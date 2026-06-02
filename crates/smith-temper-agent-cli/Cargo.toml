@@ -1,0 +1,13 @@
+[package]
+name = "smith-temper-agent-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Small Smith utility binaries for Temper agent provider setup."
+
+[dependencies]
+smith-temper-agent = { path = "../smith-temper-agent" }
+
+[lints]
+workspace = true
