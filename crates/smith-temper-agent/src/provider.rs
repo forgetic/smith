@@ -119,6 +119,24 @@ enum AuthMode {
     },
 }
 
+impl AuthMode {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::ApiKey { .. } => "api_key",
+            Self::ChatGptOAuth { .. } => "chatgpt_oauth",
+            Self::AnthropicOAuth { .. } => "anthropic_oauth",
+        }
+    }
+}
+
+/// Non-secret provider/model identity for observability.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ProviderIdentity<'a> {
+    pub(crate) provider_id: &'a str,
+    pub(crate) model_id: &'a str,
+    pub(crate) auth_mode: &'static str,
+}
+
 /// Resolved provider/model/auth wiring.
 ///
 /// Build with [`ProviderConfig::deepseek_from_env`] for the production default,
@@ -244,6 +262,15 @@ impl ProviderConfig {
     /// The (non-secret) model id this config targets.
     pub fn model_id(&self) -> &str {
         &self.model_id
+    }
+
+    /// Non-secret provider/model/auth identity for structured logs.
+    pub(crate) fn observability_identity(&self) -> ProviderIdentity<'_> {
+        ProviderIdentity {
+            provider_id: &self.provider_id,
+            model_id: &self.model_id,
+            auth_mode: self.auth.label(),
+        }
     }
 
     /// Resolves the per-request bearer.
@@ -401,17 +428,12 @@ fn zero_cost() -> ModelCost {
 
 impl fmt::Debug for ProviderConfig {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mode = match &self.auth {
-            AuthMode::ApiKey { .. } => "api_key",
-            AuthMode::ChatGptOAuth { .. } => "chatgpt_oauth",
-            AuthMode::AnthropicOAuth { .. } => "anthropic_oauth",
-        };
         formatter
             .debug_struct("ProviderConfig")
             .field("provider_id", &self.provider_id)
             .field("model_id", &self.model_id)
             .field("base_url", &self.base_url)
-            .field("auth_mode", &mode)
+            .field("auth_mode", &self.auth.label())
             .field("credential", &"<redacted>")
             .finish()
     }

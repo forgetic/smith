@@ -6,6 +6,8 @@
 //! execute Forge/workflow mutation tools; it only chooses `no_action` or one of
 //! the request's authorized action names.
 
+use std::time::Instant;
+
 use serde::Deserialize;
 use temper_runner::{
     BoundExternalTool, WORKFLOW_ROLE_DECISION_NO_ACTION, WORKFLOW_ROLE_DECISION_PROTOCOL_VERSION,
@@ -14,7 +16,12 @@ use temper_runner::{
 use temper_workflow::RoleManifest;
 
 use crate::decision::{DecisionError, run_decision};
+use crate::observability::{REASON_PREVIEW_CHARS, preview};
 use crate::provider::ProviderConfig;
+use crate::workflow_role_decision_observability::{
+    ProviderCallLogOutcome, ReplyLogMetadata, WorkflowRoleTrace, emit, provider_call_finish_event,
+    provider_call_start_event, reply_event, request_event,
+};
 
 const EXTERNAL_TOOL_SECTION: &str = "User-declared external tools";
 
@@ -35,26 +42,80 @@ impl WorkflowRoleDecisionResponder {
         request: &WorkflowRoleDecisionRequest,
     ) -> Result<WorkflowRoleDecisionReply, WorkflowRoleDecisionError> {
         validate_request_version(request)?;
+        let trace = WorkflowRoleTrace::from_work_item_context(&request.work_item_context);
         let system_prompt = workflow_role_system_prompt(request);
         let user_context = workflow_role_user_context(request)
             .map_err(WorkflowRoleDecisionError::RequestContext)?;
-        match run_decision::<WorkflowRoleModelDecision>(
+
+        emit(request_event(
+            request,
+            &trace,
+            &self.provider,
+            system_prompt.chars().count(),
+            user_context.chars().count(),
+        ));
+        emit(provider_call_start_event(request, &trace, &self.provider));
+
+        let provider_call_started = Instant::now();
+        let decision_result = run_decision::<WorkflowRoleModelDecision>(
             &self.provider,
             &system_prompt,
             &user_context,
         )
-        .await
-        {
-            Ok(decision) => Ok(reply_for_model_decision(request, decision)),
-            Err(DecisionError::Provider(error)) => Err(WorkflowRoleDecisionError::Decision(
-                DecisionError::Provider(error),
-            )),
+        .await;
+        let latency_ms = elapsed_ms(provider_call_started);
+
+        match decision_result {
+            Ok(decision) => {
+                let model_action = decision.action.trim().to_string();
+                emit(provider_call_finish_event(
+                    request,
+                    &trace,
+                    &self.provider,
+                    latency_ms,
+                    ProviderCallLogOutcome::Model {
+                        action: &model_action,
+                    },
+                ));
+                let validated = validated_reply_for_model_decision(request, decision);
+                emit(reply_event(
+                    request,
+                    &trace,
+                    &self.provider,
+                    &validated.reply,
+                    &validated.log_metadata,
+                ));
+                Ok(validated.reply)
+            }
+            Err(DecisionError::Provider(error)) => {
+                let error = DecisionError::Provider(error);
+                emit(provider_call_finish_event(
+                    request,
+                    &trace,
+                    &self.provider,
+                    latency_ms,
+                    ProviderCallLogOutcome::Error(&error),
+                ));
+                Err(WorkflowRoleDecisionError::Decision(error))
+            }
             Err(error) => {
-                eprintln!(
-                    "smith-workflow-role-decision: LLM decision failed for workflow '{}' role '{}', treating as no-action: {error}",
-                    request.workflow_id, request.role_manifest.id
-                );
-                Ok(no_action_for_request(request, "decision failed"))
+                emit(provider_call_finish_event(
+                    request,
+                    &trace,
+                    &self.provider,
+                    latency_ms,
+                    ProviderCallLogOutcome::Error(&error),
+                ));
+                let reply = no_action_for_request(request, "decision failed");
+                let log_metadata = ReplyLogMetadata::decision_error_no_action();
+                emit(reply_event(
+                    request,
+                    &trace,
+                    &self.provider,
+                    &reply,
+                    &log_metadata,
+                ));
+                Ok(reply)
             }
         }
     }
@@ -183,27 +244,51 @@ pub fn reply_for_model_decision(
     request: &WorkflowRoleDecisionRequest,
     decision: WorkflowRoleModelDecision,
 ) -> WorkflowRoleDecisionReply {
-    let action = decision.action.trim();
+    validated_reply_for_model_decision(request, decision).reply
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ValidatedWorkflowRoleReply {
+    reply: WorkflowRoleDecisionReply,
+    log_metadata: ReplyLogMetadata,
+}
+
+fn validated_reply_for_model_decision(
+    request: &WorkflowRoleDecisionRequest,
+    decision: WorkflowRoleModelDecision,
+) -> ValidatedWorkflowRoleReply {
+    let action = decision.action.trim().to_string();
     if action == WORKFLOW_ROLE_DECISION_NO_ACTION {
-        return no_action_for_request(request, decision.reason);
+        return ValidatedWorkflowRoleReply {
+            reply: no_action_for_request(request, decision.reason),
+            log_metadata: ReplyLogMetadata::no_action(action),
+        };
     }
     if request
         .authorized_actions
         .iter()
         .any(|candidate| candidate.action == action)
     {
-        return WorkflowRoleDecisionReply {
-            protocol_version: request.protocol_version,
-            action: action.to_string(),
-            reason: decision.reason,
+        return ValidatedWorkflowRoleReply {
+            reply: WorkflowRoleDecisionReply {
+                protocol_version: request.protocol_version,
+                action: action.clone(),
+                reason: decision.reason,
+            },
+            log_metadata: ReplyLogMetadata::authorized_action(action),
         };
     }
 
-    eprintln!(
-        "smith-workflow-role-decision: role '{}' model chose unauthorized action '{}', returning no_action",
-        request.role_manifest.id, action
-    );
-    no_action_for_request(request, format!("unauthorized model action: {action}"))
+    ValidatedWorkflowRoleReply {
+        reply: no_action_for_request(
+            request,
+            format!(
+                "unauthorized model action: {}",
+                preview(&action, REASON_PREVIEW_CHARS)
+            ),
+        ),
+        log_metadata: ReplyLogMetadata::unauthorized_action_downgraded(action),
+    }
 }
 
 fn no_action_for_request(
@@ -215,6 +300,10 @@ fn no_action_for_request(
         action: WORKFLOW_ROLE_DECISION_NO_ACTION.to_string(),
         reason: reason.into(),
     }
+}
+
+fn elapsed_ms(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 fn runtime_external_tool_lines(tools: &[BoundExternalTool]) -> Vec<String> {
@@ -392,6 +481,29 @@ mod tests {
         assert_eq!(reply.protocol_version, request.protocol_version);
         assert_eq!(reply.action, WORKFLOW_ROLE_DECISION_NO_ACTION);
         assert!(reply.reason.contains("delete_everything"));
+    }
+
+    #[test]
+    fn unauthorized_model_action_records_downgrade_metadata() {
+        let request = fixture_request();
+        let validated = validated_reply_for_model_decision(
+            &request,
+            WorkflowRoleModelDecision::action("delete_everything", "bad"),
+        );
+
+        assert_eq!(validated.reply.action, WORKFLOW_ROLE_DECISION_NO_ACTION);
+        assert_eq!(
+            validated.log_metadata.model_action.as_deref(),
+            Some("delete_everything")
+        );
+        assert_eq!(
+            validated.log_metadata.unauthorized_model_action.as_deref(),
+            Some("delete_everything")
+        );
+        assert_eq!(
+            validated.log_metadata.outcome,
+            "unauthorized_action_downgraded"
+        );
     }
 
     #[test]

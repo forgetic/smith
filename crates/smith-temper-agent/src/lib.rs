@@ -9,9 +9,11 @@
 #![allow(clippy::result_large_err)]
 
 pub mod decision;
+mod observability;
 pub mod product_manager;
 pub mod provider;
 pub mod workflow_role_decision;
+mod workflow_role_decision_observability;
 
 pub use decision::{DecisionError, run_decision};
 pub use product_manager::{
