@@ -7,7 +7,7 @@
 //! SDK spelling (`type:"o_auth"`, `access_token`, `refresh_token`) and writes a
 //! refreshed token back with the same field spelling it read.
 //!
-//! This is intentionally Temper-local: the SDK provider remains unpatched. The
+//! This is intentionally Smith-local: the SDK provider remains unpatched. The
 //! Claude Code-compatible identity headers are supplied through
 //! `StreamOptions.headers`, which the SDK applies after its own defaults.
 

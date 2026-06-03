@@ -13,3 +13,4 @@ auth.json
 *.secret
 .env
 .env.*
+plans/

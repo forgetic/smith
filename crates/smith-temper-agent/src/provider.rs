@@ -34,11 +34,11 @@
 //! default** ([`CODEX_MODEL_ENV`]/[`DEFAULT_CODEX_MODEL`] for the Codex model,
 //! [`ANTHROPIC_MODEL_ENV`]/[`DEFAULT_ANTHROPIC_MODEL`] for the Anthropic model,
 //! and [`AUTH_FILE_ENV`]/`~/.pi/agent/auth.json` for the auth file). The library
-//! default choice is [`AuthChoice::DeepSeek`]; the worker/test surfaces select
-//! [`AuthChoice::ChatGptOAuth`] (see the worker's `--auth` flag /
-//! `TEMPER_AGENTS_AUTH`) unless explicitly overridden. `from_auth` runs an
-//! eager credential preflight so a missing key or login fails at setup, before
-//! any worker tick.
+//! default choice is [`AuthChoice::DeepSeek`]; Smith's CLI/preflight and
+//! responder binaries default to [`AuthChoice::ChatGptOAuth`] unless their
+//! `--auth` flag explicitly chooses another mode. `from_auth` runs an eager
+//! credential preflight so a missing key or login fails at setup, before any
+//! responder work begins.
 //!
 //! No secret is ever hardcoded, logged, or committed; [`ProviderConfig`]'s
 //! `Debug` redacts credentials and errors carry only the provider/path, never
@@ -61,11 +61,11 @@ pub use oauth::{AUTH_FILE_ENV, CODEX_MODEL_ENV, DEFAULT_CODEX_MODEL, default_aut
 
 /// Which credential the real agents authenticate with.
 ///
-/// The library default is [`AuthChoice::DeepSeek`] (so any production wiring is
-/// explicit and stable); the **test/dev surfaces default to**
-/// [`AuthChoice::ChatGptOAuth`] per the cost policy (a flat subscription instead
-/// of pay-per-token). Resolve a [`ProviderConfig`] for a choice with
-/// [`ProviderConfig::from_auth`].
+/// The library default is [`AuthChoice::DeepSeek`] (so callers choose concrete
+/// production wiring explicitly); Smith's CLI/preflight and responder binaries
+/// default to [`AuthChoice::ChatGptOAuth`] per the local cost policy (a flat
+/// subscription instead of pay-per-token). Resolve a [`ProviderConfig`] for a
+/// choice with [`ProviderConfig::from_auth`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuthChoice {
     /// DeepSeek API key (pay-per-token). The library default.
