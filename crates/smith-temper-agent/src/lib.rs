@@ -9,9 +9,15 @@
 #![allow(clippy::result_large_err)]
 
 pub mod decision;
+pub mod product_manager;
 pub mod provider;
 
 pub use decision::{DecisionError, run_decision};
+pub use product_manager::{
+    PRODUCT_MANAGER_PROFILE_ID, PRODUCT_MANAGER_SYSTEM_PROMPT, ProductManagerAuthor,
+    ProductManagerConversationTurn, ProductManagerDraftIssue, ProductManagerError,
+    ProductManagerRequest, ProductManagerResponder, ProductManagerResponse,
+};
 pub use provider::{
     ANTHROPIC_MODEL_ENV, AUTH_FILE_ENV, AuthChoice, CODEX_MODEL_ENV, DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_CODEX_MODEL, ProviderConfig, ProviderError, default_auth_path,

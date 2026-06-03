@@ -5127,6 +5127,7 @@ dependencies = [
  "pi_agent_rust",
  "serde",
  "serde_json",
+ "temper-interaction",
  "temper-workflow",
  "tokio",
  "uuid",
@@ -5136,7 +5137,10 @@ dependencies = [
 name = "smith-temper-agent-cli"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "smith-temper-agent",
+ "temper-interaction",
+ "tokio",
 ]
 
 [[package]]
@@ -5604,6 +5608,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "temper-interaction"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "temper-forge",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "temper-workflow"
 version = "0.1.0"
 dependencies = [
@@ -5794,8 +5811,13 @@ version = "1.52.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
 dependencies = [
+ "bytes",
+ "libc",
+ "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "tokio-macros",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

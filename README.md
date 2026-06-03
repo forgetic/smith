@@ -1,22 +1,23 @@
 # Smith
 
 Smith is the external home for concrete agent implementations that Temper calls
-through process protocols. This bootstrap contains the Temper-specific
-`pi_agent_rust` provider/auth/decision core while Temper still owns workflow and
-interaction contracts.
+through process protocols. It contains the Temper-specific `pi_agent_rust`
+provider/auth/decision core and the product-manager interactive responder while
+Temper still owns workflow and interaction contracts.
 
 ## Workspace
 
 - `crates/smith-temper-agent` — library for provider selection, OAuth auth-file
-  handling, per-request provider knobs, and one-turn structured decisions.
-- `crates/smith-temper-agent-cli` — small setup utility; process-protocol
-  responder binaries will be added in later split phases.
+  handling, per-request provider knobs, one-turn structured decisions, and the
+  product-manager interactive profile mapping.
+- `crates/smith-temper-agent-cli` — setup utility plus the
+  `smith-product-manager-responder` process-protocol binary.
 
 Smith may use local path dependencies on the sibling Temper checkout only for
-protocol/domain crates needed by tests or binaries. The current live-provider
-fixtures use:
+protocol/domain crates needed by tests or binaries. The current split uses:
 
 ```text
+../temper/crates/temper-interaction
 ../temper/crates/temper-workflow
 ```
 
@@ -52,6 +53,22 @@ cargo run -p smith-temper-agent-cli -- preflight --auth chatgpt-oauth
 cargo run -p smith-temper-agent-cli -- preflight --auth anthropic-oauth
 ```
 
+## Product-manager responder
+
+Build the responder and point Temper's product-chat process adapter at it:
+
+```sh
+cargo build -p smith-temper-agent-cli --bin smith-product-manager-responder
+export TEMPER_PRODUCT_CHAT_RESPONDER_COMMAND=$PWD/target/debug/smith-product-manager-responder
+export TEMPER_PRODUCT_CHAT_RESPONDER_ARGS_JSON='["--auth","chatgpt-oauth"]'
+```
+
+The binary reads one Temper `ConversationRequest` JSON value on stdin and writes
+one `ConversationReply` JSON value on stdout. It receives no Forge handles,
+Forge tokens, or workflow tools; Temper keeps transcript storage, proposal
+validation, and explicit proposal acceptance. External frontends should still
+call Temper's interaction/product-chat service, not this responder directly.
+
 ## Tests
 
 Default validation is hermetic and does not require live credentials:
@@ -59,6 +76,7 @@ Default validation is hermetic and does not require live credentials:
 ```sh
 cargo fmt --all
 cargo test --workspace --all-targets
+cargo test --workspace --all-targets product_manager
 ```
 
 Live provider checks are ignored and env-gated:
