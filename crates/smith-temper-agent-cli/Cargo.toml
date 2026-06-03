@@ -12,5 +12,13 @@ smith-temper-agent = { path = "../smith-temper-agent" }
 temper-interaction = { path = "../../../temper/crates/temper-interaction" }
 tokio = { workspace = true, features = ["rt", "macros"] }
 
+[dev-dependencies]
+async-trait.workspace = true
+temper-forge = { path = "../../../temper/crates/temper-forge" }
+temper-forge-forgejo = { path = "../../../temper/crates/temper-forge-forgejo" }
+temper-runner = { path = "../../../temper/crates/temper-runner" }
+temper-testing = { path = "../../../temper/crates/temper-testing" }
+temper-workflow = { path = "../../../temper/crates/temper-workflow" }
+
 [lints]
 workspace = true

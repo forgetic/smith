@@ -1,0 +1,382 @@
+//! Ignored real Forgejo + real LLM proof for Smith's workflow-role decision
+//! process. The Smith binary chooses the manifest `open_pr` action, while
+//! Temper's process adapter validates the reply, invokes the test coding
+//! workspace, and opens the PR through `RoleTools`.
+
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use smith_temper_agent::{AuthChoice, ProviderConfig};
+use temper_forge::{CreateIssue, PullRequestQuery};
+use temper_forge_forgejo::{ForgejoConfig, ForgejoForge};
+use temper_runner::{
+    Agent, BoundExternalTool, CODING_WORKSPACE_TOOL_ID, CodingWorkspace, CodingWorkspaceError,
+    CodingWorkspaceOutput, CodingWorkspaceRequest, ExternalToolExecutors, RoleTools, WorkItem,
+    WorkflowRoleDecisionProcessAgent, WorkflowRoleDecisionProcessConfig,
+};
+use temper_testing::forgejo_server::{ForgejoServer, provision};
+use temper_workflow::{ArtifactKindId, ArtifactSource, ExternalToolId, QueueId, RoleId};
+
+#[test]
+#[ignore = "boots a real Forgejo and makes real LLM calls; run with TEMPER_FORGEJO_E2E=1 TEMPER_FORGEJO_AGENTS=1 -- --ignored"]
+fn smith_process_opens_pr_through_temper_role_tools() {
+    if !enabled() {
+        return;
+    }
+    ProviderConfig::from_auth(agents_auth_choice(), None, auth_file_override())
+        .expect("provider preflight succeeds before booting Forgejo");
+
+    let server = ForgejoServer::start().expect("forgejo server boots");
+    let provisioned = block_on(provision(&server)).expect("provisioning succeeds");
+    let engineer = provisioned
+        .role(&RoleId::new("engineer"))
+        .expect("engineer role is provisioned")
+        .clone();
+    let forge = ForgejoForge::new(
+        ForgejoConfig::new(server.base_url(), &engineer.token)
+            .with_default_repo(&provisioned.owner, &provisioned.name)
+            .with_web_ui_credentials(&engineer.user, &engineer.password),
+    );
+
+    let issue = block_on(forge.create_issue(
+        &provisioned.repository,
+        CreateIssue {
+            title: "Prove Smith workflow role decision".into(),
+            body: "A ready code issue for the Smith process responder.".into(),
+            labels: vec!["code".into(), "ready".into()],
+            assignees: Vec::new(),
+        },
+    ))
+    .expect("code issue creates");
+
+    let temp = TempDir::new("smith-forgejo-workflow-role");
+    let checkout = prepare_checkout(
+        temp.path(),
+        server.base_url(),
+        &provisioned.owner,
+        &provisioned.name,
+        &engineer.user,
+        &engineer.password,
+    );
+    let workspace: Arc<dyn CodingWorkspace> = Arc::new(GitWorkspace { checkout });
+
+    let workflow = temper_testing::workflow();
+    let compiled = workflow.compile();
+    let role = RoleId::new("engineer");
+    let manifest = compiled
+        .role(&role)
+        .expect("engineer manifest exists")
+        .clone();
+    let process =
+        WorkflowRoleDecisionProcessConfig::new(env!("CARGO_BIN_EXE_smith-workflow-role-decision"))
+            .with_args(process_args())
+            .with_env_allowlist(process_env_allowlist())
+            .with_timeout(std::time::Duration::from_secs(180));
+    let executors = ExternalToolExecutors::new().with_coding_workspace(
+        role.clone(),
+        ExternalToolId::new(CODING_WORKSPACE_TOOL_ID),
+        workspace,
+    );
+    let agent = WorkflowRoleDecisionProcessAgent::with_bound_external_tools_and_executors(
+        compiled.name(),
+        manifest,
+        process,
+        vec![bound_coding_workspace()],
+        executors,
+    )
+    .expect("process agent builds");
+    let item = WorkItem {
+        queue: QueueId::new("code_ready"),
+        role: role.clone(),
+        target: ArtifactSource::Issue {
+            number: issue.number,
+        },
+        kind: ArtifactKindId::new("code"),
+    };
+    let tools = RoleTools::new(
+        &workflow,
+        &forge,
+        &provisioned.repository,
+        role.clone(),
+        temper_testing::runner_config().execution_context(&role),
+    );
+
+    let changed = block_on(agent.service(&item, &tools)).expect("Smith process service succeeds");
+    assert!(changed, "Smith should choose and execute open_pr");
+
+    let prs =
+        block_on(forge.list_pull_requests(&provisioned.repository, PullRequestQuery::default()))
+            .expect("PR list succeeds");
+    assert_eq!(prs.len(), 1);
+    assert_eq!(
+        prs[0].source.branch,
+        format!("agent/pr-for-code-{}", issue.number.get())
+    );
+    assert!(prs[0].labels.iter().any(|label| label == "implementation"));
+    assert!(prs[0].body.contains("src/smith-workflow-role-decision.txt"));
+}
+
+fn enabled() -> bool {
+    let e2e = std::env::var("TEMPER_FORGEJO_E2E").ok().as_deref() == Some("1");
+    let agents = std::env::var("TEMPER_FORGEJO_AGENTS").ok().as_deref() == Some("1");
+    if e2e && agents {
+        true
+    } else {
+        eprintln!(
+            "skipping Smith Forgejo workflow-role e2e: set BOTH TEMPER_FORGEJO_E2E=1 and TEMPER_FORGEJO_AGENTS=1"
+        );
+        false
+    }
+}
+
+fn agents_auth_choice() -> AuthChoice {
+    match std::env::var("TEMPER_AGENTS_AUTH").ok().as_deref() {
+        Some("deepseek") => AuthChoice::DeepSeek,
+        Some("anthropic-oauth") => AuthChoice::AnthropicOAuth,
+        _ => AuthChoice::ChatGptOAuth,
+    }
+}
+
+fn auth_flag() -> &'static str {
+    match agents_auth_choice() {
+        AuthChoice::DeepSeek => "deepseek",
+        AuthChoice::ChatGptOAuth => "chatgpt-oauth",
+        AuthChoice::AnthropicOAuth => "anthropic-oauth",
+    }
+}
+
+fn auth_file_override() -> Option<PathBuf> {
+    std::env::var_os("TEMPER_AGENTS_AUTH_FILE").map(PathBuf::from)
+}
+
+fn process_args() -> Vec<String> {
+    let mut args = vec!["--auth".to_string(), auth_flag().to_string()];
+    if let Ok(model) = std::env::var("TEMPER_AGENTS_CODEX_MODEL") {
+        if !model.trim().is_empty() {
+            args.extend(["--codex-model".to_string(), model]);
+        }
+    }
+    if let Some(path) = auth_file_override() {
+        args.extend(["--auth-file".to_string(), path.display().to_string()]);
+    }
+    args
+}
+
+fn process_env_allowlist() -> Vec<String> {
+    match agents_auth_choice() {
+        AuthChoice::DeepSeek => vec![
+            "TEMPER_DEEPSEEK_API_KEY".to_string(),
+            "TEMPER_DEEPSEEK_API_KEY_PATH".to_string(),
+        ],
+        AuthChoice::AnthropicOAuth => vec!["TEMPER_AGENTS_ANTHROPIC_MODEL".to_string()],
+        AuthChoice::ChatGptOAuth => Vec::new(),
+    }
+}
+
+fn bound_coding_workspace() -> BoundExternalTool {
+    BoundExternalTool {
+        id: ExternalToolId::new(CODING_WORKSPACE_TOOL_ID),
+        description: "Edit and commit repository code.".to_string(),
+        required: true,
+        constraints: vec!["Produce a real product diff.".to_string()],
+        guidance: Some("Create a small Smith proof file.".to_string()),
+        provider: "smith-test-git-workspace".to_string(),
+    }
+}
+
+struct GitWorkspace {
+    checkout: PathBuf,
+}
+
+#[async_trait]
+impl CodingWorkspace for GitWorkspace {
+    async fn produce_head(
+        &self,
+        request: CodingWorkspaceRequest,
+    ) -> Result<CodingWorkspaceOutput, CodingWorkspaceError> {
+        let branch = request.branch_hint;
+        let base = request.base_branch;
+        git(&self.checkout, &["fetch", "origin", &base])?;
+        git(
+            &self.checkout,
+            &["checkout", "-B", &branch, &format!("origin/{base}")],
+        )?;
+        let path = self.checkout.join("src/smith-workflow-role-decision.txt");
+        std::fs::create_dir_all(path.parent().expect("file has parent")).map_err(|error| {
+            CodingWorkspaceError::new(format!("creating src dir failed: {error}"))
+        })?;
+        std::fs::write(
+            &path,
+            format!("Smith process opened {}\n", request.correlation_key),
+        )
+        .map_err(|error| {
+            CodingWorkspaceError::new(format!("writing proof file failed: {error}"))
+        })?;
+        git(
+            &self.checkout,
+            &["add", "src/smith-workflow-role-decision.txt"],
+        )?;
+        git(
+            &self.checkout,
+            &[
+                "commit",
+                "-m",
+                &format!("Implement {} [ci-pass]", request.correlation_key),
+            ],
+        )?;
+        git(
+            &self.checkout,
+            &[
+                "push",
+                "--force-with-lease",
+                "origin",
+                &format!("HEAD:refs/heads/{branch}"),
+            ],
+        )?;
+        Ok(CodingWorkspaceOutput::new(
+            branch,
+            base,
+            "updated src/smith-workflow-role-decision.txt",
+            vec!["src/smith-workflow-role-decision.txt".to_string()],
+            vec![
+                "implementation".to_string(),
+                "needs-reviewer".to_string(),
+                "needs-merge".to_string(),
+            ],
+        ))
+    }
+}
+
+fn prepare_checkout(
+    root: &Path,
+    base_url: &str,
+    owner: &str,
+    name: &str,
+    user: &str,
+    password: &str,
+) -> PathBuf {
+    let checkout = root.join("checkout");
+    let remote = format!("{}/{}/{}.git", base_url.trim_end_matches('/'), owner, name);
+    git(
+        root,
+        &[
+            "clone",
+            &remote,
+            checkout.to_str().expect("utf8 checkout path"),
+        ],
+    )
+    .expect("clone succeeds");
+    git(
+        &checkout,
+        &["config", "user.email", "engineer@example.invalid"],
+    )
+    .expect("git email config");
+    git(&checkout, &["config", "user.name", "Smith Engineer"]).expect("git name config");
+    let credentials = write_git_credentials(root, base_url, user, password);
+    git(
+        &checkout,
+        &[
+            "config",
+            "credential.helper",
+            &format!("store --file={}", credentials.display()),
+        ],
+    )
+    .expect("git credential helper config");
+    checkout
+}
+
+fn git(root: &Path, args: &[&str]) -> Result<String, CodingWorkspaceError> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .map_err(|error| {
+            CodingWorkspaceError::new(format!("failed to run git {}: {error}", args.join(" ")))
+        })?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(CodingWorkspaceError::new(format!(
+            "git {} failed with {}; stderr: {}",
+            args.join(" "),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )))
+    }
+}
+
+fn write_git_credentials(root: &Path, base_url: &str, user: &str, password: &str) -> PathBuf {
+    let without_scheme = base_url
+        .trim_end_matches('/')
+        .strip_prefix("http://")
+        .expect("throwaway Forgejo uses http");
+    let credentials = root.join("git-credentials");
+    std::fs::write(
+        &credentials,
+        format!(
+            "http://{}:{}@{}\n",
+            percent_encode_userinfo(user),
+            percent_encode_userinfo(password),
+            without_scheme
+        ),
+    )
+    .expect("credential file writes");
+    credentials
+}
+
+fn percent_encode_userinfo(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char)
+            }
+            other => encoded.push_str(&format!("%{other:02X}")),
+        }
+    }
+    encoded
+}
+
+struct TempDir {
+    path: PathBuf,
+}
+
+impl TempDir {
+    fn new(prefix: &str) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "{prefix}-{}-{}",
+            std::process::id(),
+            chrono_like_timestamp()
+        ));
+        std::fs::create_dir_all(&path).expect("temp dir creates");
+        Self { path }
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn chrono_like_timestamp() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time is after epoch")
+        .as_nanos()
+}
+
+fn block_on<F: Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime builds")
+        .block_on(future)
+}

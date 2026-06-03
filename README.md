@@ -8,16 +8,19 @@ Temper still owns workflow and interaction contracts.
 ## Workspace
 
 - `crates/smith-temper-agent` — library for provider selection, OAuth auth-file
-  handling, per-request provider knobs, one-turn structured decisions, and the
-  product-manager interactive profile mapping.
+  handling, per-request provider knobs, one-turn structured decisions, the
+  product-manager interactive profile mapping, and the workflow-role decision
+  responder.
 - `crates/smith-temper-agent-cli` — setup utility plus the
-  `smith-product-manager-responder` process-protocol binary.
+  `smith-product-manager-responder` and `smith-workflow-role-decision`
+  process-protocol binaries.
 
 Smith may use local path dependencies on the sibling Temper checkout only for
 protocol/domain crates needed by tests or binaries. The current split uses:
 
 ```text
 ../temper/crates/temper-interaction
+../temper/crates/temper-runner
 ../temper/crates/temper-workflow
 ```
 
@@ -69,6 +72,28 @@ Forge tokens, or workflow tools; Temper keeps transcript storage, proposal
 validation, and explicit proposal acceptance. External frontends should still
 call Temper's interaction/product-chat service, not this responder directly.
 
+## Workflow-role decision responder
+
+Build the responder and point Temper's role decision process adapter at it:
+
+```sh
+cargo build -p smith-temper-agent-cli --bin smith-workflow-role-decision
+export TEMPER_WORKER_ROLE_DECISION_COMMAND=$PWD/target/debug/smith-workflow-role-decision
+export TEMPER_WORKER_ROLE_DECISION_ARGS_JSON='["--auth","chatgpt-oauth"]'
+```
+
+The binary reads one Temper `WorkflowRoleDecisionRequest` JSON value on stdin and
+writes one `WorkflowRoleDecisionReply` JSON value on stdout. It receives no Forge
+handles, Forge tokens, SDK bash/file tools, or workflow mutation tools. Smith
+uses the generated role manifest, user-supplied guidance, authorized action list,
+and bound external-tool metadata only to choose `no_action` or an authorized
+manifest action; Temper still validates the reply and executes through
+`RoleTools` (including any `coding_workspace` invocation).
+
+For the reference-delivery launcher, set `REFERENCE_DELIVERY_ROLE_DECISION=smith`
+in `examples/reference-delivery/config/temper.env` (or export it) and keep
+`SMITH_WORKSPACE_ROOT` pointed at this checkout.
+
 ## Tests
 
 Default validation is hermetic and does not require live credentials:
@@ -77,6 +102,7 @@ Default validation is hermetic and does not require live credentials:
 cargo fmt --all
 cargo test --workspace --all-targets
 cargo test --workspace --all-targets product_manager
+cargo test --workspace --all-targets workflow_role_decision
 ```
 
 Live provider checks are ignored and env-gated:
@@ -88,6 +114,20 @@ TEMPER_CHATGPT_OAUTH=1 \
 TEMPER_ANTHROPIC_OAUTH=1 \
   cargo test --test anthropic_oauth_live -- --ignored --nocapture
 ```
+
+Real Forgejo + real LLM workflow-role coverage stays ignored/env-gated. This
+Smith-owned proof boots a throwaway Forgejo, runs the Smith process responder
+through Temper's `WorkflowRoleDecisionProcessAgent`, invokes a test coding
+workspace, and opens a PR through `RoleTools`:
+
+```sh
+TEMPER_FORGEJO_E2E=1 TEMPER_FORGEJO_AGENTS=1 \
+  cargo test -p smith-temper-agent-cli --test forgejo_workflow_role_e2e -- \
+  --ignored --test-threads=1
+```
+
+The older Temper real-agent Forgejo e2e remains available until the split-removal
+phase.
 
 Run the matching `pi /login ...` command before live tests. The ChatGPT refresh
 check may rotate the refresh token and writes the refreshed credential back to

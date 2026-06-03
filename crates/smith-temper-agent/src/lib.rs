@@ -11,6 +11,7 @@
 pub mod decision;
 pub mod product_manager;
 pub mod provider;
+pub mod workflow_role_decision;
 
 pub use decision::{DecisionError, run_decision};
 pub use product_manager::{
@@ -21,4 +22,9 @@ pub use product_manager::{
 pub use provider::{
     ANTHROPIC_MODEL_ENV, AUTH_FILE_ENV, AuthChoice, CODEX_MODEL_ENV, DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_CODEX_MODEL, ProviderConfig, ProviderError, default_auth_path,
+};
+pub use temper_runner::{WorkflowRoleDecisionReply, WorkflowRoleDecisionRequest};
+pub use workflow_role_decision::{
+    WorkflowRoleDecisionError, WorkflowRoleDecisionResponder, WorkflowRoleModelDecision,
+    reply_for_model_decision, workflow_role_system_prompt, workflow_role_user_context,
 };

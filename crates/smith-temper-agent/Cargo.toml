@@ -11,10 +11,11 @@ pi_agent_rust.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 temper-interaction = { path = "../../../temper/crates/temper-interaction" }
+temper-runner = { path = "../../../temper/crates/temper-runner" }
+temper-workflow = { path = "../../../temper/crates/temper-workflow" }
 uuid.workspace = true
 
 [dev-dependencies]
-temper-workflow = { path = "../../../temper/crates/temper-workflow" }
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
 
 [lints]
