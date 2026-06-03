@@ -22,8 +22,8 @@ Provider and Temper-integration recipes live in `how-to/`.
 
 Precise contracts and factual details. Start with
 `reference/development-conventions.md`, then read task-relevant pages such as
-`reference/provider-auth.md`, `reference/process-responders.md`, and
-`reference/testing.md`.
+`reference/provider-auth.md`, `reference/process-responders.md`,
+`reference/workflow-role-observability.md`, and `reference/testing.md`.
 
 Smith-owned lessons live in `reference/agent-lessons/`.
 

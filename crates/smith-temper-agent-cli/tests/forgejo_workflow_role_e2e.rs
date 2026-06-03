@@ -20,6 +20,10 @@ use temper_runner::{
 use temper_testing::forgejo_server::{ForgejoServer, provision};
 use temper_workflow::{ArtifactKindId, ArtifactSource, ExternalToolId, QueueId, RoleId};
 
+#[path = "forgejo_workflow_role_e2e/observability.rs"]
+mod observability;
+use observability::{ObservabilityProbe, forbidden_observability_values};
+
 #[test]
 #[ignore = "boots a real Forgejo and makes real LLM calls; run with TEMPER_FORGEJO_E2E=1 TEMPER_FORGEJO_AGENTS=1 -- --ignored"]
 fn smith_process_opens_pr_through_temper_role_tools() {
@@ -70,11 +74,14 @@ fn smith_process_opens_pr_through_temper_role_tools() {
         .role(&role)
         .expect("engineer manifest exists")
         .clone();
-    let process =
-        WorkflowRoleDecisionProcessConfig::new(env!("CARGO_BIN_EXE_smith-workflow-role-decision"))
-            .with_args(process_args())
-            .with_env_allowlist(process_env_allowlist())
-            .with_timeout(std::time::Duration::from_secs(180));
+    let observability = ObservabilityProbe::new(
+        temp.path(),
+        env!("CARGO_BIN_EXE_smith-workflow-role-decision"),
+    );
+    let process = WorkflowRoleDecisionProcessConfig::new(observability.wrapper())
+        .with_args(process_args())
+        .with_env_allowlist(process_env_allowlist())
+        .with_timeout(std::time::Duration::from_secs(180));
     let executors = ExternalToolExecutors::new().with_coding_workspace(
         role.clone(),
         ExternalToolId::new(CODING_WORKSPACE_TOOL_ID),
@@ -102,7 +109,9 @@ fn smith_process_opens_pr_through_temper_role_tools() {
         &provisioned.repository,
         role.clone(),
         temper_testing::runner_config().execution_context(&role),
-    );
+    )
+    .with_observability_tick_id("smith-forgejo-e2e-tick");
+    let expected_identity = tools.work_item_identity(&item);
 
     let changed = block_on(agent.service(&item, &tools)).expect("Smith process service succeeds");
     assert!(changed, "Smith should choose and execute open_pr");
@@ -117,6 +126,16 @@ fn smith_process_opens_pr_through_temper_role_tools() {
     );
     assert!(prs[0].labels.iter().any(|label| label == "implementation"));
     assert!(prs[0].body.contains("src/smith-workflow-role-decision.txt"));
+
+    observability.assert_smith_logs_and_capture(
+        &expected_identity,
+        "open_pr",
+        &forbidden_observability_values(
+            &engineer.token,
+            &engineer.password,
+            auth_file_override().as_deref(),
+        ),
+    );
 }
 
 fn enabled() -> bool {

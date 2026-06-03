@@ -30,6 +30,9 @@ TEMPER_FORGEJO_E2E=1 TEMPER_FORGEJO_AGENTS=1 \
   --ignored --test-threads=1
 ```
 
+The Forgejo e2e also asserts Smith decision logs/captures correlate with
+Temper's work-item and decision ids without exposing obvious auth/secret values.
+
 ## Temper-side coverage that protects Smith integration
 
 Run from `../temper` when changing a protocol boundary:

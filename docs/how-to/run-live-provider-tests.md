@@ -35,7 +35,8 @@ TEMPER_ANTHROPIC_OAUTH=1 \
 
 This Smith-owned proof boots a throwaway Forgejo, runs the Smith workflow-role
 process through Temper's `WorkflowRoleDecisionProcessAgent`, invokes a test
-coding workspace, and opens a PR through `RoleTools`:
+coding workspace, opens a PR through `RoleTools`, and checks that Smith stderr
+events plus redacted captures carry Temper work-item / decision ids:
 
 ```sh
 TEMPER_FORGEJO_E2E=1 TEMPER_FORGEJO_AGENTS=1 \

@@ -7,7 +7,7 @@ that Temper calls through process protocols. Temper owns workflow and interactio
 contracts; Smith owns the first concrete pi-SDK-backed responders for those
 contracts.
 
-[Docs](docs/README.md) · [Provider auth](docs/how-to/configure-provider-auth.md) · [Run responders](docs/how-to/run-temper-responders.md) · [Process boundary](docs/explanation/process-boundary.md)
+[Docs](docs/README.md) · [Provider auth](docs/how-to/configure-provider-auth.md) · [Run responders](docs/how-to/run-temper-responders.md) · [Observability](docs/reference/workflow-role-observability.md) · [Process boundary](docs/explanation/process-boundary.md)
 
 ## What Smith owns
 

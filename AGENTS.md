@@ -24,7 +24,8 @@ file as orientation only; stable rules and status belong in the linked docs.
 - Provider/auth details: `docs/how-to/configure-provider-auth.md` and
   `docs/reference/provider-auth.md`.
 - Temper integration: `docs/how-to/run-temper-responders.md`,
-  `docs/reference/process-responders.md`, and
+  `docs/reference/process-responders.md`,
+  `docs/reference/workflow-role-observability.md`, and
   `docs/explanation/process-boundary.md`.
 - Testing: `docs/reference/testing.md` and
   `docs/how-to/run-live-provider-tests.md`.

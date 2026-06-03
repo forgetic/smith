@@ -20,7 +20,9 @@ SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR=/existing/writable/dir
 
 Input: one `temper_runner::WorkflowRoleDecisionRequest` JSON value on stdin.
 Output: one `temper_runner::WorkflowRoleDecisionReply` JSON value on stdout.
-Errors/logs go to stderr.
+Errors/logs go to stderr as bounded JSON events. See
+`workflow-role-observability.md` for event names, correlation fields, capture
+contents, and omitted authority/secret fields.
 
 Smith reads the role manifest, work-item context, authorized action list, and
 bound external-tool metadata. It returns `no_action` or one authorized action
