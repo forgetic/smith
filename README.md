@@ -2,8 +2,9 @@
 
 Smith is the external home for concrete agent implementations that Temper calls
 through process protocols. It contains the Temper-specific `pi_agent_rust`
-provider/auth/decision core and the product-manager interactive responder while
-Temper still owns workflow and interaction contracts.
+provider/auth/decision core, workflow-role decision responder, and
+product-manager interactive responder. Temper owns workflow and interaction
+contracts and no longer links `pi_agent_rust`.
 
 ## Workspace
 
@@ -90,9 +91,10 @@ and bound external-tool metadata only to choose `no_action` or an authorized
 manifest action; Temper still validates the reply and executes through
 `RoleTools` (including any `coding_workspace` invocation).
 
-For the reference-delivery launcher, set `REFERENCE_DELIVERY_ROLE_DECISION=smith`
-in `examples/reference-delivery/config/temper.env` (or export it) and keep
-`SMITH_WORKSPACE_ROOT` pointed at this checkout.
+The reference-delivery and dogfood launchers in Temper are configured to use
+Smith process responders by default. Keep their `SMITH_WORKSPACE_ROOT` pointed at
+this checkout and pass provider options through the documented `SMITH_*_ARGS_JSON`
+settings.
 
 ## Tests
 
@@ -126,8 +128,8 @@ TEMPER_FORGEJO_E2E=1 TEMPER_FORGEJO_AGENTS=1 \
   --ignored --test-threads=1
 ```
 
-The older Temper real-agent Forgejo e2e remains available until the split-removal
-phase.
+Temper's old in-process real-agent Forgejo e2e has been removed; this Smith test
+is the concrete real LLM + Forgejo process-boundary gate.
 
 Run the matching `pi /login ...` command before live tests. The ChatGPT refresh
 check may rotate the refresh token and writes the refreshed credential back to
