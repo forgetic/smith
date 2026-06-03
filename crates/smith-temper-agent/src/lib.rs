@@ -13,6 +13,7 @@ mod observability;
 pub mod product_manager;
 pub mod provider;
 pub mod workflow_role_decision;
+mod workflow_role_decision_capture;
 mod workflow_role_decision_observability;
 
 pub use decision::{DecisionError, run_decision};
@@ -30,3 +31,4 @@ pub use workflow_role_decision::{
     WorkflowRoleDecisionError, WorkflowRoleDecisionResponder, WorkflowRoleModelDecision,
     reply_for_model_decision, workflow_role_system_prompt, workflow_role_user_context,
 };
+pub use workflow_role_decision_capture::WORKFLOW_ROLE_DECISION_CAPTURE_DIR_ENV;

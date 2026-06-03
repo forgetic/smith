@@ -16,11 +16,15 @@ use temper_runner::{
 use temper_workflow::RoleManifest;
 
 use crate::decision::{DecisionError, run_decision};
-use crate::observability::{REASON_PREVIEW_CHARS, preview};
-use crate::provider::ProviderConfig;
+use crate::observability::{REASON_PREVIEW_CHARS, redacted_preview};
+use crate::provider::{ProviderConfig, ProviderError};
+use crate::workflow_role_decision_capture::{
+    CaptureWriteResult, WorkflowRoleDecisionCapture, WorkflowRoleDecisionCaptureInput,
+};
 use crate::workflow_role_decision_observability::{
-    ProviderCallLogOutcome, ReplyLogMetadata, WorkflowRoleTrace, emit, provider_call_finish_event,
-    provider_call_start_event, reply_event, request_event,
+    ProviderCallLogOutcome, ReplyLogMetadata, WorkflowRoleTrace, capture_write_failed_event,
+    capture_written_event, emit, provider_call_finish_event, provider_call_start_event,
+    reply_event, request_event,
 };
 
 const EXTERNAL_TOOL_SECTION: &str = "User-declared external tools";
@@ -28,12 +32,16 @@ const EXTERNAL_TOOL_SECTION: &str = "User-declared external tools";
 /// Provider-backed workflow-role decision responder.
 pub struct WorkflowRoleDecisionResponder {
     provider: ProviderConfig,
+    capture: WorkflowRoleDecisionCapture,
 }
 
 impl WorkflowRoleDecisionResponder {
     /// Builds a responder using Smith's provider config.
     pub fn new(provider: ProviderConfig) -> Self {
-        Self { provider }
+        Self {
+            provider,
+            capture: WorkflowRoleDecisionCapture::from_env(),
+        }
     }
 
     /// Runs one LLM-backed workflow-role decision.
@@ -41,11 +49,40 @@ impl WorkflowRoleDecisionResponder {
         &self,
         request: &WorkflowRoleDecisionRequest,
     ) -> Result<WorkflowRoleDecisionReply, WorkflowRoleDecisionError> {
-        validate_request_version(request)?;
         let trace = WorkflowRoleTrace::from_work_item_context(&request.work_item_context);
         let system_prompt = workflow_role_system_prompt(request);
-        let user_context = workflow_role_user_context(request)
-            .map_err(WorkflowRoleDecisionError::RequestContext)?;
+        let user_context = match workflow_role_user_context(request) {
+            Ok(context) => context,
+            Err(error) => {
+                self.write_capture(DecisionCaptureArgs {
+                    request,
+                    trace: &trace,
+                    system_prompt: Some(&system_prompt),
+                    user_context: None,
+                    model_decision: None,
+                    final_reply: None,
+                    latency_ms: None,
+                    outcome: "request_context_error",
+                    failure_class: Some("request_context_serialization"),
+                });
+                return Err(WorkflowRoleDecisionError::RequestContext(error));
+            }
+        };
+
+        if let Err(error) = validate_request_version(request) {
+            self.write_capture(DecisionCaptureArgs {
+                request,
+                trace: &trace,
+                system_prompt: Some(&system_prompt),
+                user_context: Some(&user_context),
+                model_decision: None,
+                final_reply: None,
+                latency_ms: None,
+                outcome: "unsupported_protocol_version",
+                failure_class: Some("unsupported_protocol_version"),
+            });
+            return Err(error);
+        }
 
         emit(request_event(
             request,
@@ -77,6 +114,7 @@ impl WorkflowRoleDecisionResponder {
                         action: &model_action,
                     },
                 ));
+                let model_decision = decision.clone();
                 let validated = validated_reply_for_model_decision(request, decision);
                 emit(reply_event(
                     request,
@@ -85,6 +123,17 @@ impl WorkflowRoleDecisionResponder {
                     &validated.reply,
                     &validated.log_metadata,
                 ));
+                self.write_capture(DecisionCaptureArgs {
+                    request,
+                    trace: &trace,
+                    system_prompt: Some(&system_prompt),
+                    user_context: Some(&user_context),
+                    model_decision: Some(&model_decision),
+                    final_reply: Some(&validated.reply),
+                    latency_ms: Some(latency_ms),
+                    outcome: validated.log_metadata.outcome,
+                    failure_class: None,
+                });
                 Ok(validated.reply)
             }
             Err(DecisionError::Provider(error)) => {
@@ -96,6 +145,17 @@ impl WorkflowRoleDecisionResponder {
                     latency_ms,
                     ProviderCallLogOutcome::Error(&error),
                 ));
+                self.write_capture(DecisionCaptureArgs {
+                    request,
+                    trace: &trace,
+                    system_prompt: Some(&system_prompt),
+                    user_context: Some(&user_context),
+                    model_decision: None,
+                    final_reply: None,
+                    latency_ms: Some(latency_ms),
+                    outcome: "provider_error",
+                    failure_class: Some(decision_failure_class(&error)),
+                });
                 Err(WorkflowRoleDecisionError::Decision(error))
             }
             Err(error) => {
@@ -115,10 +175,65 @@ impl WorkflowRoleDecisionResponder {
                     &reply,
                     &log_metadata,
                 ));
+                self.write_capture(DecisionCaptureArgs {
+                    request,
+                    trace: &trace,
+                    system_prompt: Some(&system_prompt),
+                    user_context: Some(&user_context),
+                    model_decision: None,
+                    final_reply: Some(&reply),
+                    latency_ms: Some(latency_ms),
+                    outcome: log_metadata.outcome,
+                    failure_class: Some(decision_failure_class(&error)),
+                });
                 Ok(reply)
             }
         }
     }
+
+    fn write_capture(&self, args: DecisionCaptureArgs<'_>) {
+        let result = self.capture.write(WorkflowRoleDecisionCaptureInput {
+            request: args.request,
+            trace: args.trace,
+            provider: &self.provider,
+            system_prompt: args.system_prompt,
+            user_context: args.user_context,
+            model_decision: args.model_decision,
+            final_reply: args.final_reply,
+            latency_ms: args.latency_ms,
+            outcome: args.outcome,
+            failure_class: args.failure_class,
+        });
+
+        match result {
+            CaptureWriteResult::Disabled => {}
+            CaptureWriteResult::Written(path) => emit(capture_written_event(
+                args.request,
+                args.trace,
+                &self.provider,
+                &path,
+            )),
+            CaptureWriteResult::Failed(error) => emit(capture_write_failed_event(
+                args.request,
+                args.trace,
+                &self.provider,
+                error.class(),
+                error.message(),
+            )),
+        }
+    }
+}
+
+struct DecisionCaptureArgs<'a> {
+    request: &'a WorkflowRoleDecisionRequest,
+    trace: &'a WorkflowRoleTrace,
+    system_prompt: Option<&'a str>,
+    user_context: Option<&'a str>,
+    model_decision: Option<&'a WorkflowRoleModelDecision>,
+    final_reply: Option<&'a WorkflowRoleDecisionReply>,
+    latency_ms: Option<u64>,
+    outcome: &'static str,
+    failure_class: Option<&'static str>,
 }
 
 /// Minimal model decision shape. Extra fields are ignored for compatibility with
@@ -199,6 +314,20 @@ fn validate_request_version(
         Err(WorkflowRoleDecisionError::UnsupportedProtocolVersion {
             actual: request.protocol_version,
         })
+    }
+}
+
+fn decision_failure_class(error: &DecisionError) -> &'static str {
+    match error {
+        DecisionError::Provider(ProviderError::KeyUnavailable(_)) => "api_key_unavailable",
+        DecisionError::Provider(ProviderError::OAuthUnavailable(_)) => "chatgpt_oauth_unavailable",
+        DecisionError::Provider(ProviderError::AnthropicOAuthUnavailable(_)) => {
+            "anthropic_oauth_unavailable"
+        }
+        DecisionError::Provider(ProviderError::Build(_)) => "provider_build",
+        DecisionError::Run(_) => "provider_run",
+        DecisionError::Empty => "empty_response",
+        DecisionError::Parse { .. } => "json_parse",
     }
 }
 
@@ -284,7 +413,7 @@ fn validated_reply_for_model_decision(
             request,
             format!(
                 "unauthorized model action: {}",
-                preview(&action, REASON_PREVIEW_CHARS)
+                redacted_preview(&action, REASON_PREVIEW_CHARS)
             ),
         ),
         log_metadata: ReplyLogMetadata::unauthorized_action_downgraded(action),
@@ -343,178 +472,5 @@ fn runtime_external_tool_lines(tools: &[BoundExternalTool]) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use temper_runner::WorkflowRoleDecisionRequest;
-    use temper_workflow::{ExternalToolId, RawWorkflowSpec, RoleId};
-
-    fn fixture_request() -> WorkflowRoleDecisionRequest {
-        serde_json::from_str(include_str!(
-            "../../../../temper/crates/temper-runner/fixtures/workflow-role-decision-request.json"
-        ))
-        .expect("Temper workflow-role decision fixture parses")
-    }
-
-    fn request_with_compiled_external_tool(bound: bool) -> WorkflowRoleDecisionRequest {
-        let json = r#"{
-            "name": "generic-agent-test",
-            "roles": [{
-                "id": "banana",
-                "prompt": {"guidance": "Use open_pr only when coding_workspace is available."},
-                "external_tools": [{
-                    "id": "coding_workspace",
-                    "description": "Edit and commit repository code.",
-                    "required": false,
-                    "constraints": ["Only touch the checked-out repository."],
-                    "guidance": "Produce a real product diff."
-                }],
-                "queues": ["todo"]
-            }],
-            "labels": [{"id": "task"}, {"id": "todo"}, {"id": "done"}],
-            "artifact_kinds": [{
-                "id": "task",
-                "target": "issue",
-                "identifying_labels": ["task"]
-            }],
-            "queues": [{"id": "todo", "artifact": "task", "labels": ["todo"]}],
-            "transitions": [{
-                "id": "advance",
-                "artifact": "task",
-                "roles": ["banana"],
-                "effects": [
-                    {"kind": "remove_label", "label": "todo"},
-                    {"kind": "add_label", "label": "done"}
-                ]
-            }]
-        }"#;
-        let spec: RawWorkflowSpec = serde_json::from_str(json).expect("workflow parses");
-        let manifest = spec
-            .validate()
-            .expect("workflow validates")
-            .compile()
-            .role(&RoleId::new("banana"))
-            .expect("role manifest exists")
-            .clone();
-        let available = bound
-            .then(|| BoundExternalTool {
-                id: ExternalToolId::new("coding_workspace"),
-                description: "Edit and commit repository code.".to_string(),
-                required: false,
-                constraints: vec!["Only touch the checked-out repository.".to_string()],
-                guidance: Some("Produce a real product diff.".to_string()),
-                provider: "workspace-local".to_string(),
-            })
-            .into_iter()
-            .collect();
-        WorkflowRoleDecisionRequest::new(
-            "generic-agent-test",
-            manifest,
-            serde_json::json!({"artifact": {"number": 1}, "queue": "todo"}),
-            available,
-        )
-    }
-
-    #[test]
-    fn reads_temper_process_fixture_and_builds_generic_context() {
-        let request = fixture_request();
-        let prompt = workflow_role_system_prompt(&request);
-        let context: serde_json::Value = serde_json::from_str(
-            &workflow_role_user_context(&request).expect("context serializes"),
-        )
-        .expect("context is JSON");
-
-        assert_eq!(
-            request.protocol_version,
-            WORKFLOW_ROLE_DECISION_PROTOCOL_VERSION
-        );
-        assert!(prompt.contains("Workflow: generic-agent-test"));
-        assert!(prompt.contains("Role: banana"));
-        assert_eq!(
-            context["allowed_actions"],
-            serde_json::json!(["no_action", "advance"])
-        );
-        assert_eq!(context["work_item"]["artifact"]["number"], 1);
-        assert_eq!(context["authorized_actions"][0]["action"], "advance");
-        assert_eq!(
-            context["available_external_tools"][0]["provider"],
-            "workspace-local"
-        );
-    }
-
-    #[test]
-    fn runtime_prompt_lists_only_bound_external_tools() {
-        let unbound = workflow_role_system_prompt(&request_with_compiled_external_tool(false));
-        assert!(unbound.contains("no external tools are bound"));
-        assert!(!unbound.contains("coding_workspace via"));
-
-        let bound = workflow_role_system_prompt(&request_with_compiled_external_tool(true));
-        assert!(bound.contains("coding_workspace via workspace-local"));
-        assert!(bound.contains("implementation PR creation must use"));
-        assert!(bound.contains("Produce a real product diff."));
-    }
-
-    #[test]
-    fn authorized_and_no_action_model_decisions_echo_request_version() {
-        let request = fixture_request();
-        let action = reply_for_model_decision(
-            &request,
-            WorkflowRoleModelDecision::action("advance", "ready"),
-        );
-        assert_eq!(action.protocol_version, request.protocol_version);
-        assert_eq!(action.action, "advance");
-        assert_eq!(action.reason, "ready");
-
-        let none =
-            reply_for_model_decision(&request, WorkflowRoleModelDecision::no_action("not safe"));
-        assert_eq!(none.action, WORKFLOW_ROLE_DECISION_NO_ACTION);
-        assert_eq!(none.reason, "not safe");
-    }
-
-    #[test]
-    fn unauthorized_model_action_is_returned_as_no_action() {
-        let request = fixture_request();
-        let reply = reply_for_model_decision(
-            &request,
-            WorkflowRoleModelDecision::action("delete_everything", "bad"),
-        );
-
-        assert_eq!(reply.protocol_version, request.protocol_version);
-        assert_eq!(reply.action, WORKFLOW_ROLE_DECISION_NO_ACTION);
-        assert!(reply.reason.contains("delete_everything"));
-    }
-
-    #[test]
-    fn unauthorized_model_action_records_downgrade_metadata() {
-        let request = fixture_request();
-        let validated = validated_reply_for_model_decision(
-            &request,
-            WorkflowRoleModelDecision::action("delete_everything", "bad"),
-        );
-
-        assert_eq!(validated.reply.action, WORKFLOW_ROLE_DECISION_NO_ACTION);
-        assert_eq!(
-            validated.log_metadata.model_action.as_deref(),
-            Some("delete_everything")
-        );
-        assert_eq!(
-            validated.log_metadata.unauthorized_model_action.as_deref(),
-            Some("delete_everything")
-        );
-        assert_eq!(
-            validated.log_metadata.outcome,
-            "unauthorized_action_downgraded"
-        );
-    }
-
-    #[test]
-    fn rejects_unknown_protocol_version_before_model_call() {
-        let mut request = fixture_request();
-        request.protocol_version = 999;
-
-        let error = validate_request_version(&request).expect_err("version fails");
-        assert!(matches!(
-            error,
-            WorkflowRoleDecisionError::UnsupportedProtocolVersion { actual: 999 }
-        ));
-    }
-}
+#[path = "workflow_role_decision_tests.rs"]
+mod tests;

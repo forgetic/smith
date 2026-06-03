@@ -6,7 +6,9 @@ use temper_runner::{
 };
 
 use crate::decision::DecisionError;
-use crate::observability::{REASON_PREVIEW_CHARS, StructuredEvent, preview, scalar_preview};
+use crate::observability::{
+    FIELD_PREVIEW_CHARS, REASON_PREVIEW_CHARS, StructuredEvent, redacted_preview, scalar_preview,
+};
 use crate::provider::{ProviderConfig, ProviderError};
 
 /// Authority-neutral identifiers Temper may place in the work-item context.
@@ -32,12 +34,18 @@ impl WorkflowRoleTrace {
             tick_id: nested_scalar(context, &["observability", "tick_id"]),
             work_item_id: nested_scalar(context, &["observability", "work_item_id"]),
             decision_id: nested_scalar(context, &["observability", "decision_id"]),
-            repository: nested_scalar(context, &["repository"]),
-            role: nested_scalar(context, &["role"]),
-            queue: nested_scalar(context, &["queue"]),
-            kind: nested_scalar(context, &["kind"]),
-            artifact_type: nested_scalar(context, &["artifact", "type"]),
-            artifact_number: nested_scalar(context, &["artifact", "number"]),
+            repository: nested_scalar(context, &["repository"])
+                .or_else(|| nested_scalar(context, &["observability", "repo"])),
+            role: nested_scalar(context, &["role"])
+                .or_else(|| nested_scalar(context, &["observability", "role"])),
+            queue: nested_scalar(context, &["queue"])
+                .or_else(|| nested_scalar(context, &["observability", "queue"])),
+            kind: nested_scalar(context, &["kind"])
+                .or_else(|| nested_scalar(context, &["observability", "artifact_kind"])),
+            artifact_type: nested_scalar(context, &["artifact", "type"])
+                .or_else(|| nested_scalar(context, &["observability", "artifact_type"])),
+            artifact_number: nested_scalar(context, &["artifact", "number"])
+                .or_else(|| nested_scalar(context, &["observability", "artifact_number"])),
         }
     }
 }
@@ -180,7 +188,47 @@ pub(crate) fn reply_event(
     )
     .str(
         "reason_preview",
-        preview(&reply.reason, REASON_PREVIEW_CHARS),
+        redacted_preview(&reply.reason, REASON_PREVIEW_CHARS),
+    )
+}
+
+pub(crate) fn capture_written_event(
+    request: &WorkflowRoleDecisionRequest,
+    trace: &WorkflowRoleTrace,
+    provider: &ProviderConfig,
+    path: &std::path::Path,
+) -> StructuredEvent {
+    with_provider_fields(
+        base_event(
+            "smith.workflow_role_decision.capture.written",
+            request,
+            trace,
+        ),
+        provider,
+    )
+    .str("capture_path", path.display().to_string())
+}
+
+pub(crate) fn capture_write_failed_event(
+    request: &WorkflowRoleDecisionRequest,
+    trace: &WorkflowRoleTrace,
+    provider: &ProviderConfig,
+    error_class: &str,
+    error_message: &str,
+) -> StructuredEvent {
+    with_provider_fields(
+        base_event(
+            "smith.workflow_role_decision.capture.write_failed",
+            request,
+            trace,
+        ),
+        provider,
+    )
+    .str("outcome", "warning")
+    .str("capture_error_class", error_class)
+    .str(
+        "capture_error_preview",
+        redacted_preview(error_message, FIELD_PREVIEW_CHARS),
     )
 }
 
@@ -330,6 +378,29 @@ mod tests {
     }
 
     #[test]
+    fn trace_extraction_falls_back_to_observability_work_item_fields() {
+        let context = serde_json::json!({
+            "observability": {
+                "repo": "forgejo:acme/service",
+                "role": "builder",
+                "queue": "todo",
+                "artifact_kind": "task",
+                "artifact_type": "issue",
+                "artifact_number": 42
+            }
+        });
+
+        let trace = WorkflowRoleTrace::from_work_item_context(&context);
+
+        assert_eq!(trace.repository.as_deref(), Some("forgejo:acme/service"));
+        assert_eq!(trace.role.as_deref(), Some("builder"));
+        assert_eq!(trace.queue.as_deref(), Some("todo"));
+        assert_eq!(trace.kind.as_deref(), Some("task"));
+        assert_eq!(trace.artifact_type.as_deref(), Some("issue"));
+        assert_eq!(trace.artifact_number.as_deref(), Some("42"));
+    }
+
+    #[test]
     fn request_event_logs_counts_identity_and_not_raw_bodies_or_credentials() {
         let mut request = fixture_request();
         request.work_item_context["artifact"]["body"] =
@@ -400,10 +471,13 @@ mod tests {
     }
 
     #[test]
-    fn reply_event_records_unauthorized_downgrade_and_truncates_reason() {
+    fn reply_event_records_unauthorized_downgrade_and_redacts_truncated_reason() {
         let request = fixture_request();
         let trace = WorkflowRoleTrace::from_work_item_context(&request.work_item_context);
-        let long_reason = format!("{}TAIL", "x".repeat(REASON_PREVIEW_CHARS + 20));
+        let long_reason = format!(
+            "Bearer sk-secret-do-not-log {}TAIL",
+            "x".repeat(REASON_PREVIEW_CHARS + 20)
+        );
         let reply = WorkflowRoleDecisionReply {
             protocol_version: request.protocol_version,
             action: WORKFLOW_ROLE_DECISION_NO_ACTION.to_string(),
@@ -421,6 +495,57 @@ mod tests {
         assert_eq!(parsed["unauthorized_action_downgraded"], true);
         assert_eq!(parsed["unauthorized_model_action"], "delete_everything");
         assert!(parsed["reason_preview"].as_str().unwrap().ends_with('…'));
+        assert!(!rendered.contains("sk-secret-do-not-log"));
+        assert!(!rendered.contains("TAIL"));
+    }
+
+    #[test]
+    fn capture_events_record_path_or_bounded_warning() {
+        let request = fixture_request();
+        let trace = WorkflowRoleTrace::from_work_item_context(&request.work_item_context);
+
+        let rendered = capture_written_event(
+            &request,
+            &trace,
+            &provider(),
+            std::path::Path::new("/tmp/smith-captures/decision-1.json"),
+        )
+        .render();
+        let parsed: Value = serde_json::from_str(&rendered).expect("event parses");
+        assert_eq!(
+            parsed["event"],
+            "smith.workflow_role_decision.capture.written"
+        );
+        assert_eq!(
+            parsed["capture_path"],
+            "/tmp/smith-captures/decision-1.json"
+        );
+
+        let rendered = capture_write_failed_event(
+            &request,
+            &trace,
+            &provider(),
+            "permission_denied",
+            &format!(
+                "password=hunter2 {}TAIL",
+                "x".repeat(FIELD_PREVIEW_CHARS + 20)
+            ),
+        )
+        .render();
+        let parsed: Value = serde_json::from_str(&rendered).expect("event parses");
+        assert_eq!(
+            parsed["event"],
+            "smith.workflow_role_decision.capture.write_failed"
+        );
+        assert_eq!(parsed["outcome"], "warning");
+        assert_eq!(parsed["capture_error_class"], "permission_denied");
+        assert!(
+            parsed["capture_error_preview"]
+                .as_str()
+                .unwrap()
+                .ends_with('…')
+        );
+        assert!(!rendered.contains("hunter2"));
         assert!(!rendered.contains("TAIL"));
     }
 }

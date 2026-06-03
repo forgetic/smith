@@ -11,6 +11,13 @@ Binary:
 smith-workflow-role-decision [--auth ...] [--codex-model MODEL] [--auth-file PATH]
 ```
 
+Optional capture env (allow-list it in Temper worker process config when the
+responder is launched by Temper):
+
+```text
+SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR=/existing/writable/dir
+```
+
 Input: one `temper_runner::WorkflowRoleDecisionRequest` JSON value on stdin.
 Output: one `temper_runner::WorkflowRoleDecisionReply` JSON value on stdout.
 Errors/logs go to stderr.
@@ -19,6 +26,16 @@ Smith reads the role manifest, work-item context, authorized action list, and
 bound external-tool metadata. It returns `no_action` or one authorized action
 name. Unauthorized model actions are downgraded to `no_action`; unsupported
 protocol versions fail before a model call.
+
+Redacted decision captures are disabled by default. When
+`SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR` names an existing writable directory,
+Smith writes one bounded JSON capture per decision with trace/work-item ids,
+workflow/repo/role/queue/artifact metadata, provider/model/auth mode, allowed
+actions, external-tool ids, prompt/context sizes and redacted previews, model and
+final actions/reason previews, latency, outcome, and failure class. Smith never
+captures provider credentials, auth-file contents, Forge tokens, raw environment
+dumps, or unbounded prompt/body text. Missing or unwritable capture directories
+produce bounded warning logs and do not change a successful decision result.
 
 ## Product-manager interactive profile
 

@@ -2,7 +2,8 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 use smith_temper_agent::{
-    AuthChoice, ProviderConfig, WorkflowRoleDecisionRequest, WorkflowRoleDecisionResponder,
+    AuthChoice, ProviderConfig, WORKFLOW_ROLE_DECISION_CAPTURE_DIR_ENV,
+    WorkflowRoleDecisionRequest, WorkflowRoleDecisionResponder,
 };
 
 fn main() {
@@ -111,7 +112,7 @@ fn parse_auth_choice(value: &str) -> Result<AuthChoice, String> {
 
 fn print_usage() {
     println!(
-        "Usage:\n  smith-workflow-role-decision \\\n    [--auth deepseek|chatgpt-oauth|anthropic-oauth] \\\n    [--codex-model MODEL] [--auth-file PATH] \\\n    < workflow-role-decision-request.json > workflow-role-decision-reply.json\n\nReads one Temper WorkflowRoleDecisionRequest JSON value on stdin and writes one WorkflowRoleDecisionReply JSON value on stdout. Logs and errors go to stderr. The process receives no Forge handle, Forge token, or workflow mutation tool."
+        "Usage:\n  smith-workflow-role-decision \\\n    [--auth deepseek|chatgpt-oauth|anthropic-oauth] \\\n    [--codex-model MODEL] [--auth-file PATH] \\\n    < workflow-role-decision-request.json > workflow-role-decision-reply.json\n\nReads one Temper WorkflowRoleDecisionRequest JSON value on stdin and writes one WorkflowRoleDecisionReply JSON value on stdout. Logs and errors go to stderr. The process receives no Forge handle, Forge token, or workflow mutation tool. Set {WORKFLOW_ROLE_DECISION_CAPTURE_DIR_ENV} to an existing writable directory to write one bounded, redacted JSON capture per decision; captures are disabled by default."
     );
 }
 
