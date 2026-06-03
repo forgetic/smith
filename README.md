@@ -14,7 +14,7 @@ contracts.
 - ChatGPT/OpenAI Codex OAuth, Anthropic OAuth, and DeepSeek API-key provider
   wiring.
 - One-turn structured LLM decisions through `pi_agent_rust`.
-- The `product-manager` interactive profile responder.
+- The dogfood/example `product-manager` interactive profile responder.
 - The manifest-driven workflow-role decision responder.
 - Live provider tests and the real Forgejo + real LLM process-boundary proof.
 
@@ -60,23 +60,50 @@ options.
 
 ## Use with Temper
 
-Build the responder binaries and point Temper at them:
+Build the responder binaries and bind them through Temper-owned process
+configuration:
 
 ```sh
 cargo build -p smith-temper-agent-cli --bin smith-workflow-role-decision
 cargo build -p smith-temper-agent-cli --bin smith-product-manager-responder
 ```
 
+Workflow role workers still use Temper's role-decision process variables:
+
 ```sh
 export TEMPER_WORKER_ROLE_DECISION_COMMAND=$PWD/target/debug/smith-workflow-role-decision
 export TEMPER_WORKER_ROLE_DECISION_ARGS_JSON='["--auth","chatgpt-oauth"]'
+```
 
-export TEMPER_PRODUCT_CHAT_RESPONDER_COMMAND=$PWD/target/debug/smith-product-manager-responder
-export TEMPER_PRODUCT_CHAT_RESPONDER_ARGS_JSON='["--auth","chatgpt-oauth"]'
+Interactive frontends should call Temper's generic `temper-interaction` REPL or
+HTTP service. Bind Smith's product-manager example responder in the interaction
+deployment binding file under the responder id declared by the profile spec
+(fragment shown):
+
+```json
+{
+  "responders": {
+    "product-manager-responder": {
+      "command": "/path/to/smith/target/debug/smith-product-manager-responder",
+      "args": ["--auth", "chatgpt-oauth"],
+      "env_allowlist": []
+    }
+  }
+}
+```
+
+Then launch Temper with the user-defined interaction spec and binding file, for
+example:
+
+```sh
+temper-interaction repl \
+  --spec product-manager.json \
+  --bindings bindings.json \
+  --profile product-manager
 ```
 
 The reference-delivery and dogfood launchers in Temper are configured to use
-Smith process responders by default. Keep their Smith workspace setting pointed
+Smith process responders by default; keep their Smith workspace setting pointed
 at this checkout and pass provider options through the documented Smith args/env
 surfaces.
 

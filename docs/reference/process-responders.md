@@ -1,7 +1,8 @@
 # Process responders
 
-Smith provides the first concrete LLM implementations for Temper's process
-protocols. Protocol structs and validation are Temper-owned.
+Smith provides provider-backed LLM implementations for Temper's process
+protocols. Protocol structs, validation, transcripts, proposal acceptance, and
+state mutation are Temper-owned.
 
 ## Workflow-role decision
 
@@ -39,7 +40,7 @@ captures provider credentials, auth-file contents, Forge tokens, raw environment
 dumps, or unbounded prompt/body text. Missing or unwritable capture directories
 produce bounded warning logs and do not change a successful decision result.
 
-## Product-manager interactive profile
+## Product-manager example interactive profile
 
 Binary:
 
@@ -51,13 +52,17 @@ Input: one `temper_interaction::ConversationRequest` JSON value on stdin.
 Output: one `temper_interaction::ConversationReply` JSON value on stdout.
 Errors/logs go to stderr.
 
-Smith serves only the `product-manager` profile. Replies contain display text and
-inert issue proposals. Temper owns transcript storage, proposal validation,
-explicit acceptance, and issue filing.
+This binary is Smith's dogfood/example implementation for the `product-manager`
+profile id declared by Temper's interaction profile fixture or dogfood spec. It
+rejects other profile ids. Replies contain display text and inert issue-draft
+proposals only. Temper's generic interaction service owns transcript storage,
+reply/proposal validation, durable proposal snapshots, explicit acceptance, and
+issue filing.
 
 ## Authority boundary
 
-Responder processes receive no Forge credentials or mutation tools. Temper
-clears the child environment except for configured allow-listed names, validates
-reply shape/action/proposals, applies timeouts, and executes all state changes
-through Temper-owned code.
+Responder processes receive no Forge credentials or mutation tools. Clients
+enter through Temper's generic interaction or workflow services; Temper clears
+the child environment except for configured allow-listed names, validates reply
+shape/action/proposals, applies timeouts, and executes all state changes through
+Temper-owned code.

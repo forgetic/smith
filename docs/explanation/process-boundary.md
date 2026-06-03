@@ -18,7 +18,7 @@ Smith owns:
 
 - pi-SDK provider wiring and auth-file handling;
 - ChatGPT/Anthropic/DeepSeek model-specific behavior;
-- product-manager interactive responder implementation;
+- dogfood/example product-manager interactive responder implementation;
 - manifest-driven workflow-role decision implementation;
 - live provider tests and real-agent e2e tests.
 
@@ -44,6 +44,8 @@ Smith LLM responder process
 Temper validation + state mutation
 ```
 
-If Smith crashes, returns malformed JSON, times out, or chooses an unauthorized
-action, Temper handles that as a process-adapter failure or no-op according to
-the Temper-owned contract.
+Interactive users and external clients enter through Temper's generic
+interaction services, not through a Smith process directly. If Smith crashes,
+returns malformed JSON, times out, or chooses an unauthorized action, Temper
+handles that as a process-adapter failure or no-op according to the Temper-owned
+contract.

@@ -1,9 +1,10 @@
 # Split coverage ledger
 
-Smith is the only repository with concrete pi-SDK-backed provider, product-manager,
-and workflow-role decision behavior. Temper owns process protocols, validation,
-runner authority, transcripts, proposal acceptance, deterministic fake tests, and
-production process wiring.
+Smith is the only repository with concrete pi-SDK-backed provider,
+product-manager example, and workflow-role decision behavior. Temper owns
+process protocols, validation, runner authority, generic interaction services,
+transcripts, proposal acceptance, deterministic fake tests, and production
+process wiring.
 
 ## Ownership after the split
 
@@ -11,7 +12,7 @@ production process wiring.
 | --- | --- | --- |
 | Provider/auth/model calls | None; Temper treats responder args/env as opaque and clears child env except allow-listed names. | Provider/OAuth unit tests and ignored live provider tests. |
 | One-turn structured decisions | Process reply validation in `temper-runner`. | Workflow-role decision tests plus provider live smokes. |
-| Product-manager profile behavior | Generic conversations, transcripts, inert proposals, and filing. | Product-manager prompt/mapping/response tests and `smith-product-manager-responder`. |
+| Product-manager example profile behavior | Generic conversations, compiled profile manifests, transcripts, inert proposals, and filing. | Product-manager prompt/mapping/response tests, Temper fixture compatibility, and `smith-product-manager-responder`. |
 | Workflow-role behavior | Manifest authority, authorized action validation, `RoleTools`, external-tool binding, process adapter. | `smith-workflow-role-decision` prompt/context/provider implementation. |
 | Forgejo + real LLM proof | Temper process adapter and Forgejo support are used from Smith's ignored e2e. | `forgejo_workflow_role_e2e` real Forgejo + real LLM gate. |
 
@@ -22,7 +23,7 @@ Do not use these as Temper coverage gates after the split:
 - `cargo test -p temper-agents ...`
 - `temper-testing-worker --agents real`
 - production `temper-worker --auth/--codex-model/--auth-file`
-- product-chat `--auth/--codex-model/--auth-file`
+- profile-specific interactive responder auth flags in Temper production binaries
 
 ## Active Smith gates
 

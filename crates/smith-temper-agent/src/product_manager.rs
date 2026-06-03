@@ -297,6 +297,7 @@ mod tests {
     use super::*;
     use temper_interaction::{
         ConversationId, ConversationProfileId, ConversationTurn, Participant,
+        ProposalPayloadContract, ProposalPayloadValidator, RawInteractionSpec, ResponderProtocol,
     };
 
     #[test]
@@ -382,12 +383,25 @@ mod tests {
             }],
         };
         let reply = response.to_conversation_reply().unwrap();
+        reply.validate().expect("reply proposals validate");
         assert_eq!(reply.message, "File one small issue.");
         assert_eq!(reply.proposals[0].id.as_str(), "mobile-chat-loop");
         assert_eq!(
             reply.proposals[0].kind,
             temper_interaction::ProposalKind::issue()
         );
+        assert_eq!(reply.proposals[0].title, "Add mobile chat loop");
+        assert_eq!(
+            reply.proposals[0].summary.as_deref(),
+            Some("Dogfood from mobile.")
+        );
+        let issue = reply.proposals[0]
+            .issue_payload()
+            .expect("issue payload decodes")
+            .expect("issue payload is present");
+        assert_eq!(issue.title, "Add mobile chat loop");
+        assert_eq!(issue.body, "Expose chat from a phone-friendly client.");
+        assert_eq!(issue.rationale.as_deref(), Some("Dogfood from mobile."));
     }
 
     #[test]
@@ -402,6 +416,119 @@ mod tests {
         assert_eq!(mapped.repository, "owner/repo");
         assert_eq!(mapped.turns.len(), 1);
         assert_eq!(mapped.turns[0].author, ProductManagerAuthor::Human);
+    }
+
+    #[test]
+    fn product_manager_reads_temper_process_reply_fixture_and_issue_payload_contract() {
+        let fixture = include_str!(
+            "../../../../temper/crates/temper-interaction/fixtures/interactive-responder-reply.json"
+        );
+        let reply: ConversationReply = serde_json::from_str(fixture).expect("fixture parses");
+        reply.validate().expect("fixture reply validates");
+
+        assert_eq!(
+            reply.message,
+            "I would file one issue for the adapter first."
+        );
+        assert_eq!(reply.proposals.len(), 1);
+        let proposal = &reply.proposals[0];
+        assert_eq!(proposal.id.as_str(), "mobile-chat-adapter");
+        assert_eq!(proposal.kind, temper_interaction::ProposalKind::issue());
+        assert_eq!(proposal.title, "Add mobile chat adapter");
+        assert_eq!(
+            proposal.summary.as_deref(),
+            Some("Mobile access lets humans keep the conversation moving.")
+        );
+        let issue = proposal
+            .issue_payload()
+            .expect("issue payload decodes")
+            .expect("issue payload is present");
+        assert_eq!(issue.title, "Add mobile chat adapter");
+        assert_eq!(
+            issue.body,
+            "Expose the interaction service through a mobile-friendly adapter."
+        );
+        assert_eq!(
+            issue.rationale.as_deref(),
+            Some("Mobile access lets humans keep the conversation moving.")
+        );
+    }
+
+    #[test]
+    fn product_manager_reads_temper_interaction_profile_fixture_manifest() {
+        let fixture = include_str!(
+            "../../../../temper/crates/temper-interaction/fixtures/product-manager-interaction-spec.json"
+        );
+        let raw: RawInteractionSpec = serde_json::from_str(fixture).expect("fixture parses");
+        let validated = raw.validate().expect("fixture validates");
+        let profile_id =
+            ConversationProfileId::new(PRODUCT_MANAGER_PROFILE_ID).expect("valid profile id");
+        let profile = validated
+            .profile(&profile_id)
+            .expect("product-manager profile exists");
+        assert_eq!(profile.responder().as_str(), "product-manager-responder");
+        assert_eq!(
+            profile.participants().agent().display_name.as_deref(),
+            Some("product-manager")
+        );
+        assert_eq!(profile.proposal_kinds().len(), 1);
+        assert_eq!(
+            profile.proposal_kinds()[0].id(),
+            &temper_interaction::ProposalKind::issue()
+        );
+        assert_eq!(
+            profile.proposal_kinds()[0].payload(),
+            ProposalPayloadContract::IssueDraft
+        );
+
+        let compiled = validated.compile();
+        let manifest = compiled
+            .profile(&profile_id)
+            .expect("compiled product-manager profile exists");
+        assert_eq!(manifest.responder.id.as_str(), "product-manager-responder");
+        assert_eq!(manifest.responder.protocol, ResponderProtocol::ProcessV1);
+        let issue_manifest = manifest
+            .proposal(&temper_interaction::ProposalKind::issue())
+            .expect("issue proposal manifest exists");
+        assert_eq!(
+            issue_manifest.payload_validator,
+            ProposalPayloadValidator::IssueDraft
+        );
+        let proposal = ProductManagerDraftIssue {
+            slug: "mobile-chat-loop".into(),
+            title: "Add mobile chat loop".into(),
+            body: "Expose chat from a phone-friendly client.".into(),
+            rationale: Some("Dogfood from mobile.".into()),
+        }
+        .to_proposal()
+        .expect("proposal maps");
+        issue_manifest
+            .validate_payload(&proposal)
+            .expect("Smith issue proposals satisfy the fixture payload contract");
+    }
+
+    #[tokio::test]
+    async fn product_manager_responder_rejects_other_profiles_without_provider_call() {
+        let responder = ProductManagerResponder::new(ProviderConfig::new(
+            "test-provider",
+            "test-model",
+            "http://127.0.0.1",
+            "dummy-api-key",
+        ));
+        let request = ConversationRequest::new(
+            ConversationProfileId::new("support-agent").expect("valid profile"),
+            ConversationId::new("conversation-1").expect("valid conversation"),
+            Vec::new(),
+        );
+
+        let error = responder
+            .respond(&request)
+            .await
+            .expect_err("non-product profile is rejected before provider call");
+        assert!(matches!(
+            error,
+            ProductManagerError::InvalidRequest(message) if message.contains("support-agent")
+        ));
     }
 
     #[test]

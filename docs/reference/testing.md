@@ -12,7 +12,7 @@ cargo test --workspace --all-targets workflow_role_decision
 Useful focused areas:
 
 - provider/auth parsing and redaction: `provider`, `oauth`, `anthropic_oauth`;
-- product-manager request/reply mapping: `product_manager`;
+- product-manager request/reply mapping and Temper fixture compatibility: `product_manager`;
 - workflow-role prompt/context/action mapping: `workflow_role_decision`;
 - CLI/process option parsing: `smith-temper-agent-cli` tests.
 
@@ -40,7 +40,7 @@ Run from `../temper` when changing a protocol boundary:
 ```sh
 cargo test -p temper-interaction process_responder
 cargo test -p temper-runner role_decision_process
-cargo test -p temper-production product_chat
+cargo test -p temper-production interaction
 cargo test -p temper-production worker_args worker_role_agent
 ```
 
