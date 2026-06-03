@@ -9,6 +9,8 @@
 #![allow(clippy::result_large_err)]
 
 pub mod decision;
+pub mod interaction_profile;
+mod interaction_profile_config;
 mod observability;
 pub mod product_manager;
 pub mod provider;
@@ -17,6 +19,11 @@ mod workflow_role_decision_capture;
 mod workflow_role_decision_observability;
 
 pub use decision::{DecisionError, run_decision};
+pub use interaction_profile::{
+    CONVERSATION_REPLY_V1_PROTOCOL_INSTRUCTION, GenericInteractionResponder,
+    InteractionAllowedProposalKind, InteractionProfileConfig, InteractionProfileError,
+    InteractionProposalPayloadContract, InteractionResponseFormat,
+};
 pub use product_manager::{
     PRODUCT_MANAGER_PROFILE_ID, PRODUCT_MANAGER_SYSTEM_PROMPT, ProductManagerAuthor,
     ProductManagerConversationTurn, ProductManagerDraftIssue, ProductManagerError,

@@ -59,6 +59,12 @@ proposals only. Temper's generic interaction service owns transcript storage,
 reply/proposal validation, durable proposal snapshots, explicit acceptance, and
 issue filing.
 
+The Smith library also exposes a generic `InteractionProfileConfig` /
+`GenericInteractionResponder` core for JSON prompt/profile configs. Until the
+future `smith-interaction-responder` binary lands, the product-manager binary
+remains the compatibility process surface and does not parse Temper acceptance
+commands or effects.
+
 ## Authority boundary
 
 Responder processes receive no Forge credentials or mutation tools. Clients
