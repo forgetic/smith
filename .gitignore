@@ -13,7 +13,6 @@ auth.json
 *.secret
 .env
 .env.*
-plans/
 
 # Runtime artifacts from Smith-owned Temper launchers.
 /examples/dogfood/logs/

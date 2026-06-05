@@ -39,17 +39,9 @@ This page holds stable contribution rules for Smith.
 - Capture recurring mistakes or human steering in `docs/reference/agent-lessons/`
   and promote durable rules to canonical docs.
 
-## Validation before handoff
+## Workflow
 
-Run the fast validation loop for code changes unless the task explicitly narrows
-it:
+See:
 
-```sh
-cargo fmt --all
-cargo dev-clippy
-cargo dev-check
-```
-
-Run task-specific tests when behavior changed. See
-`docs/how-to/fast-local-iteration.md` and
-`docs/how-to/end-a-development-session.md`.
+`docs/how-to/fast-local-iteration.md`,
+`docs/how-to/end-a-development-session.md`, and

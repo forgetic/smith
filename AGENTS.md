@@ -1,8 +1,8 @@
 # Agent entry point
 
-This file is the first stop for coding agents working in Smith. Read
-`README.md` first, then use this map to choose task-relevant docs. Keep this
-file as orientation only; stable rules and status belong in the linked docs.
+This file is the first stop for coding agents working in Smith. Use this map to
+choose task-relevant docs. Keep this file as orientation only; stable rules and
+status belong in the linked docs.
 
 ## Codebase map
 
@@ -18,7 +18,6 @@ file as orientation only; stable rules and status belong in the linked docs.
 
 ## Documentation map
 
-- Start here for process: `docs/how-to/start-a-development-session.md`.
 - Development rules and validation: `docs/reference/development-conventions.md`,
   `docs/how-to/fast-local-iteration.md`, and
   `docs/how-to/end-a-development-session.md`.

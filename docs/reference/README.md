@@ -10,4 +10,3 @@ Current reference pages:
 - [Process responders](process-responders.md)
 - [Testing and coverage](testing.md)
 - [Split coverage ledger](split-coverage.md)
-- [Agent lessons register](agent-lessons/README.md)
