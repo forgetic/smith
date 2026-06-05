@@ -25,13 +25,24 @@ teardown. Logs stay under `logs/` for later inspection.
   manifest action, transition id, and external-executor availability.
   `transition_execution` records `outcome`, `stale_work`, compact effect
   summaries, failure class, diagnostic classes, and postcondition outcome.
-- **Mechanical reconciliation** — `mechanical.log` emits
-  `mechanical_reconciliation` for reconciler findings/actions. A blocked code
-  issue with no dependency relations is named as
+- **Mechanical landing** — `mechanical.log` starts with a
+  `temper-worker: mechanical ... ci_reader=bot ...` line: the mechanical worker
+  runs as the provisioned `bot` user and owns landing in this workflow. It reads
+  Forgejo Actions status with the bot's web-UI credentials (ADR 0019) and runs
+  `land_pr` (merge) once a `landing`-labelled PR's review and CI gates pass, or
+  `route_merge_conflict` when the merge conflicts. `./run.sh validate-webhooks`
+  fails loudly if the bot credentials or the `ci_reader=bot` startup line are
+  missing, or if the worker reports a CI-read fallback error.
+- **Mechanical reconciliation** — the same worker also emits
+  `mechanical_reconciliation` for controller-plane findings/actions (lease
+  expiry, partial-transition repair, dependency unblock). In the optional
+  cross-repo mode a blocked code issue with no dependency relations is named as
   `diagnostic=blocked_artifact_without_dependencies` with `dependency_count=0`;
   this explains why dependency-gated unblocking intentionally does not proceed.
 - **Validator diagnostics** — `./run.sh validate-multi-repo` checks logs and live
-  Forge state. For the original incident shape, expect messages like:
+  Forge state. The single-repo default converges and needs no fan-out, so this is
+  only meaningful in the optional cross-repo mode, where a bare parent the LLM
+  architect cannot fan out surfaces as:
 
   ```text
   missing: cross-repo parent acme/service#1 expected 2 child dependencies, found 0
@@ -42,7 +53,7 @@ teardown. Logs stay under `logs/` for later inspection.
 
 ## Minimal movement trail
 
-For one moving item, the expected trail is:
+For one moving item, the expected per-decision trail is:
 
 ```text
 worker_capabilities -> scan_summary -> work_item_selected
@@ -50,7 +61,12 @@ role_decision_request -> role_decision_reply -> action_dispatch
 transition_execution -> completed tick ... tick_id=...
 ```
 
-For a stuck cross-repo parent, add:
+The converging single-repo default walks these transitions in order across the
+role workers: `triage_to_code` (architect) -> `open_pr` (engineer, via the bound
+coding workspace) -> `approve_review` (reviewer, adds `landing`) -> `land_pr`
+(mechanical bot merges) -> `reconcile_landed` (architect).
+
+For a stuck cross-repo parent (optional mode only), add:
 
 ```text
 mechanical_reconciliation diagnostic=blocked_artifact_without_dependencies

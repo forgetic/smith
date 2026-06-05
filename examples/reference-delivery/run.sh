@@ -5,11 +5,14 @@
 #   1. a throwaway Forgejo server (SQLite, Actions enabled),
 #   2. a host-mode forgejo-runner producing real CI,
 #   3. admin bootstrap + the production provision/seed binary
-#      (org/users/tokens/repo/labels/CI workflow + one cross-repo intake issue),
+#      (org/users/tokens/bot/repo/labels/CI workflow + one intake issue),
 #   4. one fixed temper-worker pool (one process per workflow role, plus one
-#      mechanical reconciler) scanning every configured repo — all against
-#      Forgejo with Smith process role decisions and wall time,
-# then tears them all down cleanly on Ctrl-C / signal / `./run.sh stop`.
+#      mechanical worker that runs the controller plane AND lands approved PRs as
+#      the bot) scanning every configured repo — all against Forgejo with Smith
+#      process role decisions and wall time.
+# In the single-repo default it also binds a bundled deterministic coder so the
+# engineer opens a real implementation PR and the demo converges to a merged PR,
+# then tears everything down cleanly on Ctrl-C / signal / `./run.sh stop`.
 #
 # This script targets the operator-facing entry points from Temper's root
 # package rather than the temper-testing entry points. By default it builds/uses the
@@ -71,6 +74,11 @@ FORGEJO_RUNNER_VERSION=3.5.1
 ADMIN_USER=refadmin
 ADMIN_EMAIL=refadmin@example.invalid
 ADMIN_PASSWORD='Ref-Delivery-Admin-1!'
+
+# Diagnostic strings the production worker emits when the mechanical landing
+# worker cannot read Forgejo 7.0.x Actions status over the web UI (ADR 0019).
+CI_FALLBACK_MISSING_CREDENTIALS='no web-UI credentials configured for the CI read fallback'
+CI_FALLBACK_LOGIN_FAILED='forgejo web-ui login failed'
 
 log() { printf '[run.sh] %s\n' "$*"; }
 die() { printf '[run.sh] error: %s\n' "$*" >&2; exit 1; }
@@ -178,7 +186,7 @@ cmd_stop() {
 # Config knobs whose pre-existing environment value should win over the file
 # (precedence: CLI/env > config/temper.env > built-in default). The file is
 # the operator's edited config; a `VAR=x ./run.sh` still overrides it.
-CONFIG_KNOBS="OWNER NAME REPOS CROSS_REPO_INTAKE CROSS_REPO_INTAKE_TITLE BASE_URL POLL_MS RUN_SECS WEBHOOKS TRIGGER_BIND WEBHOOK_URL \
+CONFIG_KNOBS="OWNER NAME REPOS CROSS_REPO_INTAKE CROSS_REPO_INTAKE_TITLE BASE_URL POLL_MS CI_STATUS_POLL_MS IDLE_POLL_MAX_MS RUN_SECS WEBHOOKS TRIGGER_BIND WEBHOOK_URL \
 TEMPER_FORGEJO_GOMAXPROCS TEMPER_FORGEJO_BINARY \
 TEMPER_FORGEJO_RUNNER_BINARY TEMPER_WORKER_BIN TEMPER_PROVISION_BIN \
 TEMPER_TRIGGER_BIN TEMPER_VALIDATE_BIN TEMPER_BUILD_PACKAGE \
@@ -212,6 +220,10 @@ load_config() {
     # OWNER/NAME mode, so presence matters even when the value is empty.
     _repos_was_set=${REPOS+x}
     _pre_REPOS_VALUE=${REPOS-}
+    # CI_STATUS_POLL_MS is special: an intentionally empty value selects "use
+    # POLL_MS", so presence matters even when the value is empty.
+    _ci_status_poll_was_set=${CI_STATUS_POLL_MS+x}
+    _pre_CI_STATUS_POLL_MS_VALUE=${CI_STATUS_POLL_MS-}
     for _k in $CONFIG_KNOBS; do
         eval "_pre_$_k=\${$_k:-}"
     done
@@ -230,6 +242,9 @@ load_config() {
     if [ -n "$_repos_was_set" ]; then
         REPOS=${_pre_REPOS_VALUE}
     fi
+    if [ -n "$_ci_status_poll_was_set" ]; then
+        CI_STATUS_POLL_MS=${_pre_CI_STATUS_POLL_MS_VALUE}
+    fi
 
     OWNER=${OWNER:-acme}
     NAME=${NAME:-service}
@@ -238,6 +253,15 @@ load_config() {
     CROSS_REPO_INTAKE_TITLE=${CROSS_REPO_INTAKE_TITLE:-Coordinate greeting across service and canary}
     BASE_URL=${BASE_URL:-http://127.0.0.1:3000}
     POLL_MS=${POLL_MS:-2000}
+    # The mechanical landing worker reads CI status on a short poll because
+    # Forgejo 7.0.x does not webhook on Actions completion. An explicitly empty
+    # CI_STATUS_POLL_MS falls back to POLL_MS; otherwise it defaults to 1000ms.
+    if [ "${CI_STATUS_POLL_MS+x}" = "x" ]; then
+        [ -n "$CI_STATUS_POLL_MS" ] || CI_STATUS_POLL_MS=$POLL_MS
+    else
+        CI_STATUS_POLL_MS=1000
+    fi
+    IDLE_POLL_MAX_MS=${IDLE_POLL_MAX_MS:-8000}
     RUN_SECS=${RUN_SECS:-600}
     WEBHOOKS=${WEBHOOKS:-1}
     TRIGGER_BIND=${TRIGGER_BIND:-127.0.0.1:38080}
@@ -265,7 +289,7 @@ load_config() {
     TEMPER_CODING_WORKSPACE_COMMAND=${TEMPER_CODING_WORKSPACE_COMMAND:-}
     TEMPER_CODING_WORKSPACE_REMOTE=${TEMPER_CODING_WORKSPACE_REMOTE:-origin}
     TEMPER_CODING_WORKSPACE_PUSH=${TEMPER_CODING_WORKSPACE_PUSH:-1}
-    TEMPER_CODING_WORKSPACE_PR_LABELS=${TEMPER_CODING_WORKSPACE_PR_LABELS:-implementation,needs-reviewer,needs-merge}
+    TEMPER_CODING_WORKSPACE_PR_LABELS=${TEMPER_CODING_WORKSPACE_PR_LABELS:-implementation,needs-reviewer}
 
     _raw_repos=${REPOS:-$OWNER/$NAME}
     CONFIGURED_REPOS=
@@ -630,12 +654,110 @@ bootstrap_and_provision() {
     . "$ROLES_ENV"
 }
 
+# --- Demo coding workspace ----------------------------------------------------
+
+# URL-encodes one value for a git-credentials store entry. python3 is already a
+# demo dependency (the bundled CI workflow runs it).
+percent_encode() {
+    python3 -c 'import sys, urllib.parse; sys.stdout.write(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
+}
+
+# Binds the bundled deterministic coder so the engineer can open a real
+# implementation PR that converges to a merged PR without an external LLM coder.
+# It only runs when the operator has NOT bound their own coding workspace and
+# exactly one repository is configured (the converging single-repo happy path).
+# It also replaces the provisioned commit-message-marker CI with the bundled
+# pass-through workflow so a real coder PR head (which carries an ordinary commit
+# message, not the demo marker) clears the landing CI gate. Every failure is
+# non-fatal: the engineer simply stays idle, exactly as with no binding.
+setup_demo_coding_workspace() {
+    if [ -n "$TEMPER_CODING_WORKSPACE_ROOT" ] || [ -n "$TEMPER_CODING_WORKSPACE_COMMAND" ]; then
+        log "coding workspace: respecting operator binding (root=${TEMPER_CODING_WORKSPACE_ROOT:-unset})"
+        return 0
+    fi
+    if [ "$REPO_COUNT" -ne 1 ]; then
+        log 'coding workspace: multi-repo demo leaves the engineer idle (bind TEMPER_CODING_WORKSPACE_* for a real coder)'
+        return 0
+    fi
+
+    _repo=$FIRST_CONFIGURED_REPO
+    _key=$(role_env_key engineer)
+    eval "_eng_user=\${TEMPER_FORGEJO_USER_${_key}:-}"
+    eval "_eng_password=\${TEMPER_FORGEJO_PASSWORD_${_key}:-}"
+    if [ -z "$_eng_user" ] || [ -z "$_eng_password" ]; then
+        log "coding workspace: no engineer identity in $ROLES_ENV; engineer stays idle"
+        return 0
+    fi
+
+    _ws_dir="$RUN_DIR/coding-workspace"
+    _checkout="$_ws_dir/$(repo_slug "$_repo")"
+    _creds="$_ws_dir/git-credentials"
+    _remote="$BASE_URL/$_repo.git"
+    _without_scheme=${BASE_URL#*://}
+
+    log "coding workspace: cloning $_repo for the bundled demo coder ..."
+    rm -rf "$_ws_dir"
+    mkdir -p "$_ws_dir"
+    if ! git clone --quiet "$_remote" "$_checkout" >>"$LOG_DIR/coding-workspace.log" 2>&1; then
+        log "coding workspace: clone of $_repo failed (see logs/coding-workspace.log); engineer stays idle"
+        return 0
+    fi
+    # Configure the checkout for the local-git coding workspace push. Guarded so
+    # an unexpected git/disk failure degrades to "engineer idle" rather than
+    # aborting the whole launch under set -e.
+    if ! { ( umask 077; printf 'http://%s:%s@%s\n' "$(percent_encode "$_eng_user")" "$(percent_encode "$_eng_password")" "$_without_scheme" >"$_creds" ) \
+        && git -C "$_checkout" config user.email "$_eng_user@example.invalid" \
+        && git -C "$_checkout" config user.name 'Temper Engineer' \
+        && git -C "$_checkout" config credential.helper "store --file=$_creds"; }; then
+        log "coding workspace: could not configure the checkout; engineer stays idle"
+        return 0
+    fi
+
+    # Replace the provisioned marker CI with the bundled pass-through workflow so
+    # the engineer's ordinary-message PR head clears the landing CI gate. The PR
+    # branches off this base, so its push event runs the pass-through workflow.
+    _base=$(git -C "$_checkout" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 'main')
+    mkdir -p "$_checkout/.forgejo/workflows"
+    if cp "$CONFIG_DIR/ci.yml" "$_checkout/.forgejo/workflows/ci.yml" \
+        && ! git -C "$_checkout" diff --quiet -- .forgejo/workflows/ci.yml; then
+        if git -C "$_checkout" add .forgejo/workflows/ci.yml \
+            && git -C "$_checkout" commit --quiet -m 'ci: use reference-delivery demo pass-through workflow' >>"$LOG_DIR/coding-workspace.log" 2>&1 \
+            && git -C "$_checkout" push --quiet origin "HEAD:$_base" >>"$LOG_DIR/coding-workspace.log" 2>&1; then
+            log "coding workspace: applied pass-through CI to $_repo@$_base"
+        else
+            log "coding workspace: could not apply pass-through CI to $_repo (see logs/coding-workspace.log); landing CI gate may not pass"
+        fi
+    fi
+
+    TEMPER_CODING_WORKSPACE_ROOT="$_checkout"
+    TEMPER_CODING_WORKSPACE_COMMAND="$SCRIPT_DIR/tools/greeting-coder.sh"
+    log "coding workspace: bound bundled demo coder for $_repo (root=$_checkout)"
+}
+
 # --- Workers ------------------------------------------------------------------
 
 # Uppercases a role id and replaces non-alphanumerics with `_` (matching the
 # provision binary's env_role_key), yielding the secrets-file variable suffix.
 role_env_key() {
     printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9' '_'
+}
+
+# Resolves the provisioned `bot` automation identity from the secrets file. The
+# mechanical worker runs as the bot: it joins the Owners team so it can land
+# (merge) approved PRs, and its web-UI credentials let it read Forgejo 7.0.x
+# Actions status for the landing gate (ADR 0019). The setup-only site admin
+# never participates in the workflow.
+resolve_bot_identity() {
+    [ -f "$ROLES_ENV" ] || die "missing $ROLES_ENV"
+    # shellcheck disable=SC1090
+    . "$ROLES_ENV"
+    BOT_USER=${TEMPER_FORGEJO_BOT_USER:-}
+    BOT_TOKEN=${TEMPER_FORGEJO_BOT_TOKEN:-}
+    BOT_PASSWORD=${TEMPER_FORGEJO_BOT_PASSWORD:-}
+    [ -n "$BOT_USER" ] || die "automation user 'bot' has no username in $ROLES_ENV"
+    [ "$BOT_USER" = "bot" ] || die "automation user must be 'bot' in $ROLES_ENV, got '$BOT_USER'"
+    [ -n "$BOT_TOKEN" ] || die "automation user 'bot' has no token in $ROLES_ENV"
+    [ -n "$BOT_PASSWORD" ] || die "automation user 'bot' has no password in $ROLES_ENV"
 }
 
 launch_role_worker() {
@@ -702,26 +824,38 @@ launch_workers() {
         fi
     done
 
-    # One mechanical reconciler (controller plane; admin token, no agent).
+    # One mechanical reconciler runs the controller plane AND lands approved PRs.
+    # It runs as the provisioned `bot` automation user (Owners team) with its
+    # REST token plus web-UI credentials for the ADR-0019 CI read fallback, and
+    # polls CI status on the short CI_STATUS_POLL_MS cadence (Forgejo 7.0.x does
+    # not webhook on Actions completion), backing off to IDLE_POLL_MAX_MS while
+    # idle. Wakes still interrupt immediately.
+    resolve_bot_identity
     _wake_args=
     _wake_socket=
     if [ "$WEBHOOKS" = "1" ]; then
         _wake_socket="$WAKE_DIR/mechanical.sock"
         _wake_args="--wake-socket $_wake_socket --wake-secret-file $WAKE_SECRET_FILE"
     fi
-    # shellcheck disable=SC2086
-    TEMPER_FORGEJO_TOKEN="$ADMIN_TOKEN" "$WORKER_BIN" \
-        --backend forgejo --base-url "$BASE_URL" $WORKER_REPO_ARGS \
-        --kind mechanical \
-        --poll-ms "$POLL_MS" --stop-file "$STOP_FILE" --run-secs "$RUN_SECS" \
-        $_wake_args \
-        >"$LOG_DIR/mechanical.log" 2>&1 &
+    (
+        printf 'temper-worker: mechanical repositories=%s automation_user=%s ci_reader=bot idle_poll_max_ms=%s\n' "$CONFIGURED_REPOS" "$BOT_USER" "$IDLE_POLL_MAX_MS"
+        # shellcheck disable=SC2086
+        TEMPER_FORGEJO_TOKEN="$BOT_TOKEN" \
+        TEMPER_FORGEJO_USERNAME="$BOT_USER" \
+        TEMPER_FORGEJO_PASSWORD="$BOT_PASSWORD" \
+            "$WORKER_BIN" \
+            --backend forgejo --base-url "$BASE_URL" $WORKER_REPO_ARGS \
+            --kind mechanical \
+            --poll-ms "$CI_STATUS_POLL_MS" --idle-poll-max-ms "$IDLE_POLL_MAX_MS" \
+            --stop-file "$STOP_FILE" --run-secs "$RUN_SECS" \
+            $_wake_args
+    ) >"$LOG_DIR/mechanical.log" 2>&1 &
     _pid=$!
     echo "$_pid" >>"$WORKERS_PID_FILE"
     if [ "$WEBHOOKS" = "1" ]; then
         wait_for_socket "$_wake_socket" "$_pid" 'mechanical'
     fi
-    log "  mechanical -> pid $_pid (logs/mechanical.log)"
+    log "  mechanical -> pid $_pid as bot $BOT_USER (logs/mechanical.log)"
 
     if [ -n "$_architect_role" ]; then
         launch_role_worker "$_architect_role"
@@ -849,6 +983,58 @@ cmd_validate_reference_delivery_state() {
     return "$_ok"
 }
 
+# Confirms the mechanical landing worker has the bot automation credentials it
+# needs to merge approved PRs and read Forgejo 7.0.x Actions status (ADR 0019).
+validate_mechanical_bot_config() {
+    _ok=0
+    if [ ! -f "$ROLES_ENV" ]; then
+        log "missing: $ROLES_ENV not found; cannot confirm bot automation credentials"
+        log 'diagnosis: Forgejo 7.0.x CI reads need web-UI credentials for the mechanical landing worker (ADR 0019)'
+        return 1
+    fi
+    # shellcheck disable=SC1090
+    . "$ROLES_ENV"
+    if [ "${TEMPER_FORGEJO_BOT_USER:-}" = "bot" ] && [ -n "${TEMPER_FORGEJO_BOT_TOKEN:-}" ] \
+        && [ -n "${TEMPER_FORGEJO_BOT_PASSWORD:-}" ]; then
+        log 'ok: bot automation token + web-UI credentials present for the mechanical worker'
+    else
+        log "missing: bot automation user token/username/password in $ROLES_ENV"
+        log 'diagnosis: provision the bot user and launch mechanical with its REST token plus TEMPER_FORGEJO_USERNAME/TEMPER_FORGEJO_PASSWORD for landing and the ADR-0019 CI read fallback'
+        _ok=1
+    fi
+    return "$_ok"
+}
+
+# Checks the mechanical worker startup identity and that no CI read fallback
+# error (missing/unusable web-UI credentials) was reported for the landing gate.
+validate_mechanical_ci_log() {
+    _ok=0
+    _mechanical_log="$LOG_DIR/mechanical.log"
+    if [ ! -f "$_mechanical_log" ]; then
+        log 'missing: logs/mechanical.log exists for mechanical CI-read diagnostics'
+        return 1
+    fi
+    if ! grep -F -q 'ci_reader=bot' "$_mechanical_log" 2>/dev/null; then
+        log 'missing: mechanical worker startup did not record the bot automation identity'
+        log 'diagnosis: restart with the updated launcher so mechanical runs as the bot user for landing and CI reads'
+        _ok=1
+    fi
+    if grep -F -q "$CI_FALLBACK_MISSING_CREDENTIALS" "$_mechanical_log" 2>/dev/null; then
+        log 'missing: mechanical worker reported missing Forgejo web-UI credentials for CI reads'
+        log 'diagnosis: the landing queue needs native CI; pass the bot TEMPER_FORGEJO_USERNAME/TEMPER_FORGEJO_PASSWORD to the mechanical worker (ADR 0019)'
+        _ok=1
+    fi
+    if grep -F -q "$CI_FALLBACK_LOGIN_FAILED" "$_mechanical_log" 2>/dev/null; then
+        log 'missing: mechanical worker could not log in to Forgejo web UI for CI reads'
+        log 'diagnosis: verify the bot automation credentials in secrets/roles.env'
+        _ok=1
+    fi
+    if [ "$_ok" -eq 0 ]; then
+        log 'ok: mechanical CI read fallback reported no missing/unusable web-UI credentials'
+    fi
+    return "$_ok"
+}
+
 cmd_validate_webhooks() {
     load_config
     _ok=0
@@ -858,7 +1044,10 @@ cmd_validate_webhooks() {
     [ -d "$LOG_DIR" ] || die "no logs/ directory yet; start a run first"
     log "validating webhook wake logs under $LOG_DIR"
     log "configured repos: $CONFIGURED_REPOS"
-    log "configured POLL_MS=$POLL_MS; long-poll smoke expects POLL_MS=120000"
+    log "configured POLL_MS=$POLL_MS CI_STATUS_POLL_MS=$CI_STATUS_POLL_MS IDLE_POLL_MAX_MS=$IDLE_POLL_MAX_MS; long-poll smoke expects POLL_MS=120000"
+
+    validate_mechanical_bot_config || _ok=1
+    validate_mechanical_ci_log || _ok=1
 
     if [ "${VALIDATE_REPO_SPECIFIC:-0}" = "1" ]; then
         validate_repo_specific_logs || _ok=1
@@ -1001,6 +1190,7 @@ cmd_start() {
     boot_runner
     boot_trigger
     bootstrap_and_provision
+    setup_demo_coding_workspace
     launch_workers
     monitor
     # cleanup runs via the EXIT trap.
