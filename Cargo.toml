@@ -22,6 +22,23 @@ uuid = { version = "1", features = ["v4"] }
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
+[profile.dev]
+opt-level = 0
+debug = 0
+incremental = true
+codegen-units = 256
+lto = false
+
+[profile.dev.package."*"]
+debug = 0
+
+[profile.test]
+opt-level = 0
+debug = 0
+incremental = true
+codegen-units = 256
+lto = false
+
 # `pi_agent_rust 0.1.13` pulls `asupersync =0.3.1`, which only builds with the
 # API-compatible `franken-decision 0.3.1`. Keep Cargo.lock pinned with:
 #
