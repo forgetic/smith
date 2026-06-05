@@ -1,144 +1,196 @@
 # Smith
 
-**Concrete LLM responder implementations for Temper.**
+**LLM workers for Temper.**
 
-Smith is the external home for the `pi_agent_rust` provider/auth/decision code
-that Temper calls through process protocols. Temper owns workflow and interaction
-contracts; Smith owns the first concrete pi-SDK-backed responders for those
-contracts.
+*Agents that perform work inside Temper workflows.*
+
+Smith provides the first concrete agent implementations for Temper.
+
+Temper owns workflow execution, state transitions, permissions, and interaction contracts. Smith owns the agents that reason, make decisions, write code, and produce responses within those contracts.
+
+Smith does not own workflow state.
+
+Smith does not mutate Forge artifacts directly.
+
+Smith receives structured work from Temper, produces structured results, and returns control to the workflow engine.
 
 [Docs](docs/README.md) · [Provider auth](docs/how-to/configure-provider-auth.md) · [Run responders](docs/how-to/run-temper-responders.md) · [Observability](docs/reference/workflow-role-observability.md) · [Process boundary](docs/explanation/process-boundary.md)
 
-## What Smith owns
+---
 
-- ChatGPT/OpenAI Codex OAuth, Anthropic OAuth, and DeepSeek API-key provider
-  wiring.
-- One-turn structured LLM decisions through `pi_agent_rust`.
-- The dogfood/example `product-manager` interactive profile responder.
-- The manifest-driven workflow-role decision responder.
-- Live provider tests and the real Forgejo + real LLM process-boundary proof.
+## Why
 
-Smith does **not** mutate Forge or workflow state. Temper validates every reply
-and performs all transcript, proposal, Forge, and workflow mutations.
+Temper treats workflows as durable state machines whose state lives in the Forge.
 
-## Workspace
+Agents are intentionally separate.
 
-- `crates/smith-temper-agent` — library for provider selection, OAuth auth-file
-  handling, per-request provider knobs, one-turn structured decisions,
-  product-manager profile mapping, and workflow-role decisions.
-- `crates/smith-temper-agent-cli` — credential preflight utility plus the
-  `smith-product-manager-responder` and `smith-workflow-role-decision` binaries.
+A workflow engine should be able to:
 
-Smith may use local path dependencies on the sibling Temper checkout for
-protocol/domain crates used by tests and process binaries:
+* validate transitions
+* enforce permissions
+* recover from failures
+* reconcile workflow state
+* survive agent crashes
+
+without depending on any particular LLM implementation.
+
+Smith exists to provide those implementations.
+
+It is the home for provider integrations, authentication, prompting, decision-making, coding agents, and other forms of LLM-driven work.
+
+Temper decides what work is allowed.
+
+Smith decides how to perform it.
+
+---
+
+## Core ideas
+
+### Temper owns workflow execution
+
+Temper is authoritative for:
+
+* workflow definitions
+* queues
+* leases
+* transitions
+* permissions
+* workflow state
+* Forge mutations
+
+Smith is authoritative for none of those things.
+
+A Smith agent cannot advance a workflow on its own.
+
+All workflow changes must pass through Temper validation.
+
+### Smith owns agent execution
+
+Smith is responsible for:
+
+* provider integrations
+* authentication
+* model selection
+* prompts
+* reasoning
+* structured decisions
+* coding agents
+* responder implementations
+
+Smith turns workflow tasks into agent behavior.
+
+### Process boundaries are intentional
+
+Temper and Smith communicate through stable process protocols.
+
+This separation keeps workflow correctness independent from agent implementation details.
+
+Either side can evolve independently.
+
+Different agent implementations can be added without changing workflow semantics.
+
+Different workflow engines can reuse Smith agents without inheriting Temper internals.
+
+### Agents are replaceable
+
+Smith provides the first production-quality agents for Temper.
+
+They are not the only possible agents.
+
+Organizations may:
+
+* replace Smith entirely
+* implement alternative responders
+* mix Smith agents with custom agents
+* combine agents and human-operated roles
+
+The workflow contract remains the same.
+
+---
+
+## What Smith does
+
+Given a workflow task from Temper, Smith may:
+
+* analyze an issue
+* classify work
+* make a structured workflow decision
+* write code
+* prepare a change proposal
+* generate a review
+* answer an interactive request
+* invoke a coding agent
+
+The result is returned as structured output for Temper to validate and apply.
+
+Smith performs work.
+
+Temper decides whether that work is accepted.
+
+---
+
+## Architecture
 
 ```text
-../temper/crates/temper-interaction
-../temper/crates/temper-runner
-../temper/crates/temper-workflow
+Forge
+  authoritative workflow state
+        ↑
+Temper
+  workflow execution engine
+  queues · transitions · permissions · recovery
+        ↑
+process protocols
+        ↑
+Smith
+  providers · authentication · prompts
+  decisions · coding agents · responders
+        ↑
+LLMs
+  OpenAI · Anthropic · DeepSeek · others
 ```
 
-Temper must not depend on Smith as a Rust crate.
+The key invariant is simple:
 
-## Quick start
+> Smith can think. Temper decides.
 
-```sh
-cargo fmt --all
-cargo test --workspace --all-targets
-```
+---
 
-Run provider preflight after logging in or configuring a key:
+## What Smith owns today
 
-```sh
-cargo run -p smith-temper-agent-cli -- preflight --auth chatgpt-oauth
-cargo run -p smith-temper-agent-cli -- preflight --auth anthropic-oauth
-cargo run -p smith-temper-agent-cli -- preflight --auth deepseek
-```
+The current implementation includes:
 
-See `docs/how-to/configure-provider-auth.md` for login, model, and auth-file
-options.
+* OpenAI/ChatGPT authentication and provider integrations
+* Anthropic authentication and provider integrations
+* DeepSeek integrations
+* structured workflow-role decision responders
+* interactive profile responders
+* coding-agent integrations through `pi_agent_rust`
+* provider validation and live integration tests
 
-## Use with Temper
+These implementations serve as the default agent layer for Temper deployments.
 
-Build the responder binaries and bind them through Temper-owned process
-configuration:
+---
 
-```sh
-cargo build -p smith-temper-agent-cli --bin smith-workflow-role-decision
-cargo build -p smith-temper-agent-cli --bin smith-product-manager-responder
-```
+## Relationship to Temper
 
-Workflow role workers still use Temper's role-decision process variables:
+Temper and Smith are designed to evolve independently.
 
-```sh
-export TEMPER_WORKER_ROLE_DECISION_COMMAND=$PWD/target/debug/smith-workflow-role-decision
-export TEMPER_WORKER_ROLE_DECISION_ARGS_JSON='["--auth","chatgpt-oauth"]'
-```
+Temper remains responsible for:
 
-Interactive frontends should call Temper's generic `temper-interaction` REPL or
-HTTP service. Bind Smith's product-manager example responder in the interaction
-deployment binding file under the responder id declared by the profile spec
-(fragment shown):
+* workflow definitions
+* workflow execution
+* workflow correctness
+* Forge integration
+* state reconciliation
 
-```json
-{
-  "responders": {
-    "product-manager-responder": {
-      "command": "/path/to/smith/target/debug/smith-product-manager-responder",
-      "args": ["--auth", "chatgpt-oauth"],
-      "env_allowlist": []
-    }
-  }
-}
-```
+Smith remains responsible for:
 
-Then launch Temper with the user-defined interaction spec and binding file, for
-example:
+* agent implementations
+* model integrations
+* reasoning behavior
+* coding-agent execution
+* interactive responders
 
-```sh
-temper-interaction repl \
-  --spec product-manager.json \
-  --bindings bindings.json \
-  --profile product-manager
-```
+Together they provide a complete system for running agentic workflows on top of a Forge.
 
-The reference-delivery and dogfood launchers in Temper are configured to use
-Smith process responders by default; keep their Smith workspace setting pointed
-at this checkout and pass provider options through the documented Smith args/env
-surfaces.
-
-## Dependency note
-
-`pi_agent_rust 0.1.13` pulls `asupersync =0.3.1`, which currently needs the
-API-compatible `franken-decision 0.3.1`. Keep `Cargo.lock` pinned with:
-
-```sh
-cargo update -p franken-decision --precise 0.3.1
-```
-
-Re-check this workaround before bumping `pi_agent_rust`.
-
-## Secrets
-
-Never pass provider secrets on argv and never commit auth files here. Local
-credentials are read from environment variables, `.cache/deepseek-api-key`, or
-the shared pi auth file at `~/.pi/agent/auth.json`.
-
-## Live checks
-
-Live provider and Forgejo checks are ignored and env-gated:
-
-```sh
-TEMPER_CHATGPT_OAUTH=1 \
-  cargo test --test chatgpt_oauth_live -- --ignored --nocapture
-
-TEMPER_ANTHROPIC_OAUTH=1 \
-  cargo test --test anthropic_oauth_live -- --ignored --nocapture
-
-TEMPER_FORGEJO_E2E=1 TEMPER_FORGEJO_AGENTS=1 \
-  cargo test -p smith-temper-agent-cli --test forgejo_workflow_role_e2e -- \
-  --ignored --test-threads=1
-```
-
-See `docs/how-to/run-live-provider-tests.md` before running gates that can refresh
-real OAuth credentials or boot external services.
+Separately they maintain a clean boundary between workflow correctness and agent autonomy.
