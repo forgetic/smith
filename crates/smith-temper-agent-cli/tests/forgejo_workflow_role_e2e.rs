@@ -197,7 +197,7 @@ fn process_env_allowlist() -> Vec<String> {
 
 fn bound_coding_workspace() -> BoundExternalTool {
     BoundExternalTool {
-        id: ExternalToolId::new(CODING_WORKSPACE_TOOL_ID),
+        id: CODING_WORKSPACE_TOOL_ID.to_string(),
         description: "Edit and commit repository code.".to_string(),
         required: true,
         constraints: vec!["Produce a real product diff.".to_string()],

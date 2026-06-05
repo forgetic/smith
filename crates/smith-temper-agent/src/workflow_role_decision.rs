@@ -9,11 +9,10 @@
 use std::time::Instant;
 
 use serde::Deserialize;
-use temper_runner::{
+use temper_process_protocol::{
     BoundExternalTool, WORKFLOW_ROLE_DECISION_NO_ACTION, WORKFLOW_ROLE_DECISION_PROTOCOL_VERSION,
-    WorkflowRoleDecisionReply, WorkflowRoleDecisionRequest,
+    WorkflowRoleDecisionReply, WorkflowRoleDecisionRequest, WorkflowRoleManifest,
 };
-use temper_workflow::RoleManifest;
 
 use crate::decision::{DecisionError, run_decision};
 use crate::observability::{REASON_PREVIEW_CHARS, redacted_preview};
@@ -28,6 +27,7 @@ use crate::workflow_role_decision_observability::{
 };
 
 const EXTERNAL_TOOL_SECTION: &str = "User-declared external tools";
+const CODING_WORKSPACE_TOOL_ID: &str = "coding_workspace";
 
 /// Provider-backed workflow-role decision responder.
 pub struct WorkflowRoleDecisionResponder {
@@ -336,7 +336,7 @@ pub fn workflow_role_system_prompt(request: &WorkflowRoleDecisionRequest) -> Str
     runtime_system_prompt(&request.role_manifest, &request.available_external_tools)
 }
 
-fn runtime_system_prompt(manifest: &RoleManifest, tools: &[BoundExternalTool]) -> String {
+fn runtime_system_prompt(manifest: &WorkflowRoleManifest, tools: &[BoundExternalTool]) -> String {
     if manifest.external_tools.is_empty() {
         return manifest.prompt.render();
     }
@@ -457,7 +457,7 @@ fn runtime_external_tool_lines(tools: &[BoundExternalTool]) -> Vec<String> {
                     tool.constraints.join("; ")
                 ));
             }
-            if tool.id.as_str() == temper_runner::CODING_WORKSPACE_TOOL_ID {
+            if tool.id == CODING_WORKSPACE_TOOL_ID {
                 lines.push(format!(
                     "{} rule: implementation PR creation must use this workspace-produced branch/head; do not choose PR-opening actions for code work without it.",
                     tool.id

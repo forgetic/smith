@@ -10,12 +10,12 @@ description = "Temper-specific provider/auth/decision core for Smith agents."
 pi_agent_rust.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-temper-interaction = { path = "../../../temper/crates/temper-interaction" }
-temper-runner = { path = "../../../temper/crates/temper-runner" }
-temper-workflow = { path = "../../../temper/crates/temper-workflow" }
+temper-process-protocol = { path = "../../../temper/crates/temper-process-protocol" }
 uuid.workspace = true
 
 [dev-dependencies]
+temper-interaction = { path = "../../../temper/crates/temper-interaction" }
+temper-workflow = { path = "../../../temper/crates/temper-workflow" }
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
 
 [lints]

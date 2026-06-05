@@ -1,57 +1,66 @@
 use super::*;
-use temper_runner::WorkflowRoleDecisionRequest;
-use temper_workflow::{ExternalToolId, RawWorkflowSpec, RoleId};
+use temper_process_protocol::{
+    WorkflowExternalToolManifest, WorkflowPromptManifest, WorkflowPromptSection,
+    WorkflowRoleDecisionRequest, WorkflowRoleManifest, WorkflowRolePromptExtension,
+    WorkflowToolManifest,
+};
 
 fn fixture_request() -> WorkflowRoleDecisionRequest {
     serde_json::from_str(include_str!(
-        "../../../../temper/crates/temper-runner/fixtures/workflow-role-decision-request.json"
+        "../../../../temper/crates/temper-process-protocol/fixtures/workflow-role-decision-request.json"
     ))
     .expect("Temper workflow-role decision fixture parses")
 }
 
 fn request_with_compiled_external_tool(bound: bool) -> WorkflowRoleDecisionRequest {
-    let json = r#"{
-            "name": "generic-agent-test",
-            "roles": [{
-                "id": "banana",
-                "prompt": {"guidance": "Use open_pr only when coding_workspace is available."},
-                "external_tools": [{
-                    "id": "coding_workspace",
-                    "description": "Edit and commit repository code.",
-                    "required": false,
-                    "constraints": ["Only touch the checked-out repository."],
-                    "guidance": "Produce a real product diff."
-                }],
-                "queues": ["todo"]
-            }],
-            "labels": [{"id": "task"}, {"id": "todo"}, {"id": "done"}],
-            "artifact_kinds": [{
-                "id": "task",
-                "target": "issue",
-                "identifying_labels": ["task"]
-            }],
-            "queues": [{"id": "todo", "artifact": "task", "labels": ["todo"]}],
-            "transitions": [{
-                "id": "advance",
-                "artifact": "task",
-                "roles": ["banana"],
-                "effects": [
-                    {"kind": "remove_label", "label": "todo"},
-                    {"kind": "add_label", "label": "done"}
-                ]
-            }]
-        }"#;
-    let spec: RawWorkflowSpec = serde_json::from_str(json).expect("workflow parses");
-    let manifest = spec
-        .validate()
-        .expect("workflow validates")
-        .compile()
-        .role(&RoleId::new("banana"))
-        .expect("role manifest exists")
-        .clone();
+    let manifest = WorkflowRoleManifest {
+        id: "banana".to_string(),
+        charter: None,
+        prompt_extension: WorkflowRolePromptExtension {
+            guidance: Some("Use open_pr only when coding_workspace is available.".to_string()),
+            tool_guidance: None,
+        },
+        concurrency: None,
+        queues: vec!["todo".to_string()],
+        authority: Vec::new(),
+        tools: vec![WorkflowToolManifest {
+            name: "advance".to_string(),
+            transition: "advance".to_string(),
+            artifact: "task".to_string(),
+            requires_gates: Vec::new(),
+            effects: Vec::new(),
+        }],
+        external_tools: vec![WorkflowExternalToolManifest {
+            id: "coding_workspace".to_string(),
+            description: "Edit and commit repository code.".to_string(),
+            required: false,
+            constraints: vec!["Only touch the checked-out repository.".to_string()],
+            guidance: Some("Produce a real product diff.".to_string()),
+        }],
+        prompt: WorkflowPromptManifest {
+            role: "banana".to_string(),
+            sections: vec![
+                WorkflowPromptSection {
+                    heading: "Workflow".to_string(),
+                    lines: vec!["Workflow: generic-agent-test".to_string()],
+                },
+                WorkflowPromptSection {
+                    heading: "Role".to_string(),
+                    lines: vec![
+                        "Role: banana".to_string(),
+                        "Use open_pr only when coding_workspace is available.".to_string(),
+                    ],
+                },
+                WorkflowPromptSection {
+                    heading: EXTERNAL_TOOL_SECTION.to_string(),
+                    lines: vec!["coding_workspace is declared by the workflow.".to_string()],
+                },
+            ],
+        },
+    };
     let available = bound
         .then(|| BoundExternalTool {
-            id: ExternalToolId::new("coding_workspace"),
+            id: "coding_workspace".to_string(),
             description: "Edit and commit repository code.".to_string(),
             required: false,
             constraints: vec!["Only touch the checked-out repository.".to_string()],

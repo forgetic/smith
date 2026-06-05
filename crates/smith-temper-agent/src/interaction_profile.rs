@@ -10,9 +10,9 @@
 
 use serde::Serialize;
 use serde_json::Value;
-use temper_interaction::{
-    ConversationProfileId, ConversationReply, ConversationRequest, InteractionError,
-    ProposalPayloadValidator,
+use temper_process_protocol::{
+    ConversationId, ConversationProfileId, ConversationReply, ConversationRequest,
+    ConversationTurn, InteractionProtocolError, ProposalPayloadValidator,
 };
 
 use crate::decision::run_decision;
@@ -134,8 +134,8 @@ fn render_provider_context(
 #[derive(Serialize)]
 struct ProviderConversationContext<'a> {
     profile_id: &'a ConversationProfileId,
-    conversation_id: &'a temper_interaction::ConversationId,
-    turns: &'a [temper_interaction::ConversationTurn],
+    conversation_id: &'a ConversationId,
+    turns: &'a [ConversationTurn],
     context: &'a Value,
 }
 
@@ -180,7 +180,7 @@ fn validate_reply(
     reply.validate()?;
     for proposal in &reply.proposals {
         let Some(contract) = profile.proposal_contract(&proposal.kind) else {
-            return Err(InteractionError::UnsupportedProposalKind {
+            return Err(InteractionProtocolError::UnsupportedProposalKind {
                 id: proposal.id.clone(),
                 kind: proposal.kind.clone(),
             }

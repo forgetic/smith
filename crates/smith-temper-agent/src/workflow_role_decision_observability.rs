@@ -1,7 +1,7 @@
 //! Workflow-role decision event construction and trace extraction.
 
 use serde_json::Value;
-use temper_runner::{
+use temper_process_protocol::{
     WORKFLOW_ROLE_DECISION_NO_ACTION, WorkflowRoleDecisionReply, WorkflowRoleDecisionRequest,
 };
 
@@ -320,7 +320,7 @@ mod tests {
 
     fn fixture_request() -> WorkflowRoleDecisionRequest {
         serde_json::from_str(include_str!(
-            "../../../../temper/crates/temper-runner/fixtures/workflow-role-decision-request.json"
+            "../../../../temper/crates/temper-process-protocol/fixtures/workflow-role-decision-request.json"
         ))
         .expect("Temper workflow-role decision fixture parses")
     }

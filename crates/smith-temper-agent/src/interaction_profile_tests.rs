@@ -1,9 +1,9 @@
 use std::path::Path;
 
 use serde_json::json;
-use temper_interaction::{
+use temper_process_protocol::{
     ConversationId, ConversationProfileId, ConversationReply, ConversationRequest,
-    ConversationTurn, InteractionError, IssueProposal, Participant, Proposal, ProposalId,
+    ConversationTurn, InteractionProtocolError, IssueProposal, Participant, Proposal, ProposalId,
     ProposalKind,
 };
 use uuid::Uuid;
@@ -128,7 +128,7 @@ fn proposal_kind_allow_list_rejects_undeclared_kind() {
 
     assert!(matches!(
         error,
-        InteractionProfileError::Interaction(InteractionError::UnsupportedProposalKind { kind, .. })
+        InteractionProfileError::Protocol(InteractionProtocolError::UnsupportedProposalKind { kind, .. })
             if kind.as_str() == "other-kind"
     ));
 }
@@ -153,7 +153,7 @@ fn duplicate_proposal_ids_are_rejected_with_temper_validation() {
         .expect_err("duplicate ids fail");
     assert!(matches!(
         error,
-        InteractionProfileError::Interaction(InteractionError::DuplicateProposalId { .. })
+        InteractionProfileError::Protocol(InteractionProtocolError::DuplicateProposalId { .. })
     ));
 }
 
@@ -187,7 +187,7 @@ fn built_in_issue_payloads_are_rejected_with_temper_validation() {
         .expect_err("invalid issue payload fails");
     assert!(matches!(
         error,
-        InteractionProfileError::Interaction(InteractionError::Json(_))
+        InteractionProfileError::Protocol(InteractionProtocolError::Json(_))
     ));
 }
 

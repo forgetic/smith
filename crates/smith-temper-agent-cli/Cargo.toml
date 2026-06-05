@@ -9,7 +9,7 @@ description = "Small Smith utility binaries for Temper agent provider setup."
 [dependencies]
 serde_json.workspace = true
 smith-temper-agent = { path = "../smith-temper-agent" }
-temper-interaction = { path = "../../../temper/crates/temper-interaction" }
+temper-process-protocol = { path = "../../../temper/crates/temper-process-protocol" }
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [dev-dependencies]

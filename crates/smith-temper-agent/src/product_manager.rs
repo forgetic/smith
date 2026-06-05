@@ -10,9 +10,9 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use temper_interaction::{
-    ConversationReply, ConversationRequest, InteractionError, IssueProposal, ParticipantKind,
-    Proposal, ProposalId,
+use temper_process_protocol::{
+    ConversationReply, ConversationRequest, InteractionProtocolError, IssueProposal,
+    ParticipantKind, Proposal, ProposalId,
 };
 
 use crate::decision::{DecisionError, run_decision};
@@ -217,7 +217,7 @@ impl ProductManagerDraftIssue {
 /// hyphen. This validates the stable shape; the prompt is responsible for
 /// avoiding random IDs, dates, or timestamps.
 pub fn is_valid_draft_slug(slug: &str) -> bool {
-    temper_interaction::is_valid_deterministic_slug(slug)
+    temper_process_protocol::is_valid_deterministic_slug(slug)
 }
 
 /// Product-manager profile responder failure.
@@ -225,8 +225,8 @@ pub fn is_valid_draft_slug(slug: &str) -> bool {
 pub enum ProductManagerError {
     /// Building the provider, running the model, or parsing the model JSON failed.
     Decision(DecisionError),
-    /// The generic interaction request or proposal mapping was invalid.
-    Interaction(InteractionError),
+    /// The process-protocol request or proposal mapping was invalid.
+    Protocol(InteractionProtocolError),
     /// The request could not be serialized into the model context.
     RequestContext(serde_json::Error),
     /// The request is not a product-manager request Smith can serve.
@@ -241,7 +241,7 @@ impl std::fmt::Display for ProductManagerError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProductManagerError::Decision(error) => write!(formatter, "{error}"),
-            ProductManagerError::Interaction(error) => write!(formatter, "{error}"),
+            ProductManagerError::Protocol(error) => write!(formatter, "{error}"),
             ProductManagerError::RequestContext(error) => {
                 write!(
                     formatter,
@@ -263,7 +263,7 @@ impl std::error::Error for ProductManagerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ProductManagerError::Decision(error) => Some(error),
-            ProductManagerError::Interaction(error) => Some(error),
+            ProductManagerError::Protocol(error) => Some(error),
             ProductManagerError::RequestContext(error) => Some(error),
             ProductManagerError::InvalidRequest(_)
             | ProductManagerError::InvalidDraftSlug { .. }
@@ -278,9 +278,9 @@ impl From<DecisionError> for ProductManagerError {
     }
 }
 
-impl From<InteractionError> for ProductManagerError {
-    fn from(error: InteractionError) -> Self {
-        Self::Interaction(error)
+impl From<InteractionProtocolError> for ProductManagerError {
+    fn from(error: InteractionProtocolError) -> Self {
+        Self::Protocol(error)
     }
 }
 
@@ -295,9 +295,10 @@ fn render_request_context(request: &ProductManagerRequest) -> Result<String, Pro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use temper_interaction::{
-        ConversationId, ConversationProfileId, ConversationTurn, Participant,
-        ProposalPayloadContract, ProposalPayloadValidator, RawInteractionSpec, ResponderProtocol,
+    use temper_interaction::{ProposalPayloadContract, RawInteractionSpec, ResponderProtocol};
+    use temper_process_protocol::{
+        ConversationId, ConversationProfileId, ConversationTurn, Participant, ProposalKind,
+        ProposalPayloadValidator,
     };
 
     #[test]
@@ -357,7 +358,7 @@ mod tests {
                     "Let's keep it small.",
                 ),
                 ConversationTurn::new(
-                    temper_interaction::Participant::new(ParticipantKind::System),
+                    Participant::new(ParticipantKind::System),
                     "ignored runtime note",
                 ),
             ],
@@ -386,10 +387,7 @@ mod tests {
         reply.validate().expect("reply proposals validate");
         assert_eq!(reply.message, "File one small issue.");
         assert_eq!(reply.proposals[0].id.as_str(), "mobile-chat-loop");
-        assert_eq!(
-            reply.proposals[0].kind,
-            temper_interaction::ProposalKind::issue()
-        );
+        assert_eq!(reply.proposals[0].kind, ProposalKind::issue());
         assert_eq!(reply.proposals[0].title, "Add mobile chat loop");
         assert_eq!(
             reply.proposals[0].summary.as_deref(),
@@ -407,7 +405,7 @@ mod tests {
     #[test]
     fn product_manager_reads_temper_process_request_fixture() {
         let fixture = include_str!(
-            "../../../../temper/crates/temper-interaction/fixtures/interactive-responder-request.json"
+            "../../../../temper/crates/temper-process-protocol/fixtures/interactive-responder-request.json"
         );
         let request: ConversationRequest = serde_json::from_str(fixture).expect("fixture parses");
         let mapped = ProductManagerRequest::from_conversation_request(&request).unwrap();
@@ -421,7 +419,7 @@ mod tests {
     #[test]
     fn product_manager_reads_temper_process_reply_fixture_and_issue_payload_contract() {
         let fixture = include_str!(
-            "../../../../temper/crates/temper-interaction/fixtures/interactive-responder-reply.json"
+            "../../../../temper/crates/temper-process-protocol/fixtures/interactive-responder-reply.json"
         );
         let reply: ConversationReply = serde_json::from_str(fixture).expect("fixture parses");
         reply.validate().expect("fixture reply validates");
@@ -433,7 +431,7 @@ mod tests {
         assert_eq!(reply.proposals.len(), 1);
         let proposal = &reply.proposals[0];
         assert_eq!(proposal.id.as_str(), "mobile-chat-adapter");
-        assert_eq!(proposal.kind, temper_interaction::ProposalKind::issue());
+        assert_eq!(proposal.kind, ProposalKind::issue());
         assert_eq!(proposal.title, "Add mobile chat adapter");
         assert_eq!(
             proposal.summary.as_deref(),
@@ -472,10 +470,7 @@ mod tests {
             Some("product-manager")
         );
         assert_eq!(profile.proposal_kinds().len(), 1);
-        assert_eq!(
-            profile.proposal_kinds()[0].id(),
-            &temper_interaction::ProposalKind::issue()
-        );
+        assert_eq!(profile.proposal_kinds()[0].id(), &ProposalKind::issue());
         assert_eq!(
             profile.proposal_kinds()[0].payload(),
             ProposalPayloadContract::IssueDraft
@@ -488,7 +483,7 @@ mod tests {
         assert_eq!(manifest.responder.id.as_str(), "product-manager-responder");
         assert_eq!(manifest.responder.protocol, ResponderProtocol::ProcessV1);
         let issue_manifest = manifest
-            .proposal(&temper_interaction::ProposalKind::issue())
+            .proposal(&ProposalKind::issue())
             .expect("issue proposal manifest exists");
         assert_eq!(
             issue_manifest.payload_validator,

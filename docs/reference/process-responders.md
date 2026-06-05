@@ -19,8 +19,8 @@ responder is launched by Temper):
 SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR=/existing/writable/dir
 ```
 
-Input: one `temper_runner::WorkflowRoleDecisionRequest` JSON value on stdin.
-Output: one `temper_runner::WorkflowRoleDecisionReply` JSON value on stdout.
+Input: one `temper_process_protocol::WorkflowRoleDecisionRequest` JSON value on stdin.
+Output: one `temper_process_protocol::WorkflowRoleDecisionReply` JSON value on stdout.
 Errors/logs go to stderr as bounded JSON events. See
 `workflow-role-observability.md` for event names, correlation fields, capture
 contents, and omitted authority/secret fields.
@@ -48,8 +48,8 @@ Binary:
 smith-product-manager-responder [--auth ...] [--codex-model MODEL] [--auth-file PATH]
 ```
 
-Input: one `temper_interaction::ConversationRequest` JSON value on stdin.
-Output: one `temper_interaction::ConversationReply` JSON value on stdout.
+Input: one `temper_process_protocol::ConversationRequest` JSON value on stdin.
+Output: one `temper_process_protocol::ConversationReply` JSON value on stdout.
 Errors/logs go to stderr.
 
 This binary is Smith's dogfood/example implementation for the `product-manager`

@@ -3,8 +3,8 @@
 //! This crate is Smith's initial home for the concrete `pi_agent_rust` wiring
 //! that Temper is splitting out: provider selection, OAuth auth-file handling,
 //! per-provider request knobs, and one-turn structured decision parsing. It does
-//! not mutate Forge state and does not depend on Temper runtime crates except in
-//! dev-only tests that reuse Temper's workflow-domain fixtures.
+//! not mutate Forge state and depends on Temper's serialization-only process
+//! protocol crate for responder wire DTOs.
 
 #![allow(clippy::result_large_err)]
 
@@ -33,7 +33,9 @@ pub use provider::{
     ANTHROPIC_MODEL_ENV, AUTH_FILE_ENV, AuthChoice, CODEX_MODEL_ENV, DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_CODEX_MODEL, ProviderConfig, ProviderError, default_auth_path,
 };
-pub use temper_runner::{WorkflowRoleDecisionReply, WorkflowRoleDecisionRequest};
+pub use temper_process_protocol::{
+    ConversationReply, ConversationRequest, WorkflowRoleDecisionReply, WorkflowRoleDecisionRequest,
+};
 pub use workflow_role_decision::{
     WorkflowRoleDecisionError, WorkflowRoleDecisionResponder, WorkflowRoleModelDecision,
     reply_for_model_decision, workflow_role_system_prompt, workflow_role_user_context,

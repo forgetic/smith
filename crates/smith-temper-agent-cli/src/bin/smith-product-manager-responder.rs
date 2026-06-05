@@ -2,7 +2,7 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 
 use smith_temper_agent::{AuthChoice, ProductManagerResponder, ProviderConfig};
-use temper_interaction::ConversationRequest;
+use temper_process_protocol::ConversationRequest;
 
 fn main() {
     match run() {

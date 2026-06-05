@@ -5,7 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use temper_interaction::{ConversationProfileId, InteractionError, ProposalKind};
+use temper_process_protocol::{ConversationProfileId, InteractionProtocolError, ProposalKind};
 
 use crate::decision::DecisionError;
 
@@ -167,8 +167,8 @@ pub enum InteractionProfileError {
     RequestContext(serde_json::Error),
     /// Building the provider, running the model, or parsing the model JSON failed.
     Decision(DecisionError),
-    /// Temper's generic interaction validation rejected the reply.
-    Interaction(InteractionError),
+    /// Temper's process-protocol validation rejected the reply.
+    Protocol(InteractionProtocolError),
 }
 
 impl InteractionProfileError {
@@ -211,7 +211,7 @@ impl std::fmt::Display for InteractionProfileError {
                 )
             }
             Self::Decision(error) => write!(formatter, "{error}"),
-            Self::Interaction(error) => write!(formatter, "{error}"),
+            Self::Protocol(error) => write!(formatter, "{error}"),
         }
     }
 }
@@ -223,7 +223,7 @@ impl std::error::Error for InteractionProfileError {
             Self::ConfigJson { source, .. } => Some(source),
             Self::RequestContext(error) => Some(error),
             Self::Decision(error) => Some(error),
-            Self::Interaction(error) => Some(error),
+            Self::Protocol(error) => Some(error),
             Self::InvalidConfig { .. } | Self::InvalidRequest(_) => None,
         }
     }
@@ -235,9 +235,9 @@ impl From<DecisionError> for InteractionProfileError {
     }
 }
 
-impl From<InteractionError> for InteractionProfileError {
-    fn from(error: InteractionError) -> Self {
-        Self::Interaction(error)
+impl From<InteractionProtocolError> for InteractionProfileError {
+    fn from(error: InteractionProtocolError) -> Self {
+        Self::Protocol(error)
     }
 }
 

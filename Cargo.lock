@@ -5366,7 +5366,7 @@ dependencies = [
  "serde",
  "serde_json",
  "temper-interaction",
- "temper-runner",
+ "temper-process-protocol",
  "temper-workflow",
  "tokio",
  "uuid",
@@ -5381,7 +5381,7 @@ dependencies = [
  "smith-temper-agent",
  "temper-forge",
  "temper-forge-forgejo",
- "temper-interaction",
+ "temper-process-protocol",
  "temper-runner",
  "temper-testing",
  "temper-workflow",
@@ -5852,6 +5852,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
+name = "temper-coding-workspace"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde_json",
+ "temper-forge",
+ "temper-forgejo-ops",
+ "temper-runner",
+ "temper-workflow",
+]
+
+[[package]]
 name = "temper-forge"
 version = "0.1.0"
 dependencies = [
@@ -5896,6 +5909,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "temper-forgejo-fixture"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "temper-forgejo-ops"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "reqwest",
+ "serde_json",
+]
+
+[[package]]
 name = "temper-interaction"
 version = "0.1.0"
 dependencies = [
@@ -5904,28 +5936,18 @@ dependencies = [
  "serde",
  "serde_json",
  "temper-forge",
+ "temper-process-protocol",
  "thiserror 2.0.18",
  "tokio",
 ]
 
 [[package]]
-name = "temper-production"
+name = "temper-process-protocol"
 version = "0.1.0"
 dependencies = [
- "async-trait",
- "base64",
- "chrono",
- "hmac 0.12.1",
- "reqwest",
  "serde",
  "serde_json",
- "sha2 0.10.9",
- "temper-forge",
- "temper-forge-forgejo",
- "temper-interaction",
- "temper-runner",
- "temper-workflow",
- "tokio",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -5937,6 +5959,7 @@ dependencies = [
  "serde",
  "serde_json",
  "temper-forge",
+ "temper-process-protocol",
  "temper-workflow",
  "tokio",
 ]
@@ -5952,13 +5975,38 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "temper-coding-workspace",
  "temper-forge",
  "temper-forge-filesystem",
  "temper-forge-forgejo",
  "temper-forge-memory",
- "temper-production",
+ "temper-forgejo-fixture",
+ "temper-forgejo-ops",
  "temper-runner",
+ "temper-trigger-forgejo",
+ "temper-wake",
  "temper-workflow",
+ "tokio",
+]
+
+[[package]]
+name = "temper-trigger-forgejo"
+version = "0.1.0"
+dependencies = [
+ "hmac 0.12.1",
+ "serde_json",
+ "sha2 0.10.9",
+ "temper-forge",
+ "temper-runner",
+ "temper-wake",
+]
+
+[[package]]
+name = "temper-wake"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "temper-runner",
  "tokio",
 ]
 
