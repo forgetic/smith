@@ -6,8 +6,8 @@ leases, and every Forge mutation. For Temper's process contract and worker-side
 events, read the sibling checkout docs:
 
 - `../temper/docs/reference/workflow-role-decision-process-protocol.md`
-- `../temper/examples/reference-delivery/observability.md`
-- `../temper/plans/observability/README.md`
+- `examples/reference-delivery/observability.md`
+- `plans/observability/README.md`
 
 ## Structured stderr events
 

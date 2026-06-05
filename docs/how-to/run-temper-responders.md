@@ -77,14 +77,14 @@ Smith's decision events/captures are documented in
 
 ## Optional captures for the reference-delivery demo
 
-Captures are off by default. For one debugging run of Temper's
-reference-delivery demo through Smith:
+Captures are off by default. For one debugging run of Smith's
+reference-delivery demo through Temper:
 
 ```sh
 cd ~/src/rust/smith
 cargo build -p smith-temper-agent-cli --bin smith-workflow-role-decision
 
-cd ../temper/examples/reference-delivery
+cd examples/reference-delivery
 mkdir -p run/smith-captures
 export SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR="$PWD/run/smith-captures"
 export SMITH_WORKFLOW_ROLE_DECISION_ENV_ALLOWLIST=SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR

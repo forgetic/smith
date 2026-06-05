@@ -14,3 +14,13 @@ auth.json
 .env
 .env.*
 plans/
+
+# Runtime artifacts from Smith-owned Temper launchers.
+/examples/dogfood/logs/
+/examples/dogfood/run/
+/examples/dogfood/secrets/
+/examples/reference-delivery/logs/
+/examples/reference-delivery/run/
+/examples/reference-delivery/secrets/roles.env
+/examples/reference-delivery/secrets/wake-secret
+/examples/reference-delivery/secrets/webhook-secret
