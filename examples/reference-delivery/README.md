@@ -8,7 +8,7 @@ set `TEMPER_WORKSPACE_ROOT=/path/to/temper` if your checkout layout differs.
 
 > **Status:** this example is wired to production-owned binary names
 > (`temper-worker`, `temper-provision-forgejo`, and
-> `temper-trigger-forgejo`) from the `temper-production` crate instead of the
+> `temper-trigger-forgejo`) from Temper's root `temper` package instead of the
 > `temper-testing` binaries. After the user-defined-role migration, production
 > workers register generic agents from compiled workflow manifests. Reference
 > role behavior for this demo lives in `config/workflow.json` and the canonical
@@ -44,7 +44,7 @@ end-to-end rehearsal.
 ## Prerequisites
 
 - The operator-facing workspace binaries built: `cargo build -p
-  temper-production` (provides `temper-worker`,
+  temper` (provides `temper-worker`,
   `temper-provision-forgejo`, and `temper-trigger-forgejo`). `run.sh` refreshes
   the development-profile binaries under `target/debug` before start unless
   `TEMPER_SKIP_BUILD=1`, so stale binaries do not break the demo after source
@@ -105,7 +105,7 @@ POLL_MS=120000 ./run.sh       # long-poll mode: webhooks wake workers promptly;
 ```
 
 Each start refreshes the development-profile workspace binaries (`cargo build -p
-temper-production`, usually a no-op when current) under `target/debug` and
+temper`, usually a no-op when current) under `target/debug` and
 expects the pinned Forgejo + `forgejo-runner` binaries under `.cache/forgejo/`
 (populate with `cargo test -p temper-forgejo-fixture --test cache -- --ignored`,
 or set `TEMPER_FORGEJO_BINARY` / `TEMPER_FORGEJO_RUNNER_BINARY`). `run.sh
@@ -150,7 +150,7 @@ commits and pushes the branch, then the workflow opens the PR through `RoleTools
 Use these focused checks before a full demo run:
 
 ```sh
-cargo test -p temper-production coding_workspace_tests::local_git_workspace_accepts_product_code_or_docs_diff
+cargo test -p temper-coding-workspace local_git_workspace_accepts_product_code_or_docs_diff
 cargo test -p temper-testing --test forgejo_workspace_pr -- --ignored --test-threads=1
 ```
 
@@ -303,7 +303,7 @@ Forge state for the seeded cross-repo parent.
   next `POLL_MS` deadline, but the accelerator is not working for that worker.
 - **`provision binary is stale or incompatible` or `worker binary is stale or
   incompatible`:** rerun without `TEMPER_SKIP_BUILD=1`, or rebuild the
-  development binaries manually with `cargo build -p temper-production`.
+  development binaries manually with `cargo build -p temper`.
   `TEMPER_SKIP_BUILD=1` assumes `target/debug` and any `TEMPER_*_BIN`
   overrides are already current.
 - **Wake consumed with `actions=0`:** the wake path worked; that worker simply

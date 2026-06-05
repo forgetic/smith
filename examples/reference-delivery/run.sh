@@ -11,8 +11,8 @@
 #      Forgejo with Smith process role decisions and wall time,
 # then tears them all down cleanly on Ctrl-C / signal / `./run.sh stop`.
 #
-# This script targets the operator-facing entry points from temper-production
-# rather than the temper-testing entry points. By default it builds/uses the
+# This script targets the operator-facing entry points from Temper's root
+# package rather than the temper-testing entry points. By default it builds/uses the
 # development-profile binaries under target/debug; override TEMPER_*_BIN if you
 # want prebuilt or release artifacts.
 #
@@ -249,7 +249,7 @@ load_config() {
     TEMPER_PROVISION_BIN=${TEMPER_PROVISION_BIN:-}
     TEMPER_TRIGGER_BIN=${TEMPER_TRIGGER_BIN:-}
     TEMPER_VALIDATE_BIN=${TEMPER_VALIDATE_BIN:-}
-    TEMPER_BUILD_PACKAGE=${TEMPER_BUILD_PACKAGE:-temper-production}
+    TEMPER_BUILD_PACKAGE=${TEMPER_BUILD_PACKAGE:-temper}
     REFERENCE_DELIVERY_ROLE_DECISION=${REFERENCE_DELIVERY_ROLE_DECISION:-smith}
     SMITH_WORKSPACE_ROOT=${SMITH_WORKSPACE_ROOT:-$SMITH_WORKSPACE_ROOT_DEFAULT}
     SMITH_BUILD_PACKAGE=${SMITH_BUILD_PACKAGE:-smith-temper-agent-cli}
@@ -336,12 +336,12 @@ resolve_binaries() {
     _provision_help=$("$PROVISION_BIN" --help 2>&1 || true)
     case "$_provision_help" in
         *--seed-intake*--intake-title*--intake-body-file*) ;;
-        *) die "provision binary is stale or incompatible: $PROVISION_BIN does not advertise --seed-intake/--intake-title/--intake-body-file. Re-run without TEMPER_SKIP_BUILD=1 or rebuild temper-production with cargo build -p $TEMPER_BUILD_PACKAGE." ;;
+        *) die "provision binary is stale or incompatible: $PROVISION_BIN does not advertise --seed-intake/--intake-title/--intake-body-file. Re-run without TEMPER_SKIP_BUILD=1 or rebuild the Temper entry-point package with cargo build -p $TEMPER_BUILD_PACKAGE." ;;
     esac
     _validator_help=$("$VALIDATOR_BIN" --help 2>&1 || true)
     case "$_validator_help" in
         *--parent-number*--expected-children*) ;;
-        *) die "reference-delivery validator binary is stale or incompatible: $VALIDATOR_BIN does not advertise --parent-number/--expected-children. Re-run without TEMPER_SKIP_BUILD=1 or rebuild temper-production with cargo build -p $TEMPER_BUILD_PACKAGE." ;;
+        *) die "reference-delivery validator binary is stale or incompatible: $VALIDATOR_BIN does not advertise --parent-number/--expected-children. Re-run without TEMPER_SKIP_BUILD=1 or rebuild the Temper entry-point package with cargo build -p $TEMPER_BUILD_PACKAGE." ;;
     esac
     # Pinned Forgejo + runner: env override, else the cached pinned path.
     FORGEJO_BIN=${TEMPER_FORGEJO_BINARY:-$WORKSPACE_ROOT/.cache/forgejo/forgejo-$FORGEJO_VERSION-linux-amd64}
