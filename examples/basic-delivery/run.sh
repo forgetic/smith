@@ -7,12 +7,18 @@
 # from development-profile binaries:
 #   1. a throwaway Forgejo server (SQLite, Actions enabled),
 #   2. a host-mode forgejo-runner producing real CI,
-#   3. admin bootstrap + the production provision/seed binary against the
-#      bundled 3-role workflow (--workflow), seeding ONE unlabeled intake issue
-#      authored by the SITE ADMIN (the workflow's intake_author = site_admin),
+#   3. admin bootstrap + the production provision binary against the bundled
+#      3-role workflow (--workflow), creating the org/users/repo/labels/CI and
+#      registering the webhook — but deliberately NOT yet filing the intake
+#      issue,
 #   4. a fixed temper-worker pool: an `architect` role worker, an `engineer`
 #      role worker, and one `mechanical` worker that runs the controller plane
-#      AND lands CI-green PRs as the `bot` (the only landing authority).
+#      AND lands CI-green PRs as the `bot` (the only landing authority),
+#   5. ONLY once that pool and the wake trigger are ready, a second seed-only
+#      provision pass (--seed-only) files ONE unlabeled intake issue authored by
+#      the SITE ADMIN (the workflow's intake_author = site_admin) — so the
+#      issue-created webhook is what WAKES the bot (which stamps it untriaged),
+#      proving the wake path instead of the bot only noticing on its next poll.
 # It binds the Smith pi-SDK coding agent so the architect triages the intake to a
 # ready code issue and the engineer opens a real implementation PR; CI runs, goes
 # green, and the bot auto-merges — no reviewer, owner, or human. It tears
@@ -118,9 +124,10 @@ usage() {
 usage: $DISPLAY_SCRIPT [start|validate-webhooks|stop|help]
 
   start (default)      boot Forgejo + runner, provision the single repo against
-                       the bundled 3-role workflow, seed one site-admin intake
-                       issue, launch the architect + engineer + mechanical(bot)
-                       workers, then block until Ctrl-C or the stop-file.
+                       the bundled 3-role workflow, launch the architect +
+                       engineer + mechanical(bot) workers, then file one
+                       site-admin intake issue (so its webhook wakes them) and
+                       block until Ctrl-C or the stop-file.
   validate-webhooks    inspect logs/ and report whether webhook wakes were
                        registered, accepted, delivered, consumed, and acted on.
   stop                 tear down a previous run via run/*.pid.
@@ -370,8 +377,8 @@ resolve_binaries() {
     # Refuse to run against a stale Temper that lacks --workflow.
     _provision_help=$("$PROVISION_BIN" --help 2>&1 || true)
     case "$_provision_help" in
-        *--workflow*--seed-intake*) ;;
-        *) die "provision binary is stale or incompatible: $PROVISION_BIN does not advertise --workflow/--seed-intake. The basic-delivery example needs Temper's W1 (runtime --workflow) + W2 (intake_author) support. Re-run without TEMPER_SKIP_BUILD=1 or rebuild the Temper entry-point package with cargo build -p $TEMPER_BUILD_PACKAGE." ;;
+        *--workflow*--seed-intake*--seed-only*) ;;
+        *) die "provision binary is stale or incompatible: $PROVISION_BIN does not advertise --workflow/--seed-intake/--seed-only. The basic-delivery example needs Temper's W1 (runtime --workflow) + W2 (intake_author) support, plus the --seed-only entry-issue pass that lets the intake be filed after the workers are up. Re-run without TEMPER_SKIP_BUILD=1 or rebuild the Temper entry-point package with cargo build -p $TEMPER_BUILD_PACKAGE." ;;
     esac
     _worker_help=$("$WORKER_BIN" --help 2>&1 || true)
     case "$_worker_help" in
@@ -567,6 +574,29 @@ wait_for_socket() {
     done
 }
 
+# Waits until a worker has finished its FIRST (startup) tick, i.e. has scanned
+# the repo once and gone idle. A wake socket existing only means the worker is
+# accepting wakes, not that its initial scan is done; filing the intake in that
+# window lets a startup tick race the seed and do the work itself. Waiting here
+# makes the intake's creation webhook the unambiguous cause of the first actions:
+# every worker is past its startup scan (which found no intake), so filing the
+# issue is what WAKES the bot into marking it untriaged and the architect into
+# triaging it. Non-fatal: a worker that never reports an initial tick only
+# forfeits that determinism, it does not abort the demo.
+wait_for_worker_idle() {
+    _log=$1
+    _label=$2
+    _i=0
+    while ! grep -q 'completed tick trigger=initial' "$_log" 2>/dev/null; do
+        _i=$((_i + 1))
+        if [ "$_i" -gt 150 ]; then
+            log "  note: $_label did not report an initial tick in time; filing intake anyway"
+            return 0
+        fi
+        sleep_short
+    done
+}
+
 boot_trigger() {
     [ "$WEBHOOKS" = "1" ] || return 0
     log "starting webhook trigger at $TRIGGER_BIND ..."
@@ -595,12 +625,13 @@ bootstrap_and_provision() {
     log 'bootstrapping admin + provisioning the single repo against the bundled 3-role workflow ...'
     # Create the admin (tolerate a pre-existing one on a re-run), then mint an
     # all-scoped token. The token stays in a shell variable; it is never echoed
-    # and reaches the provision step only via the environment. The workflow's
-    # intake_author = site_admin makes the provisioner seed the intake issue as
-    # THIS admin (the "external filer"); the issue lands UNLABELED. The seed
-    # title/body come from INTAKE_TITLE + the bundled INTAKE_BODY_FILE and are
-    # deliberately THIN (intent only) so the architect's triage rewrite has real
-    # design work to do.
+    # and reaches the provision steps only via the environment. It is also kept
+    # for the later seed_intake pass: the workflow's intake_author = site_admin
+    # means the intake issue is authored by THIS admin (the "external filer").
+    # This pass deliberately runs with --seed-intake no: it sets up the
+    # org/users/repo/labels/CI and registers the webhook but does NOT file the
+    # intake issue, so the workers + wake trigger can come up first and the
+    # issue's creation webhook is what wakes them (see seed_intake).
     forgejo_cli admin user create --username "$ADMIN_USER" --password "$ADMIN_PASSWORD" \
         --email "$ADMIN_EMAIL" --admin --must-change-password=false \
         >"$LOG_DIR/admin-create.log" 2>&1 || true
@@ -616,21 +647,19 @@ bootstrap_and_provision() {
 
     _owner=$(repo_owner "$REPO")
     _name=$(repo_name "$REPO")
-    log "provisioning $REPO (labels + CI + webhook + one site-admin intake issue) ..."
+    log "provisioning $REPO (labels + CI + webhook; intake filed after the workers are up) ..."
     # _webhook_args intentionally word-split: POSIX sh has no arrays and the
-    # paths above are controlled by this script/config.
+    # paths above are controlled by this script/config. --seed-intake no holds
+    # the intake issue back for the post-launch seed_intake pass.
     # shellcheck disable=SC2086
     _status=$(TEMPER_FORGEJO_ADMIN_TOKEN="$ADMIN_TOKEN" "$PROVISION_BIN" \
         --base-url "$BASE_URL" --owner "$_owner" --name "$_name" --out "$ROLES_ENV" \
-        --workflow "$WORKFLOW_PATH" \
-        --intake-title "$INTAKE_TITLE" --intake-body-file "$INTAKE_BODY_PATH" \
+        --workflow "$WORKFLOW_PATH" --seed-intake no \
         $_webhook_args) \
         || die "provisioning $REPO failed"
 
-    _issue=$(printf '%s\n' "$_status" | sed -n 's/.*intake issue #\([0-9][0-9]*\).*/\1/p')
     {
         printf 'repo=%s %s\n' "$REPO" "$_status"
-        [ -n "$_issue" ] && printf 'repo=%s intake_issue_url=%s/%s/issues/%s\n' "$REPO" "$BASE_URL" "$REPO" "$_issue"
         if [ "$WEBHOOKS" = "1" ]; then
             printf 'repo=%s webhook registered url=%s\n' "$REPO" "$WEBHOOK_URL"
         else
@@ -638,12 +667,54 @@ bootstrap_and_provision() {
         fi
     } >>"$LOG_DIR/provision.log"
     log "$_status"
-    [ -n "$_issue" ] && log "  intake issue: $BASE_URL/$REPO/issues/$_issue"
     [ "$WEBHOOKS" = "1" ] && log "  webhook registered for $REPO ($WEBHOOK_URL)"
 
     [ -f "$ROLES_ENV" ] || die "provision did not write $ROLES_ENV"
     # shellcheck disable=SC1090
     . "$ROLES_ENV"
+}
+
+# Files the single site-admin intake issue AFTER the worker pool and the wake
+# trigger are up. This is a second, seed-only provision pass (--seed-only): the
+# org/users/repo/labels/CI and the webhook already exist from
+# bootstrap_and_provision, so this only creates the issue. Because it is filed
+# while every worker's wake socket and the trigger are already listening, the
+# issue's creation webhook is what WAKES the workers — the bot stamps it
+# untriaged and the architect triages it — proving the wake path rather than the
+# workers only discovering a pre-seeded issue on their next (long) poll. The
+# seed title/body come from INTAKE_TITLE + the bundled INTAKE_BODY_FILE and are
+# deliberately THIN (intent only) so the architect's triage rewrite has real
+# design work to do. The admin token (intake_author = site_admin) is reused from
+# bootstrap_and_provision via the environment; it is never echoed.
+seed_intake() {
+    [ -n "${ADMIN_TOKEN:-}" ] || die 'seed_intake: no admin token (bootstrap_and_provision must run first)'
+    _owner=$(repo_owner "$REPO")
+    _name=$(repo_name "$REPO")
+    # With webhooks on, wait for the whole pool to finish its startup scan and go
+    # idle before filing, so the intake's creation webhook — not a startup tick
+    # racing the seed — is what wakes the workers into acting on issue #1.
+    if [ "$WEBHOOKS" = "1" ]; then
+        log 'waiting for the worker pool to finish its initial scan before filing intake ...'
+        _idle_roles=$(sed -n "s/^TEMPER_FORGEJO_USER_[A-Z0-9_]*='\(.*\)'\$/\1/p" "$ROLES_ENV")
+        for _idle_role in $_idle_roles; do
+            wait_for_worker_idle "$LOG_DIR/$_idle_role.log" "role:$_idle_role"
+        done
+        wait_for_worker_idle "$LOG_DIR/mechanical.log" 'mechanical'
+    fi
+    log 'filing the site-admin intake issue now that the workers + wake trigger are ready ...'
+    _status=$(TEMPER_FORGEJO_ADMIN_TOKEN="$ADMIN_TOKEN" "$PROVISION_BIN" \
+        --base-url "$BASE_URL" --owner "$_owner" --name "$_name" --out "$ROLES_ENV" \
+        --workflow "$WORKFLOW_PATH" --seed-only \
+        --intake-title "$INTAKE_TITLE" --intake-body-file "$INTAKE_BODY_PATH") \
+        || die "seeding intake issue for $REPO failed"
+
+    _issue=$(printf '%s\n' "$_status" | sed -n 's/.*intake issue #\([0-9][0-9]*\).*/\1/p')
+    {
+        printf 'repo=%s %s\n' "$REPO" "$_status"
+        [ -n "$_issue" ] && printf 'repo=%s intake_issue_url=%s/%s/issues/%s\n' "$REPO" "$BASE_URL" "$REPO" "$_issue"
+    } >>"$LOG_DIR/provision.log"
+    log "$_status"
+    [ -n "$_issue" ] && log "  intake issue: $BASE_URL/$REPO/issues/$_issue (filing it should wake the workers)"
 }
 
 # --- Demo coding workspace ----------------------------------------------------
@@ -817,9 +888,11 @@ launch_workers() {
     [ -n "$_roles" ] || die "no roles found in $ROLES_ENV"
 
     log 'launching role workers (production binary, Smith process decisions) ...'
-    # The seeded intake issue is immediately available to the architect. Start
-    # every other wake listener first, then launch architect last, so the first
-    # role handoff webhook can find all downstream sockets even with a long poll.
+    # The intake issue is filed only after this whole pool is up (see
+    # seed_intake), so every wake listener must already exist before it lands.
+    # Start every other wake listener first, then launch architect last, so both
+    # the intake-created webhook and the first role-handoff webhook find all
+    # downstream sockets even with a long poll.
     _architect_role=
     for _r in $_roles; do
         if [ "$_r" = "architect" ]; then
@@ -1035,9 +1108,10 @@ monitor() {
     log "Worker pool:   architect + engineer + mechanical(bot) scan: $REPO"
     log "Intake issue:  $BASE_URL/$REPO/issues"
     log "Worker logs:   $LOG_DIR/ (role logs include the resolved repo)"
-    log 'Watch the seeded intake: the bot marks it untriaged, the architect'
-    log 'triages it to a ready code issue, the engineer opens an implementation'
-    log 'PR, CI runs and goes green, and the bot auto-merges it — no human.'
+    log 'The intake issue is filed once the pool is up, so its webhook wakes the'
+    log 'bot (which marks it untriaged); the architect then triages it to a ready'
+    log 'code issue, the engineer opens an implementation PR, CI runs and goes'
+    log 'green, and the bot auto-merges it — no human.'
     log ''
     log "Press Ctrl-C (or run '$DISPLAY_SCRIPT stop') to tear everything down."
 
@@ -1078,6 +1152,7 @@ cmd_start() {
     bootstrap_and_provision
     setup_demo_coding_workspace
     launch_workers
+    seed_intake
     monitor
     # cleanup runs via the EXIT trap.
 }

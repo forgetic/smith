@@ -17,21 +17,28 @@ The launcher defaults to the sibling Temper checkout at `../temper`; set
 
 ## What it demonstrates
 
-The seeded intake flows end to end with only three workers running:
+The intake flows end to end with only three workers running:
 
-1. `run.sh` boots a throwaway Forgejo + runner and creates exactly **one org +
-   repo** (`acme/service` by default).
-2. `run.sh` files **one unlabeled intake issue**, authored by the **site admin**
-   (mimicking an external filer). The seed is **deliberately thin**: its body
-   (bundled as `config/intake-issue.md`) declares only the overall intent — no
-   acceptance criteria, no setting name, no implementation plan. This works
-   because the bundled `config/workflow.json` declares
-   `intake_author: { "kind": "site_admin" }` (Temper W2), so provisioning seeds
-   the issue as the admin identity and the issue lands **unlabeled**.
+1. `run.sh` boots a throwaway Forgejo + runner, provisions exactly **one org +
+   repo** (`acme/service` by default) — labels, CI, and the webhook — and brings
+   up the three-worker pool plus the wake trigger. Provisioning **does not** file
+   the intake issue yet.
+2. **Only once that pool and the wake trigger are listening**, `run.sh` files
+   **one unlabeled intake issue**, authored by the **site admin** (mimicking an
+   external filer), via a second **seed-only** provision pass
+   (`temper-provision-forgejo --seed-only`). Filing it last is the point of this
+   example: the **issue-created webhook is what wakes the workers**, instead of
+   them only discovering a pre-seeded issue on their next (long) poll. The seed
+   is **deliberately thin**: its body (bundled as `config/intake-issue.md`)
+   declares only the overall intent — no acceptance criteria, no setting name, no
+   implementation plan. This works because the bundled `config/workflow.json`
+   declares `intake_author: { "kind": "site_admin" }` (Temper W2), so the seed is
+   authored as the admin identity and the issue lands **unlabeled**.
 3. The workflow declares exactly **three roles**: `architect`, `engineer`, and
    `mechanical` (serviced by the `bot`), plus CI.
-4. The **bot** (`mechanical` worker) transitions the issue unlabeled →
-   `untriaged` (the `raw_intake` queue's `mark_untriaged` automation).
+4. The **bot** (`mechanical` worker), **woken by that issue-created webhook**,
+   transitions the issue unlabeled → `untriaged` (the `raw_intake` queue's
+   `mark_untriaged` automation).
 5. The **architect** (real LLM) triages, and this is where it does real design
    work: it reads the thin intent, inspects the repo, and **rewrites the body
    into a complete, implementable code spec** (named interface, behavior,
@@ -71,7 +78,15 @@ All three landed on Temper `main` (children of parent #52: #53/W1, #54/W2,
 #55/W3, #56 fixture+tests). If your Temper checkout predates them, rebuild it:
 `run.sh` refreshes `target/debug` via `cargo build -p temper` on start (unless
 `TEMPER_SKIP_BUILD=1`) and refuses to run against a provision/worker binary that
-does not advertise `--workflow`.
+does not advertise `--workflow`, or a provision binary lacking the `--seed-only`
+entry-issue pass (see below).
+
+- **Seed-only entry issue.** `temper-provision-forgejo` accepts `--seed-only`,
+  which files just the intake issue (no org/users/repo/labels/CI/webhook work),
+  reusing the secrets the first `--seed-intake no` pass wrote to `--out`. `run.sh`
+  provisions with `--seed-intake no` **before** launching the workers, then files
+  the intake with a `--seed-only` pass **after** the pool and wake trigger are up,
+  so the issue-created webhook is what wakes the workers.
 
 ## Single-outcome triage (how the architect is constrained)
 
@@ -126,8 +141,9 @@ otherwise carries what an operator may edit (the org/repo, endpoint, cadence,
 the seeded intake title/body, Smith responder args, and the coding workspace
 binding). The seeded intake title and body file are set by `INTAKE_TITLE` /
 `INTAKE_BODY_FILE` in `config/temper.env`; `run.sh` passes them to
-`temper-provision-forgejo` as `--intake-title` / `--intake-body-file`. Keep the
-bundled body intent-only so the architect's rewrite is what produces the spec.
+`temper-provision-forgejo` as `--intake-title` / `--intake-body-file` on the
+post-launch `--seed-only` pass. Keep the bundled body intent-only so the
+architect's rewrite is what produces the spec.
 
 > **Keeping the spec in sync.** `config/workflow.json` is the canonical
 > basic-delivery spec. A copy lives as the Temper test fixture
