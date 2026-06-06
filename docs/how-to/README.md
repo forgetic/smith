@@ -9,3 +9,4 @@ Current guides:
 - [Configure provider auth](configure-provider-auth.md)
 - [Run Smith responders from Temper](run-temper-responders.md)
 - [Run live provider and Forgejo checks](run-live-provider-tests.md)
+- [Provision ai/smith and bring up the basic-delivery dogfood](provision-smith-dogfood.md)
