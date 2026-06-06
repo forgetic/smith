@@ -25,6 +25,24 @@ jobs:
             fetch --depth=1 origin "$GITHUB_SHA"
           git checkout -q --detach FETCH_HEAD
 
+      - name: checkout temper sibling (path dependencies resolve to ../temper)
+        run: |
+          set -eu
+          # smith's crates depend on temper crates by relative path
+          # (`../../../temper/crates/...` from each crate dir), which resolves to
+          # a `temper` checkout sitting next to `repo` in the workspace. CI only
+          # fetches the smith repo, so clone `ai/temper`'s default branch here or
+          # `cargo metadata` fails before any build step runs.
+          temper_repo="$(dirname "$GITHUB_REPOSITORY")/temper"
+          rm -rf "$GITHUB_WORKSPACE/temper"
+          mkdir -p "$GITHUB_WORKSPACE/temper"
+          cd "$GITHUB_WORKSPACE/temper"
+          git init -q
+          git remote add origin "$GITHUB_SERVER_URL/${temper_repo}.git"
+          git -c http.extraheader="AUTHORIZATION: token $GITHUB_TOKEN" \
+            fetch --depth=1 origin main
+          git checkout -q --detach FETCH_HEAD
+
       - name: cargo fmt --check
         run: |
           set -eu
