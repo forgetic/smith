@@ -82,7 +82,7 @@ fn smith_process_opens_pr_through_temper_role_tools() {
         .with_args(process_args())
         .with_env_allowlist(process_env_allowlist())
         .with_timeout(std::time::Duration::from_secs(180));
-    let executors = ExternalToolExecutors::new().with_coding_workspace(
+    let executors = ExternalToolExecutors::new().with_workspace(
         role.clone(),
         ExternalToolId::new(CODING_WORKSPACE_TOOL_ID),
         workspace,
