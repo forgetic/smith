@@ -194,6 +194,7 @@ REFERENCE_DELIVERY_ROLE_DECISION SMITH_WORKSPACE_ROOT SMITH_BUILD_PACKAGE \
 SMITH_WORKFLOW_ROLE_DECISION_BIN SMITH_WORKFLOW_ROLE_DECISION_ARGS_JSON \
 SMITH_WORKFLOW_ROLE_DECISION_ENV_ALLOWLIST SMITH_WORKFLOW_ROLE_DECISION_CWD \
 SMITH_WORKFLOW_ROLE_DECISION_TIMEOUT_SECS \
+REFERENCE_DELIVERY_CODER SMITH_CODING_AGENT_BIN SMITH_CODING_AGENT_ARGS \
 TEMPER_CODING_WORKSPACE_ROOT TEMPER_CODING_WORKSPACE_COMMAND \
 TEMPER_CODING_WORKSPACE_REMOTE TEMPER_CODING_WORKSPACE_PUSH \
 TEMPER_CODING_WORKSPACE_PR_LABELS"
@@ -285,6 +286,19 @@ load_config() {
     SMITH_WORKFLOW_ROLE_DECISION_ENV_ALLOWLIST=${SMITH_WORKFLOW_ROLE_DECISION_ENV_ALLOWLIST:-}
     SMITH_WORKFLOW_ROLE_DECISION_CWD=${SMITH_WORKFLOW_ROLE_DECISION_CWD:-}
     SMITH_WORKFLOW_ROLE_DECISION_TIMEOUT_SECS=${SMITH_WORKFLOW_ROLE_DECISION_TIMEOUT_SECS:-}
+    # Which coder backs the workspace external tools. `smith` (default) binds the
+    # real pi-SDK workspace agent (#3) for triage_workspace/coding_workspace/
+    # review_workspace; `greeting` is the deterministic stand-in fallback.
+    REFERENCE_DELIVERY_CODER=${REFERENCE_DELIVERY_CODER:-smith}
+    case "$REFERENCE_DELIVERY_CODER" in
+        smith | greeting) ;;
+        *) die "REFERENCE_DELIVERY_CODER must be smith or greeting, got '$REFERENCE_DELIVERY_CODER'" ;;
+    esac
+    SMITH_CODING_AGENT_BIN=${SMITH_CODING_AGENT_BIN:-}
+    SMITH_CODING_AGENT_ARGS=${SMITH_CODING_AGENT_ARGS:-}
+    if [ -z "$SMITH_CODING_AGENT_ARGS" ]; then
+        SMITH_CODING_AGENT_ARGS='--auth chatgpt-oauth'
+    fi
     TEMPER_CODING_WORKSPACE_ROOT=${TEMPER_CODING_WORKSPACE_ROOT:-}
     TEMPER_CODING_WORKSPACE_COMMAND=${TEMPER_CODING_WORKSPACE_COMMAND:-}
     TEMPER_CODING_WORKSPACE_REMOTE=${TEMPER_CODING_WORKSPACE_REMOTE:-origin}
@@ -397,6 +411,23 @@ resolve_smith_workflow_role_decision() {
     [ -n "$SMITH_WORKFLOW_ROLE_DECISION_CWD" ] && ROLE_DECISION_ARGS="$ROLE_DECISION_ARGS --role-decision-cwd $SMITH_WORKFLOW_ROLE_DECISION_CWD"
     [ -n "$SMITH_WORKFLOW_ROLE_DECISION_TIMEOUT_SECS" ] && ROLE_DECISION_ARGS="$ROLE_DECISION_ARGS --role-decision-timeout-secs $SMITH_WORKFLOW_ROLE_DECISION_TIMEOUT_SECS"
     log "role decisions: Smith process responder ($SMITH_ROLE_DECISION_BIN)"
+
+    # The workspace external tools (triage_workspace / coding_workspace /
+    # review_workspace) run the real pi-SDK agent (#3) unless the operator opted
+    # into the deterministic greeting stand-in. Build it here in the same Smith
+    # resolve step so a source change is self-healing; greeting mode skips it.
+    if [ "$REFERENCE_DELIVERY_CODER" = "greeting" ]; then
+        log "coding workspace: greeting stand-in selected (REFERENCE_DELIVERY_CODER=greeting); skipping Smith coding agent build"
+        return 0
+    fi
+    SMITH_CODING_AGENT_BIN=${SMITH_CODING_AGENT_BIN:-$SMITH_WORKSPACE_ROOT/target/debug/smith-coding-agent}
+    if [ "${TEMPER_SKIP_BUILD:-0}" != "1" ]; then
+        log "ensuring Smith coding-workspace agent is current (cargo build -p $SMITH_BUILD_PACKAGE --bin smith-coding-agent)..."
+        ( cd "$SMITH_WORKSPACE_ROOT" && cargo build -p "$SMITH_BUILD_PACKAGE" --bin smith-coding-agent ) \
+            || die 'Smith coding-agent cargo build failed'
+    fi
+    [ -x "$SMITH_CODING_AGENT_BIN" ] || die "Smith coding-workspace agent binary not found: $SMITH_CODING_AGENT_BIN"
+    log "coding workspace: Smith pi-SDK agent ($SMITH_CODING_AGENT_BIN $SMITH_CODING_AGENT_ARGS)"
 }
 
 # --- Forgejo server -----------------------------------------------------------
@@ -662,21 +693,30 @@ percent_encode() {
     python3 -c 'import sys, urllib.parse; sys.stdout.write(urllib.parse.quote(sys.argv[1], safe=""))' "$1"
 }
 
-# Binds the bundled deterministic coder so the engineer can open a real
-# implementation PR that converges to a merged PR without an external LLM coder.
+# Binds a coding workspace so the architect/engineer/reviewer roles run their
+# declared workspace external tools (triage_workspace / coding_workspace /
+# review_workspace) against a real checkout. By default it binds the Smith
+# pi-SDK workspace agent (#3): one capability/role-aware binary that temper
+# invokes per role with the right checkout capability and the work-item context.
+# Set REFERENCE_DELIVERY_CODER=greeting for the deterministic stand-in coder
+# instead (a fixed src/banner.sh diff; no LLM, no verdicts).
+#
 # It only runs when the operator has NOT bound their own coding workspace and
 # exactly one repository is configured (the converging single-repo happy path).
-# It also replaces the provisioned commit-message-marker CI with the bundled
-# pass-through workflow so a real coder PR head (which carries an ordinary commit
-# message, not the demo marker) clears the landing CI gate. Every failure is
-# non-fatal: the engineer simply stays idle, exactly as with no binding.
+# The same checkout root serves every workspace role: temper checks it out per
+# invocation, pushes only for the writable engineer checkout, and fetches the PR
+# head for the reviewer's read-only checkout. It also replaces the provisioned
+# commit-message-marker CI with the bundled pass-through workflow so a real coder
+# PR head (which carries an ordinary commit message, not the demo marker) clears
+# the landing CI gate. Every failure is non-fatal: the roles simply stay idle,
+# exactly as with no binding.
 setup_demo_coding_workspace() {
     if [ -n "$TEMPER_CODING_WORKSPACE_ROOT" ] || [ -n "$TEMPER_CODING_WORKSPACE_COMMAND" ]; then
         log "coding workspace: respecting operator binding (root=${TEMPER_CODING_WORKSPACE_ROOT:-unset})"
         return 0
     fi
     if [ "$REPO_COUNT" -ne 1 ]; then
-        log 'coding workspace: multi-repo demo leaves the engineer idle (bind TEMPER_CODING_WORKSPACE_* for a real coder)'
+        log 'coding workspace: multi-repo demo leaves the workspace roles idle (bind TEMPER_CODING_WORKSPACE_* for a real coder)'
         return 0
     fi
 
@@ -685,7 +725,7 @@ setup_demo_coding_workspace() {
     eval "_eng_user=\${TEMPER_FORGEJO_USER_${_key}:-}"
     eval "_eng_password=\${TEMPER_FORGEJO_PASSWORD_${_key}:-}"
     if [ -z "$_eng_user" ] || [ -z "$_eng_password" ]; then
-        log "coding workspace: no engineer identity in $ROLES_ENV; engineer stays idle"
+        log "coding workspace: no engineer identity in $ROLES_ENV; workspace roles stay idle"
         return 0
     fi
 
@@ -695,21 +735,21 @@ setup_demo_coding_workspace() {
     _remote="$BASE_URL/$_repo.git"
     _without_scheme=${BASE_URL#*://}
 
-    log "coding workspace: cloning $_repo for the bundled demo coder ..."
+    log "coding workspace: cloning $_repo for the bound coding workspace ..."
     rm -rf "$_ws_dir"
     mkdir -p "$_ws_dir"
     if ! git clone --quiet "$_remote" "$_checkout" >>"$LOG_DIR/coding-workspace.log" 2>&1; then
-        log "coding workspace: clone of $_repo failed (see logs/coding-workspace.log); engineer stays idle"
+        log "coding workspace: clone of $_repo failed (see logs/coding-workspace.log); workspace roles stay idle"
         return 0
     fi
     # Configure the checkout for the local-git coding workspace push. Guarded so
-    # an unexpected git/disk failure degrades to "engineer idle" rather than
+    # an unexpected git/disk failure degrades to "roles idle" rather than
     # aborting the whole launch under set -e.
     if ! { ( umask 077; printf 'http://%s:%s@%s\n' "$(percent_encode "$_eng_user")" "$(percent_encode "$_eng_password")" "$_without_scheme" >"$_creds" ) \
         && git -C "$_checkout" config user.email "$_eng_user@example.invalid" \
         && git -C "$_checkout" config user.name 'Temper Engineer' \
         && git -C "$_checkout" config credential.helper "store --file=$_creds"; }; then
-        log "coding workspace: could not configure the checkout; engineer stays idle"
+        log "coding workspace: could not configure the checkout; workspace roles stay idle"
         return 0
     fi
 
@@ -730,8 +770,17 @@ setup_demo_coding_workspace() {
     fi
 
     TEMPER_CODING_WORKSPACE_ROOT="$_checkout"
-    TEMPER_CODING_WORKSPACE_COMMAND="$SCRIPT_DIR/tools/greeting-coder.sh"
-    log "coding workspace: bound bundled demo coder for $_repo (root=$_checkout)"
+    if [ "$REFERENCE_DELIVERY_CODER" = "greeting" ]; then
+        TEMPER_CODING_WORKSPACE_COMMAND="$SCRIPT_DIR/tools/greeting-coder.sh"
+        log "coding workspace: bound deterministic greeting stand-in for $_repo (root=$_checkout)"
+    else
+        # The Smith pi-SDK workspace agent (#3). temper invokes it per role with
+        # the checkout capability and writes the work-item context to the file it
+        # reads; the engineer leaves a product diff, the architect/reviewer emit
+        # a verdict. Resolved + built in resolve_smith_workflow_role_decision.
+        TEMPER_CODING_WORKSPACE_COMMAND="$SMITH_CODING_AGENT_BIN $SMITH_CODING_AGENT_ARGS"
+        log "coding workspace: bound Smith pi-SDK agent for $_repo (root=$_checkout, command=$SMITH_CODING_AGENT_BIN $SMITH_CODING_AGENT_ARGS)"
+    fi
 }
 
 # --- Workers ------------------------------------------------------------------
