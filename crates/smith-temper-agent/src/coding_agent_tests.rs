@@ -23,6 +23,7 @@ const CONTEXT_FIXTURE: &str = r#"{
   "branch_hint": "agent/pr-for-code-7",
   "correlation_key": "pr-for-code-7",
   "checkout": "writable",
+  "allowed_verdicts": ["needs_architect"],
   "guidance": {
     "role_guidance": "Make a real product change.",
     "tool_guidance": "Use docs/product-change.md for this fixture.",
@@ -54,6 +55,10 @@ fn parses_full_context_fixture() {
     assert_eq!(context.correlation_key, "pr-for-code-7");
     assert_eq!(context.checkout.as_deref(), Some("writable"));
     assert_eq!(
+        context.allowed_verdicts,
+        vec!["needs_architect".to_string()]
+    );
+    assert_eq!(
         context.guidance.role_guidance.as_deref(),
         Some("Make a real product change.")
     );
@@ -79,6 +84,9 @@ fn parses_context_without_optional_guidance_and_checkout() {
     }"#;
     let context: WorkspaceContext = serde_json::from_str(minimal).expect("minimal context parses");
     assert_eq!(context.checkout, None);
+    // A context without `allowed_verdicts` defaults to empty (back-compat with an
+    // older temper that does not surface the vocabulary).
+    assert!(context.allowed_verdicts.is_empty());
     assert_eq!(context.guidance, WorkspaceGuidance::default());
 }
 
@@ -110,19 +118,19 @@ fn only_engineer_is_writable() {
 
 #[test]
 fn system_prompt_is_role_specific() {
-    let engineer = system_prompt(Capability::CodingWorkspace);
+    let engineer = system_prompt(Capability::CodingWorkspace, &[]);
     assert!(engineer.contains("ROLE: engineer"));
     assert!(engineer.contains("product diff"));
     assert!(engineer.contains("Do NOT run git commit"));
     assert!(engineer.contains("needs_architect"));
 
-    let architect = system_prompt(Capability::TriageWorkspace);
+    let architect = system_prompt(Capability::TriageWorkspace, &[]);
     assert!(architect.contains("ROLE: architect"));
     assert!(architect.contains("ready_code"));
     assert!(architect.contains("needs_design"));
     assert!(architect.contains("needs_breakdown"));
 
-    let reviewer = system_prompt(Capability::ReviewWorkspace);
+    let reviewer = system_prompt(Capability::ReviewWorkspace, &[]);
     assert!(reviewer.contains("ROLE: reviewer"));
     assert!(reviewer.contains("approve"));
     assert!(reviewer.contains("review_body"));
@@ -133,6 +141,50 @@ fn system_prompt_is_role_specific() {
         assert!(prompt.contains("single JSON object"));
         assert!(prompt.contains("children"));
     }
+}
+
+#[test]
+fn system_prompt_without_allowed_verdicts_has_no_constraint_block() {
+    // Back-compat: an empty vocabulary leaves the built-in per-role menu and adds
+    // no constraint section.
+    let architect = system_prompt(Capability::TriageWorkspace, &[]);
+    assert!(!architect.contains("VERDICT CONSTRAINT"));
+}
+
+#[test]
+fn system_prompt_constrains_to_allowed_verdicts() {
+    // A multi-outcome triage: the constraint names exactly the declared set.
+    let allowed = vec!["ready_code".to_string(), "needs_design".to_string()];
+    let architect = system_prompt(Capability::TriageWorkspace, &allowed);
+    assert!(architect.contains("VERDICT CONSTRAINT"));
+    assert!(architect.contains("`ready_code`"));
+    assert!(architect.contains("`needs_design`"));
+    // It must not suggest the single-outcome collapse for a 2-element set.
+    assert!(!architect.contains("SINGLE declared outcome"));
+}
+
+#[test]
+fn system_prompt_single_outcome_collapses_to_one_choice() {
+    // The basic-delivery architect: a single declared outcome ⇒ exactly one
+    // choice. This is the deterministic single-outcome triage the example relies
+    // on.
+    let allowed = vec!["ready_code".to_string()];
+    let architect = system_prompt(Capability::TriageWorkspace, &allowed);
+    assert!(architect.contains("VERDICT CONSTRAINT"));
+    assert!(architect.contains("SINGLE declared outcome"));
+    assert!(architect.contains("verdict `ready_code`"));
+}
+
+#[test]
+fn system_prompt_engineer_keeps_head_path_under_constraint() {
+    // Even with a declared verdict (needs_architect), the engineer may still take
+    // the no-verdict head path.
+    let allowed = vec!["needs_architect".to_string()];
+    let engineer = system_prompt(Capability::CodingWorkspace, &allowed);
+    assert!(engineer.contains("VERDICT CONSTRAINT"));
+    assert!(engineer.contains("head path"));
+    // The single-outcome collapse line is engineer-inapplicable.
+    assert!(!engineer.contains("SINGLE declared outcome"));
 }
 
 #[test]
@@ -267,6 +319,55 @@ fn validate_contract_readonly_requires_verdict() {
     };
     validate_contract(Capability::ReviewWorkspace, &approved, &cwd)
         .expect("verdict satisfies reviewer contract");
+}
+
+#[test]
+fn validate_verdict_vocabulary_accepts_declared_verdict() {
+    let allowed = vec!["ready_code".to_string()];
+    let result = WorkspaceResult {
+        verdict: Some("ready_code".to_string()),
+        body: Some("spec".to_string()),
+        ..WorkspaceResult::default()
+    };
+    validate_verdict_vocabulary(&result, &allowed).expect("declared verdict passes");
+}
+
+#[test]
+fn validate_verdict_vocabulary_rejects_undeclared_verdict() {
+    // The single-outcome basic-delivery triage: a `needs_design` from the model
+    // is rejected before temper would fail the tick.
+    let allowed = vec!["ready_code".to_string()];
+    let result = WorkspaceResult {
+        verdict: Some("needs_design".to_string()),
+        ..WorkspaceResult::default()
+    };
+    let error =
+        validate_verdict_vocabulary(&result, &allowed).expect_err("undeclared verdict rejected");
+    match error {
+        CodingAgentError::UndeclaredVerdict { emitted, allowed } => {
+            assert_eq!(emitted, "needs_design");
+            assert_eq!(allowed, vec!["ready_code".to_string()]);
+        }
+        other => panic!("expected UndeclaredVerdict, got {other:?}"),
+    }
+}
+
+#[test]
+fn validate_verdict_vocabulary_allows_head_path_and_empty_vocabulary() {
+    let allowed = vec!["ready_code".to_string()];
+    // No verdict (head path) passes even when a vocabulary is declared.
+    let head = WorkspaceResult {
+        summary: Some("left a diff".to_string()),
+        ..WorkspaceResult::default()
+    };
+    validate_verdict_vocabulary(&head, &allowed).expect("head path passes");
+
+    // An empty vocabulary (older temper / no declared outcomes) skips the check.
+    let any_verdict = WorkspaceResult {
+        verdict: Some("anything".to_string()),
+        ..WorkspaceResult::default()
+    };
+    validate_verdict_vocabulary(&any_verdict, &[]).expect("empty vocabulary skips the check");
 }
 
 #[test]

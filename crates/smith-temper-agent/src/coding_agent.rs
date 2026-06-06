@@ -32,6 +32,13 @@
 //!   with `children`.
 //! - **reviewer** (`review_workspace`): read-only diff + CI; verdict `approve`,
 //!   or `changes` with an authored `review_body`, or `escalate`.
+//!
+//! When temper surfaces the action's declared verdict vocabulary
+//! (`allowed_verdicts`, W3), the role is constrained to exactly that option set
+//! instead of the broad per-role menu above, and a verdict outside it is
+//! rejected with a clear message. A single-outcome triage (e.g.
+//! `["ready_code"]`, as in the `basic-delivery` example) thereby has exactly one
+//! choice. An empty vocabulary falls back to the per-role menu (back-compat).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -71,6 +78,15 @@ pub struct WorkspaceContext {
     /// Checkout mode token: `writable`, `read_only`, or `pull_request_read_only`.
     #[serde(default)]
     pub checkout: Option<String>,
+    /// The verdict vocabulary the bound action declares (the keys of the
+    /// transition's `outcomes` map). Surfaced by temper (W3) so a read-only role
+    /// is constrained to the workflow's declared option set rather than guessing
+    /// a verdict that the engine would reject as "undeclared". Empty when the
+    /// action declares no routed outcomes (e.g. the engineer head path) or when
+    /// running against an older temper that does not surface it; in that case the
+    /// agent falls back to its built-in per-role verdict menu.
+    #[serde(default)]
+    pub allowed_verdicts: Vec<String>,
     #[serde(default)]
     pub guidance: WorkspaceGuidance,
 }
@@ -209,6 +225,13 @@ pub enum CodingAgentError {
     /// A writable (engineer) run finished without leaving a product diff and
     /// without a routing verdict — there is nothing for temper to land.
     NoProduct,
+    /// The model emitted a verdict that is not in the action's declared verdict
+    /// vocabulary (W3). The engine would reject it as an undeclared verdict; we
+    /// fail earlier here with a clearer message naming the allowed set.
+    UndeclaredVerdict {
+        emitted: String,
+        allowed: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for CodingAgentError {
@@ -228,6 +251,15 @@ impl std::fmt::Display for CodingAgentError {
             CodingAgentError::NoProduct => formatter.write_str(
                 "engineer run produced no product diff and emitted no verdict; nothing to land",
             ),
+            CodingAgentError::UndeclaredVerdict { emitted, allowed } => write!(
+                formatter,
+                "agent emitted undeclared verdict `{emitted}`; this workflow step allows only: {}",
+                allowed
+                    .iter()
+                    .map(|verdict| format!("`{verdict}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }
     }
 }
@@ -245,7 +277,16 @@ impl From<ProviderError> for CodingAgentError {
 // ---------------------------------------------------------------------------
 
 /// Builds the role system prompt for a capability.
-pub fn system_prompt(capability: Capability) -> String {
+///
+/// `allowed_verdicts` is the workflow-declared verdict vocabulary surfaced by
+/// temper (W3). When non-empty it is rendered as an authoritative constraint:
+/// the role must emit exactly one of those verdicts (or, for the engineer, the
+/// no-verdict head path) and nothing else. This is the principled "the workflow
+/// defines the role's only options" mechanism — a single-outcome triage
+/// (`["ready_code"]`) thereby collapses to one choice. When empty the agent
+/// falls back to its built-in per-role verdict menu (back-compat with an older
+/// temper that does not surface the vocabulary).
+pub fn system_prompt(capability: Capability, allowed_verdicts: &[String]) -> String {
     let mut prompt = String::from(
         "You are Smith, an autonomous software engineering agent running one \
          workspace turn inside a Temper workflow. You operate on a real Git \
@@ -291,6 +332,38 @@ pub fn system_prompt(capability: Capability) -> String {
              - `escalate` when the decision exceeds a static review (explain in \
              `summary`).\n",
         ),
+    }
+
+    // W3: when temper surfaces the action's declared verdict vocabulary,
+    // constrain the role to exactly that option set. This overrides the broader
+    // per-role menu above so the role can never emit a verdict the engine would
+    // reject as undeclared. The engineer's head path (no verdict) is always
+    // allowed in addition to any declared verdicts.
+    if !allowed_verdicts.is_empty() {
+        let rendered = allowed_verdicts
+            .iter()
+            .map(|verdict| format!("`{verdict}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        prompt.push_str(&format!(
+            "\nVERDICT CONSTRAINT (authoritative): this workflow step declares \
+             exactly these verdicts: {rendered}. You MUST emit one of them and \
+             MUST NOT emit any other verdict, even if a verdict named above \
+             seems wrong — pick the closest declared option."
+        ));
+        if matches!(capability, Capability::CodingWorkspace) {
+            prompt.push_str(
+                " As the engineer you may also take the no-verdict head path \
+                 (leave a product diff and emit no verdict).",
+            );
+        } else if allowed_verdicts.len() == 1 {
+            prompt.push_str(&format!(
+                " This step has a SINGLE declared outcome, so your only choice is \
+                 to emit verdict `{}` (with the fields that verdict requires).",
+                allowed_verdicts[0]
+            ));
+        }
+        prompt.push('\n');
     }
 
     prompt.push_str(
@@ -392,7 +465,7 @@ pub async fn run_coding_agent(
     let capability = Capability::for_role(&context.work_item.role);
     let provider = provider_config.build_provider()?;
 
-    let role_prompt = system_prompt(capability);
+    let role_prompt = system_prompt(capability, &context.allowed_verdicts);
     let user = user_context(context);
 
     // Anthropic's subscription OAuth path rejects any request whose first
@@ -432,6 +505,7 @@ pub async fn run_coding_agent(
 
     let text = collect_text(&assistant.content);
     let result = parse_result(&text)?;
+    validate_verdict_vocabulary(&result, &context.allowed_verdicts)?;
     validate_contract(capability, &result, cwd)?;
     Ok(result)
 }
@@ -467,6 +541,38 @@ fn parse_result(text: &str) -> Result<WorkspaceResult, CodingAgentError> {
         snippet: snippet(text),
         error: error.to_string(),
     })
+}
+
+/// Rejects a verdict that is not in the action's declared vocabulary (W3).
+///
+/// When `allowed_verdicts` is non-empty, any verdict the model emits must be one
+/// of them; the engine would otherwise fail the tick with an "undeclared
+/// verdict" error, so we surface a clearer one here. A result with no verdict
+/// (the engineer head path) and an empty `allowed_verdicts` (no declared
+/// vocabulary, or an older temper) both pass through unchecked.
+fn validate_verdict_vocabulary(
+    result: &WorkspaceResult,
+    allowed_verdicts: &[String],
+) -> Result<(), CodingAgentError> {
+    if allowed_verdicts.is_empty() {
+        return Ok(());
+    }
+    let Some(verdict) = result
+        .verdict
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    else {
+        return Ok(());
+    };
+    if allowed_verdicts.iter().any(|allowed| allowed == verdict) {
+        Ok(())
+    } else {
+        Err(CodingAgentError::UndeclaredVerdict {
+            emitted: verdict.to_string(),
+            allowed: allowed_verdicts.to_vec(),
+        })
+    }
 }
 
 /// Enforces the role contract that temper relies on: an engineer (writable)
