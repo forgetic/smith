@@ -14,11 +14,14 @@ set `TEMPER_WORKSPACE_ROOT=/path/to/temper` if your checkout layout differs.
 > role behavior lives in `config/workflow.json` (which tracks the canonical
 > fixture `crates/temper-workflow/fixtures/reference-delivery.json`), not in
 > production prompt constants. The checked-in default is a **single-repo happy
-> path that converges to a merged PR**: the launcher auto-binds a bundled
-> deterministic coder (`tools/greeting-coder.sh`) so the engineer opens a real
-> implementation PR, and the **bot** (`mechanical` worker) lands it once the
-> review and CI gates pass. Temper runtime details live in the sibling checkout's
-> docs and plans.
+> path that converges to a merged PR**: the launcher auto-binds the **Smith
+> pi-SDK workspace agent** (`smith-coding-agent`) for the architect, engineer,
+> and reviewer workspace tools, so the architect rewrites the intake body, the
+> engineer opens a real implementation PR, the reviewer approves from the diff,
+> and the **bot** (`mechanical` worker) lands it once the review and CI gates
+> pass. Set `REFERENCE_DELIVERY_CODER=greeting` to swap in the deterministic
+> stand-in coder (`tools/greeting-coder.sh`) for an offline/CI smoke run. Temper
+> runtime details live in the sibling checkout's docs and plans.
 
 ## Honest framing — read this first
 
@@ -37,17 +40,23 @@ This is a **demo**, not a turnkey production deployment:
   ordinary message), `run.sh` overrides that marker CI with the bundled
   pass-through `config/ci.yml` so a real product diff clears the landing CI gate.
   The PR diff guard still rejects bookkeeping-only heads.
-- The bundled coder is a deterministic stand-in, not an LLM. The LLM still drives
-  every **decision** (architect triage, engineer choosing `open_pr`, reviewer
-  approval); only the code edit is deterministic so the demo reliably converges.
-  Replace it with your own coder via `TEMPER_CODING_WORKSPACE_*` for real work.
+- By default the workspace tools run a **real LLM agent** (`smith-coding-agent`):
+  the architect reads the intake and returns a triage verdict, the engineer
+  edits the checkout to leave a product diff, and the reviewer reads the real
+  diff and CI before returning an approve/changes/escalate verdict. Set
+  `REFERENCE_DELIVERY_CODER=greeting` for the deterministic stand-in (a fixed
+  `src/banner.sh` diff, no LLM, no verdicts) when you need an offline, reliably
+  converging run. Bind your own coder via `TEMPER_CODING_WORKSPACE_*` to validate
+  a different implementation path.
 - It is the operator-facing, shell-driven version of the same topology covered
   by the ignored Forgejo multi-process tests — not new workflow behavior.
-- Cross-repo fan-out (set `REPOS` to several repos) is **optional and does not
-  converge with production agents**: the LLM architect is forbidden from inventing
-  child issues, so a bare cross-repo parent stays `code + blocked`. It needs a
-  user-authored plan plus a bound fan-out tool. It is planning/aggregation only —
-  no atomic cross-repo merges, shared branches, or per-repo workflow definitions.
+- Cross-repo fan-out (set `REPOS` to several repos) is **optional**. The architect
+  can now break an intake down into dependent child issues via the
+  `needs_breakdown` verdict and the routed `create_issues` effect, but a
+  cross-repo coordination parent still needs a **user-authored plan** naming the
+  target repos and slugs; without it a bare cross-repo parent stays `code +
+  blocked`. It is planning/aggregation only — no atomic cross-repo merges, shared
+  branches, or per-repo workflow definitions.
 
 Keep these caveats in mind; this does not pretend to be more than a faithful
 end-to-end rehearsal.
@@ -90,7 +99,7 @@ examples/reference-delivery/
 │   └── ci.yml           # the host-mode pass-through CI run.sh applies over the
 │                        #   provisioned marker CI (real coder heads must pass it)
 ├── tools/
-│   └── greeting-coder.sh # bundled deterministic demo coder (auto-bound default)
+│   └── greeting-coder.sh # deterministic stand-in coder (REFERENCE_DELIVERY_CODER=greeting)
 ├── secrets/             # gitignored except the templates + .gitignore
 │   └── .env.example
 └── run.sh               # launcher/teardown (phase B3)
@@ -143,16 +152,31 @@ webhooks should make the demo visibly progress before the two-minute deadline.
 
 ## Coding workspace binding
 
-The engineer role declares `coding_workspace` in `config/workflow.json`. In the
-single-repo default, the launcher **auto-binds the bundled demo coder** so the
-example converges without extra setup: it clones the configured repo into
-`run/coding-workspace/`, applies the pass-through `config/ci.yml`, and points
-`TEMPER_CODING_WORKSPACE_ROOT`/`COMMAND` at `tools/greeting-coder.sh`. The coder
-is deterministic — it implements the seeded "configurable banner greeting" intake
-the same way every run — so CI re-runs are stable.
+`config/workflow.json` declares three workspace external tools: the architect's
+`triage_workspace`, the engineer's `coding_workspace`, and the reviewer's
+`review_workspace`. One bound command backs all three — temper invokes it per
+role with the right checkout capability (writable for the engineer, read-only for
+the architect, PR-read-only for the reviewer) and the work-item context — so the
+single binding serves the whole trail.
 
-To validate a **real** implementation path, bind your own coder; `run.sh` then
-respects your binding and does not auto-bind the demo coder:
+In the single-repo default the launcher **auto-binds the Smith pi-SDK workspace
+agent** (`smith-coding-agent`, built from this checkout) so the example converges
+without extra setup: it clones the configured repo into `run/coding-workspace/`,
+applies the pass-through `config/ci.yml`, and points
+`TEMPER_CODING_WORKSPACE_ROOT`/`COMMAND` at the agent. The agent is
+capability/role-aware: the engineer gets edit tools and leaves a product diff;
+the architect and reviewer get read-only tools and return a verdict.
+
+`REFERENCE_DELIVERY_CODER` selects the auto-bound command:
+
+- `smith` (default) — the LLM workspace agent above. Provider/auth come from
+  `SMITH_CODING_AGENT_ARGS` (default `--auth chatgpt-oauth`, mirroring the
+  role-decision responder).
+- `greeting` — the deterministic stand-in (`tools/greeting-coder.sh`): a fixed
+  `src/banner.sh` diff, no LLM, no verdicts. Use it for an offline/CI smoke run.
+
+To validate a different implementation path, bind your own coder; `run.sh` then
+respects your binding and does not auto-bind:
 
 ```sh
 export TEMPER_CODING_WORKSPACE_ROOT=/path/to/checkout
@@ -163,11 +187,14 @@ export TEMPER_CODING_WORKSPACE_PUSH=1
 ```
 
 The command runs with the checkout as its working directory and receives a JSON
-context path in `TEMPER_CODING_WORKSPACE_CONTEXT`. It must leave a meaningful
-non-`.temper*` product diff; the local-git provider commits and pushes the
-branch, then the workflow opens the PR through `RoleTools`. Leaving the binding
-empty in multi-repo mode keeps the engineer idle (the safe `no_action` state).
-Use these focused checks before a full demo run:
+context path in `TEMPER_CODING_WORKSPACE_CONTEXT` (carrying the role, the
+checkout capability, and the work item) plus a `TEMPER_CODING_WORKSPACE_RESULT`
+path it may write a verdict/content result to. On the engineer's writable
+checkout it must leave a meaningful non-`.temper*` product diff; the local-git
+provider commits and pushes the branch, then the workflow opens the PR. On a
+read-only checkout (architect/reviewer) it must return a verdict instead.
+Leaving the binding empty in multi-repo mode keeps the workspace roles idle (the
+safe `no_action` state). Use these focused checks before a full demo run:
 
 ```sh
 cargo test -p temper-coding-workspace local_git_workspace_accepts_product_code_or_docs_diff
@@ -178,23 +205,32 @@ cargo test -p temper-testing --test forgejo_workspace_pr -- --ignored --test-thr
 
 Boots Forgejo + a host-mode `forgejo-runner`, starts the local webhook trigger,
 provisions the configured repo with labels, CI, a webhook, and a `bot`
-automation user, then seeds one intake issue. In the single-repo default it also
-clones the repo, applies the pass-through CI, and binds the bundled demo coder.
-It launches exactly one `temper-worker` per role-with-an-agent plus one
-mechanical worker. Workers use wall-clock polling as the liveness backstop;
-webhooks wake them early.
+automation user, then seeds one **plain unlabeled** human intake issue. In the
+single-repo default it also clones the repo, applies the pass-through CI, and
+binds the Smith pi-SDK workspace agent. It launches exactly one `temper-worker`
+per role-with-an-agent plus one mechanical worker. Workers use wall-clock polling
+as the liveness backstop; webhooks wake them early.
 
 The intake then flows end to end:
 
-1. **architect** triages the intake into a ready `code` issue;
-2. **engineer** claims it, runs the bound coding workspace to produce a real
-   product diff, pushes the branch, and opens an `implementation` PR labelled
-   `needs-reviewer`;
-3. the **`forgejo-runner`** runs real CI on the PR head;
-4. **reviewer** approves the PR, which adds the `landing` label;
-5. the **bot** (`mechanical` worker) lands (merges) the PR once the review and CI
-   gates are green, then marks it `landed` + `alignment`;
-6. **architect** reconciles the `landed` PR.
+1. the **bot** (`mechanical` worker) marks the seeded raw intake `untriaged`
+   (`raw_intake` automation → `mark_untriaged`);
+2. **architect** runs the `triage_workspace` and, on a `ready_code` verdict,
+   rewrites the issue body into a code spec and routes it to a ready `code`
+   issue (`set_body` + `code`/`ready`); `needs_design` and `needs_breakdown`
+   verdicts route the design and child-issue branches instead;
+3. **engineer** claims the `code` issue and runs the `coding_workspace` to leave
+   a real product diff; the engine pushes the branch and opens an
+   `implementation` PR labelled `needs-reviewer` (a `needs_architect` verdict
+   instead escalates the issue to the architect);
+4. the **`forgejo-runner`** runs real CI on the PR head;
+5. **reviewer** runs the `review_workspace` against the real diff and CI and, on
+   an `approve` verdict, approves the PR, which adds the `landing` label
+   (`changes` submits a native review carrying the authored body; `escalate`
+   flags the architect);
+6. the **bot** lands (merges) the PR once the review and CI gates are green
+   (`landing` automation → `land_pr`), then marks it `landed` + `alignment`;
+7. **architect** reconciles the `landed` PR.
 
 The **mechanical** worker also runs the controller plane (lease expiry, partial-
 transition repair, dependency unblock) and, in this workflow, owns landing: it
@@ -205,13 +241,16 @@ for the durable topology and real-CI design.
 ## Cross-repo fan-out (optional, advanced)
 
 Setting `REPOS` to several repos with `CROSS_REPO_INTAKE=auto` seeds one parent
-intake in the first repo that names every repo id and asks the architect for one
-child per repo. **This path does not converge with production LLM agents**: the
-architect is forbidden from inventing child issues without a user-authored plan
-and a bound fan-out tool, so it triages the parent to `code + blocked` and the
-parent never unblocks (exactly the stall the single-repo default avoids). It
-remains useful only to exercise per-repo provisioning, webhooks, and the
-fixed-pool scan, or with the gated `temper-testing` fan-out fixtures.
+intake in the first repo whose body names every repo id and asks the architect
+for one child per repo — a **user-authored plan**. The architect's
+`triage_workspace` reads that plan and, on a `needs_breakdown` verdict, authors
+the dependent child issues through the routed `create_issues` effect. Whether the
+parent then unblocks depends on the LLM run faithfully producing one correctly
+repo-qualified child per repo from the plan; a bare cross-repo parent with no
+such plan stays `code + blocked` (exactly the stall the single-repo default
+avoids). Cross-repo mode remains primarily useful to exercise per-repo
+provisioning, webhooks, and the fixed-pool scan; it is planning/aggregation only,
+with no atomic cross-repo merges.
 
 ## Cross-repo production model
 

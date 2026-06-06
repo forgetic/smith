@@ -21,6 +21,15 @@ teardown. Logs stay under `logs/` for later inspection.
   `decision_id`/`work_item_id`. Smith receives metadata only: no Forge token,
   Forge handle, or mutation tool. Smith-owned provider details are documented in
   `~/src/rust/smith/plans/observability/README.md`.
+- **Workspace verdicts** — the architect/engineer/reviewer roles each declare a
+  workspace external tool (`triage_workspace`, `coding_workspace`,
+  `review_workspace`). One bound command (the Smith pi-SDK agent by default)
+  runs per role and returns a work product plus an optional verdict. The engine
+  routes the action's declared `outcomes` on that verdict: the architect's
+  `ready_code`/`needs_design`/`needs_breakdown` route triage (and `set_body` /
+  `create_issues` effects), the engineer's absent verdict produces the PR head
+  while `needs_architect` escalates, and the reviewer's `approve`/`changes`/
+  `escalate` route landing, a native review (`attach_review`), or escalation.
 - **Action and transition outcomes** — `action_dispatch` records the selected
   manifest action, transition id, and external-executor availability.
   `transition_execution` records `outcome`, `stale_work`, compact effect
@@ -62,9 +71,21 @@ transition_execution -> completed tick ... tick_id=...
 ```
 
 The converging single-repo default walks these transitions in order across the
-role workers: `triage_to_code` (architect) -> `open_pr` (engineer, via the bound
-coding workspace) -> `approve_review` (reviewer, adds `landing`) -> `land_pr`
-(mechanical bot merges) -> `reconcile_landed` (architect).
+role workers, each architect/engineer/reviewer step routed by the verdict its
+bound workspace returns:
+
+- `mark_untriaged` (mechanical bot automation on `raw_intake`, adds `untriaged`)
+- `triage_intake` (architect, `triage_workspace` -> `ready_code` verdict) routes
+  to `triage_intake_to_code` (`set_body` rewrite + `code`/`ready` labels)
+- `open_pr` (engineer, `coding_workspace` leaves a product diff and the engine
+  opens the PR; a `needs_architect` verdict instead routes
+  `request_code_architect_input`)
+- `review_pr` (reviewer, `review_workspace` -> `approve` verdict) routes to
+  `approve_review` (adds `landing`); `changes` routes
+  `request_changes_with_review` and `escalate` routes `request_architect_input`
+- `land_pr` (mechanical bot automation on `landing`, merges the PR; a merge
+  conflict routes `route_merge_conflict`)
+- `reconcile_landed` (architect)
 
 For a stuck cross-repo parent (optional mode only), add:
 
