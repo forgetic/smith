@@ -288,6 +288,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eba4173ce977db76d7434bb01f0bd94914a9719570ccb8f9e7d56ded6ba8b70a"
 dependencies = [
+ "asupersync-macros",
  "base64",
  "bincode-next",
  "crc32fast",
@@ -331,6 +332,17 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "x509-parser",
+]
+
+[[package]]
+name = "asupersync-macros"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b5591aab438341656dc54821bbff29098e6955876cf2eadbf32103167a5c9c2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -5376,6 +5388,7 @@ dependencies = [
 name = "smith-temper-agent-cli"
 version = "0.1.0"
 dependencies = [
+ "asupersync",
  "async-trait",
  "serde_json",
  "smith-temper-agent",
@@ -5857,6 +5870,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "serde",
  "serde_json",
  "temper-forge",
  "temper-forgejo-ops",

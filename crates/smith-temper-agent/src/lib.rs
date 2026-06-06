@@ -8,6 +8,7 @@
 
 #![allow(clippy::result_large_err)]
 
+pub mod coding_agent;
 pub mod decision;
 pub mod interaction_profile;
 mod interaction_profile_config;
@@ -18,6 +19,12 @@ pub mod workflow_role_decision;
 mod workflow_role_decision_capture;
 mod workflow_role_decision_observability;
 
+pub use coding_agent::{
+    Capability, CodingAgentError, DEFAULT_MAX_ITERATIONS, WorkspaceContext, WorkspaceGuidance,
+    WorkspaceRepository, WorkspaceResult, WorkspaceResultChild, WorkspaceWorkItem,
+    run_coding_agent, system_prompt as coding_agent_system_prompt,
+    user_context as coding_agent_user_context,
+};
 pub use decision::{DecisionError, run_decision};
 pub use interaction_profile::{
     CONVERSATION_REPLY_V1_PROTOCOL_INSTRUCTION, GenericInteractionResponder,

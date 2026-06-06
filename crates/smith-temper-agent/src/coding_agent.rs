@@ -1,0 +1,569 @@
+//! Pi-SDK-backed coding workspace agent.
+//!
+//! This module implements temper's external coding-workspace command
+//! (`TEMPER_CODING_WORKSPACE_COMMAND`) using the `pi` SDK. Where
+//! [`crate::decision`] runs a single tool-less turn that only *decides*, this
+//! module builds a tool-using [`pi::sdk::Agent`] that *acts*: it reads the
+//! work-item context temper prepared, runs a real LLM agent loop with a
+//! [`pi::sdk::ToolRegistry`] scoped to the checkout, and produces the ADR 0022
+//! work product (a working-tree diff and/or a verdict) for the role.
+//!
+//! # Protocol
+//!
+//! temper writes a context JSON file and names it with the
+//! `TEMPER_CODING_WORKSPACE_CONTEXT` env var, runs the command in the prepared
+//! checkout (cwd), and reads a result JSON file back from the path named by
+//! `TEMPER_CODING_WORKSPACE_RESULT`. The result shape is temper's
+//! `WorkspaceResult` (`{ verdict?, summary?, body?, review_body?, labels?,
+//! children? }`); see [`WorkspaceResult`]. Reading the context and writing the
+//! result is the binary's job ([`crate::coding_agent`] only models and runs the
+//! agent); this module owns the schema and the agent loop.
+//!
+//! # Capability / role awareness
+//!
+//! The three reference-delivery roles map to distinct capabilities:
+//!
+//! - **engineer** (`coding_workspace`): edit tools; implement the issue, leaving
+//!   a real product diff in the working tree. No verdict on success (the head
+//!   path ⇒ `open_pr`); verdict `needs_architect` when it cannot be implemented
+//!   as specified.
+//! - **architect** (`triage_workspace`): read-only analysis; verdict
+//!   `ready_code` / `needs_design` with an authored `body`, or `needs_breakdown`
+//!   with `children`.
+//! - **reviewer** (`review_workspace`): read-only diff + CI; verdict `approve`,
+//!   or `changes` with an authored `review_body`, or `escalate`.
+
+use std::path::Path;
+use std::sync::Arc;
+
+use pi::sdk::{
+    Agent, AgentConfig, ContentBlock, StopReason, ToolRegistry, create_bash_tool, create_edit_tool,
+    create_find_tool, create_grep_tool, create_ls_tool, create_read_tool, create_write_tool,
+};
+use serde::{Deserialize, Serialize};
+
+use crate::provider::{ProviderConfig, ProviderError};
+
+/// Default ceiling on tool-using iterations for one workspace run. The agent
+/// must do real multi-step work (read, edit, verify), so this is well above the
+/// tool-less decision path's ceiling of 1, but bounded so a confused run cannot
+/// loop forever.
+pub const DEFAULT_MAX_ITERATIONS: usize = 40;
+
+// ---------------------------------------------------------------------------
+// Context (input) — the JSON temper writes to $TEMPER_CODING_WORKSPACE_CONTEXT.
+// ---------------------------------------------------------------------------
+
+/// The work-item context temper prepares for the coding-workspace command.
+///
+/// Field names mirror temper's `write_context_file`
+/// (`temper-coding-workspace`): all top-level fields are required, `guidance`
+/// sub-fields are optional. `work_item.context` is the inner work-item JSON
+/// *as a string* (the artifact title/body/labels); we surface it to the model
+/// verbatim rather than re-parsing temper's private shape.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceContext {
+    pub repository: WorkspaceRepository,
+    pub work_item: WorkspaceWorkItem,
+    pub base_branch: String,
+    pub branch_hint: String,
+    pub correlation_key: String,
+    /// Checkout mode token: `writable`, `read_only`, or `pull_request_read_only`.
+    #[serde(default)]
+    pub checkout: Option<String>,
+    #[serde(default)]
+    pub guidance: WorkspaceGuidance,
+}
+
+/// Repository coordinates from the context file.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceRepository {
+    pub id: String,
+    pub owner: String,
+    pub name: String,
+    pub default_branch: String,
+}
+
+/// The work item the role is acting on.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceWorkItem {
+    pub role: String,
+    pub queue: String,
+    pub kind: String,
+    /// Debug-formatted target, e.g. `Issue { number: ItemNumber(7) }`.
+    pub target: String,
+    /// Inner work-item JSON string (artifact title/body/labels).
+    pub context: String,
+}
+
+/// Optional guidance temper threads through from the workflow manifest.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceGuidance {
+    #[serde(default)]
+    pub role_guidance: Option<String>,
+    #[serde(default)]
+    pub tool_guidance: Option<String>,
+    #[serde(default)]
+    pub tool_constraints: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Result (output) — the JSON the command writes to
+// $TEMPER_CODING_WORKSPACE_RESULT. Must match temper's `WorkspaceResult` /
+// `WorkspaceResultChild` exactly: temper deserializes with
+// `deny_unknown_fields`, so every field name and type has to line up.
+// ---------------------------------------------------------------------------
+
+/// The result temper reads back. Mirrors temper's `WorkspaceResult`.
+///
+/// On the engineer head path (a real product diff and no verdict) this is
+/// effectively empty except for a `summary`; temper commits/pushes the
+/// working-tree diff and the engineer worker opens the PR. On a verdict path the
+/// agent leaves no diff and routes via `verdict` plus the authored `body` /
+/// `review_body` / `children`.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceResult {
+    /// Verdict id routing the transition. Absent ⇒ head path (diff is the work
+    /// product).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<String>,
+    /// One-line human summary of what the run did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// Rewritten issue body (architect `ready_code` / `needs_design`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// Review prose (reviewer `changes`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_body: Option<String>,
+    /// PR label override for the head path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<String>>,
+    /// Child issues for `needs_breakdown`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<WorkspaceResultChild>,
+}
+
+/// A child issue for the architect `needs_breakdown` verdict. Mirrors temper's
+/// `WorkspaceResultChild` (all fields required, defaulting to empty).
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct WorkspaceResultChild {
+    pub slug: String,
+    pub title: String,
+    pub body: String,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Role → capability mapping.
+// ---------------------------------------------------------------------------
+
+/// The capability a role runs with. Engineer mutates the checkout; architect and
+/// reviewer are read-only analysts that emit a verdict.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Capability {
+    /// Edit tools; leaves a product diff. Maps to the engineer role.
+    CodingWorkspace,
+    /// Read-only analysis; emits a verdict + authored body / children.
+    TriageWorkspace,
+    /// Read-only diff + CI review; emits an approve / changes / escalate verdict.
+    ReviewWorkspace,
+}
+
+impl Capability {
+    /// Maps a workflow role id to its capability. Unknown roles default to the
+    /// read-only triage capability so an unexpected role can never silently
+    /// mutate the checkout.
+    pub fn for_role(role: &str) -> Self {
+        match role {
+            "engineer" => Capability::CodingWorkspace,
+            "reviewer" => Capability::ReviewWorkspace,
+            _ => Capability::TriageWorkspace,
+        }
+    }
+
+    /// Whether the capability is allowed to mutate the working tree.
+    pub fn is_writable(self) -> bool {
+        matches!(self, Capability::CodingWorkspace)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Errors.
+// ---------------------------------------------------------------------------
+
+/// Why a coding-workspace run could not produce a result.
+#[derive(Debug)]
+pub enum CodingAgentError {
+    /// Building the provider or loading credentials failed.
+    Provider(ProviderError),
+    /// The SDK agent run failed (network, provider rejection, abort).
+    Run(String),
+    /// The agent stopped with an error stop reason.
+    AgentStopped(String),
+    /// The model's reply was not the expected JSON result object.
+    Parse { snippet: String, error: String },
+    /// A writable (engineer) run finished without leaving a product diff and
+    /// without a routing verdict — there is nothing for temper to land.
+    NoProduct,
+}
+
+impl std::fmt::Display for CodingAgentError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CodingAgentError::Provider(error) => write!(formatter, "{error}"),
+            CodingAgentError::Run(message) => write!(formatter, "LLM run failed: {message}"),
+            CodingAgentError::AgentStopped(reason) => {
+                write!(formatter, "agent stopped abnormally: {reason}")
+            }
+            CodingAgentError::Parse { snippet, error } => {
+                write!(
+                    formatter,
+                    "could not parse agent result ({error}): {snippet}"
+                )
+            }
+            CodingAgentError::NoProduct => formatter.write_str(
+                "engineer run produced no product diff and emitted no verdict; nothing to land",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CodingAgentError {}
+
+impl From<ProviderError> for CodingAgentError {
+    fn from(error: ProviderError) -> Self {
+        Self::Provider(error)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Prompt construction.
+// ---------------------------------------------------------------------------
+
+/// Builds the role system prompt for a capability.
+pub fn system_prompt(capability: Capability) -> String {
+    let mut prompt = String::from(
+        "You are Smith, an autonomous software engineering agent running one \
+         workspace turn inside a Temper workflow. You operate on a real Git \
+         checkout using the provided file and shell tools. Work carefully and \
+         deterministically; never invent files you have not inspected.\n\n",
+    );
+
+    match capability {
+        Capability::CodingWorkspace => prompt.push_str(
+            "ROLE: engineer (coding_workspace capability).\n\
+             - Implement the work item as specified, leaving a real, \
+             non-bookkeeping product diff in the working tree.\n\
+             - Edit and create real source/docs/test files. Do NOT create \
+             bookkeeping-only diffs such as `.temper-pr-prep` or `.temper-ci` \
+             changes.\n\
+             - Do NOT run git commit, git push, or open a PR: the harness commits, \
+             pushes, and opens the PR from your working-tree diff.\n\
+             - On success, emit NO verdict (the head path opens the PR). Only emit \
+             verdict `needs_architect` if the item genuinely cannot be implemented \
+             as specified, explaining why in `summary`.\n",
+        ),
+        Capability::TriageWorkspace => prompt.push_str(
+            "ROLE: architect (triage_workspace capability).\n\
+             - Read-only analysis: inspect the repository, but make NO edits to \
+             the working tree.\n\
+             - Emit exactly one verdict:\n\
+             - `ready_code` with an authored `body` (a precise, implementable \
+             code spec) when the item is ready to be built;\n\
+             - `needs_design` with an authored `body` (a design proposal) when \
+             design work is required first;\n\
+             - `needs_breakdown` with a `children` list (each: slug, title, body, \
+             labels, depends_on) when the item must be split into child issues.\n",
+        ),
+        Capability::ReviewWorkspace => prompt.push_str(
+            "ROLE: reviewer (review_workspace capability).\n\
+             - Read-only review: inspect the actual diff and CI result, not just \
+             the PR summary. Make NO edits to the working tree.\n\
+             - Emit exactly one verdict:\n\
+             - `approve` when the change satisfies the contract and has a \
+             meaningful, correct implementation diff;\n\
+             - `changes` with an authored `review_body` when the change is \
+             incomplete, unsafe, contradicts the contract, or is bookkeeping-only;\n\
+             - `escalate` when the decision exceeds a static review (explain in \
+             `summary`).\n",
+        ),
+    }
+
+    prompt.push_str(
+        "\nWhen you have finished using tools, your FINAL message must be a single \
+         JSON object (and nothing else) describing the result, with these \
+         optional fields: `verdict` (string), `summary` (string), `body` \
+         (string), `review_body` (string), `labels` (array of strings), and \
+         `children` (array of {slug, title, body, labels, depends_on}). Omit \
+         fields you are not using. For the engineer success path, emit `{\"summary\": \
+         \"...\"}` with no `verdict`. Do not wrap the JSON in prose or code fences.",
+    );
+
+    prompt
+}
+
+/// Builds the user-turn context describing the concrete work item.
+pub fn user_context(context: &WorkspaceContext) -> String {
+    let mut text = String::new();
+    text.push_str(&format!(
+        "Repository: {}/{} (default branch: {})\n",
+        context.repository.owner, context.repository.name, context.repository.default_branch
+    ));
+    text.push_str(&format!(
+        "Role: {}  Queue: {}  Kind: {}\n",
+        context.work_item.role, context.work_item.queue, context.work_item.kind
+    ));
+    text.push_str(&format!("Target: {}\n", context.work_item.target));
+    text.push_str(&format!("Base branch: {}\n", context.base_branch));
+    text.push_str(&format!("Branch hint: {}\n", context.branch_hint));
+    text.push_str(&format!("Correlation key: {}\n", context.correlation_key));
+    if let Some(checkout) = &context.checkout {
+        text.push_str(&format!("Checkout mode: {checkout}\n"));
+    }
+
+    if let Some(role_guidance) = &context.guidance.role_guidance {
+        text.push_str(&format!("\nRole guidance:\n{role_guidance}\n"));
+    }
+    if let Some(tool_guidance) = &context.guidance.tool_guidance {
+        text.push_str(&format!("\nTool guidance:\n{tool_guidance}\n"));
+    }
+    if !context.guidance.tool_constraints.is_empty() {
+        text.push_str("\nTool constraints:\n");
+        for constraint in &context.guidance.tool_constraints {
+            text.push_str(&format!("- {constraint}\n"));
+        }
+    }
+
+    text.push_str("\nWork item context (JSON):\n");
+    text.push_str(&context.work_item.context);
+    text.push('\n');
+
+    text
+}
+
+// ---------------------------------------------------------------------------
+// Tool registry.
+// ---------------------------------------------------------------------------
+
+/// Builds the tool registry for a capability, scoped to `cwd`.
+///
+/// The engineer (writable) capability gets the full edit toolset; the read-only
+/// capabilities get inspection tools plus bash (so they can `git diff`,
+/// `git log`, inspect CI artifacts, etc.) but no file-writing tools.
+pub fn tool_registry(capability: Capability, cwd: &Path) -> ToolRegistry {
+    let mut tools = vec![
+        create_read_tool(cwd),
+        create_ls_tool(cwd),
+        create_grep_tool(cwd),
+        create_find_tool(cwd),
+        create_bash_tool(cwd),
+    ];
+    if capability.is_writable() {
+        tools.push(create_edit_tool(cwd));
+        tools.push(create_write_tool(cwd));
+    }
+    ToolRegistry::from_tools(tools)
+}
+
+// ---------------------------------------------------------------------------
+// Agent run.
+// ---------------------------------------------------------------------------
+
+/// Runs one capability/role-aware coding-workspace turn.
+///
+/// Builds a `pi` SDK agent with the role's tools scoped to `cwd`, runs the agent
+/// loop with the work-item context, parses the model's final JSON into a
+/// [`WorkspaceResult`], and validates the role contract (an engineer head path
+/// must leave a product diff or route a verdict).
+///
+/// This is an `async fn`; the caller must drive it on an **asupersync** runtime
+/// because the `pi` file/bash tools use asupersync IO. See the
+/// `smith-coding-agent` binary for the runtime wiring.
+pub async fn run_coding_agent(
+    provider_config: &ProviderConfig,
+    context: &WorkspaceContext,
+    cwd: &Path,
+    max_iterations: usize,
+) -> Result<WorkspaceResult, CodingAgentError> {
+    let capability = Capability::for_role(&context.work_item.role);
+    let provider = provider_config.build_provider()?;
+
+    let role_prompt = system_prompt(capability);
+    let user = user_context(context);
+
+    // Anthropic's subscription OAuth path rejects any request whose first
+    // `system` block is not exactly the Claude Code identity (HTTP 429). For
+    // that mode send the identity as the system prompt and fold the role prompt
+    // into the user turn, mirroring `crate::decision::run_decision`.
+    let (effective_system, effective_user) = match provider_config.required_system_identity() {
+        Some(identity) => (identity.to_string(), format!("{role_prompt}\n\n{user}")),
+        None => (role_prompt, user),
+    };
+
+    let mut config = AgentConfig {
+        system_prompt: Some(effective_system),
+        max_tool_iterations: max_iterations,
+        ..AgentConfig::default()
+    };
+    config.stream_options.api_key = Some(provider_config.resolve_bearer().await?);
+    config.stream_options.temperature = provider_config.temperature();
+    config.stream_options.thinking_level = provider_config.thinking_level();
+    config.stream_options.headers = provider_config.request_headers();
+
+    let tools = tool_registry(capability, cwd);
+    let mut agent = Agent::new(Arc::clone(&provider), tools, config);
+
+    let assistant = agent
+        .run(effective_user, |_event| {})
+        .await
+        .map_err(|error| CodingAgentError::Run(error.to_string()))?;
+
+    if matches!(assistant.stop_reason, StopReason::Error) {
+        return Err(CodingAgentError::AgentStopped(
+            assistant
+                .error_message
+                .unwrap_or_else(|| "provider reported an error stop".to_string()),
+        ));
+    }
+
+    let text = collect_text(&assistant.content);
+    let result = parse_result(&text)?;
+    validate_contract(capability, &result, cwd)?;
+    Ok(result)
+}
+
+/// Concatenates the assistant message's text blocks (ignoring thinking/tool
+/// blocks).
+fn collect_text(content: &[ContentBlock]) -> String {
+    content
+        .iter()
+        .filter_map(|block| match block {
+            ContentBlock::Text(text) => Some(text.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// Parses the model's reply into a [`WorkspaceResult`], tolerating a code-fenced
+/// or prose-wrapped JSON object. An empty / no-object reply is treated as an
+/// empty head-path result (no verdict, no diff claim) so the contract check is
+/// the single authority on whether that is acceptable.
+fn parse_result(text: &str) -> Result<WorkspaceResult, CodingAgentError> {
+    let Some(candidate) = extract_json_object(text) else {
+        if text.trim().is_empty() {
+            return Ok(WorkspaceResult::default());
+        }
+        return Err(CodingAgentError::Parse {
+            snippet: snippet(text),
+            error: "no JSON object found in reply".to_string(),
+        });
+    };
+    serde_json::from_str::<WorkspaceResult>(&candidate).map_err(|error| CodingAgentError::Parse {
+        snippet: snippet(text),
+        error: error.to_string(),
+    })
+}
+
+/// Enforces the role contract that temper relies on: an engineer (writable)
+/// run that emits no verdict must have left a real product diff in the working
+/// tree, otherwise there is nothing to land. Read-only roles need a verdict.
+fn validate_contract(
+    capability: Capability,
+    result: &WorkspaceResult,
+    cwd: &Path,
+) -> Result<(), CodingAgentError> {
+    let has_verdict = result
+        .verdict
+        .as_deref()
+        .map(|verdict| !verdict.trim().is_empty())
+        .unwrap_or(false);
+
+    match capability {
+        Capability::CodingWorkspace => {
+            if has_verdict {
+                return Ok(());
+            }
+            if working_tree_has_changes(cwd) {
+                Ok(())
+            } else {
+                Err(CodingAgentError::NoProduct)
+            }
+        }
+        Capability::TriageWorkspace | Capability::ReviewWorkspace => {
+            if has_verdict {
+                Ok(())
+            } else {
+                Err(CodingAgentError::AgentStopped(
+                    "read-only role finished without emitting a verdict".to_string(),
+                ))
+            }
+        }
+    }
+}
+
+/// Returns true when `git status --porcelain` reports any change in `cwd`.
+/// Falls back to `false` when git cannot be invoked, which the contract check
+/// then surfaces as [`CodingAgentError::NoProduct`].
+fn working_tree_has_changes(cwd: &Path) -> bool {
+    std::process::Command::new("git")
+        .arg("status")
+        .arg("--porcelain=v1")
+        .arg("--untracked-files=all")
+        .current_dir(cwd)
+        .output()
+        .map(|output| output.status.success() && !output.stdout.is_empty())
+        .unwrap_or(false)
+}
+
+/// Returns the first balanced top-level `{...}` substring, if any. Shares the
+/// brace-matching logic with [`crate::decision`] but is kept local to avoid a
+/// cross-module dependency on a private helper.
+fn extract_json_object(text: &str) -> Option<String> {
+    let start = text.find('{')?;
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, ch) in text[start..].char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(text[start..=start + offset].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// A short, single-line snippet of the model reply for error messages.
+fn snippet(text: &str) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.len() > 200 {
+        format!("{}…", &collapsed[..200])
+    } else {
+        collapsed
+    }
+}
+
+#[cfg(test)]
+#[path = "coding_agent_tests.rs"]
+mod tests;
