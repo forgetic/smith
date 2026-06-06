@@ -49,6 +49,7 @@ use pi::sdk::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::prompt_overlays::PromptOverlays;
 use crate::provider::{ProviderConfig, ProviderError};
 
 /// Default ceiling on tool-using iterations for one workspace run. The agent
@@ -453,6 +454,13 @@ pub fn tool_registry(capability: Capability, cwd: &Path) -> ToolRegistry {
 /// [`WorkspaceResult`], and validates the role contract (an engineer head path
 /// must leave a product diff or route a verdict).
 ///
+/// `config_dir` is the resolved operator config dir (default
+/// `$XDG_CONFIG_HOME/smith` else `~/.config/smith`, overridable via
+/// `--config-dir` / `SMITH_CONFIG_DIR`). When present, per-role operator prompt
+/// overlays from it and the checkout's root `AGENTS.md` are layered onto the
+/// built-in role prompt as clearly-delimited context. Missing dir/files are a
+/// clean no-op. See [`crate::prompt_overlays`].
+///
 /// This is an `async fn`; the caller must drive it on an **asupersync** runtime
 /// because the `pi` file/bash tools use asupersync IO. See the
 /// `smith-coding-agent` binary for the runtime wiring.
@@ -461,6 +469,7 @@ pub async fn run_coding_agent(
     context: &WorkspaceContext,
     cwd: &Path,
     max_iterations: usize,
+    config_dir: Option<&Path>,
 ) -> Result<WorkspaceResult, CodingAgentError> {
     let capability = Capability::for_role(&context.work_item.role);
     let provider = provider_config.build_provider()?;
@@ -468,17 +477,20 @@ pub async fn run_coding_agent(
     let role_prompt = system_prompt(capability, &context.allowed_verdicts);
     let user = user_context(context);
 
-    // Anthropic's subscription OAuth path rejects any request whose first
-    // `system` block is not exactly the Claude Code identity (HTTP 429). For
-    // that mode send the identity as the system prompt and fold the role prompt
-    // into the user turn, mirroring `crate::decision::run_decision`.
-    let (effective_system, effective_user) = match provider_config.required_system_identity() {
-        Some(identity) => (identity.to_string(), format!("{role_prompt}\n\n{user}")),
-        None => (role_prompt, user),
-    };
+    // Layer operator overlays + the checkout's AGENTS.md onto the role prompt and
+    // place them in the correct turn. The pieces are additive context; the
+    // built-in role contract stays first. Under Anthropic OAuth the role prompt
+    // and overlays fold into the user turn (the first system block must be the
+    // Claude Code identity, else HTTP 429), mirroring `crate::decision`.
+    let overlays = PromptOverlays::load(config_dir, cwd, capability);
+    let turns = overlays.compose_turns(
+        &role_prompt,
+        &user,
+        provider_config.required_system_identity(),
+    );
 
     let mut config = AgentConfig {
-        system_prompt: Some(effective_system),
+        system_prompt: Some(turns.system),
         max_tool_iterations: max_iterations,
         ..AgentConfig::default()
     };
@@ -491,7 +503,7 @@ pub async fn run_coding_agent(
     let mut agent = Agent::new(Arc::clone(&provider), tools, config);
 
     let assistant = agent
-        .run(effective_user, |_event| {})
+        .run(turns.user, |_event| {})
         .await
         .map_err(|error| CodingAgentError::Run(error.to_string()))?;
 

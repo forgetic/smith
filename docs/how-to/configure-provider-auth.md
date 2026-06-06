@@ -69,6 +69,17 @@ printf '%s' '...' > .cache/deepseek-api-key
 
 `TEMPER_DEEPSEEK_API_KEY_PATH` overrides the file path.
 
+## Coding-agent prompt overlays
+
+`smith-coding-agent` also accepts `--config-dir PATH` to point at an operator
+config dir holding optional prompt overlays (`prompts/engineer.md`,
+`prompts/architect.md`, `prompts/reviewer.md`, and a shared
+`prompts/coding-agent.md`). When unset it defaults to `$SMITH_CONFIG_DIR`, then
+`$XDG_CONFIG_HOME/smith`, then `~/.config/smith`. The checkout's root `AGENTS.md`
+is injected as context by default. Missing dirs/files are a clean no-op. See
+[Coding-agent prompt overlays and AGENTS.md](../reference/coding-agent-prompts.md)
+for the full contract.
+
 ## Secrets discipline
 
 - Never pass provider secrets on argv.
