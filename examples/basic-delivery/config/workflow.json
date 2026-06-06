@@ -4,20 +4,21 @@
   "roles": [
     {
       "id": "architect",
-      "charter": "Triage one unlabeled intake issue into a crisp, ready-to-implement code spec. There is no design or breakdown branch: the only outcome is a ready code issue.",
+      "charter": "Triage one unlabeled intake issue into a crisp, ready-to-implement code spec. Intake is filed deliberately thin — the filer states only the overall intent — so triage is real design work: expand that intent into a complete, unambiguous spec an engineer can execute without further questions. There is no design or breakdown branch: the only outcome is a ready code issue.",
       "prompt": {
-        "guidance": "Use triage_intake to triage untriaged intake. The triage workspace reads the issue and returns the single declared verdict ready_code, which rewrites the body into a crisp code spec and marks it code + ready."
+        "guidance": "Use triage_intake to triage untriaged intake. The seeded intake is intentionally short: it declares intent only, with no acceptance criteria, no setting/interface name, and no implementation plan. Your job is to DESIGN, not to relabel. Use the triage workspace to read the issue and the repository, then return the single declared verdict ready_code with a fully REWRITTEN body that is complete and ready for the engineer to implement. The rewrite must define the concrete behavior, name the user-facing interface (e.g. the setting/flag), specify the default behavior, point at the file(s) to touch, and list explicit acceptance criteria. The engine applies that body via the triage_intake_to_code set_body effect and marks the issue code + ready."
       },
       "external_tools": [
         {
           "id": "triage_workspace",
-          "description": "Read the intake issue and any linked context, then author a rewritten body as a crisp code spec, and return the ready_code verdict that routes the triage.",
+          "description": "Read the intentionally-thin intake issue (intent only) plus the repository, then author a fully rewritten body that turns that intent into a complete, implementable code spec, and return the ready_code verdict that routes the triage. The rewrite is the architect's product: it must be detailed enough that the engineer can implement it with no further design.",
           "required": false,
           "constraints": [
             "Only read the work-item context and repository; never mutate Forge state.",
+            "Do not merely restate the filer's intent: the returned body must add the concrete design the thin intake omits (named interface, behavior, defaults, files to touch, acceptance criteria).",
             "Return the single declared verdict; the engine applies the routed transition's effects."
           ],
-          "guidance": "Use this from triage_intake. If it is not bound, choose no_action for intake triage."
+          "guidance": "Use this from triage_intake. Inspect the repository so the spec references real files and conventions. Return ready_code with the authored body. If it is not bound, choose no_action for intake triage."
         }
       ],
       "concurrency": 1,

@@ -189,7 +189,7 @@ cmd_stop() {
 # Config knobs whose pre-existing environment value should win over the file
 # (precedence: CLI/env > config/temper.env > built-in default). The file is the
 # operator's edited config; a `VAR=x ./run.sh` still overrides it.
-CONFIG_KNOBS="OWNER NAME DEFAULT_BRANCH WORKFLOW_FILE BASE_URL POLL_MS CI_STATUS_POLL_MS IDLE_POLL_MAX_MS RUN_SECS WEBHOOKS TRIGGER_BIND WEBHOOK_URL \
+CONFIG_KNOBS="OWNER NAME DEFAULT_BRANCH WORKFLOW_FILE INTAKE_TITLE INTAKE_BODY_FILE BASE_URL POLL_MS CI_STATUS_POLL_MS IDLE_POLL_MAX_MS RUN_SECS WEBHOOKS TRIGGER_BIND WEBHOOK_URL \
 TEMPER_FORGEJO_GOMAXPROCS TEMPER_FORGEJO_BINARY \
 TEMPER_FORGEJO_RUNNER_BINARY TEMPER_WORKER_BIN TEMPER_PROVISION_BIN \
 TEMPER_TRIGGER_BIN TEMPER_BUILD_PACKAGE \
@@ -247,6 +247,13 @@ load_config() {
     NAME=${NAME:-service}
     DEFAULT_BRANCH=${DEFAULT_BRANCH:-main}
     WORKFLOW_FILE=${WORKFLOW_FILE:-workflow.json}
+    # The seeded intake issue is deliberately THIN: the site admin (external
+    # filer) states only the overall intent, with no acceptance criteria, no
+    # setting name, and no implementation detail. Turning that into an
+    # implementable spec is the architect's job (the triage_intake_to_code
+    # set_body rewrite) — that is what this example proves the architect can do.
+    INTAKE_TITLE=${INTAKE_TITLE:-Service banner should identify the environment}
+    INTAKE_BODY_FILE=${INTAKE_BODY_FILE:-intake-issue.md}
     BASE_URL=${BASE_URL:-http://127.0.0.1:4100}
     POLL_MS=${POLL_MS:-120000}
     # The mechanical landing worker reads CI status on a short poll because
@@ -311,6 +318,14 @@ load_config() {
         *)  WORKFLOW_PATH="$CONFIG_DIR/$WORKFLOW_FILE" ;;
     esac
     [ -f "$WORKFLOW_PATH" ] || die "workflow file not found: $WORKFLOW_PATH (set WORKFLOW_FILE in config/temper.env)"
+
+    # Resolve the thin intake body the same way: a relative path is taken
+    # relative to config/, an absolute path is used verbatim.
+    case "$INTAKE_BODY_FILE" in
+        /*) INTAKE_BODY_PATH="$INTAKE_BODY_FILE" ;;
+        *)  INTAKE_BODY_PATH="$CONFIG_DIR/$INTAKE_BODY_FILE" ;;
+    esac
+    [ -f "$INTAKE_BODY_PATH" ] || die "intake body file not found: $INTAKE_BODY_PATH (set INTAKE_BODY_FILE in config/temper.env)"
 
     # Cap the Go runtime of the spawned forgejo + forgejo-runner (lesson 0009).
     # Exported so both Go processes inherit it; harmless for the Rust workers.
@@ -582,7 +597,10 @@ bootstrap_and_provision() {
     # all-scoped token. The token stays in a shell variable; it is never echoed
     # and reaches the provision step only via the environment. The workflow's
     # intake_author = site_admin makes the provisioner seed the intake issue as
-    # THIS admin (the "external filer"); the issue lands UNLABELED.
+    # THIS admin (the "external filer"); the issue lands UNLABELED. The seed
+    # title/body come from INTAKE_TITLE + the bundled INTAKE_BODY_FILE and are
+    # deliberately THIN (intent only) so the architect's triage rewrite has real
+    # design work to do.
     forgejo_cli admin user create --username "$ADMIN_USER" --password "$ADMIN_PASSWORD" \
         --email "$ADMIN_EMAIL" --admin --must-change-password=false \
         >"$LOG_DIR/admin-create.log" 2>&1 || true
@@ -605,6 +623,7 @@ bootstrap_and_provision() {
     _status=$(TEMPER_FORGEJO_ADMIN_TOKEN="$ADMIN_TOKEN" "$PROVISION_BIN" \
         --base-url "$BASE_URL" --owner "$_owner" --name "$_name" --out "$ROLES_ENV" \
         --workflow "$WORKFLOW_PATH" \
+        --intake-title "$INTAKE_TITLE" --intake-body-file "$INTAKE_BODY_PATH" \
         $_webhook_args) \
         || die "provisioning $REPO failed"
 

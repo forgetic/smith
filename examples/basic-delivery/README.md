@@ -21,8 +21,10 @@ The seeded intake flows end to end with only three workers running:
 
 1. `run.sh` boots a throwaway Forgejo + runner and creates exactly **one org +
    repo** (`acme/service` by default).
-2. `run.sh` files **one unlabeled intake issue** with a dead-simple coding task,
-   authored by the **site admin** (mimicking an external filer). This works
+2. `run.sh` files **one unlabeled intake issue**, authored by the **site admin**
+   (mimicking an external filer). The seed is **deliberately thin**: its body
+   (bundled as `config/intake-issue.md`) declares only the overall intent — no
+   acceptance criteria, no setting name, no implementation plan. This works
    because the bundled `config/workflow.json` declares
    `intake_author: { "kind": "site_admin" }` (Temper W2), so provisioning seeds
    the issue as the admin identity and the issue lands **unlabeled**.
@@ -30,10 +32,14 @@ The seeded intake flows end to end with only three workers running:
    `mechanical` (serviced by the `bot`), plus CI.
 4. The **bot** (`mechanical` worker) transitions the issue unlabeled →
    `untriaged` (the `raw_intake` queue's `mark_untriaged` automation).
-5. The **architect** (real LLM) triages. Its *only* option is to **rewrite the
-   body into a crisp code spec and mark it `code` + `ready`** — there is no
-   `needs_design` / `needs_breakdown` branch (`triage_intake` has a single
-   `ready_code → triage_intake_to_code` outcome).
+5. The **architect** (real LLM) triages, and this is where it does real design
+   work: it reads the thin intent, inspects the repo, and **rewrites the body
+   into a complete, implementable code spec** (named interface, behavior,
+   defaults, files to touch, acceptance criteria), then marks it `code` +
+   `ready`. The rewrite is applied by the `triage_intake_to_code` `set_body`
+   effect. There is no `needs_design` / `needs_breakdown` branch (`triage_intake`
+   has a single `ready_code → triage_intake_to_code` outcome), so the architect
+   proves its value through the **content of the rewrite**, not through routing.
 6. The **engineer** (real LLM) claims the ready code issue, implements it,
    leaving a real product diff, and opens an `implementation` PR.
 7. The **`forgejo-runner`** runs real CI on the PR head, and it goes green.
@@ -73,6 +79,14 @@ The architect's `triage_intake` declares a **single** outcome (`ready_code`). Fo
 the run to converge deterministically the architect must emit exactly that
 verdict — never `needs_design` / `needs_breakdown`.
 
+A single routing outcome does **not** make the architect a rubber stamp. The
+intake is seeded intentionally thin (intent only; see `config/intake-issue.md`),
+and the architect's role guidance instructs it to **design**: expand that intent
+into a complete spec and return it as the rewritten body. The engine then
+applies the body through the `triage_intake_to_code` `set_body` effect. Comparing
+the seeded body to the triaged issue shows the architect's design contribution —
+that is the proof this example exists to provide.
+
 This example uses the **W3 path**: Temper surfaces the action's
 `allowed_verdicts` in the workspace context, and the **Smith coding agent reads
 it** (`crates/smith-temper-agent/src/coding_agent.rs`). When `allowed_verdicts`
@@ -94,6 +108,9 @@ examples/basic-delivery/
 │   ├── workflow.json    # the 3-role basic-delivery spec (tracks the canonical
 │   │                    #   fixture crates/temper-workflow/fixtures/
 │   │                    #   basic-delivery.json — keep the two in sync; see below)
+│   ├── intake-issue.md  # the deliberately THIN intake body (intent only) the
+│   │                    #   site admin files; the architect rewrites it into a
+│   │                    #   complete spec during triage
 │   └── ci.yml           # the host-mode CI run.sh applies over the provisioned
 │                        #   marker CI (real coder heads must pass it)
 ├── tools/
@@ -106,7 +123,11 @@ examples/basic-delivery/
 The workflow **roles**, labels, role guidance, prompt extensions, and
 external-tool declarations are derived from `config/workflow.json`. `config/`
 otherwise carries what an operator may edit (the org/repo, endpoint, cadence,
-Smith responder args, and the coding workspace binding).
+the seeded intake title/body, Smith responder args, and the coding workspace
+binding). The seeded intake title and body file are set by `INTAKE_TITLE` /
+`INTAKE_BODY_FILE` in `config/temper.env`; `run.sh` passes them to
+`temper-provision-forgejo` as `--intake-title` / `--intake-body-file`. Keep the
+bundled body intent-only so the architect's rewrite is what produces the spec.
 
 > **Keeping the spec in sync.** `config/workflow.json` is the canonical
 > basic-delivery spec. A copy lives as the Temper test fixture
@@ -213,7 +234,11 @@ diffs pass it.
 A converged run (default `BASIC_DELIVERY_CODER=smith`) ends with the seeded issue
 `code`+`ready`, an implementation PR open, CI green, and the PR merged + `landed`
 by the bot — with only `architect` + `engineer` + `mechanical` workers running and
-no human action. `./run.sh validate-webhooks` confirms webhooks were registered,
+no human action. Open the triaged issue and confirm the architect **replaced the
+thin seed body** (`config/intake-issue.md`) with a complete spec — a named
+interface, behavior, defaults, files to touch, and acceptance criteria — that the
+engineer then implemented. That before/after on the issue body is this example's
+proof the architect does real design work, not just relabeling. `./run.sh validate-webhooks` confirms webhooks were registered,
 accepted, delivered, consumed, and acted on. `./run.sh stop` / Ctrl-C tears
 everything down cleanly; re-runs start fresh.
 

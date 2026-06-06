@@ -440,6 +440,8 @@ fn runtime_external_tool_lines(tools: &[BoundExternalTool]) -> Vec<String> {
         "Only the external tools listed in this section are bound and available for this run."
             .to_string(),
         "Declared tools not listed here are unavailable; do not claim to use them.".to_string(),
+        "You do not and cannot call these tools yourself: selecting the workflow action a bound tool backs makes the engine run that tool automatically while it executes the action.".to_string(),
+        "Because a bound tool runs on action selection, never return no_action just because you cannot run the tool directly or because its output (a branch, head, diff, or verdict) does not exist yet; selecting the action is what produces it.".to_string(),
         "External tools do not grant workflow or Forge mutation authority beyond the authorized workflow actions above.".to_string(),
     ];
     if tools.is_empty() {
@@ -459,7 +461,7 @@ fn runtime_external_tool_lines(tools: &[BoundExternalTool]) -> Vec<String> {
             }
             if tool.id == CODING_WORKSPACE_TOOL_ID {
                 lines.push(format!(
-                    "{} rule: implementation PR creation must use this workspace-produced branch/head; do not choose PR-opening actions for code work without it.",
+                    "{} rule: it is bound, so selecting the PR-opening workflow action runs it to produce the implementation branch/head and then opens the PR. Choose that PR-opening action for ready code work; do not return no_action expecting to run the workspace first.",
                     tool.id
                 ));
             }

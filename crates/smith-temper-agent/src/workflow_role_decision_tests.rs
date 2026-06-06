@@ -111,7 +111,11 @@ fn runtime_prompt_lists_only_bound_external_tools() {
 
     let bound = workflow_role_system_prompt(&request_with_compiled_external_tool(true));
     assert!(bound.contains("coding_workspace via workspace-local"));
-    assert!(bound.contains("implementation PR creation must use"));
+    // The engineer must learn that selecting the PR-opening action runs the
+    // bound workspace; it must not decline because it cannot run the tool itself.
+    assert!(bound.contains("selecting the PR-opening workflow action runs it"));
+    assert!(bound.contains("do not return no_action expecting to run the workspace first"));
+    assert!(bound.contains("selecting the workflow action a bound tool backs makes the engine run that tool automatically"));
     assert!(bound.contains("Produce a real product diff."));
 }
 
