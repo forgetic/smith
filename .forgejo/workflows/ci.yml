@@ -10,39 +10,53 @@ on:
       - reopened
 
 jobs:
-  check:
+  validate:
     runs-on: host
+    defaults:
+      run:
+        working-directory: ${{ env.HOME }}/.local/state/forgejo/runner/data/smith
     steps:
-      - name: checkout (manual; OFFLINE_MODE has no actions/checkout)
+      - name: Checkout
         run: |
           set -eu
-          rm -rf "$GITHUB_WORKSPACE/repo"
-          mkdir -p "$GITHUB_WORKSPACE/repo"
-          cd "$GITHUB_WORKSPACE/repo"
-          git init -q
-          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+
+          repo_dir="$HOME/.local/state/forgejo/runner/data/smith"
+          repo_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+
+          mkdir -p "$(dirname "$repo_dir")"
+
+          if [ -d "$repo_dir/.git" ]; then
+            cd "$repo_dir"
+            git remote set-url origin "$repo_url"
+          else
+            git -c http.extraheader="AUTHORIZATION: token $GITHUB_TOKEN" \
+              clone --no-checkout "$repo_url" "$repo_dir"
+            cd "$repo_dir"
+          fi
+
           git -c http.extraheader="AUTHORIZATION: token $GITHUB_TOKEN" \
-            fetch --depth=1 origin "$GITHUB_SHA"
-          git checkout -q --detach FETCH_HEAD
+            fetch --force --prune origin "$GITHUB_REF"
+          git checkout --force --detach FETCH_HEAD
+          git reset --hard "$GITHUB_SHA"
+          # Keep the local Cargo target symlink and Forgejo fixture binary cache.
+          # `target/` does not match a symlink, so exclude `target` without a slash.
+          git clean -ffdx -e target -e .cache/forgejo
 
-      - name: cargo fmt --check
+          mkdir -p "$HOME/.cache/cargo-target-smith"
+          if [ -e target ] && [ ! -L target ]; then
+            rm -rf target
+          fi
+          ln -sfn "$HOME/.cache/cargo-target-smith" target
+      - name: Lint
         run: |
           set -eu
-          cd "$GITHUB_WORKSPACE/repo"
-          cargo fmt --all --check
-
-      - name: cargo clippy
+          cargo fmt --all
+          cargo dev-clippy
+      - name: Check
         run: |
           set -eu
-          cd "$GITHUB_WORKSPACE/repo"
-          # Warm, shared target cache across CI runs (the checkout dir is wiped
-          # each run); keep it outside the throwaway workspace.
-          export CARGO_TARGET_DIR="$HOME/.cache/smith-ci/target"
-          cargo dev-clippy -- -D warnings
-
-      - name: cargo test
+          cargo dev-check
+      - name: Test
         run: |
           set -eu
-          cd "$GITHUB_WORKSPACE/repo"
-          export CARGO_TARGET_DIR="$HOME/.cache/smith-ci/target"
           cargo dev-test

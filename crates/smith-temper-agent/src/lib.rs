@@ -14,6 +14,7 @@ pub mod interaction_profile;
 mod interaction_profile_config;
 mod observability;
 pub mod product_manager;
+pub mod prompt_overlays;
 pub mod provider;
 pub mod workflow_role_decision;
 mod workflow_role_decision_capture;
@@ -35,6 +36,9 @@ pub use product_manager::{
     PRODUCT_MANAGER_PROFILE_ID, PRODUCT_MANAGER_SYSTEM_PROMPT, ProductManagerAuthor,
     ProductManagerConversationTurn, ProductManagerDraftIssue, ProductManagerError,
     ProductManagerRequest, ProductManagerResponder, ProductManagerResponse,
+};
+pub use prompt_overlays::{
+    CONFIG_DIR_ENV, ComposedTurns, PromptOverlays, RenderedOverlays, resolve_config_dir,
 };
 pub use provider::{
     ANTHROPIC_MODEL_ENV, AUTH_FILE_ENV, AuthChoice, CODEX_MODEL_ENV, DEFAULT_ANTHROPIC_MODEL,

@@ -24,7 +24,7 @@ use asupersync::runtime::RuntimeBuilder;
 use asupersync::runtime::reactor::create_reactor;
 use smith_temper_agent::{
     AuthChoice, CodingAgentError, DEFAULT_MAX_ITERATIONS, ProviderConfig, WorkspaceContext,
-    WorkspaceResult, run_coding_agent,
+    WorkspaceResult, resolve_config_dir, run_coding_agent,
 };
 
 /// Env var naming the file Temper wrote the work-item context JSON to.
@@ -55,6 +55,10 @@ fn run() -> Result<(), String> {
     let cwd = std::env::current_dir()
         .map_err(|error| format!("resolving working directory failed: {error}"))?;
 
+    // Resolve the operator config dir for prompt overlays + AGENTS.md injection.
+    // A missing dir/files is a clean no-op inside `run_coding_agent`.
+    let config_dir = resolve_config_dir(options.config_dir.as_deref());
+
     // Preflight credentials before booting the runtime so a missing key fails
     // fast with a clear setup error (and never writes a result file).
     let provider = ProviderConfig::from_auth(options.auth, options.codex_model, options.auth_file)
@@ -75,6 +79,7 @@ fn run() -> Result<(), String> {
             &context,
             &cwd,
             options.max_iterations,
+            config_dir.as_deref(),
         ))
         .map_err(describe_agent_error)?;
 
@@ -129,6 +134,7 @@ struct CodingAgentOptions {
     auth: AuthChoice,
     codex_model: Option<String>,
     auth_file: Option<PathBuf>,
+    config_dir: Option<PathBuf>,
     max_iterations: usize,
     help: bool,
 }
@@ -138,6 +144,7 @@ impl CodingAgentOptions {
         let mut auth = AuthChoice::ChatGptOAuth;
         let mut codex_model = None;
         let mut auth_file = None;
+        let mut config_dir = None;
         let mut max_iterations = DEFAULT_MAX_ITERATIONS;
         let mut help = false;
         let mut iter = args.into_iter();
@@ -161,6 +168,12 @@ impl CodingAgentOptions {
                         .ok_or_else(|| "--auth-file requires a value".to_string())?;
                     auth_file = Some(PathBuf::from(value));
                 }
+                "--config-dir" => {
+                    let value = iter
+                        .next()
+                        .ok_or_else(|| "--config-dir requires a value".to_string())?;
+                    config_dir = Some(PathBuf::from(value));
+                }
                 "--max-iterations" => {
                     let value = iter
                         .next()
@@ -180,6 +193,7 @@ impl CodingAgentOptions {
             auth,
             codex_model,
             auth_file,
+            config_dir,
             max_iterations,
             help,
         })
@@ -199,7 +213,7 @@ fn parse_auth_choice(value: &str) -> Result<AuthChoice, String> {
 
 fn print_usage() {
     println!(
-        "Usage:\n  smith-coding-agent \\\n    [--auth deepseek|chatgpt-oauth|anthropic-oauth] \\\n    [--codex-model MODEL] [--auth-file PATH] [--max-iterations N]\n\nImplements Temper's external coding-workspace command. Reads the work-item context from the file named by {CONTEXT_ENV}, runs a capability/role-aware pi SDK agent in the current working directory (the prepared checkout), and writes a WorkspaceResult JSON value to the file named by {RESULT_ENV} (or to stdout when that variable is unset). The engineer role leaves a product diff in the working tree; architect and reviewer roles emit a verdict. Logs and errors go to stderr; exits non-zero on failure."
+        "Usage:\n  smith-coding-agent \\\n    [--auth deepseek|chatgpt-oauth|anthropic-oauth] \\\n    [--codex-model MODEL] [--auth-file PATH] [--config-dir PATH] [--max-iterations N]\n\nImplements Temper's external coding-workspace command. Reads the work-item context from the file named by {CONTEXT_ENV}, runs a capability/role-aware pi SDK agent in the current working directory (the prepared checkout), and writes a WorkspaceResult JSON value to the file named by {RESULT_ENV} (or to stdout when that variable is unset). The engineer role leaves a product diff in the working tree; architect and reviewer roles emit a verdict.\n\nOperator prompt overlays (prompts/architect.md, prompts/engineer.md, prompts/reviewer.md, prompts/coding-agent.md) are loaded from --config-dir if given, else $SMITH_CONFIG_DIR, else $XDG_CONFIG_HOME/smith, else ~/.config/smith; the checkout's root AGENTS.md is injected as context. Missing dir/files are a clean no-op. Logs and errors go to stderr; exits non-zero on failure."
     );
 }
 
@@ -216,6 +230,8 @@ mod tests {
             "gpt-test".into(),
             "--auth-file".into(),
             "/tmp/auth.json".into(),
+            "--config-dir".into(),
+            "/tmp/smith-config".into(),
             "--max-iterations".into(),
             "12".into(),
         ])
@@ -224,6 +240,7 @@ mod tests {
         assert_eq!(options.auth, AuthChoice::AnthropicOAuth);
         assert_eq!(options.codex_model.as_deref(), Some("gpt-test"));
         assert_eq!(options.auth_file, Some(PathBuf::from("/tmp/auth.json")));
+        assert_eq!(options.config_dir, Some(PathBuf::from("/tmp/smith-config")));
         assert_eq!(options.max_iterations, 12);
     }
 
@@ -232,7 +249,15 @@ mod tests {
         let options = CodingAgentOptions::parse(Vec::new()).expect("defaults parse");
         assert_eq!(options.auth, AuthChoice::ChatGptOAuth);
         assert_eq!(options.max_iterations, DEFAULT_MAX_ITERATIONS);
+        assert_eq!(options.config_dir, None);
         assert!(!options.help);
+    }
+
+    #[test]
+    fn config_dir_requires_a_value() {
+        let error = CodingAgentOptions::parse(vec!["--config-dir".into()])
+            .expect_err("missing value fails");
+        assert!(error.contains("--config-dir requires a value"));
     }
 
     #[test]
