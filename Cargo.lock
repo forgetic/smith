@@ -3345,6 +3345,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "jig-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "jig-server"
+version = "0.1.0"
+dependencies = [
+ "jig-core",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "jobserver"
 version = "0.1.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5374,6 +5391,8 @@ checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
 name = "smith-temper-agent"
 version = "0.1.0"
 dependencies = [
+ "jig-core",
+ "jig-server",
  "pi_agent_rust",
  "serde",
  "serde_json",

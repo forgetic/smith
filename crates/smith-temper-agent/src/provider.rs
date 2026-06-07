@@ -228,6 +228,14 @@ impl ProviderConfig {
         Self::anthropic_oauth(None)
     }
 
+    /// Overrides the provider base URL for hermetic tests that redirect OAuth
+    /// provider traffic to a local fake LLM server.
+    #[cfg(any(test, feature = "test-base-url-override"))]
+    pub fn with_base_url_override(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into();
+        self
+    }
+
     /// Builds the provider config for an [`AuthChoice`], applying optional
     /// `codex_model` / `auth_file` overrides (each CLI > env > default), and
     /// performs an **eager credential preflight** so a missing key or login fails

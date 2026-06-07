@@ -1,5 +1,9 @@
 use super::*;
 
+fn jig_auth_fixture() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jig_auth.json")
+}
+
 #[test]
 fn deepseek_mode_targets_openai_completions() {
     let config = ProviderConfig::new("deepseek", "deepseek-chat", DEFAULT_BASE_URL, "sk-secret");
@@ -60,6 +64,48 @@ fn anthropic_oauth_mode_targets_anthropic_messages_route() {
     assert!(config.temperature().is_none());
     assert!(config.thinking_level().is_none());
     assert!(config.build_provider().is_ok());
+}
+
+#[test]
+fn base_url_override_changes_oauth_model_entries() {
+    let fixture = jig_auth_fixture();
+    let anthropic = ProviderConfig::anthropic_oauth(Some(fixture.clone()))
+        .with_base_url_override("http://127.0.0.1:12345");
+    assert_eq!(
+        anthropic.model_entry().model.base_url,
+        "http://127.0.0.1:12345"
+    );
+
+    let chatgpt = ProviderConfig::chatgpt_oauth(None, Some(fixture))
+        .with_base_url_override("http://127.0.0.1:23456");
+    assert_eq!(
+        chatgpt.model_entry().model.base_url,
+        "http://127.0.0.1:23456"
+    );
+}
+
+#[test]
+fn fixture_preflights_for_both_oauth_modes() {
+    assert!(
+        ProviderConfig::from_auth(AuthChoice::AnthropicOAuth, None, Some(jig_auth_fixture()))
+            .is_ok()
+    );
+    assert!(
+        ProviderConfig::from_auth(AuthChoice::ChatGptOAuth, None, Some(jig_auth_fixture())).is_ok()
+    );
+}
+
+#[tokio::test]
+async fn fixture_resolves_bearers_offline_for_both_oauth_modes() {
+    let anthropic =
+        ProviderConfig::from_auth(AuthChoice::AnthropicOAuth, None, Some(jig_auth_fixture()))
+            .expect("anthropic fixture should preflight");
+    assert_eq!(anthropic.resolve_bearer().await.unwrap(), "jig-dummy");
+
+    let chatgpt =
+        ProviderConfig::from_auth(AuthChoice::ChatGptOAuth, None, Some(jig_auth_fixture()))
+            .expect("chatgpt fixture should preflight");
+    assert_eq!(chatgpt.resolve_bearer().await.unwrap(), "jig-dummy");
 }
 
 #[test]
