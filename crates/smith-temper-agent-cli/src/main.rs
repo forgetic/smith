@@ -19,6 +19,10 @@ fn run() -> Result<(), String> {
         return Ok(());
     };
     match command.as_str() {
+        "version" => {
+            print_version();
+            Ok(())
+        }
         "preflight" => preflight(args.collect()),
         "help" | "--help" | "-h" => {
             print_usage();
@@ -26,6 +30,10 @@ fn run() -> Result<(), String> {
         }
         other => Err(format!("unknown command `{other}`; run with `help`")),
     }
+}
+
+fn print_version() {
+    println!("smith-temper-agent-cli {}", env!("CARGO_PKG_VERSION"));
 }
 
 fn preflight(args: Vec<String>) -> Result<(), String> {
@@ -100,6 +108,6 @@ fn parse_auth_choice(value: &str) -> Result<AuthChoice, String> {
 
 fn print_usage() {
     println!(
-        "Usage:\n  smith-temper-agent-cli preflight \\\n    [--auth deepseek|chatgpt-oauth|anthropic-oauth] \\\n    [--codex-model MODEL] [--auth-file PATH]\n\nThe preflight command reads credentials from env or auth files and prints only redacted provider config."
+        "Usage:\n  smith-temper-agent-cli preflight \\\n    [--auth deepseek|chatgpt-oauth|anthropic-oauth] \\\n    [--codex-model MODEL] [--auth-file PATH]\n  smith-temper-agent-cli version\n\nThe preflight command reads credentials from env or auth files and prints only redacted provider config.\nThe version command prints the Smith Temper agent CLI package version."
     );
 }
