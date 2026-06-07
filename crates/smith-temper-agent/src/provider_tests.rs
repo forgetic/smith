@@ -105,7 +105,10 @@ async fn fixture_resolves_bearers_offline_for_both_oauth_modes() {
     let chatgpt =
         ProviderConfig::from_auth(AuthChoice::ChatGptOAuth, None, Some(jig_auth_fixture()))
             .expect("chatgpt fixture should preflight");
-    assert_eq!(chatgpt.resolve_bearer().await.unwrap(), "jig-dummy");
+    assert_eq!(
+        chatgpt.resolve_bearer().await.unwrap(),
+        "eyJhbGciOiAibm9uZSJ9.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOiB7ImNoYXRncHRfYWNjb3VudF9pZCI6ICJhY2N0X2ppZyJ9fQ."
+    );
 }
 
 #[test]
