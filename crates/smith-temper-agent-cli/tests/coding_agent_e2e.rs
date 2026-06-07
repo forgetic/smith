@@ -1,16 +1,18 @@
-//! Ignored real-LLM proof for the Smith coding-workspace agent binary.
+//! Ignored jig-backed e2e for the Smith coding-workspace agent binary.
 //!
-//! Mirrors the gating of `forgejo_workflow_role_e2e.rs`: it makes real LLM
-//! calls, so it is `#[ignore]`d and only runs when `TEMPER_FORGEJO_AGENTS=1`.
-//! Unlike the workflow-role e2e it needs no Forgejo server — it drives the
-//! `smith-coding-agent` binary directly against a throwaway local git checkout
-//! using the temper coding-workspace protocol (context file in, result file
-//! out, product diff in the working tree) and asserts the engineer head path
-//! produces a real, non-bookkeeping diff and an empty (verdict-less) result.
+//! Runs the real `smith-coding-agent` binary against a local scripted
+//! `jig_server::FakeLlm`, so it is hermetic but still opt-in: run ignored tests
+//! with `SMITH_JIG_E2E=1`. It drives the temper coding-workspace protocol
+//! (context file in, result file out, product diff in the working tree) and
+//! asserts the engineer head path produces a real, non-bookkeeping diff and an
+//! empty (verdict-less) result.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use jig_core::{Reply, Script, StopReason, Turn};
+use jig_server::FakeLlm;
 
 const ENGINEER_CONTEXT: &str = r#"{
   "repository": { "id": "repo-1", "owner": "ai", "name": "demo", "default_branch": "main" },
@@ -33,12 +35,13 @@ const ENGINEER_CONTEXT: &str = r#"{
 }"#;
 
 #[test]
-#[ignore = "makes real LLM calls; run with TEMPER_FORGEJO_AGENTS=1 -- --ignored"]
+#[ignore = "jig-backed e2e; run with SMITH_JIG_E2E=1 -- --ignored"]
 fn engineer_run_leaves_a_product_diff() {
-    if !agents_enabled() {
+    if !jig_e2e_enabled() {
         return;
     }
 
+    let fake = coding_agent_fake();
     let temp = TempDir::new("smith-coding-agent-e2e");
     let checkout = init_git_repo(temp.path());
 
@@ -46,14 +49,30 @@ fn engineer_run_leaves_a_product_diff() {
     let result_path = temp.path().join("result.json");
     fs::write(&context_path, ENGINEER_CONTEXT).expect("write context file");
 
+    let auth_fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../smith-temper-agent/tests/fixtures/jig_auth.json");
+
     let status = Command::new(env!("CARGO_BIN_EXE_smith-coding-agent"))
         .current_dir(&checkout)
-        .args(process_args())
+        .args([
+            "--auth",
+            "chatgpt-oauth",
+            "--auth-file",
+            &auth_fixture.display().to_string(),
+        ])
         .env("TEMPER_CODING_WORKSPACE_CONTEXT", &context_path)
         .env("TEMPER_CODING_WORKSPACE_RESULT", &result_path)
+        .env("SMITH_TEST_PROVIDER_BASE_URL", fake.base_url())
         .status()
         .expect("smith-coding-agent runs");
     assert!(status.success(), "engineer run should exit 0");
+
+    let notes = fs::read_to_string(checkout.join("NOTES.md")).expect("NOTES.md was written");
+    assert_eq!(
+        notes.lines().next(),
+        Some("project notes"),
+        "NOTES.md first line must match the requested product content"
+    );
 
     // The head path leaves a real product diff in the working tree.
     let porcelain = Command::new("git")
@@ -65,6 +84,10 @@ fn engineer_run_leaves_a_product_diff() {
     assert!(
         !changes.trim().is_empty(),
         "engineer run must leave a product diff; git status was empty"
+    );
+    assert!(
+        changes.lines().any(|line| line == "?? NOTES.md"),
+        "diff must include the requested product file: {changes}"
     );
     assert!(
         !changes.contains(".temper-pr-prep") && !changes.contains(".temper-ci"),
@@ -79,39 +102,41 @@ fn engineer_run_leaves_a_product_diff() {
         result.get("verdict").is_none() || result["verdict"].is_null(),
         "engineer head path should emit no verdict, got {result_raw}"
     );
+    assert!(
+        fake.requests().len() > 1,
+        "expected a tool loop, got one model turn"
+    );
 }
 
-fn agents_enabled() -> bool {
-    if std::env::var("TEMPER_FORGEJO_AGENTS").ok().as_deref() == Some("1") {
+fn jig_e2e_enabled() -> bool {
+    if std::env::var("SMITH_JIG_E2E").ok().as_deref() == Some("1") {
         true
     } else {
-        eprintln!("skipping Smith coding-agent e2e: set TEMPER_FORGEJO_AGENTS=1");
+        eprintln!("skipping Smith coding-agent jig e2e: set SMITH_JIG_E2E=1");
         false
     }
 }
 
-fn auth_flag() -> &'static str {
-    match std::env::var("TEMPER_AGENTS_AUTH").ok().as_deref() {
-        Some("deepseek") => "deepseek",
-        Some("anthropic-oauth") => "anthropic-oauth",
-        _ => "chatgpt-oauth",
-    }
-}
-
-fn process_args() -> Vec<String> {
-    let mut args = vec!["--auth".to_string(), auth_flag().to_string()];
-    if let Ok(model) = std::env::var("TEMPER_AGENTS_CODEX_MODEL") {
-        if !model.trim().is_empty() {
-            args.extend(["--codex-model".to_string(), model]);
+fn coding_agent_fake() -> FakeLlm {
+    FakeLlm::start(Script::rule(|view| {
+        if view.prior_tool_results == 0 {
+            Reply {
+                turns: vec![Turn::ToolCall {
+                    id: "call_write_notes".to_string(),
+                    name: "write".to_string(),
+                    args: serde_json::json!({
+                        "path": "NOTES.md",
+                        "content": "project notes\n"
+                    }),
+                }],
+                usage: Default::default(),
+                stop: StopReason::ToolCalls,
+            }
+        } else {
+            Reply::text(r#"{"summary":"Created NOTES.md with project notes."}"#)
         }
-    }
-    if let Some(path) = std::env::var_os("TEMPER_AGENTS_AUTH_FILE") {
-        args.extend([
-            "--auth-file".to_string(),
-            PathBuf::from(path).display().to_string(),
-        ]);
-    }
-    args
+    }))
+    .expect("start fake LLM")
 }
 
 /// Initializes a minimal git repository so the agent's working-tree diff check
