@@ -15,10 +15,10 @@ uuid.workspace = true
 
 [features]
 default = []
-test-base-url-override = []
+test-provider-base-url-override = []
 
 [dev-dependencies]
-smith-temper-agent = { path = ".", features = ["test-base-url-override"] }
+smith-temper-agent = { path = ".", features = ["test-provider-base-url-override"] }
 jig-server = { path = "../../../jig/crates/jig-server" }
 jig-core = { path = "../../../jig/crates/jig-core" }
 temper-interaction = { path = "../../../temper/crates/temper-interaction" }
