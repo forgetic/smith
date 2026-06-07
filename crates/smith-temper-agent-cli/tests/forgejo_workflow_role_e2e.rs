@@ -35,7 +35,7 @@ fn smith_process_opens_pr_through_temper_role_tools() {
     let fake = workflow_role_decision_fake();
     let provider_base_url = fake.base_url();
 
-    let server = ForgejoServer::start().expect("forgejo server boots");
+    let server = start_forgejo_server_from_temper_workspace().expect("forgejo server boots");
     let provisioned = block_on(provision(&server)).expect("provisioning succeeds");
     let engineer = provisioned
         .role(&RoleId::new("engineer"))
@@ -152,6 +152,75 @@ fn workflow_role_decision_fake() -> FakeLlm {
         r#"{"action":"open_pr","reason":"jig selects open_pr for Forgejo workflow-role e2e"}"#,
     )))
     .expect("start fake LLM")
+}
+
+fn start_forgejo_server_from_temper_workspace() -> Result<ForgejoServer, String> {
+    let temper_root = temper_workspace_root()?;
+    let _current_dir = CurrentDirGuard::change_to(&temper_root)?;
+    ForgejoServer::start().map_err(|error| {
+        format!(
+            "forgejo server failed to boot from Temper workspace root {}: {error}",
+            temper_root.display()
+        )
+    })
+}
+
+fn temper_workspace_root() -> Result<PathBuf, String> {
+    let attempted = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../temper");
+    let root = attempted.canonicalize().map_err(|error| {
+        format!(
+            "failed to resolve Temper workspace root at {}: {error}",
+            attempted.display()
+        )
+    })?;
+
+    let cargo_toml = root.join("Cargo.toml");
+    if !cargo_toml.is_file() {
+        return Err(format!(
+            "resolved Temper workspace root {} is missing Cargo.toml",
+            root.display()
+        ));
+    }
+
+    let forgejo_fixture = root.join("crates/temper-forgejo-fixture");
+    if !forgejo_fixture.is_dir() {
+        return Err(format!(
+            "resolved Temper workspace root {} is missing crates/temper-forgejo-fixture/",
+            root.display()
+        ));
+    }
+
+    Ok(root)
+}
+
+struct CurrentDirGuard {
+    original: PathBuf,
+}
+
+impl CurrentDirGuard {
+    fn change_to(path: &Path) -> Result<Self, String> {
+        let original = std::env::current_dir()
+            .map_err(|error| format!("failed to read current directory: {error}"))?;
+        std::env::set_current_dir(path).map_err(|error| {
+            format!(
+                "failed to change current directory from {} to Temper workspace root {}: {error}",
+                original.display(),
+                path.display()
+            )
+        })?;
+        Ok(Self { original })
+    }
+}
+
+impl Drop for CurrentDirGuard {
+    fn drop(&mut self) {
+        if let Err(error) = std::env::set_current_dir(&self.original) {
+            eprintln!(
+                "failed to restore current directory to {} after Forgejo fixture startup: {error}",
+                self.original.display()
+            );
+        }
+    }
 }
 
 fn jig_auth_fixture() -> PathBuf {

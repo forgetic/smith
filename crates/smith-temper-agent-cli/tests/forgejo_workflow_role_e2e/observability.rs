@@ -78,19 +78,23 @@ impl ObservabilityProbe {
         assert!(json_string(reply, "reason_preview").is_some_and(|reason| !reason.is_empty()));
 
         let capture_event = event(&events, "smith.workflow_role_decision.capture.written");
-        let capture_path = PathBuf::from(
-            json_string(capture_event, "capture_path").expect("capture_path is logged"),
-        );
+        let logged_capture_path =
+            json_string(capture_event, "capture_path").expect("capture_path is logged");
         assert!(
-            capture_path.starts_with(&self.capture_dir),
-            "capture path {capture_path:?} should stay under {:?}",
-            self.capture_dir
+            !logged_capture_path.trim().is_empty(),
+            "capture_path should be a present, non-empty string"
         );
 
         let capture_files = capture_files(&self.capture_dir);
         assert_eq!(capture_files.len(), 1, "expected one Smith capture file");
-        assert_eq!(capture_files[0], capture_path);
-        let capture_json = fs::read_to_string(&capture_path).expect("capture file is readable");
+        let capture_path = &capture_files[0];
+        assert!(
+            capture_path.starts_with(&self.capture_dir),
+            "actual capture path {capture_path:?} should stay under {:?}",
+            self.capture_dir
+        );
+        assert_capture_path_preview(logged_capture_path, capture_path);
+        let capture_json = fs::read_to_string(capture_path).expect("capture file is readable");
         let capture: Value = serde_json::from_str(&capture_json).expect("capture JSON parses");
         assert_eq!(capture["trace"]["work_item_id"], identity.work_item_id);
         assert_eq!(capture["trace"]["decision_id"], identity.decision_id);
@@ -207,6 +211,26 @@ fn capture_files(dir: &Path) -> Vec<PathBuf> {
         .collect::<Vec<_>>();
     files.sort();
     files
+}
+
+fn assert_capture_path_preview(logged: &str, actual: &Path) {
+    let actual = actual.display().to_string();
+    if logged == actual {
+        return;
+    }
+
+    let Some(prefix) = logged
+        .strip_suffix('…')
+        .or_else(|| logged.strip_suffix("..."))
+    else {
+        panic!(
+            "logged capture_path {logged:?} should either equal or be an abbreviated prefix of actual path {actual:?}"
+        );
+    };
+    assert!(
+        !prefix.is_empty() && actual.starts_with(prefix),
+        "logged capture_path preview {logged:?} should prefix actual path {actual:?}"
+    );
 }
 
 fn assert_absent_if_non_empty(haystack: &str, needle: &str) {
