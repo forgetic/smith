@@ -12,6 +12,8 @@ on:
 jobs:
   validate:
     runs-on: host
+    env:
+      CARGO_BUILD_JOBS: "1"
     defaults:
       run:
         working-directory: ${{ env.HOME }}/.local/state/forgejo/runner/data/smith
