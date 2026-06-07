@@ -1,4 +1,4 @@
-#[cfg(feature = "test-base-url-override")]
+#[cfg(feature = "test-provider-base-url-override")]
 mod feature_enabled {
     use jig_core::{Reply, Script};
     use jig_server::FakeLlm;
