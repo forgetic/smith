@@ -42,13 +42,21 @@ SMITH_JIG_E2E=1 \
   --features test-provider-base-url-override \
   --test forgejo_workflow_role_e2e \
   -- --ignored --test-threads=1
+
+TEMPER_BASIC_DELIVERY_JIG_E2E=1 \
+  cargo test -p smith-temper-agent-cli --test basic_delivery_jig_e2e -- \
+  --ignored --test-threads=1 --nocapture
 ```
 
-`SMITH_JIG_E2E=1` opts into these hermetic jig-backed ignored e2e tests.
+`SMITH_JIG_E2E=1` opts into the hermetic jig-backed Smith process tests.
+`TEMPER_BASIC_DELIVERY_JIG_E2E=1` opts into the provider-free basic-delivery
+Forgejo/runner jig gate: it boots real Forgejo and host-mode `forgejo-runner`,
+uses deterministic local role behavior instead of provider calls, and therefore
+does not require `TEMPER_FORGEJO_AGENTS=1` or provider auth variables.
 `test-provider-base-url-override` enables the test-only provider base URL hook so
-the tests can route model-provider requests to the local jig server. CI does not
-run a broad ignored-test sweep such as `cargo test -- --ignored`; ignored live
-provider checks remain manual-only.
+the Smith process tests can route model-provider requests to the local jig
+server. CI does not run a broad ignored-test sweep such as `cargo test --
+--ignored`; ignored live provider checks remain manual-only.
 
 ## Manual live/provider gates
 

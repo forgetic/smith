@@ -14,7 +14,7 @@ process wiring.
 | One-turn structured decisions | Process reply validation in `temper-runner`. | Workflow-role decision tests plus provider live smokes. |
 | Product-manager example profile behavior | Generic conversations, compiled profile manifests, transcripts, inert proposals, and filing. | Product-manager prompt/mapping/response tests, Temper fixture compatibility, and `smith-product-manager-responder`. |
 | Workflow-role behavior | Manifest authority, authorized action validation, `RoleTools`, external-tool binding, process adapter. | `smith-workflow-role-decision` prompt/context/provider implementation. |
-| Hermetic Forgejo + jig e2e | Temper process adapter and Forgejo support are exercised from Smith's targeted ignored e2e. | `coding_agent_e2e` and `forgejo_workflow_role_e2e` run in CI with `SMITH_JIG_E2E=1` and local jig fakes. |
+| Hermetic Forgejo + jig e2e | Temper process adapter and Forgejo support are exercised from Smith's targeted ignored e2e. | `coding_agent_e2e` and `forgejo_workflow_role_e2e` run in CI with `SMITH_JIG_E2E=1` and local jig fakes; `basic_delivery_jig_e2e` runs with `TEMPER_BASIC_DELIVERY_JIG_E2E=1` as a deterministic/provider-free Forgejo + host-runner basic-delivery gate. |
 | Live provider proofs | None. | Manual-only OAuth and DeepSeek/OpenAI-compatible request-oracle gates. |
 
 ## Removed Temper gates
@@ -37,6 +37,7 @@ Run from this repository:
 | `cargo test --workspace --all-targets workflow_role_decision` | Temper workflow-role fixture compatibility, manifest prompt/context mapping, bound external-tool metadata, authorized/no-action mapping, unauthorized action downgrade, and protocol-version rejection. | Focused local |
 | `SMITH_JIG_E2E=1 cargo test -p smith-temper-agent-cli --features test-provider-base-url-override --test coding_agent_e2e -- --ignored --test-threads=1` | Hermetic real `smith-coding-agent` binary proof using a local jig fake LLM and a local git checkout. | CI |
 | `SMITH_JIG_E2E=1 cargo test -p smith-temper-agent-cli --features test-provider-base-url-override --test forgejo_workflow_role_e2e -- --ignored --test-threads=1` | Hermetic throwaway Forgejo + jig fake LLM proof through Temper's process adapter, coding workspace, and `RoleTools`. | CI |
+| `TEMPER_BASIC_DELIVERY_JIG_E2E=1 cargo test -p smith-temper-agent-cli --test basic_delivery_jig_e2e -- --ignored --test-threads=1 --nocapture` | Provider-free basic-delivery jig proof through real throwaway Forgejo and host-mode `forgejo-runner`; deterministic local role behavior replaces live LLM/provider decisions. | CI |
 | `TEMPER_CHATGPT_OAUTH=1 cargo test --test chatgpt_oauth_live -- --ignored --nocapture` | Live ChatGPT/OpenAI Codex OAuth smoke and refresh/write-back. | Manual only |
 | `TEMPER_ANTHROPIC_OAUTH=1 cargo test --test anthropic_oauth_live -- --ignored --nocapture` | Live Anthropic OAuth smoke with Claude Code identity handling. | Manual only |
 | `TEMPER_DEEPSEEK_REQUEST_ORACLE=1 TEMPER_DEEPSEEK_API_KEY=... cargo test -p smith-temper-agent --test jig_request_oracle --features test-provider-base-url-override -- --ignored --nocapture` | Live DeepSeek/OpenAI-compatible request-body oracle against jig's authoritative template. | Manual only |
