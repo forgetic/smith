@@ -5396,6 +5396,7 @@ dependencies = [
  "pi_agent_rust",
  "serde",
  "serde_json",
+ "smith-temper-agent",
  "temper-interaction",
  "temper-process-protocol",
  "temper-workflow",

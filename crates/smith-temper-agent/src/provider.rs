@@ -230,6 +230,7 @@ impl ProviderConfig {
 
     /// Overrides the provider base URL for hermetic tests that redirect OAuth
     /// provider traffic to a local fake LLM server.
+    #[cfg(any(test, feature = "test-base-url-override"))]
     pub fn with_base_url_override(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
         self
