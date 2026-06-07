@@ -5423,6 +5423,8 @@ version = "0.1.0"
 dependencies = [
  "asupersync",
  "async-trait",
+ "jig-core",
+ "jig-server",
  "serde_json",
  "smith-temper-agent",
  "temper-forge",
