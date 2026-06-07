@@ -32,6 +32,28 @@ const CONTEXT_ENV: &str = "TEMPER_CODING_WORKSPACE_CONTEXT";
 /// Env var naming the file the command must write its result JSON to.
 const RESULT_ENV: &str = "TEMPER_CODING_WORKSPACE_RESULT";
 
+#[cfg(feature = "test-provider-base-url-override")]
+const TEST_PROVIDER_BASE_URL_ENV: &str = "SMITH_TEST_PROVIDER_BASE_URL";
+
+#[cfg(feature = "test-provider-base-url-override")]
+fn apply_test_provider_base_url_override(provider: ProviderConfig) -> ProviderConfig {
+    apply_test_provider_base_url_override_value(
+        provider,
+        std::env::var(TEST_PROVIDER_BASE_URL_ENV).ok(),
+    )
+}
+
+#[cfg(feature = "test-provider-base-url-override")]
+fn apply_test_provider_base_url_override_value(
+    provider: ProviderConfig,
+    base_url: Option<String>,
+) -> ProviderConfig {
+    match base_url {
+        Some(base_url) if !base_url.trim().is_empty() => provider.with_base_url_override(base_url),
+        _ => provider,
+    }
+}
+
 fn main() {
     match run() {
         Ok(()) => {}
@@ -63,6 +85,8 @@ fn run() -> Result<(), String> {
     // fast with a clear setup error (and never writes a result file).
     let provider = ProviderConfig::from_auth(options.auth, options.codex_model, options.auth_file)
         .map_err(|error| error.to_string())?;
+    #[cfg(feature = "test-provider-base-url-override")]
+    let provider = apply_test_provider_base_url_override(provider);
 
     // The pi file/bash tools require an asupersync reactor; mirror pi's main.rs.
     let reactor =
@@ -279,5 +303,31 @@ mod tests {
         let error = CodingAgentOptions::parse(vec!["--max-iterations".into(), "lots".into()])
             .expect_err("non-numeric fails");
         assert!(error.contains("positive integer"));
+    }
+
+    #[cfg(feature = "test-provider-base-url-override")]
+    #[test]
+    fn test_provider_base_url_override_honors_non_empty_env() {
+        let provider = ProviderConfig::new("test", "model", "http://original", "key");
+
+        let provider = apply_test_provider_base_url_override_value(
+            provider,
+            Some("http://127.0.0.1:4100".to_string()),
+        );
+
+        assert_eq!(provider.base_url_for_test(), "http://127.0.0.1:4100");
+    }
+
+    #[cfg(feature = "test-provider-base-url-override")]
+    #[test]
+    fn test_provider_base_url_override_ignores_unset_and_empty_env() {
+        let provider = ProviderConfig::new("test", "model", "http://original", "key");
+        let provider = apply_test_provider_base_url_override_value(provider, None);
+        assert_eq!(provider.base_url_for_test(), "http://original");
+
+        let provider = ProviderConfig::new("test", "model", "http://original", "key");
+        let provider =
+            apply_test_provider_base_url_override_value(provider, Some("   ".to_string()));
+        assert_eq!(provider.base_url_for_test(), "http://original");
     }
 }

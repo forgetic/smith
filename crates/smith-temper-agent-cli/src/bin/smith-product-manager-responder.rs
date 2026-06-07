@@ -4,6 +4,17 @@ use std::path::PathBuf;
 use smith_temper_agent::{AuthChoice, ProductManagerResponder, ProviderConfig};
 use temper_process_protocol::ConversationRequest;
 
+#[cfg(feature = "test-provider-base-url-override")]
+const TEST_PROVIDER_BASE_URL_ENV: &str = "SMITH_TEST_PROVIDER_BASE_URL";
+
+#[cfg(feature = "test-provider-base-url-override")]
+fn apply_test_provider_base_url_override(provider: ProviderConfig) -> ProviderConfig {
+    match std::env::var(TEST_PROVIDER_BASE_URL_ENV) {
+        Ok(base_url) if !base_url.trim().is_empty() => provider.with_base_url_override(base_url),
+        _ => provider,
+    }
+}
+
 fn main() {
     match run() {
         Ok(()) => {}
@@ -30,6 +41,8 @@ fn run() -> Result<(), String> {
 
     let provider = ProviderConfig::from_auth(options.auth, options.codex_model, options.auth_file)
         .map_err(|error| error.to_string())?;
+    #[cfg(feature = "test-provider-base-url-override")]
+    let provider = apply_test_provider_base_url_override(provider);
     let responder = ProductManagerResponder::new(provider);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -140,5 +153,12 @@ mod tests {
         let error = ResponderOptions::parse(vec!["--auth".into(), "unknown".into()])
             .expect_err("unknown auth fails");
         assert!(error.contains("unsupported auth"));
+    }
+
+    #[cfg(feature = "test-provider-base-url-override")]
+    #[test]
+    fn test_provider_base_url_override_leaves_config_unchanged_without_override() {
+        let provider = ProviderConfig::new("test", "model", "http://original", "key");
+        assert_eq!(provider.base_url_for_test(), "http://original");
     }
 }

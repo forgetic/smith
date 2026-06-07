@@ -230,10 +230,17 @@ impl ProviderConfig {
 
     /// Overrides the provider base URL for hermetic tests that redirect OAuth
     /// provider traffic to a local fake LLM server.
-    #[cfg(any(test, feature = "test-provider-base-url-override"))]
+    #[cfg(feature = "test-provider-base-url-override")]
     pub fn with_base_url_override(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
         self
+    }
+
+    /// The provider base URL, exposed only to feature-gated tests that verify
+    /// hermetic fake-LLM routing.
+    #[cfg(feature = "test-provider-base-url-override")]
+    pub fn base_url_for_test(&self) -> &str {
+        &self.base_url
     }
 
     /// Builds the provider config for an [`AuthChoice`], applying optional

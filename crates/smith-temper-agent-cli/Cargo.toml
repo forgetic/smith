@@ -21,5 +21,9 @@ temper-runner = { path = "../../../temper/crates/temper-runner" }
 temper-testing = { path = "../../../temper/crates/temper-testing" }
 temper-workflow = { path = "../../../temper/crates/temper-workflow" }
 
+[features]
+default = []
+test-provider-base-url-override = ["smith-temper-agent/test-provider-base-url-override"]
+
 [lints]
 workspace = true
