@@ -65,9 +65,11 @@ jobs:
       - name: Forgejo workflow role e2e
         run: |
           set -eu
-          TEMPER_FORGEJO_E2E=1 TEMPER_FORGEJO_AGENTS=1 \
-            cargo test -p smith-temper-agent-cli --test forgejo_workflow_role_e2e \
-              smith_process_opens_pr_through_temper_role_tools -- --ignored --exact
+          SMITH_JIG_E2E=1 \
+            cargo test -p smith-temper-agent-cli \
+            --features test-provider-base-url-override \
+            --test forgejo_workflow_role_e2e \
+            smith_process_opens_pr_through_temper_role_tools -- --ignored --exact
       - name: Coding-agent jig e2e
         run: |
           set -eu
