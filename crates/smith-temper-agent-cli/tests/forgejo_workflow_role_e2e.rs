@@ -1,6 +1,6 @@
-//! Ignored real Forgejo + real LLM proof for Smith's workflow-role decision
-//! process. The Smith binary chooses the manifest `open_pr` action, while
-//! Temper's process adapter validates the reply, invokes the test coding
+//! Ignored throwaway Forgejo + jig fake LLM proof for Smith's workflow-role
+//! decision process. The Smith binary chooses the manifest `open_pr` action,
+//! while Temper's process adapter validates the reply, invokes the test coding
 //! workspace, and opens the PR through `RoleTools`.
 
 use std::future::Future;
@@ -9,7 +9,8 @@ use std::process::Command;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use smith_temper_agent::{AuthChoice, ProviderConfig};
+use jig_core::{Reply, Script};
+use jig_server::FakeLlm;
 use temper_forge::{CreateIssue, PullRequestQuery};
 use temper_forge_forgejo::{ForgejoConfig, ForgejoForge};
 use temper_runner::{
@@ -25,13 +26,14 @@ mod observability;
 use observability::{ObservabilityProbe, forbidden_observability_values};
 
 #[test]
-#[ignore = "boots a real Forgejo and makes real LLM calls; run with TEMPER_FORGEJO_E2E=1 TEMPER_FORGEJO_AGENTS=1 -- --ignored"]
+#[ignore = "boots a throwaway Forgejo and jig fake LLM; run with SMITH_JIG_E2E=1 -- --ignored"]
 fn smith_process_opens_pr_through_temper_role_tools() {
     if !enabled() {
         return;
     }
-    ProviderConfig::from_auth(agents_auth_choice(), None, auth_file_override())
-        .expect("provider preflight succeeds before booting Forgejo");
+
+    let fake = workflow_role_decision_fake();
+    let provider_base_url = fake.base_url();
 
     let server = ForgejoServer::start().expect("forgejo server boots");
     let provisioned = block_on(provision(&server)).expect("provisioning succeeds");
@@ -77,6 +79,7 @@ fn smith_process_opens_pr_through_temper_role_tools() {
     let observability = ObservabilityProbe::new(
         temp.path(),
         env!("CARGO_BIN_EXE_smith-workflow-role-decision"),
+        &provider_base_url,
     );
     let process = WorkflowRoleDecisionProcessConfig::new(observability.wrapper())
         .with_args(process_args())
@@ -127,72 +130,45 @@ fn smith_process_opens_pr_through_temper_role_tools() {
     assert!(prs[0].labels.iter().any(|label| label == "implementation"));
     assert!(prs[0].body.contains("src/smith-workflow-role-decision.txt"));
 
+    let auth_fixture = jig_auth_fixture();
     observability.assert_smith_logs_and_capture(
         &expected_identity,
         "open_pr",
-        &forbidden_observability_values(
-            &engineer.token,
-            &engineer.password,
-            auth_file_override().as_deref(),
-        ),
+        &forbidden_observability_values(&engineer.token, &engineer.password, &auth_fixture),
     );
 }
 
 fn enabled() -> bool {
-    let e2e = std::env::var("TEMPER_FORGEJO_E2E").ok().as_deref() == Some("1");
-    let agents = std::env::var("TEMPER_FORGEJO_AGENTS").ok().as_deref() == Some("1");
-    if e2e && agents {
+    if std::env::var("SMITH_JIG_E2E").ok().as_deref() == Some("1") {
         true
     } else {
-        eprintln!(
-            "skipping Smith Forgejo workflow-role e2e: set BOTH TEMPER_FORGEJO_E2E=1 and TEMPER_FORGEJO_AGENTS=1"
-        );
+        eprintln!("skipping Smith Forgejo workflow-role jig e2e: set SMITH_JIG_E2E=1");
         false
     }
 }
 
-fn agents_auth_choice() -> AuthChoice {
-    match std::env::var("TEMPER_AGENTS_AUTH").ok().as_deref() {
-        Some("deepseek") => AuthChoice::DeepSeek,
-        Some("anthropic-oauth") => AuthChoice::AnthropicOAuth,
-        _ => AuthChoice::ChatGptOAuth,
-    }
+fn workflow_role_decision_fake() -> FakeLlm {
+    FakeLlm::start(Script::Fixed(Reply::text(
+        r#"{"action":"open_pr","reason":"jig selects open_pr for Forgejo workflow-role e2e"}"#,
+    )))
+    .expect("start fake LLM")
 }
 
-fn auth_flag() -> &'static str {
-    match agents_auth_choice() {
-        AuthChoice::DeepSeek => "deepseek",
-        AuthChoice::ChatGptOAuth => "chatgpt-oauth",
-        AuthChoice::AnthropicOAuth => "anthropic-oauth",
-    }
-}
-
-fn auth_file_override() -> Option<PathBuf> {
-    std::env::var_os("TEMPER_AGENTS_AUTH_FILE").map(PathBuf::from)
+fn jig_auth_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../smith-temper-agent/tests/fixtures/jig_auth.json")
 }
 
 fn process_args() -> Vec<String> {
-    let mut args = vec!["--auth".to_string(), auth_flag().to_string()];
-    if let Ok(model) = std::env::var("TEMPER_AGENTS_CODEX_MODEL") {
-        if !model.trim().is_empty() {
-            args.extend(["--codex-model".to_string(), model]);
-        }
-    }
-    if let Some(path) = auth_file_override() {
-        args.extend(["--auth-file".to_string(), path.display().to_string()]);
-    }
-    args
+    vec![
+        "--auth".to_string(),
+        "chatgpt-oauth".to_string(),
+        "--auth-file".to_string(),
+        jig_auth_fixture().display().to_string(),
+    ]
 }
 
 fn process_env_allowlist() -> Vec<String> {
-    match agents_auth_choice() {
-        AuthChoice::DeepSeek => vec![
-            "TEMPER_DEEPSEEK_API_KEY".to_string(),
-            "TEMPER_DEEPSEEK_API_KEY_PATH".to_string(),
-        ],
-        AuthChoice::AnthropicOAuth => vec!["TEMPER_AGENTS_ANTHROPIC_MODEL".to_string()],
-        AuthChoice::ChatGptOAuth => Vec::new(),
-    }
+    vec!["SMITH_TEST_PROVIDER_BASE_URL".to_string()]
 }
 
 fn bound_coding_workspace() -> BoundExternalTool {

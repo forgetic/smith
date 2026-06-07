@@ -14,18 +14,19 @@ pub(crate) struct ObservabilityProbe {
 }
 
 impl ObservabilityProbe {
-    pub(crate) fn new(root: &Path, responder: &str) -> Self {
+    pub(crate) fn new(root: &Path, responder: &str, provider_base_url: &str) -> Self {
         let capture_dir = root.join("smith-captures");
         fs::create_dir_all(&capture_dir).expect("capture dir creates");
         let stderr_log = root.join("smith-observability-stderr.log");
         let wrapper = root.join("smith-observability-wrapper.sh");
         let script = format!(
-            "#!/bin/sh\n{}={}\nexport {}\nexec {} \"$@\" 2>>{}\n",
+            "#!/bin/sh\n{}={}\nSMITH_TEST_PROVIDER_BASE_URL={}\nexport {} SMITH_TEST_PROVIDER_BASE_URL\nexec {} \"$@\" 2>>{}\n",
             WORKFLOW_ROLE_DECISION_CAPTURE_DIR_ENV,
-            shell_quote(capture_dir.as_path()),
+            shell_quote_path(capture_dir.as_path()),
+            shell_quote(provider_base_url),
             WORKFLOW_ROLE_DECISION_CAPTURE_DIR_ENV,
-            shell_quote(Path::new(responder)),
-            shell_quote(stderr_log.as_path()),
+            shell_quote_path(Path::new(responder)),
+            shell_quote_path(stderr_log.as_path()),
         );
         fs::write(&wrapper, script).expect("wrapper writes");
         make_executable(&wrapper);
@@ -127,21 +128,17 @@ impl ObservabilityProbe {
 pub(crate) fn forbidden_observability_values(
     engineer_token: &str,
     engineer_password: &str,
-    auth_file_override: Option<&Path>,
+    auth_fixture: &Path,
 ) -> Vec<String> {
-    let mut values = vec![engineer_token.to_string(), engineer_password.to_string()];
-    for name in [
-        "TEMPER_DEEPSEEK_API_KEY",
-        "TEMPER_DEEPSEEK_API_KEY_PATH",
-        "TEMPER_AGENTS_AUTH_FILE",
-    ] {
-        if let Ok(value) = std::env::var(name) {
-            values.push(value);
-        }
-    }
-    if let Some(path) = auth_file_override {
-        values.push(path.display().to_string());
-    }
+    let mut values = vec![
+        engineer_token.to_string(),
+        engineer_password.to_string(),
+        auth_fixture.display().to_string(),
+        "jig-dummy".to_string(),
+        "eyJhbGciOiAibm9uZSJ9.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOiB7ImNoYXRncHRfYWNjb3VudF9pZCI6ICJhY2N0X2ppZyJ9fQ.".to_string(),
+        "acct_jig".to_string(),
+    ];
+    values.retain(|value| !value.is_empty());
     values
 }
 
@@ -221,8 +218,11 @@ fn assert_absent_if_non_empty(haystack: &str, needle: &str) {
     }
 }
 
-fn shell_quote(path: &Path) -> String {
-    let raw = path.as_os_str().to_string_lossy();
+fn shell_quote_path(path: &Path) -> String {
+    shell_quote(&path.as_os_str().to_string_lossy())
+}
+
+fn shell_quote(raw: &str) -> String {
     format!("'{}'", raw.replace('\'', "'\\''"))
 }
 
