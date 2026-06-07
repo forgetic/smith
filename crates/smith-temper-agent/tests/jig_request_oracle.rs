@@ -11,7 +11,8 @@
 //!
 //! ```sh
 //! # DeepSeek/OpenAI-compatible API-key leg
-//! DEEPSEEK_API_KEY=... \
+//! TEMPER_DEEPSEEK_REQUEST_ORACLE=1 \
+//! TEMPER_DEEPSEEK_API_KEY=... \
 //!   cargo test -p smith-temper-agent --test jig_request_oracle --features test-provider-base-url-override -- --ignored --nocapture
 //!
 //! # Anthropic OAuth leg (requires `pi /login anthropic` first)
@@ -58,6 +59,19 @@ fn smith_requests_match_jig_authoritative_templates() {
 }
 
 fn run_deepseek_openai_leg() {
+    if std::env::var("TEMPER_DEEPSEEK_REQUEST_ORACLE")
+        .ok()
+        .as_deref()
+        != Some("1")
+    {
+        eprintln!(
+            "skipping DeepSeek request oracle live validation: set \
+             TEMPER_DEEPSEEK_REQUEST_ORACLE=1 (requires real DeepSeek/OpenAI-compatible \
+             credentials and makes real provider calls)"
+        );
+        return;
+    }
+
     let provider = match ProviderConfig::from_auth(AuthChoice::DeepSeek, None, None) {
         Ok(provider) => provider,
         Err(error) => {
