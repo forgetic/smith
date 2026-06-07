@@ -1,0 +1,39 @@
+[Unit]
+# Smith basic-delivery engineer role worker.
+#
+# Repo-tracked TEMPLATE. The install script (deploy/install.sh) copies this into
+# ~/.config/systemd/user/ verbatim. Machine-specific values are read at runtime
+# from smith.env, secrets/roles.env, and %h. ExecStart is the smith-role-worker
+# shim (see smith-architect.service for why a shim is needed).
+#
+# The engineer claims ready code issues, drives the coding workspace to produce a
+# real product diff, opens an implementation PR, and addresses failed CI before
+# landing. Its checkout at ~/.local/state/smith/engineer/smith is WRITABLE and
+# carries push credentials.
+Description=Smith basic-delivery engineer role worker
+Documentation=https://git.ekanayaka.io/ai/smith/src/branch/main/docs/how-to/run-local-delivery.md
+PartOf=smith-delivery.target
+After=forgejo.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/smith/smith.env
+EnvironmentFile=%h/.config/smith/secrets/roles.env
+# The engineer's stable workspace is a pre-cloned, WRITABLE worktree with push
+# creds; Temper reuses it across ticks (fetch + checkout -B).
+Environment=TEMPER_CODING_WORKSPACE_ROOT=%h/.local/state/smith/engineer/smith
+Environment=TEMPER_CODING_WORKSPACE_PUSH=1
+Environment=TEMPER_CODING_WORKSPACE_REMOTE=origin
+Environment=TEMPER_CODING_WORKSPACE_PR_LABELS=implementation
+Environment=TEMPER_WORKFLOW_FILE=%h/.config/smith/workflow.json
+# The engineer binds the real pi-SDK coding agent for the coding_workspace tool.
+# Temper runs this via `sh -c`, which expands $HOME / $SMITH_CODING_AGENT_ARGS
+# from the inherited environment at run time (systemd does not expand it here).
+Environment="TEMPER_CODING_WORKSPACE_COMMAND=$HOME/.local/bin/smith-coding-agent $SMITH_CODING_AGENT_ARGS"
+ExecStart=%h/.local/bin/smith-role-worker engineer
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=smith-delivery.target

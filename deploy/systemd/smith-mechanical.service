@@ -1,0 +1,33 @@
+[Unit]
+# Smith basic-delivery mechanical worker — runs as the `bot` automation user.
+#
+# Repo-tracked TEMPLATE. The install script (deploy/install.sh) copies this into
+# ~/.config/systemd/user/ verbatim. ExecStart is the smith-mechanical-worker shim,
+# which remaps the provisioned bot identity onto the generic vars temper-worker
+# reads (systemd's `Environment=` does not expand ${VAR}), keeping secrets off argv.
+#
+# The mechanical worker is the SOLE landing authority: with no reviewer/owner it
+# stamps raw intake `untriaged` and merges CI-green implementation PRs (landing
+# gated on CI alone). It runs as the provisioned `bot` (Owners team) using the
+# bot's REST token PLUS its web-UI username/password — Forgejo 7.0.x does not
+# expose Actions status over the REST API, so the landing gate reads CI through
+# the web UI (ADR 0019). It polls CI on a SHORT cadence (CI_STATUS_POLL_MS)
+# because Forgejo 7.0.x does not webhook on Actions completion, backing off to
+# IDLE_POLL_MAX_MS while idle; wakes still interrupt immediately.
+Description=Smith basic-delivery mechanical landing worker (runs as bot)
+Documentation=https://git.ekanayaka.io/ai/smith/src/branch/main/docs/how-to/run-local-delivery.md
+PartOf=smith-delivery.target
+After=forgejo.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/smith/smith.env
+EnvironmentFile=%h/.config/smith/secrets/roles.env
+Environment=TEMPER_WORKFLOW_FILE=%h/.config/smith/workflow.json
+ExecStart=%h/.local/bin/smith-mechanical-worker
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=smith-delivery.target

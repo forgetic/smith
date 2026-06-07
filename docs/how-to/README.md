@@ -10,3 +10,4 @@ Current guides:
 - [Run Smith responders from Temper](run-temper-responders.md)
 - [Run live provider and Forgejo checks](run-live-provider-tests.md)
 - [Provision ai/smith and bring up the basic-delivery dogfood](provision-smith-dogfood.md)
+- [Run the local basic-delivery deployment](run-local-delivery.md)
