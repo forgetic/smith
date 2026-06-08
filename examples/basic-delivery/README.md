@@ -195,19 +195,20 @@ var before invoking the script (env wins over the file).
 
 ### Offline / no-LLM smoke
 
-The full unattended run needs a real LLM for the architect (single-outcome
-triage) **and** the engineer (implementation). For an offline smoke of just the
-**engineer head path** — boot, provision, the deterministic stand-in coder leaves
-a fixed `src/banner.sh` diff that passes the bundled CI — set:
+The full unattended run needs a coder for both the architect (single-outcome
+triage) and the engineer (implementation). For an offline smoke with the
+deterministic stand-in coder — architect triage writes a fixed `ready_code` body
+and engineer implementation leaves a fixed `src/banner.sh` diff that passes the
+bundled CI — set:
 
 ```sh
 BASIC_DELIVERY_CODER=greeting ./run.sh
 ```
 
-The greeting stand-in does not emit the architect's `ready_code` verdict, so in
-greeting mode the engineer step converges only for an already-`code`+`ready`
-issue; the full triage → code → PR → merge run needs the default
-`BASIC_DELIVERY_CODER=smith`.
+In greeting mode, the stand-in uses Temper W3 `allowed_verdicts` to distinguish
+the architect's read-only triage workspace from the engineer's writable coding
+workspace. Architect invocations return the single `ready_code` verdict plus a
+complete banner spec; engineer invocations create the product script.
 
 ## Coding workspace binding
 
