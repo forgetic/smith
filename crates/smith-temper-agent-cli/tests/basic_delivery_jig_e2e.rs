@@ -177,15 +177,48 @@ fn wait_for_token(example: &Path, deadline: Instant, run: &RunGuard) -> String {
         deadline,
         run,
         || {
-            fs::read_to_string(&roles).ok().and_then(|s| {
-                s.lines().find_map(|l| {
-                    l.strip_prefix("TEMPER_FORGEJO_TOKEN_BOT=")
-                        .map(|v| v.trim_matches('\'').to_string())
-                })
-            })
+            fs::read_to_string(&roles)
+                .ok()
+                .and_then(|s| parse_bot_token(&s))
         },
         "bot token",
     )
+}
+
+fn parse_bot_token(roles_env: &str) -> Option<String> {
+    ["TEMPER_FORGEJO_BOT_TOKEN", "TEMPER_FORGEJO_TOKEN_BOT"]
+        .into_iter()
+        .find_map(|name| {
+            roles_env.lines().find_map(|line| {
+                line.strip_prefix(&format!("{name}="))
+                    .map(|value| value.trim_matches('\'').to_string())
+            })
+        })
+}
+
+#[test]
+fn parses_current_bot_token_before_legacy_fallback() {
+    let roles_env = "\
+TEMPER_FORGEJO_TOKEN_BOT='legacy-token'\n\
+TEMPER_FORGEJO_BOT_TOKEN='current-token'\n";
+
+    assert_eq!(parse_bot_token(roles_env).as_deref(), Some("current-token"));
+}
+
+#[test]
+fn parses_legacy_bot_token_fallback() {
+    assert_eq!(
+        parse_bot_token("TEMPER_FORGEJO_TOKEN_BOT='legacy-token'\n").as_deref(),
+        Some("legacy-token")
+    );
+}
+
+#[test]
+fn parses_unquoted_current_bot_token() {
+    assert_eq!(
+        parse_bot_token("TEMPER_FORGEJO_BOT_TOKEN=current-token\n").as_deref(),
+        Some("current-token")
+    );
 }
 
 fn wait_for_topology_evidence(base: &str, token: &str, deadline: Instant, run: &RunGuard) {
