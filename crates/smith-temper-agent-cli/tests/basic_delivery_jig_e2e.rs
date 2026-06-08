@@ -176,15 +176,42 @@ fn wait_for_token(example: &Path, deadline: Instant, run: &RunGuard) -> String {
     )
 }
 
-fn parse_bot_token(roles_env: &str) -> Option<String> {
-    ["TEMPER_FORGEJO_BOT_TOKEN", "TEMPER_FORGEJO_TOKEN_BOT"]
-        .into_iter()
-        .find_map(|name| {
-            roles_env.lines().find_map(|line| {
-                line.strip_prefix(&format!("{name}="))
-                    .map(|value| value.trim_matches('\'').to_string())
-            })
+fn parse_roles_env(roles_env: &str) -> Vec<(String, String)> {
+    roles_env
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (key, value) = line.split_once('=')?;
+            let key = key.trim();
+            if key.is_empty() {
+                return None;
+            }
+            let value = value.trim();
+            let value = if (value.starts_with('\'') && value.ends_with('\''))
+                || (value.starts_with('"') && value.ends_with('"'))
+            {
+                &value[1..value.len().saturating_sub(1)]
+            } else {
+                value
+            };
+            Some((key.to_string(), value.to_string()))
         })
+        .collect()
+}
+
+fn parse_bot_token(roles_env: &str) -> Option<String> {
+    parse_roles_env(roles_env)
+        .into_iter()
+        .find(|(name, _)| name == "TEMPER_FORGEJO_BOT_TOKEN")
+        .or_else(|| {
+            parse_roles_env(roles_env)
+                .into_iter()
+                .find(|(name, _)| name == "TEMPER_FORGEJO_TOKEN_BOT")
+        })
+        .map(|(_, token)| token)
 }
 
 #[test]
@@ -212,46 +239,222 @@ fn parses_unquoted_current_bot_token() {
     );
 }
 
-fn wait_for_topology_evidence(base: &str, token: &str, deadline: Instant, run: &RunGuard) {
-    let mut observed_labels = Vec::new();
+#[test]
+fn parses_double_quoted_role_tokens() {
+    assert_eq!(
+        parse_roles_env("TEMPER_FORGEJO_TOKEN_ENGINEER=\"engineer-token\"\n"),
+        vec![(
+            "TEMPER_FORGEJO_TOKEN_ENGINEER".to_string(),
+            "engineer-token".to_string()
+        )]
+    );
+}
+
+#[test]
+fn label_token_candidates_include_bot_architect_engineer() {
+    let roles_env = "\
+TEMPER_FORGEJO_BOT_TOKEN='bot-token'\n\
+TEMPER_FORGEJO_TOKEN_ARCHITECT=architect-token\n\
+TEMPER_FORGEJO_TOKEN_ENGINEER=\"engineer-token\"\n";
+
+    let names: Vec<_> = label_token_candidates(roles_env)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "TEMPER_FORGEJO_BOT_TOKEN",
+            "TEMPER_FORGEJO_TOKEN_ARCHITECT",
+            "TEMPER_FORGEJO_TOKEN_ENGINEER"
+        ]
+    );
+}
+
+fn wait_for_topology_evidence(base: &str, _token: &str, deadline: Instant, run: &RunGuard) {
+    let labels_path = "/api/v1/repos/acme/service/labels?page=1&limit=50";
+    let mut diagnostics = LabelPollDiagnostics::default();
     while Instant::now() < deadline {
-        let labels = api_json(base, token, "/api/v1/repos/acme/service/labels");
-        if let Some(arr) = labels.as_array() {
-            observed_labels = arr
-                .iter()
-                .filter_map(|l| l["name"].as_str().map(str::to_string))
-                .collect();
-            let needed = [
-                "untriaged",
-                "code",
-                "ready",
-                "in-progress",
-                "implementation",
-                "landed",
-            ];
-            let logs = logs_tail(&run.example.join("logs"));
-            if needed
-                .iter()
-                .all(|n| observed_labels.iter().any(|s| s == n))
-                && has_worker_evidence(&logs, "architect")
-                && has_worker_evidence(&logs, "engineer")
-                && has_mechanical_evidence(&logs)
-                && has_trigger_evidence(&logs)
-            {
-                return;
-            }
+        diagnostics = poll_labels(base, labels_path, &run.example.join("secrets/roles.env"));
+        let needed = [
+            "untriaged",
+            "code",
+            "ready",
+            "in-progress",
+            "implementation",
+            "landed",
+        ];
+        let logs = logs_tail(&run.example.join("logs"));
+        if needed
+            .iter()
+            .all(|n| diagnostics.observed_labels.iter().any(|s| s == n))
+            && has_worker_evidence(&logs, "architect")
+            && has_worker_evidence(&logs, "engineer")
+            && has_mechanical_evidence(&logs)
+            && has_trigger_evidence(&logs)
+        {
+            return;
         }
         assert!(
             run.child_still_running(),
-            "run.sh exited before basic-delivery topology labels/workers/webhook logs; observed labels: {observed_labels:?}; diagnostics: {}",
+            "run.sh exited before basic-delivery topology labels/workers/webhook logs; {}; diagnostics: {}",
+            diagnostics.summary(),
             run.diagnostics()
         );
         std::thread::sleep(Duration::from_secs(2));
     }
     panic!(
-        "timed out waiting for basic-delivery topology labels/workers/webhook logs; observed labels: {observed_labels:?}; diagnostics: {}",
+        "timed out waiting for basic-delivery topology labels/workers/webhook logs; {}; diagnostics: {}",
+        diagnostics.summary(),
         run.diagnostics()
     );
+}
+
+#[derive(Default)]
+struct LabelPollDiagnostics {
+    observed_labels: Vec<String>,
+    attempts: Vec<LabelPollAttempt>,
+}
+
+struct LabelPollAttempt {
+    token_name: String,
+    status: Option<String>,
+    json_ok: bool,
+    failure: Option<String>,
+}
+
+impl LabelPollDiagnostics {
+    fn summary(&self) -> String {
+        let attempts = self
+            .attempts
+            .iter()
+            .map(|a| {
+                format!(
+                    "{} status={} json_ok={}{}",
+                    a.token_name,
+                    a.status.as_deref().unwrap_or("transport-error"),
+                    a.json_ok,
+                    a.failure
+                        .as_ref()
+                        .map(|f| format!(" failure={f}"))
+                        .unwrap_or_default()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!(
+            "observed labels: {:?}; label API attempts: [{}]",
+            self.observed_labels, attempts
+        )
+    }
+}
+
+fn poll_labels(base: &str, path: &str, roles_path: &Path) -> LabelPollDiagnostics {
+    let mut diagnostics = LabelPollDiagnostics::default();
+    let roles_env = match fs::read_to_string(roles_path) {
+        Ok(s) => s,
+        Err(e) => {
+            diagnostics.attempts.push(LabelPollAttempt {
+                token_name: "roles.env".to_string(),
+                status: None,
+                json_ok: false,
+                failure: Some(format!("read failed: {e}")),
+            });
+            return diagnostics;
+        }
+    };
+    for (name, token) in label_token_candidates(&roles_env) {
+        let (attempt, labels) = fetch_labels(base, path, &name, &token);
+        if let Some(labels) = labels {
+            diagnostics.observed_labels = labels;
+        }
+        diagnostics.attempts.push(attempt);
+    }
+    diagnostics
+}
+
+fn label_token_candidates(roles_env: &str) -> Vec<(String, String)> {
+    let parsed = parse_roles_env(roles_env);
+    [
+        "TEMPER_FORGEJO_BOT_TOKEN",
+        "TEMPER_FORGEJO_TOKEN_BOT",
+        "TEMPER_FORGEJO_TOKEN_ARCHITECT",
+        "TEMPER_FORGEJO_TOKEN_ENGINEER",
+    ]
+    .into_iter()
+    .filter_map(|wanted| {
+        parsed
+            .iter()
+            .find(|(name, token)| name == wanted && !token.is_empty())
+            .map(|(_, token)| (wanted.to_string(), token.clone()))
+    })
+    .collect()
+}
+
+fn fetch_labels(
+    base: &str,
+    path: &str,
+    token_name: &str,
+    token: &str,
+) -> (LabelPollAttempt, Option<Vec<String>>) {
+    let output = Command::new("curl")
+        .args([
+            "-sS",
+            "-w",
+            "\n%{http_code}",
+            "-H",
+            &format!("Authorization: token {token}"),
+            &format!("{base}{path}"),
+        ])
+        .output();
+    let output = match output {
+        Ok(output) => output,
+        Err(e) => {
+            return (
+                LabelPollAttempt {
+                    token_name: token_name.to_string(),
+                    status: None,
+                    json_ok: false,
+                    failure: Some(format!("transport error: {e}")),
+                },
+                None,
+            );
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (body, status) = stdout
+        .rsplit_once('\n')
+        .unwrap_or((stdout.as_ref(), "unknown"));
+    let mut attempt = LabelPollAttempt {
+        token_name: token_name.to_string(),
+        status: Some(status.to_string()),
+        json_ok: false,
+        failure: None,
+    };
+    let status_code = status.parse::<u16>().ok();
+    if !output.status.success() || !matches!(status_code, Some(200..=299)) {
+        attempt.failure = Some(format!("HTTP status {status}"));
+        return (attempt, None);
+    }
+    match serde_json::from_str::<Value>(body) {
+        Ok(Value::Array(arr)) => {
+            attempt.json_ok = true;
+            let labels = arr
+                .iter()
+                .filter_map(|l| l["name"].as_str().map(str::to_string))
+                .collect::<Vec<_>>();
+            (attempt, Some(labels))
+        }
+        Ok(other) => {
+            attempt.json_ok = true;
+            attempt.failure = Some(format!("non-list JSON response: {other:#}"));
+            (attempt, None)
+        }
+        Err(e) => {
+            attempt.failure = Some(format!("JSON parse failed: {e}"));
+            (attempt, None)
+        }
+    }
 }
 
 fn has_worker_evidence(logs: &str, worker: &str) -> bool {
@@ -390,10 +593,12 @@ fn wait_for_ci_and_merge(
 }
 
 fn assert_mechanical_merge_evidence(run: &RunGuard, pr_number: u64) {
-    let mechanical = log_tail(&run.example.join("logs/mechanical.log"));
+    let mechanical_path = run.example.join("logs/mechanical.log");
+    let mechanical = fs::read_to_string(&mechanical_path).unwrap_or_default();
     assert!(
         has_merge_evidence_for_pr(&mechanical, pr_number),
-        "mechanical merge evidence for PR #{pr_number} not logged; mechanical.log tail:\n{mechanical}\ndiagnostics: {}",
+        "mechanical merge evidence for PR #{pr_number} not logged; mechanical.log tail:\n{}\ndiagnostics: {}",
+        tail(&mechanical, 200),
         run.diagnostics()
     );
 }
