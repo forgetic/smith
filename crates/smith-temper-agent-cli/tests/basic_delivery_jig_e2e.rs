@@ -477,39 +477,71 @@ fn wait_for_issue_rewrite(
     deadline: Instant,
     run: &RunGuard,
 ) -> Value {
-    poll(
+    let last = Arc::new(Mutex::new(String::from(
+        "issue #1 has not been requested yet",
+    )));
+    let write_last = Arc::clone(&last);
+    poll_with_diagnostics(
         deadline,
         run,
-        || {
-            let issues = api_json(
-                base,
-                token,
-                "/api/v1/repos/acme/service/issues?state=all",
-                "architect issue rewrite polling",
-            );
-            let arr = issues.as_array()?;
-            let non_pr: Vec<_> = arr
+        &mut || {
+            let issue_path = "/api/v1/repos/acme/service/issues/1";
+            let issue = match try_api_json(base, &token.name, &token.value, issue_path) {
+                Ok(issue) => issue,
+                Err(e) => {
+                    *write_last.lock().unwrap() =
+                        format!("issue #1 could not be read while polling architect rewrite: {e}");
+                    return None;
+                }
+            };
+
+            let body = match issue["body"].as_str() {
+                Some(body) => body,
+                None => {
+                    *write_last.lock().unwrap() = format!(
+                        "issue #1 was readable via GET {issue_path} with {}, but the body was missing or not a string; issue: {}",
+                        token.name,
+                        small_summary(&format!("{issue:#}"))
+                    );
+                    return None;
+                }
+            };
+
+            let expected_markers = [
+                "BANNER_GREETING",
+                "Hello from the basic-delivery demo",
+                "src/banner.sh",
+                "sh -n src/banner.sh",
+            ];
+            let missing = expected_markers
                 .iter()
-                .filter(|i| i.get("pull_request").is_none())
-                .collect();
-            assert!(
-                non_pr.len() <= 1,
-                "expected at most one intake issue, got {non_pr:#?}"
+                .copied()
+                .filter(|marker| !body.contains(marker))
+                .collect::<Vec<_>>();
+            if body == INTAKE_BODY {
+                *write_last.lock().unwrap() = format!(
+                    "issue #1 was readable via GET {issue_path} with {}, but still had the original thin intake body",
+                    token.name
+                );
+                return None;
+            }
+            if !missing.is_empty() {
+                *write_last.lock().unwrap() = format!(
+                    "issue #1 was readable and rewritten via GET {issue_path} with {}, but missing expected greeting spec markers: {missing:?}; body snippet: {}",
+                    token.name,
+                    small_summary(body)
+                );
+                return None;
+            }
+
+            *write_last.lock().unwrap() = format!(
+                "issue #1 satisfied the architect rewrite condition via GET {issue_path} with {}",
+                token.name
             );
-            let issue = (*non_pr.first()?).clone();
-            let body = issue["body"].as_str()?;
-            (body != INTAKE_BODY
-                && [
-                    "BANNER_GREETING",
-                    "Hello from the basic-delivery demo",
-                    "src/banner.sh",
-                    "sh -n src/banner.sh",
-                ]
-                .iter()
-                .all(|s| body.contains(s)))
-            .then_some(issue)
+            Some(issue)
         },
-        "architect issue rewrite",
+        "architect issue #1 rewrite with greeting-ready-code markers",
+        || last.lock().unwrap().clone(),
     )
 }
 
