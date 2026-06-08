@@ -284,6 +284,10 @@ load_config() {
     TEMPER_TRIGGER_BIN=${TEMPER_TRIGGER_BIN:-}
     TEMPER_BUILD_PACKAGE=${TEMPER_BUILD_PACKAGE:-temper}
     BASIC_DELIVERY_ROLE_DECISION=${BASIC_DELIVERY_ROLE_DECISION:-smith}
+    case "$BASIC_DELIVERY_ROLE_DECISION" in
+        smith | greeting) ;;
+        *) die "BASIC_DELIVERY_ROLE_DECISION must be smith or greeting, got '$BASIC_DELIVERY_ROLE_DECISION'" ;;
+    esac
     SMITH_WORKSPACE_ROOT=${SMITH_WORKSPACE_ROOT:-$SMITH_WORKSPACE_ROOT_DEFAULT}
     SMITH_BUILD_PACKAGE=${SMITH_BUILD_PACKAGE:-smith-temper-agent-cli}
     SMITH_WORKFLOW_ROLE_DECISION_BIN=${SMITH_WORKFLOW_ROLE_DECISION_BIN:-}
@@ -397,10 +401,31 @@ resolve_binaries() {
        with: cargo test -p temper-forgejo-fixture --test cache -- --ignored"
 
     ROLE_DECISION_ARGS=
+    ROLE_DECISION_ARGS_JSON=$SMITH_WORKFLOW_ROLE_DECISION_ARGS_JSON
+    ROLE_DECISION_ENV_ALLOWLIST=$SMITH_WORKFLOW_ROLE_DECISION_ENV_ALLOWLIST
     case "$BASIC_DELIVERY_ROLE_DECISION" in
         smith | "") resolve_smith_workflow_role_decision ;;
-        *) die "unknown BASIC_DELIVERY_ROLE_DECISION '$BASIC_DELIVERY_ROLE_DECISION' (expected smith)" ;;
+        greeting) resolve_greeting_workflow_role_decision ;;
+        *) die "unknown BASIC_DELIVERY_ROLE_DECISION '$BASIC_DELIVERY_ROLE_DECISION' (expected smith or greeting)" ;;
     esac
+}
+
+resolve_greeting_workflow_role_decision() {
+    GREETING_ROLE_DECISION_BIN=$SCRIPT_DIR/tools/greeting-role-decision.sh
+    [ -f "$GREETING_ROLE_DECISION_BIN" ] || die "greeting role-decision script not found: $GREETING_ROLE_DECISION_BIN"
+    [ -x "$GREETING_ROLE_DECISION_BIN" ] || die "greeting role-decision script is not executable: $GREETING_ROLE_DECISION_BIN"
+
+    ROLE_DECISION_ARGS="--role-decision-command $GREETING_ROLE_DECISION_BIN"
+    [ -n "$SMITH_WORKFLOW_ROLE_DECISION_TIMEOUT_SECS" ] && ROLE_DECISION_ARGS="$ROLE_DECISION_ARGS --role-decision-timeout-secs $SMITH_WORKFLOW_ROLE_DECISION_TIMEOUT_SECS"
+    ROLE_DECISION_ARGS_JSON='[]'
+    ROLE_DECISION_ENV_ALLOWLIST=
+    log "role decisions: greeting deterministic stand-in ($GREETING_ROLE_DECISION_BIN)"
+
+    if [ "$BASIC_DELIVERY_CODER" = "greeting" ]; then
+        log "coding workspace: greeting stand-in selected (BASIC_DELIVERY_CODER=greeting); skipping Smith coding agent build"
+        return 0
+    fi
+    resolve_smith_coding_agent
 }
 
 resolve_smith_workflow_role_decision() {
@@ -425,6 +450,10 @@ resolve_smith_workflow_role_decision() {
         log "coding workspace: greeting stand-in selected (BASIC_DELIVERY_CODER=greeting); skipping Smith coding agent build"
         return 0
     fi
+    resolve_smith_coding_agent
+}
+
+resolve_smith_coding_agent() {
     SMITH_CODING_AGENT_BIN=${SMITH_CODING_AGENT_BIN:-$SMITH_WORKSPACE_ROOT/target/debug/smith-coding-agent}
     if [ "${TEMPER_SKIP_BUILD:-0}" != "1" ]; then
         log "ensuring Smith coding-workspace agent is current (cargo build -p $SMITH_BUILD_PACKAGE --bin smith-coding-agent)..."
@@ -860,8 +889,8 @@ launch_role_worker() {
     TEMPER_CODING_WORKSPACE_REMOTE="$TEMPER_CODING_WORKSPACE_REMOTE" \
     TEMPER_CODING_WORKSPACE_PUSH="$TEMPER_CODING_WORKSPACE_PUSH" \
     TEMPER_CODING_WORKSPACE_PR_LABELS="$TEMPER_CODING_WORKSPACE_PR_LABELS" \
-    TEMPER_WORKER_ROLE_DECISION_ARGS_JSON="$SMITH_WORKFLOW_ROLE_DECISION_ARGS_JSON" \
-    TEMPER_WORKER_ROLE_DECISION_ENV_ALLOWLIST="$SMITH_WORKFLOW_ROLE_DECISION_ENV_ALLOWLIST" \
+    TEMPER_WORKER_ROLE_DECISION_ARGS_JSON="$ROLE_DECISION_ARGS_JSON" \
+    TEMPER_WORKER_ROLE_DECISION_ENV_ALLOWLIST="$ROLE_DECISION_ENV_ALLOWLIST" \
         "$WORKER_BIN" \
         --backend forgejo --base-url "$BASE_URL" $WORKER_REPO_ARGS \
         --workflow "$WORKFLOW_PATH" \
@@ -887,7 +916,7 @@ launch_workers() {
     _roles=$(sed -n "s/^TEMPER_FORGEJO_USER_[A-Z0-9_]*='\(.*\)'\$/\1/p" "$ROLES_ENV")
     [ -n "$_roles" ] || die "no roles found in $ROLES_ENV"
 
-    log 'launching role workers (production binary, Smith process decisions) ...'
+    log "launching role workers (production binary, $BASIC_DELIVERY_ROLE_DECISION process decisions) ..."
     # The intake issue is filed only after this whole pool is up (see
     # seed_intake), so every wake listener must already exist before it lands.
     # Start every other wake listener first, then launch architect last, so both
