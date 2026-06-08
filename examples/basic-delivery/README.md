@@ -129,7 +129,8 @@ examples/basic-delivery/
 │   └── ci.yml           # the host-mode CI run.sh applies over the provisioned
 │                        #   marker CI (real coder heads must pass it)
 ├── tools/
-│   └── greeting-coder.sh # deterministic engineer-head stand-in (BASIC_DELIVERY_CODER=greeting)
+│   ├── greeting-coder.sh          # deterministic architect/engineer coder stand-in (BASIC_DELIVERY_CODER=greeting)
+│   └── greeting-role-decision.sh  # deterministic role-decision stand-in (BASIC_DELIVERY_ROLE_DECISION=greeting)
 ├── secrets/             # gitignored except the templates + .gitignore
 │   └── .env.example
 └── run.sh               # launcher / teardown
@@ -169,10 +170,12 @@ architect's rewrite is what produces the spec.
   `TEMPER_FORGEJO_BINARY` / `TEMPER_FORGEJO_RUNNER_BINARY` in `config/temper.env`.
 - A host that permits **host-mode** CI jobs (spawning child processes, binding a
   loopback port) — the runner executes steps directly on the host, no containers.
-- Smith provider/auth for the LLM roles. By default the launcher builds this
-  Smith checkout's `smith-workflow-role-decision` and `smith-coding-agent` and
-  runs them with `--auth chatgpt-oauth`. Smith owns provider/auth setup and
+- Smith provider/auth for the default LLM mode. By default the launcher builds
+  this Smith checkout's `smith-workflow-role-decision` and `smith-coding-agent`
+  and runs them with `--auth chatgpt-oauth`. Smith owns provider/auth setup and
   preflight; Temper only passes opaque responder args. See `secrets/.env.example`.
+  For a provider-free smoke/demo path, use both deterministic greeting stand-ins
+  as shown below.
 
 ## Quick start
 
@@ -195,20 +198,26 @@ var before invoking the script (env wins over the file).
 
 ### Offline / no-LLM smoke
 
-The full unattended run needs a coder for both the architect (single-outcome
-triage) and the engineer (implementation). For an offline smoke with the
-deterministic stand-in coder — architect triage writes a fixed `ready_code` body
-and engineer implementation leaves a fixed `src/banner.sh` diff that passes the
-bundled CI — set:
+The default `./run.sh` path is the Smith LLM mode: role selection is delegated to
+`smith-workflow-role-decision`, and the architect/engineer workspaces are backed
+by `smith-coding-agent`. For a fully provider-free basic-delivery smoke, select
+both deterministic stand-ins:
 
 ```sh
-BASIC_DELIVERY_CODER=greeting ./run.sh
+BASIC_DELIVERY_ROLE_DECISION=greeting BASIC_DELIVERY_CODER=greeting ./run.sh
 ```
 
-In greeting mode, the stand-in uses Temper W3 `allowed_verdicts` to distinguish
-the architect's read-only triage workspace from the engineer's writable coding
-workspace. Architect invocations return the single `ready_code` verdict plus a
-complete banner spec; engineer invocations create the product script.
+The knobs are independent. `BASIC_DELIVERY_ROLE_DECISION=greeting` binds
+`tools/greeting-role-decision.sh`, which deterministically chooses
+`triage_intake` first and then `open_pr` when those actions are authorized (and
+otherwise falls back to a safe no-op/repair choice). `BASIC_DELIVERY_CODER=greeting`
+binds `tools/greeting-coder.sh`, which supplies the architect `ready_code`
+verdict/body and the engineer product diff (`src/banner.sh`) that passes the
+bundled CI.
+
+This greeting mode is only for the basic-delivery smoke/demo path. It is not a
+replacement for the default Smith LLM responders when you want real role-selection
+and coding behavior.
 
 ## Coding workspace binding
 
