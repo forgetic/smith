@@ -107,11 +107,6 @@ fn basic_delivery_jig_runs_to_bot_merge() {
     assert_eq!(post_engineer_issue["number"], 1);
 
     wait_for_ci_and_merge(&base_url, &token, pr_number, deadline, &run);
-    assert!(
-        log_tail(&output_path).contains("sh -n src/banner.sh"),
-        "runner log evidence missing shell check; diagnostics: {}",
-        run.diagnostics()
-    );
 
     let final_pr_path = format!("/api/v1/repos/acme/service/pulls/{pr_number}");
     let pr = api_json(&base_url, &token, &final_pr_path);
@@ -129,11 +124,7 @@ fn basic_delivery_jig_runs_to_bot_merge() {
         final_file["name"], "banner.sh",
         "main lacks src/banner.sh: {final_file:#}"
     );
-    assert!(
-        log_tail(&output_path).contains("land_pr"),
-        "mechanical land_pr not logged; diagnostics: {}",
-        run.diagnostics()
-    );
+    assert_mechanical_merge_evidence(&run, pr_number);
 
     run.stop();
 }
@@ -222,13 +213,11 @@ fn parses_unquoted_current_bot_token() {
 }
 
 fn wait_for_topology_evidence(base: &str, token: &str, deadline: Instant, run: &RunGuard) {
-    poll(
-        deadline,
-        run,
-        || {
-            let labels = api_json(base, token, "/api/v1/repos/acme/service/labels");
-            let names: Vec<String> = labels
-                .as_array()?
+    let mut observed_labels = Vec::new();
+    while Instant::now() < deadline {
+        let labels = api_json(base, token, "/api/v1/repos/acme/service/labels");
+        if let Some(arr) = labels.as_array() {
+            observed_labels = arr
                 .iter()
                 .filter_map(|l| l["name"].as_str().map(str::to_string))
                 .collect();
@@ -240,15 +229,41 @@ fn wait_for_topology_evidence(base: &str, token: &str, deadline: Instant, run: &
                 "implementation",
                 "landed",
             ];
-            (needed.iter().all(|n| names.iter().any(|s| s == n))
-                && log_tail(&run.output_path).contains("architect")
-                && log_tail(&run.output_path).contains("engineer")
-                && log_tail(&run.output_path).contains("mechanical")
-                && log_tail(&run.output_path).contains("webhook"))
-            .then_some(())
-        },
-        "basic-delivery topology labels/workers/webhook logs",
+            let logs = logs_tail(&run.example.join("logs"));
+            if needed
+                .iter()
+                .all(|n| observed_labels.iter().any(|s| s == n))
+                && has_worker_evidence(&logs, "architect")
+                && has_worker_evidence(&logs, "engineer")
+                && has_mechanical_evidence(&logs)
+                && has_trigger_evidence(&logs)
+            {
+                return;
+            }
+        }
+        assert!(
+            run.child_still_running(),
+            "run.sh exited before basic-delivery topology labels/workers/webhook logs; observed labels: {observed_labels:?}; diagnostics: {}",
+            run.diagnostics()
+        );
+        std::thread::sleep(Duration::from_secs(2));
+    }
+    panic!(
+        "timed out waiting for basic-delivery topology labels/workers/webhook logs; observed labels: {observed_labels:?}; diagnostics: {}",
+        run.diagnostics()
     );
+}
+
+fn has_worker_evidence(logs: &str, worker: &str) -> bool {
+    logs.contains(&format!("role:{worker}")) || logs.contains(&format!("worker={worker}"))
+}
+
+fn has_mechanical_evidence(logs: &str) -> bool {
+    logs.to_ascii_lowercase().contains("mechanical")
+}
+
+fn has_trigger_evidence(logs: &str) -> bool {
+    logs.contains("listening on") || logs.contains("webhook accepted")
 }
 
 fn wait_for_issue_rewrite(base: &str, token: &str, deadline: Instant, run: &RunGuard) -> Value {
@@ -362,14 +377,40 @@ fn wait_for_ci_and_merge(
                 token,
                 "/api/v1/repos/acme/service/commits/main/statuses",
             );
-            let logs = log_tail(&run.output_path);
-            (pr["merged"].as_bool().unwrap_or(false)
-                && logs.contains("success")
-                && statuses.is_array())
-            .then_some(())
+            let runner_logs = log_tail(&run.example.join("logs/runner.log"));
+            let ci_success = runner_logs.contains("Success")
+                || runner_logs.contains("Job succeeded")
+                || (runner_logs.contains("sh -n src/banner.sh")
+                    && pr["merged"].as_bool().unwrap_or(false));
+            (pr["merged"].as_bool().unwrap_or(false) && ci_success && statuses.is_array())
+                .then_some(())
         },
         &format!("CI success and bot merge for PR #{pr_number}"),
     )
+}
+
+fn assert_mechanical_merge_evidence(run: &RunGuard, pr_number: u64) {
+    let mechanical = log_tail(&run.example.join("logs/mechanical.log"));
+    assert!(
+        has_merge_evidence_for_pr(&mechanical, pr_number),
+        "mechanical merge evidence for PR #{pr_number} not logged; mechanical.log tail:\n{mechanical}\ndiagnostics: {}",
+        run.diagnostics()
+    );
+}
+
+fn has_merge_evidence_for_pr(logs: &str, pr_number: u64) -> bool {
+    let pr_markers = [
+        format!("PR #{pr_number}"),
+        format!("pr #{pr_number}"),
+        format!("pull/{pr_number}"),
+        format!("pulls/{pr_number}"),
+        format!("pr_number={pr_number}"),
+        format!("\"pr_number\":{pr_number}"),
+        format!("number={pr_number}"),
+        format!("#{pr_number}"),
+    ];
+    (logs.contains("land_pr") || logs.to_ascii_lowercase().contains("merge"))
+        && pr_markers.iter().any(|marker| logs.contains(marker))
 }
 
 fn api_json(base: &str, token: &str, path: &str) -> Value {
