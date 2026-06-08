@@ -10,6 +10,7 @@ use std::{
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -92,24 +93,31 @@ fn basic_delivery_jig_runs_to_bot_merge() {
     let token = wait_for_token(&example, deadline, &run);
 
     wait_for_topology_evidence(&base_url, &token, deadline, &run);
-    let issue = wait_for_issue_rewrite(&base_url, &token, deadline, &run);
+    let read_token = wait_for_read_token(
+        &base_url,
+        &example.join("secrets/roles.env"),
+        deadline,
+        &run,
+    );
+    let issue = wait_for_issue_rewrite(&base_url, &read_token, deadline, &run);
     assert_eq!(issue["number"], 1);
     assert_architect_issue_state(&issue);
 
-    let (pr_number, pr) = wait_for_pr(&base_url, &token, deadline, &run);
+    let (pr_number, pr) = wait_for_pr(&base_url, &read_token, deadline, &run);
     let pr_labels = labels(&pr);
     assert!(
         pr_labels.contains(&"implementation".to_string()),
         "PR #{pr_number} labels: {pr:#}"
     );
 
-    let post_engineer_issue = wait_for_post_engineer_issue_state(&base_url, &token, deadline, &run);
+    let post_engineer_issue =
+        wait_for_post_engineer_issue_state(&base_url, &read_token, deadline, &run);
     assert_eq!(post_engineer_issue["number"], 1);
 
-    wait_for_ci_and_merge(&base_url, &token, pr_number, deadline, &run);
+    wait_for_ci_and_merge(&base_url, &read_token, pr_number, deadline, &run);
 
     let final_pr_path = format!("/api/v1/repos/acme/service/pulls/{pr_number}");
-    let pr = api_json(&base_url, &token, &final_pr_path);
+    let pr = api_json(&base_url, &read_token, &final_pr_path, "final PR state");
     assert_eq!(pr["state"], "closed", "final PR #{pr_number} state: {pr:#}");
     assert!(
         pr["merged"].as_bool().unwrap_or(false),
@@ -117,8 +125,9 @@ fn basic_delivery_jig_runs_to_bot_merge() {
     );
     let final_file = api_json(
         &base_url,
-        &token,
+        &read_token,
         "/api/v1/repos/acme/service/contents/src/banner.sh?ref=main",
+        "final src/banner.sh lookup",
     );
     assert_eq!(
         final_file["name"], "banner.sh",
@@ -261,14 +270,7 @@ TEMPER_FORGEJO_TOKEN_ENGINEER=\"engineer-token\"\n";
         .into_iter()
         .map(|(name, _)| name)
         .collect();
-    assert_eq!(
-        names,
-        vec![
-            "TEMPER_FORGEJO_BOT_TOKEN",
-            "TEMPER_FORGEJO_TOKEN_ARCHITECT",
-            "TEMPER_FORGEJO_TOKEN_ENGINEER"
-        ]
-    );
+    assert_eq!(names, vec!["bot", "architect", "engineer"]);
 }
 
 fn wait_for_topology_evidence(base: &str, _token: &str, deadline: Instant, run: &RunGuard) {
@@ -376,17 +378,17 @@ fn poll_labels(base: &str, path: &str, roles_path: &Path) -> LabelPollDiagnostic
 fn label_token_candidates(roles_env: &str) -> Vec<(String, String)> {
     let parsed = parse_roles_env(roles_env);
     [
-        "TEMPER_FORGEJO_BOT_TOKEN",
-        "TEMPER_FORGEJO_TOKEN_BOT",
-        "TEMPER_FORGEJO_TOKEN_ARCHITECT",
-        "TEMPER_FORGEJO_TOKEN_ENGINEER",
+        ("bot", "TEMPER_FORGEJO_BOT_TOKEN"),
+        ("bot", "TEMPER_FORGEJO_TOKEN_BOT"),
+        ("architect", "TEMPER_FORGEJO_TOKEN_ARCHITECT"),
+        ("engineer", "TEMPER_FORGEJO_TOKEN_ENGINEER"),
     ]
     .into_iter()
-    .filter_map(|wanted| {
+    .filter_map(|(label, wanted)| {
         parsed
             .iter()
             .find(|(name, token)| name == wanted && !token.is_empty())
-            .map(|(_, token)| (wanted.to_string(), token.clone()))
+            .map(|(_, token)| (label.to_string(), token.clone()))
     })
     .collect()
 }
@@ -469,12 +471,22 @@ fn has_trigger_evidence(logs: &str) -> bool {
     logs.contains("listening on") || logs.contains("webhook accepted")
 }
 
-fn wait_for_issue_rewrite(base: &str, token: &str, deadline: Instant, run: &RunGuard) -> Value {
+fn wait_for_issue_rewrite(
+    base: &str,
+    token: &ReadToken,
+    deadline: Instant,
+    run: &RunGuard,
+) -> Value {
     poll(
         deadline,
         run,
         || {
-            let issues = api_json(base, token, "/api/v1/repos/acme/service/issues?state=all");
+            let issues = api_json(
+                base,
+                token,
+                "/api/v1/repos/acme/service/issues?state=all",
+                "architect issue rewrite polling",
+            );
             let arr = issues.as_array()?;
             let non_pr: Vec<_> = arr
                 .iter()
@@ -521,12 +533,17 @@ fn assert_architect_issue_state(issue: &Value) {
     }
 }
 
-fn wait_for_pr(base: &str, token: &str, deadline: Instant, run: &RunGuard) -> (u64, Value) {
+fn wait_for_pr(base: &str, token: &ReadToken, deadline: Instant, run: &RunGuard) -> (u64, Value) {
     poll(
         deadline,
         run,
         || {
-            let pulls = api_json(base, token, "/api/v1/repos/acme/service/pulls?state=all");
+            let pulls = api_json(
+                base,
+                token,
+                "/api/v1/repos/acme/service/pulls?state=all",
+                "implementation PR discovery",
+            );
             let arr = pulls.as_array()?;
             assert!(
                 arr.len() <= 1,
@@ -544,7 +561,7 @@ fn wait_for_pr(base: &str, token: &str, deadline: Instant, run: &RunGuard) -> (u
 
 fn wait_for_post_engineer_issue_state(
     base: &str,
-    token: &str,
+    token: &ReadToken,
     deadline: Instant,
     run: &RunGuard,
 ) -> Value {
@@ -552,7 +569,12 @@ fn wait_for_post_engineer_issue_state(
         deadline,
         run,
         || {
-            let issue = api_json(base, token, "/api/v1/repos/acme/service/issues/1");
+            let issue = api_json(
+                base,
+                token,
+                "/api/v1/repos/acme/service/issues/1",
+                "post-engineer issue state checks",
+            );
             let issue_labels = labels(&issue);
             (issue_labels.contains(&"in-progress".to_string())
                 && !issue_labels.contains(&"ready".to_string()))
@@ -564,7 +586,7 @@ fn wait_for_post_engineer_issue_state(
 
 fn wait_for_ci_and_merge(
     base: &str,
-    token: &str,
+    token: &ReadToken,
     pr_number: u64,
     deadline: Instant,
     run: &RunGuard,
@@ -574,11 +596,12 @@ fn wait_for_ci_and_merge(
         run,
         || {
             let pr_path = format!("/api/v1/repos/acme/service/pulls/{pr_number}");
-            let pr = api_json(base, token, &pr_path);
+            let pr = api_json(base, token, &pr_path, "PR merged-state polling");
             let statuses = api_json(
                 base,
                 token,
                 "/api/v1/repos/acme/service/commits/main/statuses",
+                "commit status polling",
             );
             let runner_logs = log_tail(&run.example.join("logs/runner.log"));
             let ci_success = runner_logs.contains("Success")
@@ -618,20 +641,91 @@ fn has_merge_evidence_for_pr(logs: &str, pr_number: u64) -> bool {
         && pr_markers.iter().any(|marker| logs.contains(marker))
 }
 
-fn api_json(base: &str, token: &str, path: &str) -> Value {
+#[derive(Clone, Debug)]
+struct ReadToken {
+    name: String,
+    value: String,
+}
+
+fn wait_for_read_token(
+    base: &str,
+    roles_path: &Path,
+    deadline: Instant,
+    run: &RunGuard,
+) -> ReadToken {
+    let last = Arc::new(Mutex::new(String::new()));
+    let write_last = Arc::clone(&last);
+    poll_with_diagnostics(
+        deadline,
+        run,
+        &mut || {
+            let roles_env = match fs::read_to_string(roles_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    *write_last.lock().unwrap() = format!("read roles.env failed: {e}");
+                    return None;
+                }
+            };
+            let candidates = label_token_candidates(&roles_env);
+            let names = candidates
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            for (name, value) in candidates {
+                match try_api_json(base, &name, &value, "/api/v1/repos/acme/service/issues/1") {
+                    Ok(_) => return Some(ReadToken { name, value }),
+                    Err(e) => {
+                        *write_last.lock().unwrap() = format!("candidates [{names}]; latest: {e}")
+                    }
+                }
+            }
+            None
+        },
+        "read-capable Forgejo API token",
+        || last.lock().unwrap().clone(),
+    )
+}
+
+fn api_json(base: &str, token: &ReadToken, path: &str, what: &str) -> Value {
+    try_api_json(base, &token.name, &token.value, path)
+        .unwrap_or_else(|e| panic!("{what} failed: {e}"))
+}
+
+fn try_api_json(base: &str, token_name: &str, token: &str, path: &str) -> Result<Value, String> {
     let output = Command::new("curl")
         .args([
-            "-fsS",
+            "-sS",
+            "-w",
+            "\n%{http_code}",
             "-H",
             &format!("Authorization: token {token}"),
             &format!("{base}{path}"),
         ])
         .output()
-        .expect("run curl");
-    if !output.status.success() {
-        return Value::Null;
+        .map_err(|e| format!("GET {path} with {token_name} => transport error: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (body, status) = stdout
+        .rsplit_once('\n')
+        .unwrap_or((stdout.as_ref(), "unknown"));
+    let status_code = status.parse::<u16>().ok();
+    if !output.status.success() || !matches!(status_code, Some(200..=299)) {
+        return Err(format!(
+            "GET {path} with {token_name} => {status}; body: {}",
+            small_summary(body)
+        ));
     }
-    serde_json::from_slice(&output.stdout).unwrap_or(Value::Null)
+    serde_json::from_str::<Value>(body).map_err(|e| {
+        format!(
+            "GET {path} with {token_name} => {status} JSON parse failed: {e}; body: {}",
+            small_summary(body)
+        )
+    })
+}
+
+fn small_summary(s: &str) -> String {
+    let compact = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    compact.chars().take(160).collect()
 }
 
 fn labels(value: &Value) -> Vec<String> {
@@ -644,19 +738,31 @@ fn labels(value: &Value) -> Vec<String> {
 }
 
 fn poll<T>(deadline: Instant, run: &RunGuard, mut f: impl FnMut() -> Option<T>, what: &str) -> T {
+    poll_with_diagnostics(deadline, run, &mut f, what, || String::new())
+}
+
+fn poll_with_diagnostics<T>(
+    deadline: Instant,
+    run: &RunGuard,
+    f: &mut impl FnMut() -> Option<T>,
+    what: &str,
+    diagnostics: impl Fn() -> String,
+) -> T {
     while Instant::now() < deadline {
         if let Some(v) = f() {
             return v;
         }
         assert!(
             run.child_still_running(),
-            "run.sh exited before {what}; diagnostics: {}",
+            "run.sh exited before {what}; attempts: {}; diagnostics: {}",
+            diagnostics(),
             run.diagnostics()
         );
         std::thread::sleep(Duration::from_secs(2));
     }
     panic!(
-        "timed out waiting for {what}; diagnostics: {}",
+        "timed out waiting for {what}; attempts: {}; diagnostics: {}",
+        diagnostics(),
         run.diagnostics()
     );
 }
