@@ -103,12 +103,8 @@ fn basic_delivery_jig_runs_to_bot_merge() {
     assert_eq!(issue["number"], 1);
     assert_architect_issue_state(&issue);
 
-    let (pr_number, pr) = wait_for_pr(&base_url, &read_token, deadline, &run);
-    let pr_labels = labels(&pr);
-    assert!(
-        pr_labels.contains(&"implementation".to_string()),
-        "PR #{pr_number} labels: {pr:#}"
-    );
+    let (pr_number, _pr) = wait_for_pr(&base_url, &read_token, deadline, &run);
+    wait_for_implementation_pr_label(&base_url, &read_token, pr_number, deadline, &run);
 
     let post_engineer_issue =
         wait_for_post_engineer_issue_state(&base_url, &read_token, deadline, &run);
@@ -591,6 +587,173 @@ fn wait_for_pr(base: &str, token: &ReadToken, deadline: Instant, run: &RunGuard)
     )
 }
 
+fn wait_for_implementation_pr_label(
+    base: &str,
+    token: &ReadToken,
+    pr_number: u64,
+    deadline: Instant,
+    run: &RunGuard,
+) {
+    let diagnostics = Arc::new(Mutex::new(PrLabelDiagnostics::new(pr_number)));
+    let write_diagnostics = Arc::clone(&diagnostics);
+    poll_with_diagnostics(
+        deadline,
+        run,
+        &mut || {
+            let mut latest = PrLabelDiagnostics::new(pr_number);
+            let pull_path = format!("/api/v1/repos/acme/service/pulls/{pr_number}");
+            if let Some(labels) =
+                poll_pr_label_endpoint(base, token, &pull_path, LabelSource::Pull, &mut latest)
+            {
+                if labels.iter().any(|label| label == "implementation") {
+                    *write_diagnostics.lock().unwrap() = latest;
+                    return Some(());
+                }
+            }
+
+            let issue_path = format!("/api/v1/repos/acme/service/issues/{pr_number}");
+            if let Some(labels) =
+                poll_pr_label_endpoint(base, token, &issue_path, LabelSource::Issue, &mut latest)
+            {
+                if labels.iter().any(|label| label == "implementation") {
+                    *write_diagnostics.lock().unwrap() = latest;
+                    return Some(());
+                }
+            }
+
+            *write_diagnostics.lock().unwrap() = latest;
+            None
+        },
+        &format!("implementation label visibility for PR #{pr_number}"),
+        || diagnostics.lock().unwrap().summary(&token.name),
+    )
+}
+
+#[derive(Clone, Copy)]
+enum LabelSource {
+    Pull,
+    Issue,
+}
+
+#[derive(Clone, Debug)]
+struct EndpointLabelDiagnostics {
+    status: Option<String>,
+    labels: Option<Vec<String>>,
+    state: Option<String>,
+    error: Option<String>,
+}
+
+impl EndpointLabelDiagnostics {
+    fn status_summary(&self) -> String {
+        self.status
+            .as_deref()
+            .unwrap_or("transport-error")
+            .to_string()
+    }
+
+    fn error_summary(&self) -> String {
+        self.error.as_deref().unwrap_or("<none>").to_string()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PrLabelDiagnostics {
+    pr_number: u64,
+    pull: Option<EndpointLabelDiagnostics>,
+    issue: Option<EndpointLabelDiagnostics>,
+}
+
+impl PrLabelDiagnostics {
+    fn new(pr_number: u64) -> Self {
+        Self {
+            pr_number,
+            pull: None,
+            issue: None,
+        }
+    }
+
+    fn summary(&self, token_name: &str) -> String {
+        let pull_status = self
+            .pull
+            .as_ref()
+            .map(EndpointLabelDiagnostics::status_summary)
+            .unwrap_or_else(|| "not-requested".to_string());
+        let pull_state = self
+            .pull
+            .as_ref()
+            .and_then(|d| d.state.as_deref())
+            .unwrap_or("<unknown>");
+        let pull_labels = self
+            .pull
+            .as_ref()
+            .and_then(|d| d.labels.clone())
+            .unwrap_or_default();
+        let issue_status = self
+            .issue
+            .as_ref()
+            .map(EndpointLabelDiagnostics::status_summary)
+            .unwrap_or_else(|| "not-requested".to_string());
+        let issue_labels = self
+            .issue
+            .as_ref()
+            .and_then(|d| d.labels.clone())
+            .unwrap_or_default();
+        let pull_error = self
+            .pull
+            .as_ref()
+            .map(EndpointLabelDiagnostics::error_summary)
+            .unwrap_or_else(|| "<none>".to_string());
+        let issue_error = self
+            .issue
+            .as_ref()
+            .map(EndpointLabelDiagnostics::error_summary)
+            .unwrap_or_else(|| "<none>".to_string());
+        format!(
+            "implementation label did not appear for PR #{} before timeout; latest pull endpoint via {}: status={} state={} labels={:?}; latest issue endpoint via {}: status={} labels={:?}; last errors: pull={}, issue={}",
+            self.pr_number,
+            token_name,
+            pull_status,
+            pull_state,
+            pull_labels,
+            token_name,
+            issue_status,
+            issue_labels,
+            pull_error,
+            issue_error
+        )
+    }
+}
+
+fn poll_pr_label_endpoint(
+    base: &str,
+    token: &ReadToken,
+    path: &str,
+    source: LabelSource,
+    diagnostics: &mut PrLabelDiagnostics,
+) -> Option<Vec<String>> {
+    let result = try_api_json_with_status(base, &token.name, &token.value, path);
+    let endpoint = match result {
+        Ok((json, status)) => EndpointLabelDiagnostics {
+            status: Some(status),
+            labels: Some(labels(&json)),
+            state: json["state"].as_str().map(str::to_string),
+            error: None,
+        },
+        Err(e) => EndpointLabelDiagnostics {
+            status: e.status,
+            labels: None,
+            state: None,
+            error: Some(e.message),
+        },
+    };
+    let labels = endpoint.labels.clone();
+    match source {
+        LabelSource::Pull => diagnostics.pull = Some(endpoint),
+        LabelSource::Issue => diagnostics.issue = Some(endpoint),
+    }
+    labels
+}
+
 fn wait_for_post_engineer_issue_state(
     base: &str,
     token: &ReadToken,
@@ -721,10 +884,38 @@ fn wait_for_read_token(
 
 fn api_json(base: &str, token: &ReadToken, path: &str, what: &str) -> Value {
     try_api_json(base, &token.name, &token.value, path)
-        .unwrap_or_else(|e| panic!("{what} failed: {e}"))
+        .unwrap_or_else(|e| panic!("{what} failed: {}", e.message))
 }
 
-fn try_api_json(base: &str, token_name: &str, token: &str, path: &str) -> Result<Value, String> {
+fn try_api_json(
+    base: &str,
+    token_name: &str,
+    token: &str,
+    path: &str,
+) -> Result<Value, ApiJsonError> {
+    try_api_json_with_status(base, token_name, token, path).map(|(json, _)| json)
+}
+
+#[derive(Debug)]
+struct ApiJsonError {
+    status: Option<String>,
+    message: String,
+}
+
+impl std::fmt::Display for ApiJsonError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ApiJsonError {}
+
+fn try_api_json_with_status(
+    base: &str,
+    token_name: &str,
+    token: &str,
+    path: &str,
+) -> Result<(Value, String), ApiJsonError> {
     let output = Command::new("curl")
         .args([
             "-sS",
@@ -735,24 +926,34 @@ fn try_api_json(base: &str, token_name: &str, token: &str, path: &str) -> Result
             &format!("{base}{path}"),
         ])
         .output()
-        .map_err(|e| format!("GET {path} with {token_name} => transport error: {e}"))?;
+        .map_err(|e| ApiJsonError {
+            status: None,
+            message: format!("GET {path} with {token_name} => transport error: {e}"),
+        })?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let (body, status) = stdout
         .rsplit_once('\n')
         .unwrap_or((stdout.as_ref(), "unknown"));
+    let status = status.to_string();
     let status_code = status.parse::<u16>().ok();
     if !output.status.success() || !matches!(status_code, Some(200..=299)) {
-        return Err(format!(
-            "GET {path} with {token_name} => {status}; body: {}",
-            small_summary(body)
-        ));
+        return Err(ApiJsonError {
+            status: Some(status.clone()),
+            message: format!(
+                "GET {path} with {token_name} => {status}; body: {}",
+                small_summary(body)
+            ),
+        });
     }
-    serde_json::from_str::<Value>(body).map_err(|e| {
-        format!(
-            "GET {path} with {token_name} => {status} JSON parse failed: {e}; body: {}",
-            small_summary(body)
-        )
-    })
+    serde_json::from_str::<Value>(body)
+        .map(|json| (json, status.clone()))
+        .map_err(|e| ApiJsonError {
+            status: Some(status.clone()),
+            message: format!(
+                "GET {path} with {token_name} => {status} JSON parse failed: {e}; body: {}",
+                small_summary(body)
+            ),
+        })
 }
 
 fn small_summary(s: &str) -> String {
