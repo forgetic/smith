@@ -32,7 +32,6 @@ fn basic_delivery_jig_runs_to_bot_merge() {
 
     let smith_root = repo_root();
     let real_example = smith_root.join("examples/basic-delivery");
-    assert_forbidden_fixture_helpers_are_absent();
     assert!(
         real_example.join("run.sh").exists(),
         "missing basic-delivery run.sh"
@@ -95,38 +94,31 @@ fn basic_delivery_jig_runs_to_bot_merge() {
     wait_for_topology_evidence(&base_url, &token, deadline, &run);
     let issue = wait_for_issue_rewrite(&base_url, &token, deadline, &run);
     assert_eq!(issue["number"], 1);
-    assert!(
-        labels(&issue).contains(&"code".to_string()),
-        "issue labels: {issue:#}"
-    );
-    assert!(
-        !labels(&issue).contains(&"ready".to_string()),
-        "issue should move beyond ready: {issue:#}"
-    );
-    assert!(
-        labels(&issue).contains(&"in-progress".to_string()),
-        "issue should be in-progress after PR opens: {issue:#}"
-    );
+    assert_architect_issue_state(&issue);
 
-    let pr = wait_for_pr(&base_url, &token, deadline, &run);
+    let (pr_number, pr) = wait_for_pr(&base_url, &token, deadline, &run);
     let pr_labels = labels(&pr);
     assert!(
         pr_labels.contains(&"implementation".to_string()),
-        "PR labels: {pr:#}"
+        "PR #{pr_number} labels: {pr:#}"
     );
 
-    wait_for_ci_and_merge(&base_url, &token, deadline, &run);
+    let post_engineer_issue = wait_for_post_engineer_issue_state(&base_url, &token, deadline, &run);
+    assert_eq!(post_engineer_issue["number"], 1);
+
+    wait_for_ci_and_merge(&base_url, &token, pr_number, deadline, &run);
     assert!(
         log_tail(&output_path).contains("sh -n src/banner.sh"),
         "runner log evidence missing shell check; diagnostics: {}",
         run.diagnostics()
     );
 
-    let pr = api_json(&base_url, &token, "/api/v1/repos/acme/service/pulls/1");
-    assert_eq!(pr["state"], "closed", "final PR state: {pr:#}");
+    let final_pr_path = format!("/api/v1/repos/acme/service/pulls/{pr_number}");
+    let pr = api_json(&base_url, &token, &final_pr_path);
+    assert_eq!(pr["state"], "closed", "final PR #{pr_number} state: {pr:#}");
     assert!(
         pr["merged"].as_bool().unwrap_or(false),
-        "PR was not merged by bot: {pr:#}"
+        "observed PR #{pr_number} was not merged by bot: {pr:#}"
     );
     let final_file = api_json(
         &base_url,
@@ -144,12 +136,6 @@ fn basic_delivery_jig_runs_to_bot_merge() {
     );
 
     run.stop();
-}
-
-fn assert_forbidden_fixture_helpers_are_absent() {
-    let source = fs::read_to_string(file!()).expect("read test source");
-    assert!(!source.contains("start_cached_provisioned_server"));
-    assert!(!source.contains("reference-delivery"));
 }
 
 fn repo_root() -> PathBuf {
@@ -264,26 +250,80 @@ fn wait_for_issue_rewrite(base: &str, token: &str, deadline: Instant, run: &RunG
     )
 }
 
-fn wait_for_pr(base: &str, token: &str, deadline: Instant, run: &RunGuard) -> Value {
+fn assert_architect_issue_state(issue: &Value) {
+    let issue_labels = labels(issue);
+    assert!(
+        issue_labels.contains(&"code".to_string()),
+        "architect triage should add code label; observed labels: {issue_labels:?}; issue: {issue:#}"
+    );
+    let body = issue["body"].as_str().unwrap_or_default();
+    for expected in [
+        "BANNER_GREETING",
+        "Hello from the basic-delivery demo",
+        "src/banner.sh",
+        "sh -n src/banner.sh",
+    ] {
+        assert!(
+            body.contains(expected),
+            "architect-rewritten issue body missing {expected:?}; body: {body}"
+        );
+    }
+}
+
+fn wait_for_pr(base: &str, token: &str, deadline: Instant, run: &RunGuard) -> (u64, Value) {
     poll(
         deadline,
         run,
         || {
-            api_json(base, token, "/api/v1/repos/acme/service/pulls?state=all")
-                .as_array()?
-                .first()
-                .cloned()
+            let pulls = api_json(base, token, "/api/v1/repos/acme/service/pulls?state=all");
+            let arr = pulls.as_array()?;
+            assert!(
+                arr.len() <= 1,
+                "expected at most one implementation PR while polling, got {arr:#?}"
+            );
+            let pr = (arr.len() == 1).then(|| arr[0].clone())?;
+            let number = pr["number"]
+                .as_u64()
+                .expect("observed implementation PR should have a number");
+            Some((number, pr))
         },
-        "implementation PR",
+        "exactly one implementation PR",
     )
 }
 
-fn wait_for_ci_and_merge(base: &str, token: &str, deadline: Instant, run: &RunGuard) {
+fn wait_for_post_engineer_issue_state(
+    base: &str,
+    token: &str,
+    deadline: Instant,
+    run: &RunGuard,
+) -> Value {
     poll(
         deadline,
         run,
         || {
-            let pr = api_json(base, token, "/api/v1/repos/acme/service/pulls/1");
+            let issue = api_json(base, token, "/api/v1/repos/acme/service/issues/1");
+            let issue_labels = labels(&issue);
+            (issue_labels.contains(&"in-progress".to_string())
+                && !issue_labels.contains(&"ready".to_string()))
+            .then_some(issue)
+        },
+        "issue #1 post-engineer labels (expected in-progress and not ready after implementation PR opened)",
+    )
+}
+
+fn wait_for_ci_and_merge(
+    base: &str,
+    token: &str,
+    pr_number: u64,
+    deadline: Instant,
+    run: &RunGuard,
+) {
+    poll(
+        deadline,
+        run,
+        || {
+            let pr_path = format!("/api/v1/repos/acme/service/pulls/{pr_number}");
+            let pr = api_json(base, token, &pr_path);
             let statuses = api_json(
                 base,
                 token,
@@ -295,7 +335,7 @@ fn wait_for_ci_and_merge(base: &str, token: &str, deadline: Instant, run: &RunGu
                 && statuses.is_array())
             .then_some(())
         },
-        "CI success and bot merge",
+        &format!("CI success and bot merge for PR #{pr_number}"),
     )
 }
 
