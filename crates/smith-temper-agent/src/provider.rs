@@ -350,6 +350,21 @@ impl ProviderConfig {
         }
     }
 
+    /// The reasoning effort for the **coding/triage workspace** agent, which does
+    /// real multi-step work (read/edit/verify) and benefits from maximal
+    /// reasoning — distinct from [`thinking_level`](Self::thinking_level), used by
+    /// the lightweight one-shot role-decision path. The codex reasoning models
+    /// read effort from `stream_options.thinking_level`, so under Codex OAuth the
+    /// coding agent requests the **highest** supported effort (`xhigh`). Non-codex
+    /// providers (DeepSeek API key, Anthropic OAuth) leave it unset, matching
+    /// `thinking_level`.
+    pub(crate) fn coding_thinking_level(&self) -> Option<ThinkingLevel> {
+        match &self.auth {
+            AuthMode::ApiKey { .. } | AuthMode::AnthropicOAuth { .. } => None,
+            AuthMode::ChatGptOAuth { .. } => Some(ThinkingLevel::XHigh),
+        }
+    }
+
     /// Builds an SDK [`Provider`] for this config.
     ///
     /// The returned provider authenticates per request from the bearer carried in

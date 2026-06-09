@@ -13,6 +13,7 @@ fn deepseek_mode_targets_openai_completions() {
     assert!(!entry.model.reasoning);
     assert_eq!(config.temperature(), Some(0.0));
     assert!(config.thinking_level().is_none());
+    assert!(config.coding_thinking_level().is_none());
     assert!(config.build_provider().is_ok());
 }
 
@@ -25,6 +26,9 @@ fn chatgpt_oauth_mode_targets_codex_route() {
     assert_eq!(config.model_id(), DEFAULT_CODEX_MODEL);
     assert!(config.temperature().is_none());
     assert_eq!(config.thinking_level(), Some(ThinkingLevel::Low));
+    // The coding/triage workspace agent requests maximal reasoning effort, while
+    // the one-shot decision path stays at the cheaper `Low`.
+    assert_eq!(config.coding_thinking_level(), Some(ThinkingLevel::XHigh));
     assert!(config.build_provider().is_ok());
 }
 

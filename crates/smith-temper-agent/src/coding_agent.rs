@@ -53,10 +53,12 @@ use crate::prompt_overlays::PromptOverlays;
 use crate::provider::{ProviderConfig, ProviderError};
 
 /// Default ceiling on tool-using iterations for one workspace run. The agent
-/// must do real multi-step work (read, edit, verify), so this is well above the
-/// tool-less decision path's ceiling of 1, but bounded so a confused run cannot
-/// loop forever.
-pub const DEFAULT_MAX_ITERATIONS: usize = 40;
+/// must do real multi-step work (read, edit, verify) on substantial work items,
+/// so this is well above the tool-less decision path's ceiling of 1, but bounded
+/// so a confused run cannot loop forever. Raised to 250 so the engineer can take
+/// larger, self-contained work items without exhausting the budget mid-run (we
+/// otherwise pay the per-round-trip cost of over-splitting issues).
+pub const DEFAULT_MAX_ITERATIONS: usize = 250;
 
 // ---------------------------------------------------------------------------
 // Context (input) — the JSON temper writes to $TEMPER_CODING_WORKSPACE_CONTEXT.
@@ -496,7 +498,7 @@ pub async fn run_coding_agent(
     };
     config.stream_options.api_key = Some(provider_config.resolve_bearer().await?);
     config.stream_options.temperature = provider_config.temperature();
-    config.stream_options.thinking_level = provider_config.thinking_level();
+    config.stream_options.thinking_level = provider_config.coding_thinking_level();
     config.stream_options.headers = provider_config.request_headers();
 
     let tools = tool_registry(capability, cwd);
