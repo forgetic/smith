@@ -5537,7 +5537,8 @@ dependencies = [
  "serde",
  "serde_json",
  "temper-worker-protocol",
- "thiserror 1.0.69",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
