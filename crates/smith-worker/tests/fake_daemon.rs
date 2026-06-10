@@ -8,7 +8,7 @@ use axum::{
     routing::post,
 };
 use serde_json::json;
-use smith_worker::{CapabilitySpec, StubExecutor, WorkerConfig, run_worker};
+use smith_worker::{CapabilitySpec, ExecutorSelection, StubExecutor, WorkerConfig, run_worker};
 use temper_worker_protocol::{
     Artifact, Assign, ErrorCode, FailureClass, JobResult, ProtocolError, Register, Release,
     ReleaseDisposition, ResultStatus, WORKER_PROTOCOL_VERSION, WorkerProtocolMessage,
@@ -194,6 +194,7 @@ fn worker_config() -> WorkerConfig {
         max_concurrent_jobs: 1,
         poll_wait: Duration::from_millis(25),
         heartbeat_interval: Duration::from_millis(25),
+        executor: ExecutorSelection::Stub,
     }
 }
 
