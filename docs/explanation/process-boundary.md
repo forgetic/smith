@@ -25,6 +25,25 @@ Smith owns:
 Temper must not take a Rust dependency on Smith. Smith can depend on Temper
 protocol crates to implement the wire contracts.
 
+## Post-Phase-4a dependency posture
+
+Smith's production Temper dependencies are serialization-only protocol contracts:
+
+- `temper-worker-protocol` is the versioned worker↔daemon wire protocol and is
+  `smith-worker`'s only Temper dependency.
+- `temper-process-protocol` is the spawn-boundary stdio JSON contract spoken by
+  the responder and coding-agent binaries. ADR 0002 retains it deliberately;
+  removing it would re-architect the process boundary rather than merely finish
+  daemon/worker consolidation.
+
+`temper-interaction` remains only as a `smith-temper-agent` dev-dependency for a
+single product-manager contract-parity test. The legacy direct code dependencies
+and imports from `temper-forge*`, `temper-runner`, `temper-testing`, and
+`temper-workflow` are gone from Smith's manifests and code. Smith still never
+calls the Forge API; the deliberate exception is the git plane in
+`smith-worker`'s role-credentialed workspaces, which uses clone/fetch/commit/push
+rather than Forge API crates.
+
 ## Why a process boundary
 
 Provider SDKs, auth-file schemas, subscription quirks, and live model behavior

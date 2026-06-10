@@ -37,12 +37,6 @@ SMITH_JIG_E2E=1 \
   --test coding_agent_e2e \
   -- --ignored --test-threads=1
 
-SMITH_JIG_E2E=1 \
-  cargo test -p smith-temper-agent-cli \
-  --features test-provider-base-url-override \
-  --test forgejo_workflow_role_e2e \
-  -- --ignored --test-threads=1
-
 TEMPER_BASIC_DELIVERY_JIG_E2E=1 \
   cargo test -p smith-temper-agent-cli --test basic_delivery_jig_e2e -- \
   --ignored --test-threads=1 --nocapture

@@ -23,7 +23,6 @@ jig-server = { path = "../../../jig/crates/jig-server" }
 jig-core = { path = "../../../jig/crates/jig-core" }
 jig-record = { path = "../../../jig/crates/jig-record" }
 temper-interaction = { path = "../../../temper/crates/temper-interaction" }
-temper-workflow = { path = "../../../temper/crates/temper-workflow" }
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
 
 [lints]

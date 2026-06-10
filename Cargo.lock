@@ -496,16 +496,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
-name = "bench-forgejo"
-version = "0.0.0"
-dependencies = [
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.10.9",
-]
-
-[[package]]
 name = "better_scoped_tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1835,16 +1825,6 @@ checksum = "e5ff35a391aef949120a0340d690269b3d9f63460a6106e99bd07b961f345ea9"
 dependencies = [
  "swc_macros_common",
  "syn",
-]
-
-[[package]]
-name = "fs2"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]
@@ -4850,9 +4830,7 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64",
  "bytes",
- "futures-channel",
  "futures-core",
- "futures-util",
  "http",
  "http-body",
  "http-body-util",
@@ -5504,7 +5482,6 @@ dependencies = [
  "smith-temper-agent",
  "temper-interaction",
  "temper-process-protocol",
- "temper-workflow",
  "tokio",
  "uuid",
 ]
@@ -5514,17 +5491,11 @@ name = "smith-temper-agent-cli"
 version = "0.1.0"
 dependencies = [
  "asupersync",
- "async-trait",
  "jig-core",
  "jig-server",
  "serde_json",
  "smith-temper-agent",
- "temper-forge",
- "temper-forge-forgejo",
  "temper-process-protocol",
- "temper-runner",
- "temper-testing",
- "temper-workflow",
  "tokio",
 ]
 
@@ -6007,20 +5978,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
-name = "temper-coding-workspace"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "serde",
- "serde_json",
- "temper-forge",
- "temper-forgejo-ops",
- "temper-runner",
- "temper-workflow",
-]
-
-[[package]]
 name = "temper-forge"
 version = "0.1.0"
 dependencies = [
@@ -6028,49 +5985,6 @@ dependencies = [
  "chrono",
  "serde",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "temper-forge-filesystem"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "fs2",
- "serde",
- "serde_json",
- "temper-forge",
-]
-
-[[package]]
-name = "temper-forge-forgejo"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "reqwest",
- "serde",
- "serde_json",
- "temper-forge",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "temper-forge-memory"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "temper-forge",
-]
-
-[[package]]
-name = "temper-forgejo-ops"
-version = "0.1.0"
-dependencies = [
- "base64",
- "reqwest",
- "serde_json",
 ]
 
 [[package]]
@@ -6097,95 +6011,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "temper-reference-delivery"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde_json",
- "temper-forge",
- "temper-runner",
- "temper-workflow",
-]
-
-[[package]]
-name = "temper-runner"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "serde",
- "serde_json",
- "temper-forge",
- "temper-process-protocol",
- "temper-workflow",
- "tokio",
-]
-
-[[package]]
-name = "temper-testing"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64",
- "bench-forgejo",
- "chrono",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "temper-coding-workspace",
- "temper-forge",
- "temper-forge-filesystem",
- "temper-forge-forgejo",
- "temper-forge-memory",
- "temper-forgejo-ops",
- "temper-reference-delivery",
- "temper-runner",
- "temper-trigger-forgejo",
- "temper-wake",
- "temper-workflow",
- "tokio",
-]
-
-[[package]]
-name = "temper-trigger-forgejo"
-version = "0.1.0"
-dependencies = [
- "hmac 0.12.1",
- "serde_json",
- "sha2 0.10.9",
- "temper-forge",
- "temper-runner",
- "temper-wake",
-]
-
-[[package]]
-name = "temper-wake"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "temper-runner",
- "tokio",
-]
-
-[[package]]
 name = "temper-worker-protocol"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "temper-workflow"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "serde",
- "serde_json",
- "temper-forge",
 ]
 
 [[package]]
