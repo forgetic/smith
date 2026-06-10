@@ -14,14 +14,8 @@ temper-process-protocol = { path = "../../../temper/crates/temper-process-protoc
 tokio = { workspace = true, features = ["rt", "macros"] }
 
 [dev-dependencies]
-async-trait.workspace = true
 jig-core = { path = "../../../jig/crates/jig-core" }
 jig-server = { path = "../../../jig/crates/jig-server" }
-temper-forge = { path = "../../../temper/crates/temper-forge" }
-temper-forge-forgejo = { path = "../../../temper/crates/temper-forge-forgejo" }
-temper-runner = { path = "../../../temper/crates/temper-runner" }
-temper-testing = { path = "../../../temper/crates/temper-testing" }
-temper-workflow = { path = "../../../temper/crates/temper-workflow" }
 
 [features]
 default = []

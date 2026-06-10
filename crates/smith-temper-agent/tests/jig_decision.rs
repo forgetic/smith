@@ -4,7 +4,10 @@ use jig_core::{Reply, Script};
 use jig_server::FakeLlm;
 use serde::Deserialize;
 use smith_temper_agent::{ProviderConfig, run_decision};
-use temper_workflow::{RawWorkflowSpec, RoleId, RoleManifest};
+
+#[path = "support/workflow_role_fixture.rs"]
+mod workflow_role_fixture;
+use workflow_role_fixture::{role_context, role_manifest};
 
 #[derive(Debug, Deserialize)]
 struct RoleDecision {
@@ -64,8 +67,11 @@ fn run_fixture_decision(
     runtime: &tokio::runtime::Runtime,
     provider: &ProviderConfig,
 ) -> RoleDecision {
-    let role = fixture_role_manifest();
-    let context = fixture_role_context(&role);
+    let role = role_manifest(
+        "jig-generic-role-smoke",
+        "When the work item is a task in the todo queue with the todo label, choose the advance action.",
+    );
+    let context = role_context(&role);
     runtime
         .block_on(run_decision::<RoleDecision>(
             provider,
@@ -77,67 +83,4 @@ fn run_fixture_decision(
 
 fn jig_auth_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jig_auth.json")
-}
-
-fn fixture_role_manifest() -> RoleManifest {
-    let json = r#"{
-        "name": "jig-generic-role-smoke",
-        "roles": [{
-            "id": "banana",
-            "prompt": {
-                "guidance": "When the work item is a task in the todo queue with the todo label, choose the advance action."
-            },
-            "queues": ["todo"]
-        }],
-        "labels": [{"id": "task"}, {"id": "todo"}, {"id": "done"}],
-        "artifact_kinds": [{
-            "id": "task",
-            "target": "issue",
-            "identifying_labels": ["task"]
-        }],
-        "queues": [{"id": "todo", "artifact": "task", "labels": ["todo"]}],
-        "transitions": [{
-            "id": "advance",
-            "artifact": "task",
-            "roles": ["banana"],
-            "effects": [
-                {"kind": "remove_label", "label": "todo"},
-                {"kind": "add_label", "label": "done"}
-            ]
-        }]
-    }"#;
-    let spec: RawWorkflowSpec = serde_json::from_str(json).expect("workflow json parses");
-    spec.validate()
-        .expect("workflow validates")
-        .compile()
-        .role(&RoleId::new("banana"))
-        .expect("banana role manifest exists")
-        .clone()
-}
-
-fn fixture_role_context(role: &RoleManifest) -> String {
-    let context = serde_json::json!({
-        "work_item": {
-            "repository": "forgejo:acme/service",
-            "queue": "todo",
-            "role": role.id.as_str(),
-            "kind": "task",
-            "artifact": {
-                "type": "issue",
-                "number": 1,
-                "title": "Advance a generic task",
-                "body": "This synthetic task is ready for the generic action.",
-                "labels": ["task", "todo"],
-                "state": "Open"
-            }
-        },
-        "allowed_actions": ["no_action", "advance"],
-        "authorized_actions": [{
-            "action": "advance",
-            "transition": "advance",
-            "artifact": "task",
-            "requires_gates": []
-        }]
-    });
-    serde_json::to_string_pretty(&context).expect("context serializes")
 }
