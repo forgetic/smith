@@ -971,7 +971,7 @@ fn labels(value: &Value) -> Vec<String> {
 }
 
 fn poll<T>(deadline: Instant, run: &RunGuard, mut f: impl FnMut() -> Option<T>, what: &str) -> T {
-    poll_with_diagnostics(deadline, run, &mut f, what, || String::new())
+    poll_with_diagnostics(deadline, run, &mut f, what, String::new)
 }
 
 fn poll_with_diagnostics<T>(
