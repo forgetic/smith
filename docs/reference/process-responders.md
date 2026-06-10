@@ -65,6 +65,26 @@ future `smith-interaction-responder` binary lands, the product-manager binary
 remains the compatibility process surface and does not parse Temper acceptance
 commands or effects.
 
+## Smith worker
+
+Binary:
+
+```text
+smith-worker --daemon-url <url> --worker-id <id> --capability <owner/name>:<role> [--capability ...] [--max-concurrent <n>] [--poll-wait-ms <n>] [--heartbeat-interval-ms <n>]
+```
+
+The `smith-worker` process speaks Temper Worker/Daemon Wire Protocol v1 over the
+configured daemon URL. It registers all configured `(repo, role)` capabilities,
+long-polls for assignments, runs each assignment through the current stub
+executor seam, and posts structured `result` messages back to Temper. This
+skeleton does not run role-decision/coding agents, manage git workspaces, or
+call deploy/Forge services.
+
+Authority boundary: `smith-worker` never receives Forge credentials and never
+calls the Forge API. Temper remains authoritative for workflow state, leases,
+PR create/update, and all Forge mutations; the worker only exchanges protocol
+messages with the daemon.
+
 ## Authority boundary
 
 Responder processes receive no Forge credentials or mutation tools. Clients

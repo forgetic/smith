@@ -2,6 +2,7 @@
 members = [
     "crates/smith-temper-agent",
     "crates/smith-temper-agent-cli",
+    "crates/smith-worker",
 ]
 resolver = "2"
 
