@@ -182,10 +182,10 @@ fn temper_workspace_root() -> Result<PathBuf, String> {
         ));
     }
 
-    let forgejo_fixture = root.join("crates/temper-forgejo-fixture");
-    if !forgejo_fixture.is_dir() {
+    let temper_testing = root.join("crates/temper-testing");
+    if !temper_testing.is_dir() {
         return Err(format!(
-            "resolved Temper workspace root {} is missing crates/temper-forgejo-fixture/",
+            "resolved Temper workspace root {} is missing crates/temper-testing/",
             root.display()
         ));
     }
