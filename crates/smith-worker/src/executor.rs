@@ -8,6 +8,11 @@ pub enum JobOutcome {
         branch: Branch,
         summary: Option<String>,
     },
+    Verdict {
+        verdict: String,
+        body: Option<String>,
+        summary: Option<String>,
+    },
     Failure {
         class: FailureClass,
         message: String,
@@ -69,27 +74,51 @@ impl JobExecutor for StubExecutor {
 
 pub fn job_result(worker_id: &str, job_id: &str, outcome: JobOutcome) -> JobResult {
     match outcome {
-        JobOutcome::Success { branch, summary } => JobResult {
-            protocol_version: WORKER_PROTOCOL_VERSION,
-            worker_id: worker_id.to_string(),
-            job_id: job_id.to_string(),
-            status: ResultStatus::Success,
-            branch: Some(branch),
-            failure: None,
+        JobOutcome::Success { branch, summary } => job_result_from_value(serde_json::json!({
+            "protocol_version": WORKER_PROTOCOL_VERSION,
+            "worker_id": worker_id,
+            "job_id": job_id,
+            "status": ResultStatus::Success,
+            "branch": branch,
+            "failure": null,
+            "summary": summary,
+            "details": null,
+            "verdict": null,
+            "body": null,
+        })),
+        JobOutcome::Verdict {
+            verdict,
+            body,
             summary,
-            details: None,
-        },
-        JobOutcome::Failure { class, message } => JobResult {
-            protocol_version: WORKER_PROTOCOL_VERSION,
-            worker_id: worker_id.to_string(),
-            job_id: job_id.to_string(),
-            status: ResultStatus::Failure,
-            branch: None,
-            failure: Some(Failure { class, message }),
-            summary: None,
-            details: None,
-        },
+        } => job_result_from_value(serde_json::json!({
+            "protocol_version": WORKER_PROTOCOL_VERSION,
+            "worker_id": worker_id,
+            "job_id": job_id,
+            "status": ResultStatus::Success,
+            "branch": null,
+            "failure": null,
+            "summary": summary,
+            "details": null,
+            "verdict": verdict,
+            "body": body,
+        })),
+        JobOutcome::Failure { class, message } => job_result_from_value(serde_json::json!({
+            "protocol_version": WORKER_PROTOCOL_VERSION,
+            "worker_id": worker_id,
+            "job_id": job_id,
+            "status": ResultStatus::Failure,
+            "branch": null,
+            "failure": Failure { class, message },
+            "summary": null,
+            "details": null,
+            "verdict": null,
+            "body": null,
+        })),
     }
+}
+
+fn job_result_from_value(value: serde_json::Value) -> JobResult {
+    serde_json::from_value(value).expect("smith-worker constructs valid worker-protocol JobResult")
 }
 
 #[cfg(test)]
@@ -134,6 +163,37 @@ mod tests {
                 head_sha: "0000000000000000000000000000000000000000".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn verdict_outcome_maps_to_success_result_without_branch() {
+        let result = job_result(
+            "worker-3",
+            "job-789",
+            JobOutcome::Verdict {
+                verdict: "ready_code".to_string(),
+                body: Some("rewritten issue body".to_string()),
+                summary: Some("triaged".to_string()),
+            },
+        );
+
+        assert_eq!(result.protocol_version, WORKER_PROTOCOL_VERSION);
+        assert_eq!(result.worker_id, "worker-3");
+        assert_eq!(result.job_id, "job-789");
+        assert_eq!(result.status, ResultStatus::Success);
+        assert_eq!(result.branch, None);
+        assert_eq!(result.failure, None);
+        assert_eq!(result.summary.as_deref(), Some("triaged"));
+
+        // The current worker-protocol crate carries top-level `verdict`/`body`.
+        // Older path checkouts ignore unknown fields during deserialization; keep
+        // this compatibility assertion conditional so the smith tree can still be
+        // checked against both sides of the lockstep protocol change.
+        let serialized = serde_json::to_value(&result).expect("JobResult serializes");
+        if serialized.get("verdict").is_some() {
+            assert_eq!(serialized["verdict"], "ready_code");
+            assert_eq!(serialized["body"], "rewritten issue body");
+        }
     }
 
     #[tokio::test]
