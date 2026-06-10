@@ -37,17 +37,38 @@ async fn workspace_prepares_commits_pushes_and_reuses_local_git_checkout() {
     let head = workspace.head_sha().await.expect("workspace head sha");
     let origin_main = git_output(["-C", path_str(workspace.path()), "rev-parse", "origin/main"]);
     assert_eq!(head, origin_main);
+    assert!(
+        !workspace
+            .has_changes()
+            .await
+            .expect("prepared workspace has no changes"),
+        "freshly prepared workspace should be clean"
+    );
 
     fs::write(
         workspace.path().join("worker.txt"),
         "persistent workspace\n",
     )
     .expect("write workspace file");
+    assert!(
+        workspace
+            .has_changes()
+            .await
+            .expect("workspace detects untracked file"),
+        "untracked file should count as a workspace change"
+    );
     let commit_sha = workspace
         .commit_all("add file")
         .await
         .expect("commit all changes");
     assert_is_sha(&commit_sha);
+    assert!(
+        !workspace
+            .has_changes()
+            .await
+            .expect("committed workspace has no changes"),
+        "committed workspace should be clean"
+    );
 
     assert_eq!(
         git_output([

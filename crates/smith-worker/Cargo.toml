@@ -11,12 +11,13 @@ temper-worker-protocol = { path = "../../../temper/crates/temper-worker-protocol
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde.workspace = true
 serde_json.workspace = true
+tempfile = "3"
 thiserror = "2"
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "process"] }
 
 [dev-dependencies]
 axum = "0.8"
-tempfile = "3"
+smith-temper-agent = { path = "../smith-temper-agent" }
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "net", "process"] }
 
 [lints]

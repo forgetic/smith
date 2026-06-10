@@ -5536,6 +5536,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "smith-temper-agent",
  "temper-worker-protocol",
  "tempfile",
  "thiserror 2.0.18",
