@@ -167,6 +167,28 @@ impl Workspace {
         self.head_sha().await
     }
 
+    /// Discard all local tracked and untracked working-tree changes.
+    pub async fn discard_changes(&self) -> Result<(), WorkspaceError> {
+        self.run_workspace_git(
+            false,
+            "git reset --hard HEAD".to_string(),
+            vec![
+                OsString::from("reset"),
+                OsString::from("--hard"),
+                OsString::from("HEAD"),
+            ],
+        )
+        .await?;
+        self.run_workspace_git(
+            false,
+            "git clean -ffd".to_string(),
+            vec![OsString::from("clean"), OsString::from("-ffd")],
+        )
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn head_sha(&self) -> Result<String, WorkspaceError> {
         let output = self
             .run_workspace_git(

@@ -2,10 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::Deserialize;
-use serde_json::json;
-use temper_worker_protocol::{
-    Assign, Branch, FailureClass, JobArtifactSnapshot, JobContext, JobRepository,
-};
+use temper_worker_protocol::{Assign, Branch, FailureClass, JobArtifactSnapshot, JobRepository};
 use tokio::process::Command;
 
 use crate::executor::{JobExecutor, JobOutcome};
@@ -47,7 +44,7 @@ impl JobExecutor for CodingExecutor {
 }
 
 async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
-    let context = match serde_json::from_value::<JobContext>(assign.job_payload) {
+    let context = match serde_json::from_value::<WireJobContext>(assign.job_payload) {
         Ok(context) => context,
         Err(error) => {
             return failure(
@@ -57,7 +54,7 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
         }
     };
 
-    let JobContext {
+    let WireJobContext {
         role,
         repo,
         queue,
@@ -67,6 +64,9 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
         branch_hint,
         correlation_key,
         artifact,
+        action: _action,
+        checkout_capability,
+        allowed_verdicts,
     } = context;
 
     let repository = match require_enriched_field(repository, "repository") {
@@ -89,6 +89,18 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
         Ok(artifact) => artifact,
         Err(outcome) => return outcome,
     };
+    let checkout = checkout_capability.unwrap_or_else(|| "writable".to_string());
+    let mode = match JobMode::from_checkout(&checkout) {
+        Ok(mode) => mode,
+        Err(outcome) => return outcome,
+    };
+
+    if mode == JobMode::PullRequestReadOnly {
+        return failure(
+            FailureClass::Permanent,
+            "pull-request read-only jobs are not supported yet",
+        );
+    }
 
     let identity = match config.role_identities.get(&role) {
         Some(identity) => identity.clone(),
@@ -138,6 +150,8 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
         &branch_hint,
         &correlation_key,
         &artifact,
+        &checkout,
+        &allowed_verdicts,
     ) {
         Ok(payload) => payload,
         Err(error) => {
@@ -219,38 +233,89 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
         }
     };
 
-    if let Some(verdict) = result.verdict {
-        return failure(
-            FailureClass::Permanent,
-            format!("verdict routing not supported by smith-worker yet: {verdict}"),
-        );
-    }
+    match mode {
+        JobMode::Writable => {
+            if let Some(verdict) = result.verdict {
+                if allowed_verdicts.contains(&verdict) {
+                    if let Err(error) = workspace.discard_changes().await {
+                        return workspace_failure(
+                            "discard verdict workspace changes",
+                            error,
+                            &token,
+                        );
+                    }
 
-    match workspace.has_changes().await {
-        Ok(true) => {}
-        Ok(false) => return failure(FailureClass::Permanent, "agent produced no diff"),
-        Err(error) => return workspace_failure("inspect workspace changes", error, &token),
-    }
+                    let summary = result
+                        .summary
+                        .or_else(|| Some(format!("implemented {correlation_key}")));
+                    return JobOutcome::Verdict {
+                        verdict,
+                        body: result.body.or(result.review_body),
+                        summary,
+                    };
+                }
 
-    if let Err(error) = workspace
-        .commit_all(&format!("Implement {correlation_key}"))
-        .await
-    {
-        return workspace_failure("commit workspace changes", error, &token);
-    }
-    let head_sha = match workspace.push_branch(&branch_hint).await {
-        Ok(head_sha) => head_sha,
-        Err(error) => return workspace_failure("push workspace branch", error, &token),
-    };
+                return failure(
+                    FailureClass::Permanent,
+                    format!("verdict routing not supported by smith-worker yet: {verdict}"),
+                );
+            }
 
-    JobOutcome::Success {
-        branch: Branch {
-            name: branch_hint,
-            head_sha,
-        },
-        summary: result
-            .summary
-            .or_else(|| Some(format!("implemented {correlation_key}"))),
+            match workspace.has_changes().await {
+                Ok(true) => {}
+                Ok(false) => return failure(FailureClass::Permanent, "agent produced no diff"),
+                Err(error) => return workspace_failure("inspect workspace changes", error, &token),
+            }
+
+            if let Err(error) = workspace
+                .commit_all(&format!("Implement {correlation_key}"))
+                .await
+            {
+                return workspace_failure("commit workspace changes", error, &token);
+            }
+            let head_sha = match workspace.push_branch(&branch_hint).await {
+                Ok(head_sha) => head_sha,
+                Err(error) => return workspace_failure("push workspace branch", error, &token),
+            };
+
+            JobOutcome::Success {
+                branch: Branch {
+                    name: branch_hint,
+                    head_sha,
+                },
+                summary: result
+                    .summary
+                    .or_else(|| Some(format!("implemented {correlation_key}"))),
+            }
+        }
+        JobMode::ReadOnly => {
+            let Some(verdict) = result.verdict else {
+                return failure(FailureClass::Permanent, "read-only job returned no verdict");
+            };
+            if !allowed_verdicts.contains(&verdict) {
+                return failure(
+                    FailureClass::Permanent,
+                    format!(
+                        "read-only job returned undeclared verdict `{verdict}`; allowed verdicts: {}",
+                        allowed_verdicts_display(&allowed_verdicts)
+                    ),
+                );
+            }
+
+            if let Err(error) = workspace.discard_changes().await {
+                return workspace_failure("discard verdict workspace changes", error, &token);
+            }
+
+            let summary = result
+                .summary
+                .or_else(|| Some(format!("implemented {correlation_key}")));
+            JobOutcome::Verdict {
+                verdict,
+                body: result.body.or(result.review_body),
+                summary,
+            }
+        }
+        JobMode::PullRequestReadOnly => unreachable!("rejected before workspace preparation"),
     }
 }
 
@@ -288,8 +353,10 @@ fn workspace_context_payload(
     branch_hint: &str,
     correlation_key: &str,
     artifact: &JobArtifactSnapshot,
+    checkout: &str,
+    allowed_verdicts: &[String],
 ) -> Result<serde_json::Value, serde_json::Error> {
-    let work_item_context = json!({
+    let work_item_context = serde_json::json!({
         "repository": repo,
         "role": role,
         "queue": queue,
@@ -305,7 +372,7 @@ fn workspace_context_payload(
     });
     let work_item_context = serde_json::to_string_pretty(&work_item_context)?;
 
-    Ok(json!({
+    Ok(serde_json::json!({
         "repository": {
             "id": repo,
             "owner": repository.owner.as_str(),
@@ -322,8 +389,8 @@ fn workspace_context_payload(
         "base_branch": base_branch,
         "branch_hint": branch_hint,
         "correlation_key": correlation_key,
-        "checkout": "writable",
-        "allowed_verdicts": [],
+        "checkout": checkout,
+        "allowed_verdicts": allowed_verdicts,
         "guidance": {
             "role_guidance": null,
             "tool_guidance": null,
@@ -360,9 +427,66 @@ fn redact_secret(text: String, secret: &str) -> String {
 }
 
 #[derive(Debug, Deserialize)]
+struct WireJobContext {
+    role: String,
+    repo: String,
+    queue: String,
+    artifact_kind: String,
+    #[serde(default)]
+    repository: Option<JobRepository>,
+    #[serde(default)]
+    base_branch: Option<String>,
+    #[serde(default)]
+    branch_hint: Option<String>,
+    #[serde(default)]
+    correlation_key: Option<String>,
+    #[serde(default)]
+    artifact: Option<JobArtifactSnapshot>,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    checkout_capability: Option<String>,
+    #[serde(default)]
+    allowed_verdicts: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum JobMode {
+    Writable,
+    ReadOnly,
+    PullRequestReadOnly,
+}
+
+impl JobMode {
+    fn from_checkout(checkout: &str) -> Result<Self, JobOutcome> {
+        match checkout {
+            "writable" => Ok(Self::Writable),
+            "read_only" => Ok(Self::ReadOnly),
+            "pull_request_read_only" => Ok(Self::PullRequestReadOnly),
+            other => Err(failure(
+                FailureClass::Protocol,
+                format!("unsupported checkout capability `{other}`"),
+            )),
+        }
+    }
+}
+
+fn allowed_verdicts_display(allowed_verdicts: &[String]) -> String {
+    if allowed_verdicts.is_empty() {
+        "[]".to_string()
+    } else {
+        allowed_verdicts.join(", ")
+    }
+}
+
+#[derive(Debug, Deserialize)]
 struct AgentResult {
     #[serde(default)]
     verdict: Option<String>,
     #[serde(default)]
     summary: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    review_body: Option<String>,
 }
