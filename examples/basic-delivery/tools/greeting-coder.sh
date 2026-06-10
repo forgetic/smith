@@ -1,15 +1,17 @@
 #!/bin/sh
-# Deterministic basic-delivery demo coder.
+# Deterministic basic-delivery demo coding agent.
 #
-# The production local-git coding workspace (temper-coding-workspace) invokes
-# this command with the prepared checkout as the working directory and the
-# work-item context written to the file named by $TEMPER_CODING_WORKSPACE_CONTEXT.
+# smith-worker's coding executor invokes this command with the prepared checkout
+# as the working directory and with file paths for the work-item context and
+# WorkspaceResult supplied in its environment. The command must always write one
+# WorkspaceResult JSON object to the supplied result path.
+#
 # When the context allows the architect triage verdict `ready_code`, this command
-# acts as the read-only architect workspace and writes the routed verdict result.
-# Otherwise it acts as the writable engineer workspace and leaves a MEANINGFUL,
-# non-bookkeeping product diff in the working tree; the workspace then commits
-# the branch, pushes it, and the engineer worker opens the implementation PR
-# through Temper.
+# acts as the read-only architect workspace and writes that routed verdict result.
+# Otherwise it acts as the writable engineer workspace and leaves a meaningful,
+# non-bookkeeping product diff in the working tree, then writes a summary result.
+# smith-worker owns commit/push/PR result delivery, so this script never commits
+# or pushes.
 #
 # This stand-in implements the seeded dead-simple intake (a configurable banner
 # greeting) deterministically so the basic-delivery demo can run without a real
@@ -105,3 +107,10 @@ default_greeting=$default_greeting
 printf '%s\n' "\$BANNER_GREETING"
 EOF
 chmod +x src/banner.sh
+
+result=${TEMPER_CODING_WORKSPACE_RESULT:-}
+if [ -z "$result" ]; then
+	printf '%s\n' 'error: engineer mode requires TEMPER_CODING_WORKSPACE_RESULT' >&2
+	exit 1
+fi
+printf '{"summary":"Implement the configurable banner greeting"}\n' >"$result"
