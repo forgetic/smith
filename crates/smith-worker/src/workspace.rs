@@ -181,6 +181,23 @@ impl Workspace {
         Ok(stdout.trim().to_string())
     }
 
+    /// True when the working tree has any staged, unstaged, or untracked change.
+    pub async fn has_changes(&self) -> Result<bool, WorkspaceError> {
+        let output = self
+            .run_workspace_git(
+                false,
+                "git status --porcelain=v1 --untracked-files=all".to_string(),
+                vec![
+                    OsString::from("status"),
+                    OsString::from("--porcelain=v1"),
+                    OsString::from("--untracked-files=all"),
+                ],
+            )
+            .await?;
+
+        Ok(!output.stdout.is_empty())
+    }
+
     async fn run_workspace_git(
         &self,
         include_remote_header: bool,
