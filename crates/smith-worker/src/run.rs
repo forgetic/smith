@@ -175,6 +175,8 @@ mod tests {
                 head_sha: "abc123".to_string(),
             }),
             failure: None,
+            verdict: None,
+            body: None,
             summary: None,
             details: None,
         };
@@ -197,6 +199,8 @@ mod tests {
                 class: FailureClass::Permanent,
                 message: "configured failure".to_string(),
             }),
+            verdict: None,
+            body: None,
             summary: None,
             details: None,
         };
@@ -216,6 +220,8 @@ mod tests {
             status: ResultStatus::Failure,
             branch: None,
             failure: None,
+            verdict: None,
+            body: None,
             summary: None,
             details: None,
         };
