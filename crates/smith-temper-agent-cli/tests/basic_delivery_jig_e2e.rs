@@ -1,9 +1,9 @@
 //! Provider-free basic-delivery process E2E.
 //!
 //! This ignored test boots the checked-in `examples/basic-delivery` launcher with
-//! deterministic local stand-ins for role decisions and coding workspaces. It is
-//! intentionally not part of default CI because it starts real Forgejo,
-//! forgejo-runner, Temper workers, and webhook trigger processes.
+//! the deterministic local greeting coding-agent stand-in. It is intentionally
+//! not part of default CI because it starts real Forgejo, forgejo-runner, one
+//! Temper daemon, and one Smith worker process.
 
 use std::{
     fs,
@@ -41,22 +41,15 @@ fn basic_delivery_jig_runs_to_bot_merge() {
         real_example.join("tools/greeting-coder.sh").exists(),
         "missing greeting coder"
     );
-    assert!(
-        real_example
-            .join("tools/greeting-role-decision.sh")
-            .exists(),
-        "missing greeting role decision"
-    );
 
     let temp = TempDir::new("basic-delivery-jig-e2e");
     let example = temp.path.join("basic-delivery");
     copy_dir(&real_example, &example);
 
     let forgejo_port = unused_loopback_port();
-    let trigger_port = unused_loopback_port();
+    let daemon_port = unused_loopback_port();
     let base_url = format!("http://127.0.0.1:{forgejo_port}");
-    let trigger_bind = format!("127.0.0.1:{trigger_port}");
-    let webhook_url = format!("http://127.0.0.1:{trigger_port}/forgejo/webhook");
+    let daemon_bind = format!("127.0.0.1:{daemon_port}");
     let output_path = temp.path.join("run.sh.out");
     let output = fs::File::create(&output_path).expect("create run.sh output capture");
     let output_err = output.try_clone().expect("clone output capture");
@@ -67,15 +60,12 @@ fn basic_delivery_jig_runs_to_bot_merge() {
         .current_dir(&example)
         .env("SMITH_WORKSPACE_ROOT", &smith_root)
         .env("TEMPER_WORKSPACE_ROOT", temper_root(&smith_root))
-        .env("BASIC_DELIVERY_ROLE_DECISION", "greeting")
         .env("BASIC_DELIVERY_CODER", "greeting")
         .env("BASE_URL", &base_url)
-        .env("TRIGGER_BIND", &trigger_bind)
-        .env("WEBHOOK_URL", &webhook_url)
+        .env("DAEMON_BIND", &daemon_bind)
         .env("RUN_SECS", "240")
-        .env("POLL_MS", "120000")
-        .env("CI_STATUS_POLL_MS", "1000")
-        .env("IDLE_POLL_MAX_MS", "2000")
+        .env("DAEMON_POLL_CADENCE_SECS", "120")
+        .env("DAEMON_MECHANICAL_CADENCE_SECS", "1")
         .stdout(Stdio::from(output))
         .stderr(Stdio::from(output_err));
     preserve_overrides(&mut command);
@@ -106,11 +96,9 @@ fn basic_delivery_jig_runs_to_bot_merge() {
     let (pr_number, _pr) = wait_for_pr(&base_url, &read_token, deadline, &run);
     wait_for_implementation_pr_label(&base_url, &read_token, pr_number, deadline, &run);
 
-    let post_engineer_issue =
-        wait_for_post_engineer_issue_state(&base_url, &read_token, deadline, &run);
-    assert_eq!(post_engineer_issue["number"], 1);
-
     wait_for_ci_and_merge(&base_url, &read_token, pr_number, deadline, &run);
+    let post_engineer_issue = wait_for_source_issue_closed(&base_url, &read_token, deadline, &run);
+    assert_eq!(post_engineer_issue["number"], 1);
 
     let final_pr_path = format!("/api/v1/repos/acme/service/pulls/{pr_number}");
     let pr = api_json(&base_url, &read_token, &final_pr_path, "final PR state");
@@ -157,9 +145,9 @@ fn preserve_overrides(command: &mut Command) {
     for key in [
         "TEMPER_FORGEJO_BINARY",
         "TEMPER_FORGEJO_RUNNER_BINARY",
-        "TEMPER_WORKER_BIN",
+        "TEMPER_DAEMON_BIN",
         "TEMPER_PROVISION_BIN",
-        "TEMPER_TRIGGER_BIN",
+        "SMITH_WORKER_BIN",
     ] {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);
@@ -282,14 +270,16 @@ fn wait_for_topology_evidence(base: &str, _token: &str, deadline: Instant, run: 
             "implementation",
             "landed",
         ];
-        let logs = logs_tail(&run.example.join("logs"));
+        let log_dir = run.example.join("logs");
+        let daemon_log = log_tail(&log_dir.join("daemon.log"));
+        let worker_log = log_tail(&log_dir.join("worker.log"));
         if needed
             .iter()
             .all(|n| diagnostics.observed_labels.iter().any(|s| s == n))
-            && has_worker_evidence(&logs, "architect")
-            && has_worker_evidence(&logs, "engineer")
-            && has_mechanical_evidence(&logs)
-            && has_trigger_evidence(&logs)
+            && has_worker_evidence(&worker_log, "architect")
+            && has_worker_evidence(&worker_log, "engineer")
+            && has_mechanical_evidence(&daemon_log)
+            && has_trigger_evidence(&daemon_log)
         {
             return;
         }
@@ -456,15 +446,20 @@ fn fetch_labels(
 }
 
 fn has_worker_evidence(logs: &str, worker: &str) -> bool {
-    logs.contains(&format!("role:{worker}")) || logs.contains(&format!("worker={worker}"))
+    logs.contains("smith-worker: registered")
+        && logs.contains("smith-worker: assigned job_id=")
+        && logs.contains(&format!("role={worker}"))
 }
 
-fn has_mechanical_evidence(logs: &str) -> bool {
-    logs.to_ascii_lowercase().contains("mechanical")
+fn has_mechanical_evidence(daemon_log: &str) -> bool {
+    daemon_log.contains("mechanical")
+        || daemon_log.contains("ci_gate")
+        || daemon_log.contains("land_pr")
+        || daemon_log.to_ascii_lowercase().contains("merge")
 }
 
-fn has_trigger_evidence(logs: &str) -> bool {
-    logs.contains("listening on") || logs.contains("webhook accepted")
+fn has_trigger_evidence(daemon_log: &str) -> bool {
+    daemon_log.contains("webhook accepted")
 }
 
 fn wait_for_issue_rewrite(
@@ -754,7 +749,7 @@ fn poll_pr_label_endpoint(
     labels
 }
 
-fn wait_for_post_engineer_issue_state(
+fn wait_for_source_issue_closed(
     base: &str,
     token: &ReadToken,
     deadline: Instant,
@@ -768,14 +763,11 @@ fn wait_for_post_engineer_issue_state(
                 base,
                 token,
                 "/api/v1/repos/acme/service/issues/1",
-                "post-engineer issue state checks",
+                "source issue closed-state checks",
             );
-            let issue_labels = labels(&issue);
-            (issue_labels.contains(&"in-progress".to_string())
-                && !issue_labels.contains(&"ready".to_string()))
-            .then_some(issue)
+            (issue["state"].as_str() == Some("closed")).then_some(issue)
         },
-        "issue #1 post-engineer labels (expected in-progress and not ready after implementation PR opened)",
+        "source issue #1 closed after CI-green bot merge",
     )
 }
 
@@ -811,12 +803,12 @@ fn wait_for_ci_and_merge(
 }
 
 fn assert_mechanical_merge_evidence(run: &RunGuard, pr_number: u64) {
-    let mechanical_path = run.example.join("logs/mechanical.log");
-    let mechanical = fs::read_to_string(&mechanical_path).unwrap_or_default();
+    let daemon_path = run.example.join("logs/daemon.log");
+    let daemon = fs::read_to_string(&daemon_path).unwrap_or_default();
     assert!(
-        has_merge_evidence_for_pr(&mechanical, pr_number),
-        "mechanical merge evidence for PR #{pr_number} not logged; mechanical.log tail:\n{}\ndiagnostics: {}",
-        tail(&mechanical, 200),
+        has_merge_evidence_for_pr(&daemon, pr_number),
+        "mechanical merge evidence for PR #{pr_number} not logged; daemon.log tail:\n{}\ndiagnostics: {}",
+        tail(&daemon, 200),
         run.diagnostics()
     );
 }
