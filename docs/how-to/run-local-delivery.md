@@ -1,5 +1,12 @@
 # Run the local basic-delivery deployment
 
+> **Legacy walkthrough.** This page describes the superseded per-role pool
+> (`smith-delivery.target` with architect/engineer/mechanical/trigger units).
+> The consolidated two-tier deployment — one Temper daemon (the sole Forgejo
+> API writer, deployed from `temper/deploy/`) plus one `smith-worker.service`
+> — is documented in [`deploy/README.md`](../../deploy/README.md), including
+> the cutover steps from this pool.
+
 This guide installs and runs the basic-delivery workflow against `ai/smith` as
 **real systemd user services** — the production-like counterpart to the throwaway
 [`examples/basic-delivery`](../../examples/basic-delivery/README.md) launcher. A

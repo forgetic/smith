@@ -44,6 +44,20 @@ calls the Forge API; the deliberate exception is the git plane in
 `smith-worker`'s role-credentialed workspaces, which uses clone/fetch/commit/push
 rather than Forge API crates.
 
+## Two-tier deployment topology
+
+The deployed shape mirrors the dependency posture. The **Temper daemon**
+(deployed from `temper/deploy/`) is the sole Forgejo **API** writer: it owns
+webhook intake, the poll backstop, queue scanning, lease management, mechanical
+landing, and every role-attributed Forge mutation, holding the per-role Forge
+API tokens. The **Smith worker tier** (deployed from this repo's `deploy/` as
+one `smith-worker.service`) registers `(repo, role)` capabilities, long-polls
+the daemon over the versioned `temper-worker-protocol` wire contract, runs the
+coding agent in persistent per-`(repo, role)` git workspaces, and pushes
+branches as the role using only git credentials — it never holds a Forge API
+token. The wire protocol crate is the entire compile-time contract between the
+tiers.
+
 ## Why a process boundary
 
 Provider SDKs, auth-file schemas, subscription quirks, and live model behavior
