@@ -212,6 +212,7 @@ mod tests {
             max_concurrent_jobs: 2,
             poll_wait: Duration::from_millis(1_500),
             heartbeat_interval: Duration::from_millis(500),
+            executor: crate::config::ExecutorSelection::Stub,
         }
     }
 
