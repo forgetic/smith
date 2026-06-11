@@ -132,6 +132,7 @@ fn system_prompt_is_role_specific() {
     assert!(architect.contains("ready_code"));
     assert!(architect.contains("needs_design"));
     assert!(architect.contains("needs_breakdown"));
+    assert!(architect.contains("target_repo"));
 
     let reviewer = system_prompt(Capability::ReviewWorkspace, &[]);
     assert!(reviewer.contains("ROLE: reviewer"));
@@ -233,6 +234,7 @@ fn breakdown_result_serializes_children() {
                 body: "api body".to_string(),
                 labels: vec!["code".to_string()],
                 depends_on: Vec::new(),
+                target_repo: Some("acme/other".to_string()),
             },
             WorkspaceResultChild {
                 slug: "ui".to_string(),
@@ -240,6 +242,7 @@ fn breakdown_result_serializes_children() {
                 body: "ui body".to_string(),
                 labels: Vec::new(),
                 depends_on: vec!["api".to_string()],
+                target_repo: None,
             },
         ],
         ..WorkspaceResult::default()
@@ -247,7 +250,9 @@ fn breakdown_result_serializes_children() {
     let value = serde_json::to_value(&result).expect("serializes");
     assert_eq!(value["verdict"], "needs_breakdown");
     assert_eq!(value["children"][0]["slug"], "api");
+    assert_eq!(value["children"][0]["target_repo"], "acme/other");
     assert_eq!(value["children"][1]["depends_on"][0], "api");
+    assert!(value["children"][1].get("target_repo").is_none());
     // No spurious head-path fields.
     assert!(value.get("summary").is_none());
     assert!(value.get("body").is_none());

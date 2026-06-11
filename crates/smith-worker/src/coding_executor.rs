@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::Deserialize;
-use temper_worker_protocol::{Assign, Branch, FailureClass, JobArtifactSnapshot, JobRepository};
+use temper_worker_protocol::{
+    Assign, Branch, FailureClass, JobArtifactSnapshot, JobChild, JobRepository,
+};
 use tokio::process::Command;
 
 use crate::executor::{JobExecutor, JobOutcome};
@@ -255,6 +257,7 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
                         verdict,
                         body: result.body.or(result.review_body),
                         summary,
+                        children: Vec::new(),
                     };
                 }
 
@@ -316,6 +319,7 @@ async fn verdict_only_outcome(
         summary,
         body,
         review_body,
+        children,
     } = result;
     let Some(verdict) = verdict else {
         return failure(FailureClass::Permanent, "read-only job returned no verdict");
@@ -334,10 +338,23 @@ async fn verdict_only_outcome(
         return workspace_failure("discard verdict workspace changes", error, token);
     }
 
+    let children = children
+        .into_iter()
+        .map(|child| JobChild {
+            slug: child.slug,
+            title: child.title,
+            body: child.body,
+            labels: child.labels,
+            depends_on: child.depends_on,
+            target_repo: child.target_repo,
+        })
+        .collect();
+
     JobOutcome::Verdict {
         verdict,
         body: body.or(review_body),
         summary: summary.or_else(|| Some(format!("implemented {correlation_key}"))),
+        children,
     }
 }
 
@@ -520,13 +537,28 @@ fn allowed_verdicts_display(allowed_verdicts: &[String]) -> String {
 }
 
 #[derive(Debug, Deserialize)]
-struct AgentResult {
+pub struct AgentResult {
     #[serde(default)]
-    verdict: Option<String>,
+    pub verdict: Option<String>,
     #[serde(default)]
-    summary: Option<String>,
+    pub summary: Option<String>,
     #[serde(default)]
-    body: Option<String>,
+    pub body: Option<String>,
     #[serde(default)]
-    review_body: Option<String>,
+    pub review_body: Option<String>,
+    #[serde(default)]
+    pub children: Vec<AgentResultChild>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AgentResultChild {
+    pub slug: String,
+    pub title: String,
+    pub body: String,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub target_repo: Option<String>,
 }

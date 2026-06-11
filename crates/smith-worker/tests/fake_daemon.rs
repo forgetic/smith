@@ -29,7 +29,7 @@ struct DaemonRequest {
 #[derive(Debug)]
 enum DaemonReply {
     NoContent,
-    Message(WorkerProtocolMessage),
+    Message(Box<WorkerProtocolMessage>),
 }
 
 #[derive(Debug)]
@@ -57,7 +57,7 @@ async fn message_handler(
 
     match reply_rx.await {
         Ok(DaemonReply::NoContent) => StatusCode::NO_CONTENT.into_response(),
-        Ok(DaemonReply::Message(reply)) => Json(reply).into_response(),
+        Ok(DaemonReply::Message(reply)) => Json(*reply).into_response(),
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "fake daemon dropped reply",
@@ -122,8 +122,8 @@ async fn fake_daemon_controller(
                 assigned = true;
                 request
                     .reply
-                    .send(DaemonReply::Message(WorkerProtocolMessage::Assign(
-                        assign.clone(),
+                    .send(DaemonReply::Message(Box::new(
+                        WorkerProtocolMessage::Assign(assign.clone()),
                     )))
                     .expect("handler receives assign reply");
             }
@@ -139,7 +139,7 @@ async fn fake_daemon_controller(
                 });
                 request
                     .reply
-                    .send(DaemonReply::Message(release))
+                    .send(DaemonReply::Message(Box::new(release)))
                     .expect("handler receives release reply");
 
                 if let Some(observed) = observed.take() {
@@ -154,14 +154,14 @@ async fn fake_daemon_controller(
             other => {
                 request
                     .reply
-                    .send(DaemonReply::Message(WorkerProtocolMessage::Error(
-                        ProtocolError {
+                    .send(DaemonReply::Message(Box::new(
+                        WorkerProtocolMessage::Error(ProtocolError {
                             protocol_version: WORKER_PROTOCOL_VERSION,
                             code: ErrorCode::MalformedMessage,
                             message: format!("unexpected fake-daemon request: {other:?}"),
                             retry_after_ms: None,
                             job_id: None,
-                        },
+                        }),
                     )))
                     .expect("handler receives error reply");
             }
@@ -171,14 +171,14 @@ async fn fake_daemon_controller(
 
 fn reply_with_timeout(reply: oneshot::Sender<DaemonReply>) {
     reply
-        .send(DaemonReply::Message(WorkerProtocolMessage::Error(
-            ProtocolError {
+        .send(DaemonReply::Message(Box::new(
+            WorkerProtocolMessage::Error(ProtocolError {
                 protocol_version: WORKER_PROTOCOL_VERSION,
                 code: ErrorCode::PollTimeout,
                 message: "no assignment available before the long-poll deadline".to_string(),
                 retry_after_ms: None,
                 job_id: None,
-            },
+            }),
         )))
         .expect("handler receives timeout reply");
 }
