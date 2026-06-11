@@ -69,6 +69,64 @@ impl Workspace {
     }
 
     pub async fn prepare(&self, work_branch: &str) -> Result<(), WorkspaceError> {
+        self.prepare_base_checkout().await?;
+
+        self.run_workspace_git(
+            false,
+            format!("git checkout -B {work_branch} origin/{}", self.base_branch),
+            vec![
+                OsString::from("checkout"),
+                OsString::from("-B"),
+                OsString::from(work_branch),
+                OsString::from(format!("origin/{}", self.base_branch)),
+            ],
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    /// Prepare the workspace at a pull request's head (read-only review checkout):
+    /// same clone-or-reuse + base-branch fetch as `prepare`, then fetch the forge's
+    /// `refs/pull/<n>/head` into the local ref `refs/temper/pr/<n>/head` and
+    /// `checkout -B <work_branch>` from it. Nothing is ever pushed from this state.
+    pub async fn prepare_pull_request_head(
+        &self,
+        pull_request_number: u64,
+        work_branch: &str,
+    ) -> Result<(), WorkspaceError> {
+        self.prepare_base_checkout().await?;
+
+        let remote_ref = format!("refs/pull/{pull_request_number}/head");
+        let local_ref = format!("refs/temper/pr/{pull_request_number}/head");
+        let refspec = format!("+{remote_ref}:{local_ref}");
+        self.run_workspace_git(
+            true,
+            format!("git fetch origin {refspec}"),
+            vec![
+                OsString::from("fetch"),
+                OsString::from("origin"),
+                OsString::from(refspec),
+            ],
+        )
+        .await?;
+
+        self.run_workspace_git(
+            false,
+            format!("git checkout -B {work_branch} {local_ref}"),
+            vec![
+                OsString::from("checkout"),
+                OsString::from("-B"),
+                OsString::from(work_branch),
+                OsString::from(local_ref),
+            ],
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn prepare_base_checkout(&self) -> Result<(), WorkspaceError> {
         if self.path.exists() {
             self.run_workspace_git(
                 false,
@@ -111,18 +169,6 @@ impl Workspace {
                 OsString::from("fetch"),
                 OsString::from("origin"),
                 OsString::from(refspec),
-            ],
-        )
-        .await?;
-
-        self.run_workspace_git(
-            false,
-            format!("git checkout -B {work_branch} origin/{}", self.base_branch),
-            vec![
-                OsString::from("checkout"),
-                OsString::from("-B"),
-                OsString::from(work_branch),
-                OsString::from(format!("origin/{}", self.base_branch)),
             ],
         )
         .await?;
