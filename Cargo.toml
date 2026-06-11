@@ -9,14 +9,19 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT OR Apache-2.0"
-rust-version = "1.85"
+# asupersync 0.3.2 uses let-chains (stable since 1.88) without declaring its own
+# MSRV, so the workspace floor is 1.88 to match. This also matches temper, whose
+# serde DTO crates smith depends on by path.
+rust-version = "1.88"
 version = "0.1.0"
 
 [workspace.dependencies]
-# Pinned to the exact version `pi_agent_rust 0.1.13` pulls in; the coding-agent
-# binary drives the pi file/bash tools on an asupersync reactor.
-asupersync = "=0.3.1"
-pi_agent_rust = "0.1.13"
+# Pinned to the exact version `pi_agent_rust 0.1.18` pulls in. The pi file/bash
+# tools (and, in-process now, the coding-agent loop) drive an asupersync reactor.
+# Kept in lockstep with temper's `=0.3.2` so the whole local toolchain — smith,
+# temper's serde DTO crates, and pi-sdk — resolves one asupersync version.
+asupersync = "=0.3.2"
+pi_agent_rust = "0.1.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = "1"
@@ -41,10 +46,3 @@ debug = 0
 incremental = true
 codegen-units = 256
 lto = false
-
-# `pi_agent_rust 0.1.13` pulls `asupersync =0.3.1`, which only builds with the
-# API-compatible `franken-decision 0.3.1`. Keep Cargo.lock pinned with:
-#
-#   cargo update -p franken-decision --precise 0.3.1
-#
-# Re-check this workaround before bumping `pi_agent_rust`.
