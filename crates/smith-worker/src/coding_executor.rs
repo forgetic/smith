@@ -96,13 +96,6 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
         Err(outcome) => return outcome,
     };
 
-    if mode == JobMode::PullRequestReadOnly {
-        return failure(
-            FailureClass::Permanent,
-            "pull-request read-only jobs are not supported yet",
-        );
-    }
-
     let identity = match config.role_identities.get(&role) {
         Some(identity) => identity.clone(),
         None => {
@@ -126,7 +119,15 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
         Ok(workspace) => workspace,
         Err(error) => return workspace_failure("configure workspace", error, &token),
     };
-    if let Err(error) = workspace.prepare(&branch_hint).await {
+    let prepare_result = match mode {
+        JobMode::Writable | JobMode::ReadOnly => workspace.prepare(&branch_hint).await,
+        JobMode::PullRequestReadOnly => {
+            workspace
+                .prepare_pull_request_head(artifact.number, &branch_hint)
+                .await
+        }
+    };
+    if let Err(error) = prepare_result {
         return workspace_failure("prepare workspace", error, &token);
     }
 
@@ -151,6 +152,7 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
         &branch_hint,
         &correlation_key,
         &artifact,
+        assign.artifact.kind.as_str(),
         &checkout,
         &allowed_verdicts,
     ) {
@@ -289,34 +291,53 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
                     .or_else(|| Some(format!("implemented {correlation_key}"))),
             }
         }
-        JobMode::ReadOnly => {
-            let Some(verdict) = result.verdict else {
-                return failure(FailureClass::Permanent, "read-only job returned no verdict");
-            };
-            if !allowed_verdicts.contains(&verdict) {
-                return failure(
-                    FailureClass::Permanent,
-                    format!(
-                        "read-only job returned undeclared verdict `{verdict}`; allowed verdicts: {}",
-                        allowed_verdicts_display(&allowed_verdicts)
-                    ),
-                );
-            }
-
-            if let Err(error) = workspace.discard_changes().await {
-                return workspace_failure("discard verdict workspace changes", error, &token);
-            }
-
-            let summary = result
-                .summary
-                .or_else(|| Some(format!("implemented {correlation_key}")));
-            JobOutcome::Verdict {
-                verdict,
-                body: result.body.or(result.review_body),
-                summary,
-            }
+        JobMode::ReadOnly | JobMode::PullRequestReadOnly => {
+            verdict_only_outcome(
+                &workspace,
+                result,
+                &allowed_verdicts,
+                &correlation_key,
+                &token,
+            )
+            .await
         }
-        JobMode::PullRequestReadOnly => unreachable!("rejected before workspace preparation"),
+    }
+}
+
+async fn verdict_only_outcome(
+    workspace: &Workspace,
+    result: AgentResult,
+    allowed_verdicts: &[String],
+    correlation_key: &str,
+    token: &str,
+) -> JobOutcome {
+    let AgentResult {
+        verdict,
+        summary,
+        body,
+        review_body,
+    } = result;
+    let Some(verdict) = verdict else {
+        return failure(FailureClass::Permanent, "read-only job returned no verdict");
+    };
+    if !allowed_verdicts.contains(&verdict) {
+        return failure(
+            FailureClass::Permanent,
+            format!(
+                "read-only job returned undeclared verdict `{verdict}`; allowed verdicts: {}",
+                allowed_verdicts_display(allowed_verdicts)
+            ),
+        );
+    }
+
+    if let Err(error) = workspace.discard_changes().await {
+        return workspace_failure("discard verdict workspace changes", error, token);
+    }
+
+    JobOutcome::Verdict {
+        verdict,
+        body: body.or(review_body),
+        summary: summary.or_else(|| Some(format!("implemented {correlation_key}"))),
     }
 }
 
@@ -367,16 +388,21 @@ fn workspace_context_payload(
     branch_hint: &str,
     correlation_key: &str,
     artifact: &JobArtifactSnapshot,
+    artifact_wire_kind: &str,
     checkout: &str,
     allowed_verdicts: &[String],
 ) -> Result<serde_json::Value, serde_json::Error> {
+    let (artifact_type, target_kind) = match artifact_wire_kind {
+        "pull_request" => ("pull_request", "PullRequest"),
+        _ => ("issue", "Issue"),
+    };
     let work_item_context = serde_json::json!({
         "repository": repo,
         "role": role,
         "queue": queue,
         "kind": artifact_kind,
         "artifact": {
-            "type": "issue",
+            "type": artifact_type,
             "number": artifact.number,
             "title": artifact.title.as_str(),
             "body": artifact.body.as_str(),
@@ -397,7 +423,7 @@ fn workspace_context_payload(
             "role": role,
             "queue": queue,
             "kind": artifact_kind,
-            "target": format!("Issue {{ number: ItemNumber({}) }}", artifact.number),
+            "target": format!("{target_kind} {{ number: ItemNumber({}) }}", artifact.number),
             "context": work_item_context,
         },
         "base_branch": base_branch,

@@ -327,6 +327,9 @@ pub fn system_prompt(capability: Capability, allowed_verdicts: &[String]) -> Str
             "ROLE: reviewer (review_workspace capability).\n\
              - Read-only review: inspect the actual diff and CI result, not just \
              the PR summary. Make NO edits to the working tree.\n\
+             - The working tree is checked out at the pull request's head. Compare \
+             against the base branch from the context file (git diff \
+             origin/<base_branch>...HEAD, git log origin/<base_branch>..HEAD).\n\
              - Emit exactly one verdict:\n\
              - `approve` when the change satisfies the contract and has a \
              meaningful, correct implementation diff;\n\

@@ -137,6 +137,8 @@ fn system_prompt_is_role_specific() {
     assert!(reviewer.contains("ROLE: reviewer"));
     assert!(reviewer.contains("approve"));
     assert!(reviewer.contains("review_body"));
+    assert!(reviewer.contains("git diff origin/<base_branch>...HEAD"));
+    assert!(reviewer.contains("git log origin/<base_branch>..HEAD"));
     assert!(reviewer.contains("escalate"));
 
     // Every role must be told to emit a single final JSON object.

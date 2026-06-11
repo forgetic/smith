@@ -103,13 +103,17 @@ async fn context_shape_matches_temper_coding_agent_contract() {
     .expect("captured context parses as smith-temper-agent WorkspaceContext");
     assert_workspace_context(
         &context,
-        "engineer",
-        "code_ready",
-        "code",
-        "writable",
-        &[],
-        "agent/pr-for-code-7",
-        "pr-for-code-7",
+        ExpectedWorkspaceContext {
+            role: "engineer",
+            queue: "code_ready",
+            kind: "code",
+            checkout: "writable",
+            allowed_verdicts: &[],
+            branch_hint: "agent/pr-for-code-7",
+            correlation_key: "pr-for-code-7",
+            target: "Issue { number: ItemNumber(7) }",
+            artifact_type: "issue",
+        },
     );
 }
 
@@ -137,42 +141,85 @@ async fn context_shape_passes_through_read_only_capability_and_verdicts() {
     .expect("captured context parses as smith-temper-agent WorkspaceContext");
     assert_workspace_context(
         &context,
-        "architect",
-        "design_review",
-        "triage",
-        "read_only",
-        &["ready_code", "needs_design"],
-        "agent/triage-7",
-        "triage-7",
+        ExpectedWorkspaceContext {
+            role: "architect",
+            queue: "design_review",
+            kind: "triage",
+            checkout: "read_only",
+            allowed_verdicts: &["ready_code", "needs_design"],
+            branch_hint: "agent/triage-7",
+            correlation_key: "triage-7",
+            target: "Issue { number: ItemNumber(7) }",
+            artifact_type: "issue",
+        },
     );
 }
 
-#[allow(clippy::too_many_arguments)]
-fn assert_workspace_context(
-    context: &WorkspaceContext,
-    role: &str,
-    queue: &str,
-    kind: &str,
-    checkout: &str,
-    allowed_verdicts: &[&str],
-    branch_hint: &str,
-    correlation_key: &str,
-) {
+#[tokio::test]
+async fn review_context_shape_carries_pull_request_target() {
+    let fixture = Fixture::new();
+    let capture_path = fixture.temp.path().join("captured-review-context.json");
+    let agent = fixture.agent(AgentBehavior::ReviewApprove {
+        head_capture_path: fixture.pull_request_head_path(),
+        capture_path: Some(capture_path.clone()),
+    });
+    let executor = fixture.executor(&agent, true);
+
+    expect_verdict(
+        executor
+            .execute(pr_assign("agent/review-7", "review-7", pr_job_context))
+            .await,
+    );
+
+    let context: WorkspaceContext = serde_json::from_slice(
+        &fs::read(&capture_path).expect("fake agent captured the context file"),
+    )
+    .expect("captured context parses as smith-temper-agent WorkspaceContext");
+    assert_workspace_context(
+        &context,
+        ExpectedWorkspaceContext {
+            role: "reviewer",
+            queue: "pr_needs_review",
+            kind: "implementation_pr",
+            checkout: "pull_request_read_only",
+            allowed_verdicts: &["approve", "changes", "escalate"],
+            branch_hint: "agent/review-7",
+            correlation_key: "review-7",
+            target: "PullRequest { number: ItemNumber(7) }",
+            artifact_type: "pull_request",
+        },
+    );
+}
+
+struct ExpectedWorkspaceContext<'a> {
+    role: &'a str,
+    queue: &'a str,
+    kind: &'a str,
+    checkout: &'a str,
+    allowed_verdicts: &'a [&'a str],
+    branch_hint: &'a str,
+    correlation_key: &'a str,
+    target: &'a str,
+    artifact_type: &'a str,
+}
+
+fn assert_workspace_context(context: &WorkspaceContext, expected: ExpectedWorkspaceContext<'_>) {
     assert_eq!(context.repository.id, "acme/service");
     assert_eq!(context.repository.owner, "acme");
     assert_eq!(context.repository.name, "service");
     assert_eq!(context.repository.default_branch, "main");
-    assert_eq!(context.work_item.role, role);
-    assert_eq!(context.work_item.queue, queue);
-    assert_eq!(context.work_item.kind, kind);
-    assert_eq!(context.work_item.target, "Issue { number: ItemNumber(7) }");
+    assert_eq!(context.work_item.role, expected.role);
+    assert_eq!(context.work_item.queue, expected.queue);
+    assert_eq!(context.work_item.kind, expected.kind);
+    assert_eq!(context.work_item.target, expected.target);
     assert_eq!(context.base_branch, "main");
-    assert_eq!(context.branch_hint, branch_hint);
-    assert_eq!(context.correlation_key, correlation_key);
-    assert_eq!(context.checkout.as_deref(), Some(checkout));
+    assert_eq!(context.branch_hint, expected.branch_hint);
+    assert_eq!(context.correlation_key, expected.correlation_key);
+    assert_eq!(context.checkout.as_deref(), Some(expected.checkout));
     assert_eq!(
         context.allowed_verdicts,
-        allowed_verdicts
+        expected
+            .allowed_verdicts
             .iter()
             .map(|verdict| (*verdict).to_string())
             .collect::<Vec<_>>()
@@ -184,10 +231,10 @@ fn assert_workspace_context(
     let inner: Value =
         serde_json::from_str(&context.work_item.context).expect("inner work item JSON parses");
     assert_eq!(inner["repository"], "acme/service");
-    assert_eq!(inner["role"], role);
-    assert_eq!(inner["queue"], queue);
-    assert_eq!(inner["kind"], kind);
-    assert_eq!(inner["artifact"]["type"], "issue");
+    assert_eq!(inner["role"], expected.role);
+    assert_eq!(inner["queue"], expected.queue);
+    assert_eq!(inner["kind"], expected.kind);
+    assert_eq!(inner["artifact"]["type"], expected.artifact_type);
     assert_eq!(inner["artifact"]["number"], 7);
     assert_eq!(inner["artifact"]["title"], "Implement the thing");
     assert_eq!(inner["artifact"]["body"], "Detailed issue body");
@@ -449,6 +496,109 @@ async fn read_only_job_with_undeclared_verdict_is_permanent() {
 }
 
 #[tokio::test]
+async fn review_job_checks_out_pr_head_and_returns_approve_verdict() {
+    let fixture = Fixture::new();
+    let head_capture_path = fixture.pull_request_head_path();
+    let agent = fixture.agent(AgentBehavior::ReviewApprove {
+        head_capture_path: head_capture_path.clone(),
+        capture_path: None,
+    });
+    let executor = fixture.executor(&agent, true);
+
+    let (verdict, body, summary) = expect_verdict(
+        executor
+            .execute(pr_assign("agent/review-7", "review-7", pr_job_context))
+            .await,
+    );
+
+    assert_eq!(verdict, "approve");
+    assert_eq!(body, None);
+    assert_eq!(summary.as_deref(), Some("looks good"));
+    assert_eq!(
+        fs::read_to_string(&head_capture_path)
+            .expect("fake agent captured HEAD")
+            .trim(),
+        fixture.pull_request_head_sha
+    );
+    assert_no_origin_branch(&fixture, "agent/review-7");
+    assert_no_extra_origin_head_branches(&fixture, &["main"]);
+}
+
+#[tokio::test]
+async fn review_job_changes_verdict_passes_review_body_through() {
+    let fixture = Fixture::new();
+    let agent = fixture.agent(AgentBehavior::ReviewChanges);
+    let executor = fixture.executor(&agent, true);
+
+    let (verdict, body, summary) = expect_verdict(
+        executor
+            .execute(pr_assign(
+                "agent/review-changes-7",
+                "review-changes-7",
+                pr_job_context,
+            ))
+            .await,
+    );
+
+    assert_eq!(verdict, "changes");
+    assert_eq!(body.as_deref(), Some("please add error handling"));
+    assert_eq!(summary.as_deref(), Some("needs error handling"));
+    assert_no_origin_branch(&fixture, "agent/review-changes-7");
+    assert_no_extra_origin_head_branches(&fixture, &["main"]);
+    assert_workspace_clean(&fixture, "reviewer");
+}
+
+#[tokio::test]
+async fn review_job_missing_verdict_is_permanent_failure() {
+    let fixture = Fixture::new();
+    let agent = fixture.agent(AgentBehavior::ReviewMissingVerdict);
+    let executor = fixture.executor(&agent, true);
+
+    let outcome = executor
+        .execute(pr_assign(
+            "agent/review-missing-verdict-7",
+            "review-missing-verdict-7",
+            pr_job_context,
+        ))
+        .await;
+
+    let message = expect_failure_class(outcome, FailureClass::Permanent);
+    assert!(
+        message.contains("read-only job returned no verdict"),
+        "unexpected message: {message}"
+    );
+    assert_no_origin_branch(&fixture, "agent/review-missing-verdict-7");
+    assert_no_extra_origin_head_branches(&fixture, &["main"]);
+}
+
+#[tokio::test]
+async fn review_job_undeclared_verdict_is_permanent_failure() {
+    let fixture = Fixture::new();
+    let agent = fixture.agent(AgentBehavior::ReviewUndeclaredVerdict);
+    let executor = fixture.executor(&agent, true);
+
+    let outcome = executor
+        .execute(pr_assign(
+            "agent/review-undeclared-7",
+            "review-undeclared-7",
+            pr_job_context,
+        ))
+        .await;
+
+    let message = expect_failure_class(outcome, FailureClass::Permanent);
+    assert!(
+        message.contains("merge_now"),
+        "message should name the emitted verdict: {message}"
+    );
+    assert!(
+        message.contains("approve") && message.contains("changes") && message.contains("escalate"),
+        "message should name the allowed vocabulary: {message}"
+    );
+    assert_no_origin_branch(&fixture, "agent/review-undeclared-7");
+    assert_no_extra_origin_head_branches(&fixture, &["main"]);
+}
+
+#[tokio::test]
 async fn writable_job_with_allowed_escalation_verdict_returns_verdict() {
     let fixture = Fixture::new();
     let agent = fixture.agent(AgentBehavior::WritableVerdict);
@@ -474,31 +624,11 @@ async fn writable_job_with_allowed_escalation_verdict_returns_verdict() {
     assert_workspace_clean(&fixture, "engineer");
 }
 
-#[tokio::test]
-async fn pull_request_read_only_is_permanent() {
-    let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::NoDiff);
-    let executor = fixture.executor(&agent, true);
-
-    let outcome = executor
-        .execute(assign_with_context(
-            "review-7",
-            pull_request_read_only_job_context("agent/review-7", "review-7"),
-        ))
-        .await;
-
-    let message = expect_failure_class(outcome, FailureClass::Permanent);
-    assert!(
-        message.contains("pull-request read-only jobs are not supported yet"),
-        "unexpected message: {message}"
-    );
-    assert_no_origin_branch(&fixture, "agent/review-7");
-}
-
 struct Fixture {
     temp: TempDir,
     origin: PathBuf,
     workspace_root: PathBuf,
+    pull_request_head_sha: String,
 }
 
 impl Fixture {
@@ -508,12 +638,13 @@ impl Fixture {
         fs::create_dir_all(git_root.join("acme")).expect("create git root");
         let origin = git_root.join("acme/service.git");
         git(["init", "--bare", path_str(&origin)]);
-        seed_origin(&origin, temp.path());
+        let pull_request_head_sha = seed_origin(&origin, temp.path());
 
         Self {
             workspace_root: temp.path().join("workspaces"),
             temp,
             origin,
+            pull_request_head_sha,
         }
     }
 
@@ -533,6 +664,14 @@ impl Fixture {
                 RoleGitIdentity {
                     user: "Smith Architect".to_string(),
                     email: "smith-architect@example.test".to_string(),
+                    token: "test-token".to_string(),
+                },
+            );
+            role_identities.insert(
+                "reviewer".to_string(),
+                RoleGitIdentity {
+                    user: "Smith Reviewer".to_string(),
+                    email: "smith-reviewer@example.test".to_string(),
                     token: "test-token".to_string(),
                 },
             );
@@ -559,18 +698,33 @@ impl Fixture {
         fs::set_permissions(&path, permissions).expect("make fake agent executable");
         path
     }
+
+    fn pull_request_head_path(&self) -> PathBuf {
+        self.temp.path().join("pull-request-head")
+    }
 }
 
 enum AgentBehavior {
-    Success { capture_path: PathBuf },
+    Success {
+        capture_path: PathBuf,
+    },
     Exit3,
     NoResultFile,
     NoDiff,
     Verdict,
-    ReadOnlyVerdict { capture_path: Option<PathBuf> },
+    ReadOnlyVerdict {
+        capture_path: Option<PathBuf>,
+    },
     ReadOnlyVerdictWithDiff,
     UndeclaredVerdict,
     WritableVerdict,
+    ReviewApprove {
+        head_capture_path: PathBuf,
+        capture_path: Option<PathBuf>,
+    },
+    ReviewChanges,
+    ReviewMissingVerdict,
+    ReviewUndeclaredVerdict,
 }
 
 impl AgentBehavior {
@@ -585,6 +739,10 @@ impl AgentBehavior {
             AgentBehavior::ReadOnlyVerdictWithDiff => "read-only-verdict-with-diff",
             AgentBehavior::UndeclaredVerdict => "undeclared-verdict",
             AgentBehavior::WritableVerdict => "writable-verdict",
+            AgentBehavior::ReviewApprove { .. } => "review-approve",
+            AgentBehavior::ReviewChanges => "review-changes",
+            AgentBehavior::ReviewMissingVerdict => "review-missing-verdict",
+            AgentBehavior::ReviewUndeclaredVerdict => "review-undeclared-verdict",
         }
     }
 
@@ -614,6 +772,19 @@ impl AgentBehavior {
             AgentBehavior::WritableVerdict => {
                 "#!/bin/sh\nset -eu\nprintf 'discard me\\n' > agent-output.txt\nprintf '{\"verdict\":\"needs_architect\",\"body\":\"blocked\",\"summary\":\"cannot proceed\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
             }
+            AgentBehavior::ReviewApprove {
+                head_capture_path,
+                capture_path,
+            } => review_approve_script(path_str(head_capture_path), capture_path.as_deref()),
+            AgentBehavior::ReviewChanges => {
+                "#!/bin/sh\nset -eu\ngrep '\"checkout\": \"pull_request_read_only\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\nprintf 'discard me\\n' > agent-output.txt\nprintf '{\"verdict\":\"changes\",\"review_body\":\"please add error handling\",\"summary\":\"needs error handling\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
+            }
+            AgentBehavior::ReviewMissingVerdict => {
+                "#!/bin/sh\nset -eu\nprintf '{\"summary\":\"no opinion\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
+            }
+            AgentBehavior::ReviewUndeclaredVerdict => {
+                "#!/bin/sh\nset -eu\nprintf '{\"verdict\":\"merge_now\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
+            }
         }
     }
 }
@@ -638,6 +809,30 @@ fn read_only_verdict_script(capture_path: Option<&Path>, writes_diff: bool) -> S
     script
 }
 
+fn review_approve_script(head_capture_path: &str, capture_path: Option<&Path>) -> String {
+    let mut script = "#!/bin/sh\nset -eu\n".to_string();
+    if let Some(capture_path) = capture_path {
+        script.push_str(&format!(
+            "cp \"$TEMPER_CODING_WORKSPACE_CONTEXT\" {}\n",
+            shell_quote(path_str(capture_path))
+        ));
+    }
+    script.push_str(
+        "grep '\"checkout\": \"pull_request_read_only\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n",
+    );
+    script.push_str("grep '\"approve\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n");
+    script.push_str("grep '\"changes\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n");
+    script.push_str("grep '\"escalate\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n");
+    script.push_str(&format!(
+        "git rev-parse HEAD > {}\n",
+        shell_quote(head_capture_path)
+    ));
+    script.push_str(
+        "printf '{\"verdict\":\"approve\",\"summary\":\"looks good\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n",
+    );
+    script
+}
+
 fn assign(branch_hint: &str, correlation_key: &str) -> Assign {
     Assign {
         protocol_version: WORKER_PROTOCOL_VERSION,
@@ -650,6 +845,25 @@ fn assign(branch_hint: &str, correlation_key: &str) -> Assign {
         },
         job_payload: serde_json::to_value(job_context(branch_hint, correlation_key))
             .expect("JobContext serializes"),
+    }
+}
+
+fn pr_assign(
+    branch_hint: &str,
+    correlation_key: &str,
+    context_builder: fn(&str, &str) -> TestJobContext,
+) -> Assign {
+    let context = context_builder(branch_hint, correlation_key);
+    Assign {
+        protocol_version: WORKER_PROTOCOL_VERSION,
+        job_id: format!("acme/service/pull-7/reviewer/{correlation_key}"),
+        role: "reviewer".to_string(),
+        repo: "acme/service".to_string(),
+        artifact: Artifact {
+            item: json!(7),
+            kind: "pull_request".to_string(),
+        },
+        job_payload: serde_json::to_value(context).expect("PR JobContext serializes"),
     }
 }
 
@@ -738,14 +952,18 @@ fn writable_job_context_with_allowed_verdicts(
     context
 }
 
-fn pull_request_read_only_job_context(branch_hint: &str, correlation_key: &str) -> TestJobContext {
+fn pr_job_context(branch_hint: &str, correlation_key: &str) -> TestJobContext {
     let mut context = job_context(branch_hint, correlation_key);
     context.role = "reviewer".to_string();
-    context.queue = "review_ready".to_string();
-    context.artifact_kind = "review".to_string();
+    context.queue = "pr_needs_review".to_string();
+    context.artifact_kind = "implementation_pr".to_string();
     context.action = Some("review_pr".to_string());
     context.checkout_capability = Some("pull_request_read_only".to_string());
-    context.allowed_verdicts = vec!["approve".to_string(), "changes".to_string()];
+    context.allowed_verdicts = vec![
+        "approve".to_string(),
+        "changes".to_string(),
+        "escalate".to_string(),
+    ];
     context
 }
 
@@ -764,7 +982,7 @@ fn assign_with_context(correlation_key: &str, context: TestJobContext) -> Assign
     }
 }
 
-fn seed_origin(origin: &Path, temp: &Path) {
+fn seed_origin(origin: &Path, temp: &Path) -> String {
     let seed = temp.join("seed");
     git(["init", "-b", "main", path_str(&seed)]);
     fs::write(seed.join("README.md"), "# seed\n").expect("write seed file");
@@ -798,6 +1016,53 @@ fn seed_origin(origin: &Path, temp: &Path) {
         path_str(origin),
     ]);
     git(["-C", path_str(&seed), "push", "origin", "main"]);
+
+    git(["-C", path_str(&seed), "checkout", "-b", "review-head"]);
+    fs::write(seed.join("pr-change.txt"), "pull request change\n").expect("write PR file");
+    git([
+        "-C",
+        path_str(&seed),
+        "-c",
+        "user.name=Seed User",
+        "-c",
+        "user.email=seed@example.test",
+        "add",
+        "pr-change.txt",
+    ]);
+    git([
+        "-C",
+        path_str(&seed),
+        "-c",
+        "user.name=Seed User",
+        "-c",
+        "user.email=seed@example.test",
+        "commit",
+        "-m",
+        "pull request change",
+    ]);
+    let pull_request_head_sha = git_output(["-C", path_str(&seed), "rev-parse", "HEAD"]);
+    git([
+        "-C",
+        path_str(&seed),
+        "push",
+        "origin",
+        "HEAD:refs/temper/seed/pr-7",
+    ]);
+    git([
+        "-C",
+        path_str(origin),
+        "update-ref",
+        "refs/pull/7/head",
+        pull_request_head_sha.as_str(),
+    ]);
+    git([
+        "-C",
+        path_str(origin),
+        "update-ref",
+        "-d",
+        "refs/temper/seed/pr-7",
+    ]);
+    pull_request_head_sha
 }
 
 fn expect_success(outcome: JobOutcome) -> (String, String, Option<String>) {
@@ -867,6 +1132,30 @@ fn assert_no_origin_branch(fixture: &Fixture, branch_name: &str) {
         "origin unexpectedly has branch {branch_name}: {}",
         String::from_utf8_lossy(&output.stdout)
     );
+}
+
+fn assert_no_extra_origin_head_branches(fixture: &Fixture, expected: &[&str]) {
+    let output = git_output([
+        "-C",
+        path_str(&fixture.origin),
+        "for-each-ref",
+        "--format=%(refname:short)",
+        "refs/heads",
+    ]);
+    let mut branches = if output.is_empty() {
+        Vec::new()
+    } else {
+        output.lines().map(str::to_string).collect::<Vec<_>>()
+    };
+    branches.sort();
+
+    let mut expected = expected
+        .iter()
+        .map(|branch| (*branch).to_string())
+        .collect::<Vec<_>>();
+    expected.sort();
+
+    assert_eq!(branches, expected);
 }
 
 fn assert_workspace_clean(fixture: &Fixture, role: &str) {

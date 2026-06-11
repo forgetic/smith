@@ -165,21 +165,21 @@ mod tests {
 
     #[test]
     fn result_sent_line_formats_success_status() {
-        let result = JobResult {
-            protocol_version: WORKER_PROTOCOL_VERSION,
-            worker_id: "worker-1".to_string(),
-            job_id: "job-123".to_string(),
-            status: ResultStatus::Success,
-            branch: Some(Branch {
+        let result = test_job_result(json!({
+            "protocol_version": WORKER_PROTOCOL_VERSION,
+            "worker_id": "worker-1",
+            "job_id": "job-123",
+            "status": ResultStatus::Success,
+            "branch": Branch {
                 name: "agent/pr-for-code-1".to_string(),
                 head_sha: "abc123".to_string(),
-            }),
-            failure: None,
-            verdict: None,
-            body: None,
-            summary: None,
-            details: None,
-        };
+            },
+            "failure": null,
+            "verdict": null,
+            "body": null,
+            "summary": null,
+            "details": null,
+        }));
 
         assert_eq!(
             result_sent_line(&result),
@@ -189,21 +189,21 @@ mod tests {
 
     #[test]
     fn result_sent_line_formats_failure_class() {
-        let result = JobResult {
-            protocol_version: WORKER_PROTOCOL_VERSION,
-            worker_id: "worker-1".to_string(),
-            job_id: "job-456".to_string(),
-            status: ResultStatus::Failure,
-            branch: None,
-            failure: Some(Failure {
+        let result = test_job_result(json!({
+            "protocol_version": WORKER_PROTOCOL_VERSION,
+            "worker_id": "worker-1",
+            "job_id": "job-456",
+            "status": ResultStatus::Failure,
+            "branch": null,
+            "failure": Failure {
                 class: FailureClass::Permanent,
                 message: "configured failure".to_string(),
-            }),
-            verdict: None,
-            body: None,
-            summary: None,
-            details: None,
-        };
+            },
+            "verdict": null,
+            "body": null,
+            "summary": null,
+            "details": null,
+        }));
 
         assert_eq!(
             result_sent_line(&result),
@@ -213,22 +213,26 @@ mod tests {
 
     #[test]
     fn result_sent_line_formats_failure_without_details_as_unknown() {
-        let result = JobResult {
-            protocol_version: WORKER_PROTOCOL_VERSION,
-            worker_id: "worker-1".to_string(),
-            job_id: "job-789".to_string(),
-            status: ResultStatus::Failure,
-            branch: None,
-            failure: None,
-            verdict: None,
-            body: None,
-            summary: None,
-            details: None,
-        };
+        let result = test_job_result(json!({
+            "protocol_version": WORKER_PROTOCOL_VERSION,
+            "worker_id": "worker-1",
+            "job_id": "job-789",
+            "status": ResultStatus::Failure,
+            "branch": null,
+            "failure": null,
+            "verdict": null,
+            "body": null,
+            "summary": null,
+            "details": null,
+        }));
 
         assert_eq!(
             result_sent_line(&result),
             "smith-worker: result sent job_id=job-789 status=failure(unknown)"
         );
+    }
+
+    fn test_job_result(value: serde_json::Value) -> JobResult {
+        serde_json::from_value(value).expect("test JobResult JSON matches worker protocol")
     }
 }

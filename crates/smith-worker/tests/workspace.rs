@@ -10,7 +10,7 @@ async fn workspace_prepares_commits_pushes_and_reuses_local_git_checkout() {
     let temp = tempdir().expect("create temp dir");
     let origin = temp.path().join("origin.git");
     git(["init", "--bare", path_str(&origin)]);
-    seed_origin(&origin, temp.path());
+    let _ = seed_origin(&origin, temp.path());
 
     let identity = RoleGitIdentity {
         user: "Smith Engineer".to_string(),
@@ -109,7 +109,64 @@ async fn workspace_prepares_commits_pushes_and_reuses_local_git_checkout() {
     );
 }
 
-fn seed_origin(origin: &Path, temp: &Path) {
+#[tokio::test]
+async fn prepare_pull_request_head_checks_out_the_pull_ref() {
+    let temp = tempdir().expect("create temp dir");
+    let origin = temp.path().join("origin.git");
+    git(["init", "--bare", path_str(&origin)]);
+    let pull_request_head_sha = seed_origin(&origin, temp.path());
+
+    let identity = RoleGitIdentity {
+        user: "Smith Reviewer".to_string(),
+        email: "smith-reviewer@example.test".to_string(),
+        token: "test-token".to_string(),
+    };
+    let config = WorkspaceConfig {
+        root: temp.path().join("workspaces"),
+        base_branch: "main".to_string(),
+    };
+    let workspace = Workspace::new(&config, "ai/smith", "reviewer", identity, path_str(&origin))
+        .expect("workspace config is valid");
+
+    workspace
+        .prepare_pull_request_head(7, "smith-worker/review-7")
+        .await
+        .expect("prepare PR-head workspace");
+    assert_eq!(
+        git_output(["-C", path_str(workspace.path()), "branch", "--show-current"]),
+        "smith-worker/review-7"
+    );
+    assert_eq!(
+        workspace.head_sha().await.expect("workspace head sha"),
+        pull_request_head_sha
+    );
+    assert_eq!(
+        git_output([
+            "-C",
+            path_str(workspace.path()),
+            "rev-parse",
+            "refs/temper/pr/7/head",
+        ]),
+        pull_request_head_sha
+    );
+
+    let sentinel = workspace.path().join(".git").join("smith-pr-sentinel");
+    fs::write(&sentinel, "keep git object cache").expect("write sentinel under .git");
+    workspace
+        .prepare_pull_request_head(7, "smith-worker/review-7")
+        .await
+        .expect("reuse existing PR-head workspace");
+    assert!(
+        sentinel.exists(),
+        "prepare_pull_request_head must not recreate or wipe checkout"
+    );
+    assert_eq!(
+        workspace.head_sha().await.expect("workspace head sha"),
+        pull_request_head_sha
+    );
+}
+
+fn seed_origin(origin: &Path, temp: &Path) -> String {
     let seed = temp.join("seed");
     git(["init", "-b", "main", path_str(&seed)]);
     fs::write(seed.join("README.md"), "# seed\n").expect("write seed file");
@@ -143,6 +200,53 @@ fn seed_origin(origin: &Path, temp: &Path) {
         path_str(origin),
     ]);
     git(["-C", path_str(&seed), "push", "origin", "main"]);
+
+    git(["-C", path_str(&seed), "checkout", "-b", "review-head"]);
+    fs::write(seed.join("pr-change.txt"), "pull request change\n").expect("write PR file");
+    git([
+        "-C",
+        path_str(&seed),
+        "-c",
+        "user.name=Seed User",
+        "-c",
+        "user.email=seed@example.test",
+        "add",
+        "pr-change.txt",
+    ]);
+    git([
+        "-C",
+        path_str(&seed),
+        "-c",
+        "user.name=Seed User",
+        "-c",
+        "user.email=seed@example.test",
+        "commit",
+        "-m",
+        "pull request change",
+    ]);
+    let pull_request_head_sha = git_output(["-C", path_str(&seed), "rev-parse", "HEAD"]);
+    git([
+        "-C",
+        path_str(&seed),
+        "push",
+        "origin",
+        "HEAD:refs/temper/seed/pr-7",
+    ]);
+    git([
+        "-C",
+        path_str(origin),
+        "update-ref",
+        "refs/pull/7/head",
+        pull_request_head_sha.as_str(),
+    ]);
+    git([
+        "-C",
+        path_str(origin),
+        "update-ref",
+        "-d",
+        "refs/temper/seed/pr-7",
+    ]);
+    pull_request_head_sha
 }
 
 fn git<const N: usize>(args: [&str; N]) {
