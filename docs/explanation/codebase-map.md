@@ -7,7 +7,7 @@
 | `crates/smith-temper-agent-cli/` | Preflight CLI and process-protocol binaries for Temper. |
 | `crates/smith-worker/` | Worker-process library and `smith-worker` binary for the Temper worker/daemon wire protocol loop, plus the persistent per-`(repo, role)` git workspace plane for clone/fetch, branch preparation, role-authored commits, and role-token branch pushes. |
 | `crates/smith-temper-agent-cli/tests/` | Version, coding-agent, and basic-delivery jig tests; the legacy cross-process Forgejo workflow-role e2e was removed after `smith-worker` gained hermetic daemon coverage. |
-| `examples/` | Smith-owned Temper launchers that bind Smith responders, including dogfood/product-chat and the Smith-backed reference-delivery demo. |
+| `examples/` | Smith-owned operator demos (`basic-delivery` and `reference-delivery`), both booting the two-tier Temper daemon / Smith worker topology. |
 | `deploy/` | The Smith worker tier of the two-tier topology: the `smith-worker.service` unit template, the `smith-worker-launcher` ExecStart shim, `~/.config/smith` config templates, and the idempotent install script. The Temper daemon tier deploys from the sibling `temper/deploy/`. |
 | `docs/` | Diátaxis docs, ADRs, and Smith-owned agent lessons. |
 

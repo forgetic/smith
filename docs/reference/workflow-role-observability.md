@@ -6,7 +6,7 @@ leases, and every Forge mutation. For Temper's process contract and worker-side
 events, read the sibling checkout docs:
 
 - `../temper/docs/reference/workflow-role-decision-process-protocol.md`
-- `examples/reference-delivery/observability.md`
+- `examples/reference-delivery/observability.md` (daemon/worker example logs)
 - `plans/observability/README.md`
 
 ## Structured stderr events
@@ -72,7 +72,7 @@ Because Temper owns workflow and Forge authority, Smith events do not include:
 - full artifact bodies, comments, raw prompts, raw model payloads, auth-file
   paths, API keys, OAuth access tokens, or refresh tokens.
 
-Look in Temper worker logs and validators for transition execution,
+Look in Temper daemon logs and validators for transition execution,
 `action_dispatch`, `transition_execution`, mechanical reconciliation, and
 reference-delivery Forge-state diagnostics.
 
