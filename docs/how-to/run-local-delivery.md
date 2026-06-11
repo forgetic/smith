@@ -8,10 +8,10 @@
 > the cutover steps from this pool.
 
 This guide installs and runs the basic-delivery workflow against `ai/smith` as
-**real systemd user services** — the production-like counterpart to the throwaway
-[`examples/basic-delivery`](../../examples/basic-delivery/README.md) launcher. A
-filed intake issue is driven all the way to a merged PR with **no human action**,
-and **CI is the only landing gate**.
+**real systemd user services** — the legacy deployment counterpart to the
+throwaway daemon/worker [`examples/basic-delivery`](../../examples/basic-delivery/README.md)
+launcher. A filed intake issue is driven all the way to a merged PR with **no
+human action**, and **CI is the only landing gate**.
 
 It is the deployment half of issue #9 (the install script + units + config live
 in [`deploy/`](../../deploy/README.md)); the identity/label/webhook provisioning

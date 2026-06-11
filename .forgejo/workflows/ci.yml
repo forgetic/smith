@@ -70,3 +70,11 @@ jobs:
             --features test-provider-base-url-override \
             --test coding_agent_e2e \
             -- --ignored --test-threads=1
+      - name: Basic-delivery jig e2e
+        run: |
+          set -eu
+          TEMPER_BASIC_DELIVERY_JIG_E2E=1 \
+          TEMPER_WORKSPACE_ROOT="$HOME/.local/state/forgejo/runner/data/temper" \
+            cargo test -p smith-temper-agent-cli \
+            --test basic_delivery_jig_e2e \
+            -- --ignored --test-threads=1

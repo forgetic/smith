@@ -38,19 +38,31 @@ SMITH_JIG_E2E=1 \
   -- --ignored --test-threads=1
 
 TEMPER_BASIC_DELIVERY_JIG_E2E=1 \
-  cargo test -p smith-temper-agent-cli --test basic_delivery_jig_e2e -- \
-  --ignored --test-threads=1 --nocapture
+TEMPER_WORKSPACE_ROOT="$HOME/.local/state/forgejo/runner/data/temper" \
+  cargo test -p smith-temper-agent-cli \
+  --test basic_delivery_jig_e2e \
+  -- --ignored --test-threads=1
 ```
 
 `SMITH_JIG_E2E=1` opts into the hermetic jig-backed Smith process tests.
-`TEMPER_BASIC_DELIVERY_JIG_E2E=1` opts into the provider-free basic-delivery
-Forgejo/runner jig gate: it boots real Forgejo and host-mode `forgejo-runner`,
-uses deterministic local role behavior instead of provider calls, and therefore
-does not require `TEMPER_FORGEJO_AGENTS=1` or provider auth variables.
 `test-provider-base-url-override` enables the test-only provider base URL hook so
 the Smith process tests can route model-provider requests to the local jig
-server. CI does not run a broad ignored-test sweep such as `cargo test --
---ignored`; ignored live provider checks remain manual-only.
+server.
+
+`TEMPER_BASIC_DELIVERY_JIG_E2E=1` opts into the provider-free basic-delivery jig,
+which now runs in CI as a gate and remains available locally with the same env
+flag. It boots real throwaway Forgejo, host-mode `forgejo-runner`, one
+`temper-daemon`, and one `smith-worker`; `BASIC_DELIVERY_CODER=greeting` supplies
+deterministic local architect/engineer behavior instead of provider calls, so the
+test does not require `TEMPER_FORGEJO_AGENTS=1` or provider auth variables. The
+test honors `TEMPER_DAEMON_BIN`, `TEMPER_PROVISION_BIN`, `SMITH_WORKER_BIN`,
+`TEMPER_FORGEJO_BINARY`, and `TEMPER_FORGEJO_RUNNER_BINARY` for prebuilt
+artifacts. Set `TEMPER_WORKSPACE_ROOT` when the Temper checkout is not the
+sibling `../temper`; CI points it at the runner's Temper checkout, which also
+holds the pinned Forgejo/runner binary cache.
+
+CI does not run a broad ignored-test sweep such as `cargo test -- --ignored`;
+ignored live provider checks remain manual-only.
 
 ## Manual live/provider gates
 
