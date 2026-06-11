@@ -4389,6 +4389,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7c388c1b5e93756d0c740965c41e8822f866621d41acbdf6336a6a168f8840c"
 
 [[package]]
+name = "smith-agent"
+version = "0.1.0"
+dependencies = [
+ "asupersync",
+ "futures",
+ "jig-core",
+ "jig-server",
+ "pi_agent_rust",
+ "serde",
+ "serde_json",
+ "smith-io-engine",
+ "smith-temper-agent",
+]
+
+[[package]]
 name = "smith-io-engine"
 version = "0.1.0"
 dependencies = [

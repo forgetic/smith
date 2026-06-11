@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/smith-agent",
     "crates/smith-io-engine",
     "crates/smith-temper-agent",
     "crates/smith-temper-agent-cli",
