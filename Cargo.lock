@@ -4408,7 +4408,6 @@ dependencies = [
  "serde",
  "serde_json",
  "smith-temper-agent",
- "temper-interaction",
  "temper-process-protocol",
  "tokio",
  "uuid",
@@ -4884,39 +4883,6 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-io-kit",
  "windows",
-]
-
-[[package]]
-name = "temper-forge"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "serde",
- "thiserror",
-]
-
-[[package]]
-name = "temper-interaction"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "serde",
- "serde_json",
- "temper-forge",
- "temper-io-engine",
- "temper-process-protocol",
- "thiserror",
-]
-
-[[package]]
-name = "temper-io-engine"
-version = "0.1.0"
-dependencies = [
- "asupersync",
- "serde",
- "serde_json",
 ]
 
 [[package]]

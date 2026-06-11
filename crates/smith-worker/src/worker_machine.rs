@@ -125,15 +125,31 @@ impl WorkerMachine {
         let mut requests = Vec::new();
         match reply {
             Ok(Some(WorkerProtocolMessage::Assign(assign))) => {
-                requests.push(WorkerRequest::Log(crate::observability::assigned_job_line(
-                    &assign,
-                )));
-                self.free_capacity = self.free_capacity.saturating_sub(1);
-                self.in_flight.insert(assign.job_id.clone());
-                requests.push(WorkerRequest::RunJob(assign));
-                // Immediately try to poll again — more work may be waiting and
-                // we may still have capacity.
-                requests.extend(self.poll_or_backoff());
+                // Defensive: the machine only polls with free capacity, so the
+                // daemon should never assign when we are full or re-assign a job
+                // already in flight. If it does (a buggy/racing daemon), refuse
+                // rather than over-subscribe or double-run — capacity
+                // conservation is an invariant, not a hope. Back off and re-sync
+                // on the next poll.
+                if self.free_capacity == 0 || self.in_flight.contains(&assign.job_id) {
+                    requests.push(WorkerRequest::Log(format!(
+                        "smith-worker: refusing assignment job_id={} (free_capacity={}, already_in_flight={})",
+                        assign.job_id,
+                        self.free_capacity,
+                        self.in_flight.contains(&assign.job_id)
+                    )));
+                    requests.push(WorkerRequest::ArmPollTimer(self.params.poll_backoff));
+                } else {
+                    requests.push(WorkerRequest::Log(crate::observability::assigned_job_line(
+                        &assign,
+                    )));
+                    self.free_capacity = self.free_capacity.saturating_sub(1);
+                    self.in_flight.insert(assign.job_id.clone());
+                    requests.push(WorkerRequest::RunJob(assign));
+                    // Immediately try to poll again — more work may be waiting
+                    // and we may still have capacity.
+                    requests.extend(self.poll_or_backoff());
+                }
             }
             Ok(Some(WorkerProtocolMessage::Error(error)))
                 if error.code == ErrorCode::PollTimeout =>

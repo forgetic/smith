@@ -295,10 +295,8 @@ fn render_request_context(request: &ProductManagerRequest) -> Result<String, Pro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use temper_interaction::{ProposalPayloadContract, RawInteractionSpec, ResponderProtocol};
     use temper_process_protocol::{
         ConversationId, ConversationProfileId, ConversationTurn, Participant, ProposalKind,
-        ProposalPayloadValidator,
     };
 
     #[test]
@@ -452,55 +450,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn product_manager_reads_temper_interaction_profile_fixture_manifest() {
-        let fixture = include_str!(
-            "../../../../temper/crates/temper-interaction/fixtures/product-manager-interaction-spec.json"
-        );
-        let raw: RawInteractionSpec = serde_json::from_str(fixture).expect("fixture parses");
-        let validated = raw.validate().expect("fixture validates");
-        let profile_id =
-            ConversationProfileId::new(PRODUCT_MANAGER_PROFILE_ID).expect("valid profile id");
-        let profile = validated
-            .profile(&profile_id)
-            .expect("product-manager profile exists");
-        assert_eq!(profile.responder().as_str(), "product-manager-responder");
-        assert_eq!(
-            profile.participants().agent().display_name.as_deref(),
-            Some("product-manager")
-        );
-        assert_eq!(profile.proposal_kinds().len(), 1);
-        assert_eq!(profile.proposal_kinds()[0].id(), &ProposalKind::issue());
-        assert_eq!(
-            profile.proposal_kinds()[0].payload(),
-            ProposalPayloadContract::IssueDraft
-        );
-
-        let compiled = validated.compile();
-        let manifest = compiled
-            .profile(&profile_id)
-            .expect("compiled product-manager profile exists");
-        assert_eq!(manifest.responder.id.as_str(), "product-manager-responder");
-        assert_eq!(manifest.responder.protocol, ResponderProtocol::ProcessV1);
-        let issue_manifest = manifest
-            .proposal(&ProposalKind::issue())
-            .expect("issue proposal manifest exists");
-        assert_eq!(
-            issue_manifest.payload_validator,
-            ProposalPayloadValidator::IssueDraft
-        );
-        let proposal = ProductManagerDraftIssue {
-            slug: "mobile-chat-loop".into(),
-            title: "Add mobile chat loop".into(),
-            body: "Expose chat from a phone-friendly client.".into(),
-            rationale: Some("Dogfood from mobile.".into()),
-        }
-        .to_proposal()
-        .expect("proposal maps");
-        issue_manifest
-            .validate_payload(&proposal)
-            .expect("Smith issue proposals satisfy the fixture payload contract");
-    }
+    // NOTE: a former test here loaded temper-interaction's
+    // `product-manager-interaction-spec.json` fixture via `RawInteractionSpec`
+    // to cross-check Smith's profile/proposal assumptions against temper's
+    // compiled interaction manifest. It was removed when Smith dropped its
+    // dependency on `temper-interaction`: that crate is no longer serde-only
+    // (it pulls `temper-forge` + `temper-io-engine`), and Smith depends on
+    // temper only through the pure serde DTO crates. Smith's own
+    // ConversationRequest/Reply parsing stays covered by the
+    // `temper-process-protocol` fixture tests above.
 
     #[tokio::test]
     async fn product_manager_responder_rejects_other_profiles_without_provider_call() {

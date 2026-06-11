@@ -135,6 +135,79 @@ fn assign_reply_dispatches_job_and_decrements_capacity() {
 }
 
 #[test]
+fn assignment_is_refused_when_already_at_capacity() {
+    // max_concurrent = 1; take a job, then a (misbehaving) daemon assigns
+    // another while we are full. The machine must refuse rather than
+    // over-subscribe.
+    let mut machine = WorkerMachine::new(params());
+    machine.on_start(EngineTime::ZERO);
+    run(
+        &mut machine,
+        vec![
+            WorkerCompletion::Registered(Ok(())),
+            WorkerCompletion::PollReply(Ok(Some(WorkerProtocolMessage::Assign(assign("job-1"))))),
+        ],
+    );
+    assert_eq!(machine.free_capacity(), 0);
+
+    let requests = run(
+        &mut machine,
+        vec![WorkerCompletion::PollReply(Ok(Some(
+            WorkerProtocolMessage::Assign(assign("job-2")),
+        )))],
+    );
+    // No second dispatch; capacity conserved; logged the refusal + backed off.
+    assert!(
+        !requests
+            .iter()
+            .any(|r| matches!(r, WorkerRequest::RunJob(a) if a.job_id == "job-2")),
+        "must not dispatch a second job at capacity: {requests:?}"
+    );
+    assert_eq!(machine.free_capacity(), 0);
+    assert_eq!(machine.in_flight().len(), 1);
+    assert!(
+        requests
+            .iter()
+            .any(|r| matches!(r, WorkerRequest::Log(line) if line.contains("refusing assignment"))),
+        "expected a refusal log: {requests:?}"
+    );
+}
+
+#[test]
+fn duplicate_assignment_of_in_flight_job_is_refused() {
+    let mut machine = WorkerMachine::new(WorkerParams {
+        max_concurrent_jobs: 4,
+        ..params()
+    });
+    machine.on_start(EngineTime::ZERO);
+    run(
+        &mut machine,
+        vec![
+            WorkerCompletion::Registered(Ok(())),
+            WorkerCompletion::PollReply(Ok(Some(WorkerProtocolMessage::Assign(assign("job-1"))))),
+        ],
+    );
+    assert_eq!(machine.in_flight().len(), 1);
+
+    // The same job id is assigned again (daemon race). Refuse — don't double-run.
+    let requests = run(
+        &mut machine,
+        vec![WorkerCompletion::PollReply(Ok(Some(
+            WorkerProtocolMessage::Assign(assign("job-1")),
+        )))],
+    );
+    assert!(
+        !requests
+            .iter()
+            .any(|r| matches!(r, WorkerRequest::RunJob(_))),
+        "must not re-dispatch an in-flight job: {requests:?}"
+    );
+    assert_eq!(machine.in_flight().len(), 1);
+    // free_capacity unchanged (still 3 of 4).
+    assert_eq!(machine.free_capacity(), 3);
+}
+
+#[test]
 fn poll_timeout_arms_backoff_without_logging_error() {
     let mut machine = WorkerMachine::new(params());
     machine.on_start(EngineTime::ZERO);
