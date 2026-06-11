@@ -75,26 +75,11 @@ responder contract summary is `docs/reference/process-responders.md`, and
 Smith's decision events/captures are documented in
 `docs/reference/workflow-role-observability.md`.
 
-## Optional captures for the reference-delivery demo
+## Reference-delivery note
 
-Captures are off by default. For one debugging run of Smith's
-reference-delivery demo through Temper:
-
-```sh
-cd ~/src/rust/smith
-cargo build -p smith-temper-agent-cli --bin smith-workflow-role-decision
-
-cd examples/reference-delivery
-mkdir -p run/smith-captures
-export SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR="$PWD/run/smith-captures"
-export SMITH_WORKFLOW_ROLE_DECISION_ENV_ALLOWLIST=SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR
-POLL_MS=120000 ./run.sh start
-./run.sh validate-multi-repo
-```
-
-Keep provider credentials on Smith's documented auth surfaces; append only the
-provider env names Smith requires (for example DeepSeek's key env) if your auth
-mode needs them. Do not add Forge tokens or auth-file paths to the role-decision
-allow-list. Inspect Temper worker logs for `role_decision_*` /
-`transition_execution`, then join to Smith events or captures by `decision_id` /
-`work_item_id`.
+`examples/reference-delivery` no longer binds this role-decision responder. The
+current demo uses `smith-worker --executor coding`; provider/auth options flow
+through `SMITH_CODING_AGENT_ARGS`, and runtime evidence is documented in
+`examples/reference-delivery/observability.md`. Use the capture variables for
+older role-worker deployments that still invoke `smith-workflow-role-decision`,
+not for the daemon/worker reference-delivery launcher.
