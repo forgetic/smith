@@ -613,7 +613,9 @@ seed_intake() {
         [ -n "$_issue" ] && printf 'repo=%s intake_issue_url=%s/%s/issues/%s\n' "$REPO" "$BASE_URL" "$REPO" "$_issue"
     } >>"$LOG_DIR/provision.log"
     log "$_status"
-    [ -n "$_issue" ] && log "  intake issue: $BASE_URL/$REPO/issues/$_issue (filing it should drive the webhook path)"
+    if [ -n "$_issue" ]; then
+        log "  intake issue: $BASE_URL/$REPO/issues/$_issue (filing it should drive the webhook path)"
+    fi
 }
 
 # --- Demo CI seed -------------------------------------------------------------
@@ -721,7 +723,9 @@ export_worker_role_identities() {
         [ -n "$_token" ] || die "no token for role '$_role' in $ROLES_ENV"
         export "TEMPER_FORGEJO_USER_${_key}" "TEMPER_FORGEJO_TOKEN_${_key}"
         eval "_email=\${TEMPER_FORGEJO_EMAIL_${_key}:-}"
-        [ -n "$_email" ] && export "TEMPER_FORGEJO_EMAIL_${_key}"
+        if [ -n "$_email" ]; then
+            export "TEMPER_FORGEJO_EMAIL_${_key}"
+        fi
     done
 }
 

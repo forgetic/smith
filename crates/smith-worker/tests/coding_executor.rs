@@ -55,6 +55,17 @@ async fn success_path_commits_pushes_and_reports_branch() {
             path_str(&fixture.origin),
             "log",
             "-1",
+            "--format=%b",
+            "refs/heads/agent/pr-for-code-7",
+        ]),
+        "Closes #7"
+    );
+    assert_eq!(
+        git_output([
+            "-C",
+            path_str(&fixture.origin),
+            "log",
+            "-1",
             "--format=%an <%ae>|%cn <%ce>",
             "refs/heads/agent/pr-for-code-7",
         ]),
