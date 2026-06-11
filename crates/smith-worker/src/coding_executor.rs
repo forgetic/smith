@@ -44,6 +44,7 @@ impl JobExecutor for CodingExecutor {
 }
 
 async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
+    let artifact_item = assign.artifact.item.clone();
     let context = match serde_json::from_value::<WireJobContext>(assign.job_payload) {
         Ok(context) => context,
         Err(error) => {
@@ -268,7 +269,7 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
             }
 
             if let Err(error) = workspace
-                .commit_all(&format!("Implement {correlation_key}"))
+                .commit_all(&commit_message(&correlation_key, &artifact_item))
                 .await
             {
                 return workspace_failure("commit workspace changes", error, &token);
@@ -333,6 +334,19 @@ fn workspace_failure(action: &str, error: WorkspaceError, token: &str) -> JobOut
         FailureClass::Transient,
         redact_secret(format!("{action}: {error}"), token),
     )
+}
+
+/// Builds the implementation commit message.
+///
+/// Numeric issue artifacts gain a `Closes #<n>` trailer so the forge's native
+/// close-on-merge closes the source issue when the implementation PR lands —
+/// the daemon applies no issue transition on success, so this trailer is what
+/// retires the source issue (and its queue entry) at merge time.
+fn commit_message(correlation_key: &str, artifact_item: &serde_json::Value) -> String {
+    match artifact_item.as_u64() {
+        Some(number) => format!("Implement {correlation_key}\n\nCloses #{number}"),
+        None => format!("Implement {correlation_key}"),
+    }
 }
 
 fn failure(class: FailureClass, message: impl Into<String>) -> JobOutcome {

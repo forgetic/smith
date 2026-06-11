@@ -117,7 +117,7 @@ fn basic_delivery_jig_runs_to_bot_merge() {
         final_file["name"], "banner.sh",
         "main lacks src/banner.sh: {final_file:#}"
     );
-    assert_mechanical_merge_evidence(&run, pr_number);
+    wait_for_mechanical_merge_evidence(&run, pr_number, deadline);
 
     run.stop();
 }
@@ -802,14 +802,21 @@ fn wait_for_ci_and_merge(
     )
 }
 
-fn assert_mechanical_merge_evidence(run: &RunGuard, pr_number: u64) {
+/// Waits for the daemon's mechanical `land_pr` evidence to reach the log file.
+///
+/// The daemon's runner-event JSON lines go to a block-buffered stdout pipe, so
+/// the merge can be visible through the API before the matching log line is
+/// flushed; poll instead of asserting on a single read.
+fn wait_for_mechanical_merge_evidence(run: &RunGuard, pr_number: u64, deadline: Instant) {
     let daemon_path = run.example.join("logs/daemon.log");
-    let daemon = fs::read_to_string(&daemon_path).unwrap_or_default();
-    assert!(
-        has_merge_evidence_for_pr(&daemon, pr_number),
-        "mechanical merge evidence for PR #{pr_number} not logged; daemon.log tail:\n{}\ndiagnostics: {}",
-        tail(&daemon, 200),
-        run.diagnostics()
+    poll(
+        deadline,
+        run,
+        || {
+            let daemon = fs::read_to_string(&daemon_path).unwrap_or_default();
+            has_merge_evidence_for_pr(&daemon, pr_number).then_some(())
+        },
+        &format!("mechanical merge evidence for PR #{pr_number} in logs/daemon.log"),
     );
 }
 
@@ -823,6 +830,10 @@ fn has_merge_evidence_for_pr(logs: &str, pr_number: u64) -> bool {
         format!("\"pr_number\":{pr_number}"),
         format!("number={pr_number}"),
         format!("#{pr_number}"),
+        // The daemon's mechanical backstop logs the landing as a structured
+        // `mechanical_automation_execution` JSON event identifying the PR as
+        // `"artifact_number":<n>` with `"transition":"land_pr"`.
+        format!("\"artifact_number\":{pr_number}"),
     ];
     (logs.contains("land_pr") || logs.to_ascii_lowercase().contains("merge"))
         && pr_markers.iter().any(|marker| logs.contains(marker))
@@ -1014,10 +1025,16 @@ impl RunGuard {
         )
     }
     fn stop(&mut self) {
+        // The sandbox copy lives under a temp dir, so the launcher cannot
+        // derive the workspace roots from its own location; pass them
+        // explicitly or `run.sh stop` dies resolving `../temper` under
+        // `set -eu` and leaves the boot processes running.
         let _ = Command::new("/bin/sh")
             .arg(self.example.join("run.sh"))
             .arg("stop")
             .current_dir(&self.example)
+            .env("SMITH_WORKSPACE_ROOT", repo_root())
+            .env("TEMPER_WORKSPACE_ROOT", temper_root(&repo_root()))
             .status();
         let _ = self.child.kill();
         let _ = self.child.wait();
