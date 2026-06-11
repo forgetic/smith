@@ -385,14 +385,11 @@ resolve_binaries() {
             log "coding agent: deterministic greeting stand-in ($GREETING_CODER_BIN)"
             ;;
         smith)
-            SMITH_CODING_AGENT_BIN=${SMITH_CODING_AGENT_BIN:-$SMITH_WORKSPACE_ROOT/target/debug/smith-coding-agent}
-            if [ "${TEMPER_SKIP_BUILD:-0}" != "1" ]; then
-                log "ensuring Smith coding agent is current (cargo build -p $SMITH_BUILD_PACKAGE --bin smith-coding-agent)..."
-                ( cd "$SMITH_WORKSPACE_ROOT" && cargo build -p "$SMITH_BUILD_PACKAGE" --bin smith-coding-agent ) \
-                    || die 'Smith coding-agent cargo build failed'
-            fi
-            [ -x "$SMITH_CODING_AGENT_BIN" ] || die "Smith coding-agent binary not found: $SMITH_CODING_AGENT_BIN"
-            log "coding agent: Smith pi-SDK agent ($SMITH_CODING_AGENT_BIN $SMITH_CODING_AGENT_ARGS)"
+            # The Smith pi-SDK coding agent now runs in-process inside
+            # smith-worker (no separate smith-coding-agent binary). The worker is
+            # selected with `--agent-command smith`; SMITH_CODING_AGENT_ARGS still
+            # carries the agent's auth flags, passed through as --agent-arg.
+            log "coding agent: Smith pi-SDK agent (in-process; args: $SMITH_CODING_AGENT_ARGS)"
             ;;
     esac
 }
@@ -769,7 +766,9 @@ boot_worker() {
 
     case "$BASIC_DELIVERY_CODER" in
         greeting) _agent_command=$GREETING_CODER_BIN ;;
-        smith) _agent_command=$SMITH_CODING_AGENT_BIN ;;
+        # `smith` selects the in-process pi-SDK agent: the worker recognizes the
+        # literal program name `smith` and runs the coding loop itself.
+        smith) _agent_command=smith ;;
         *) die "unknown BASIC_DELIVERY_CODER '$BASIC_DELIVERY_CODER'" ;;
     esac
 

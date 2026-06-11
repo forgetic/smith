@@ -45,12 +45,14 @@
 //! exchange for an independent dependency surface.
 
 pub mod engine;
+pub mod http_client;
 pub mod machine;
 pub mod queue;
 pub mod runtime;
 pub mod timer;
 
 pub use engine::{drive, drive_sync, Executor};
+pub use http_client::{build_http_client, http_call, HttpCall, HttpCallResult, HttpResponseData};
 pub use machine::{EngineTime, Machine};
 pub use queue::{channel, oneshot, CqReceiver, CqSender, OneshotReceiver, OneshotSender};
 pub use runtime::{

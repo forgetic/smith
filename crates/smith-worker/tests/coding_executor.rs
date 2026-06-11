@@ -1,14 +1,28 @@
+//! End-to-end tests for [`CodingExecutor`]: workspace prep, the agent turn (an
+//! in-process [`FakeAgentRunner`] standing in for the `pi`-SDK loop), and the
+//! result → [`JobOutcome`] mapping (commit/push on the writable head path,
+//! verdict routing otherwise).
+//!
+//! Before the daemon/worker consolidation these tests drove a fake coding agent
+//! as a shell *script* over the `TEMPER_CODING_WORKSPACE_CONTEXT` / `_RESULT`
+//! file protocol. The agent now runs in-process behind the [`AgentRunner`]
+//! seam, so the fake is an in-process runner: it captures the typed
+//! [`WorkspaceContext`] it receives, optionally writes a product diff into the
+//! checkout, and returns a scripted [`WorkspaceResult`] (or [`AgentRunError`]).
+//! The workspace/git/result-mapping coverage is unchanged.
+
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use smith_temper_agent::{WorkspaceContext, WorkspaceResult, WorkspaceResultChild};
+use smith_temper_agent::{WorkspaceContext, WorkspaceResultChild};
 use smith_worker::{
-    CodingExecutor, CodingExecutorConfig, JobExecutor, JobOutcome, RoleGitIdentity,
+    AgentRunError, AgentRunner, CodingExecutor, CodingExecutorConfig, JobExecutor, JobOutcome,
+    RoleGitIdentity, WorkspaceResult,
 };
 use temper_worker_protocol::{Artifact, Assign, FailureClass, JobChild, WORKER_PROTOCOL_VERSION};
 use tempfile::TempDir;
@@ -16,9 +30,8 @@ use tempfile::TempDir;
 #[tokio::test]
 async fn success_path_commits_pushes_and_reports_branch() {
     let fixture = Fixture::new();
-    let capture_path = fixture.temp.path().join("captured-context.json");
-    let agent = fixture.agent(AgentBehavior::Success { capture_path });
-    let executor = fixture.executor(&agent, true);
+    let agent = AgentBehavior::Success.runner();
+    let executor = fixture.executor(agent.clone(), true);
 
     let outcome = executor
         .execute(assign("agent/pr-for-code-7", "pr-for-code-7"))
@@ -85,11 +98,8 @@ async fn success_path_commits_pushes_and_reports_branch() {
 #[tokio::test]
 async fn context_shape_matches_temper_coding_agent_contract() {
     let fixture = Fixture::new();
-    let capture_path = fixture.temp.path().join("captured-context.json");
-    let agent = fixture.agent(AgentBehavior::Success {
-        capture_path: capture_path.clone(),
-    });
-    let executor = fixture.executor(&agent, true);
+    let agent = AgentBehavior::Success.runner();
+    let executor = fixture.executor(agent.clone(), true);
 
     expect_success(
         executor
@@ -97,10 +107,7 @@ async fn context_shape_matches_temper_coding_agent_contract() {
             .await,
     );
 
-    let context: WorkspaceContext = serde_json::from_slice(
-        &fs::read(&capture_path).expect("fake agent captured the context file"),
-    )
-    .expect("captured context parses as smith-temper-agent WorkspaceContext");
+    let context = agent.captured_context();
     assert_workspace_context(
         &context,
         ExpectedWorkspaceContext {
@@ -120,11 +127,8 @@ async fn context_shape_matches_temper_coding_agent_contract() {
 #[tokio::test]
 async fn context_shape_passes_through_read_only_capability_and_verdicts() {
     let fixture = Fixture::new();
-    let capture_path = fixture.temp.path().join("captured-read-only-context.json");
-    let agent = fixture.agent(AgentBehavior::ReadOnlyVerdict {
-        capture_path: Some(capture_path.clone()),
-    });
-    let executor = fixture.executor(&agent, true);
+    let agent = AgentBehavior::ReadOnlyVerdict.runner();
+    let executor = fixture.executor(agent.clone(), true);
 
     expect_verdict(
         executor
@@ -135,10 +139,7 @@ async fn context_shape_passes_through_read_only_capability_and_verdicts() {
             .await,
     );
 
-    let context: WorkspaceContext = serde_json::from_slice(
-        &fs::read(&capture_path).expect("fake agent captured the context file"),
-    )
-    .expect("captured context parses as smith-temper-agent WorkspaceContext");
+    let context = agent.captured_context();
     assert_workspace_context(
         &context,
         ExpectedWorkspaceContext {
@@ -158,12 +159,8 @@ async fn context_shape_passes_through_read_only_capability_and_verdicts() {
 #[tokio::test]
 async fn review_context_shape_carries_pull_request_target() {
     let fixture = Fixture::new();
-    let capture_path = fixture.temp.path().join("captured-review-context.json");
-    let agent = fixture.agent(AgentBehavior::ReviewApprove {
-        head_capture_path: fixture.pull_request_head_path(),
-        capture_path: Some(capture_path.clone()),
-    });
-    let executor = fixture.executor(&agent, true);
+    let agent = AgentBehavior::ReviewApprove.runner();
+    let executor = fixture.executor(agent.clone(), true);
 
     expect_verdict(
         executor
@@ -171,10 +168,7 @@ async fn review_context_shape_carries_pull_request_target() {
             .await,
     );
 
-    let context: WorkspaceContext = serde_json::from_slice(
-        &fs::read(&capture_path).expect("fake agent captured the context file"),
-    )
-    .expect("captured context parses as smith-temper-agent WorkspaceContext");
+    let context = agent.captured_context();
     assert_workspace_context(
         &context,
         ExpectedWorkspaceContext {
@@ -245,11 +239,7 @@ fn assert_workspace_context(context: &WorkspaceContext, expected: ExpectedWorksp
 #[tokio::test]
 async fn workspace_is_reused_across_successful_jobs_for_same_repo_and_role() {
     let fixture = Fixture::new();
-    let first_capture = fixture.temp.path().join("first-context.json");
-    let first_agent = fixture.agent(AgentBehavior::Success {
-        capture_path: first_capture,
-    });
-    let executor = fixture.executor(&first_agent, true);
+    let executor = fixture.executor(AgentBehavior::Success.runner(), true);
 
     expect_success(
         executor
@@ -286,8 +276,7 @@ async fn workspace_is_reused_across_successful_jobs_for_same_repo_and_role() {
 #[tokio::test]
 async fn malformed_payload_maps_to_protocol_failure() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::NoDiff);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::NoDiff.runner(), true);
 
     let outcome = executor
         .execute(Assign {
@@ -302,8 +291,7 @@ async fn malformed_payload_maps_to_protocol_failure() {
 #[tokio::test]
 async fn missing_enriched_artifact_maps_to_protocol_failure() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::NoDiff);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::NoDiff.runner(), true);
     let mut context = job_context("agent/pr-for-code-7", "pr-for-code-7");
     context.artifact = None;
 
@@ -324,8 +312,7 @@ async fn missing_enriched_artifact_maps_to_protocol_failure() {
 #[tokio::test]
 async fn missing_role_identity_maps_to_permanent_failure() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::NoDiff);
-    let executor = fixture.executor(&agent, false);
+    let executor = fixture.executor(AgentBehavior::NoDiff.runner(), false);
 
     let outcome = executor
         .execute(assign("agent/pr-for-code-7", "pr-for-code-7"))
@@ -339,10 +326,9 @@ async fn missing_role_identity_maps_to_permanent_failure() {
 }
 
 #[tokio::test]
-async fn nonzero_agent_exit_maps_to_transient_failure_with_stderr() {
+async fn transient_agent_error_maps_to_transient_failure() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::Exit3);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::TransientError.runner(), true);
 
     let outcome = executor
         .execute(assign("agent/pr-for-code-7", "pr-for-code-7"))
@@ -350,33 +336,15 @@ async fn nonzero_agent_exit_maps_to_transient_failure_with_stderr() {
 
     let message = expect_failure_class(outcome, FailureClass::Transient);
     assert!(
-        message.contains("status 3"),
-        "unexpected message: {message}"
+        message.contains("provider transport reset"),
+        "transient error message missing: {message}"
     );
-    assert!(
-        message.contains("fake agent failed"),
-        "stderr tail missing from message: {message}"
-    );
-}
-
-#[tokio::test]
-async fn missing_result_file_after_zero_exit_maps_to_permanent_failure() {
-    let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::NoResultFile);
-    let executor = fixture.executor(&agent, true);
-
-    let outcome = executor
-        .execute(assign("agent/pr-for-code-7", "pr-for-code-7"))
-        .await;
-
-    expect_failure_class(outcome, FailureClass::Permanent);
 }
 
 #[tokio::test]
 async fn zero_diff_maps_to_permanent_failure() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::NoDiff);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::NoDiff.runner(), true);
 
     let outcome = executor
         .execute(assign("agent/pr-for-code-7", "pr-for-code-7"))
@@ -392,8 +360,7 @@ async fn zero_diff_maps_to_permanent_failure() {
 #[tokio::test]
 async fn verdict_result_maps_to_permanent_failure() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::Verdict);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::Verdict.runner(), true);
 
     let outcome = executor
         .execute(assign("agent/pr-for-code-7", "pr-for-code-7"))
@@ -409,8 +376,7 @@ async fn verdict_result_maps_to_permanent_failure() {
 #[tokio::test]
 async fn read_only_job_returns_verdict_and_body() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::ReadOnlyVerdict { capture_path: None });
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::ReadOnlyVerdict.runner(), true);
 
     let (verdict, body, summary, children) = expect_verdict(
         executor
@@ -431,8 +397,7 @@ async fn read_only_job_returns_verdict_and_body() {
 #[tokio::test]
 async fn read_only_job_with_diff_still_returns_verdict_without_push() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::ReadOnlyVerdictWithDiff);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::ReadOnlyVerdictWithDiff.runner(), true);
 
     let (verdict, body, summary, children) = expect_verdict(
         executor
@@ -454,8 +419,7 @@ async fn read_only_job_with_diff_still_returns_verdict_without_push() {
 #[tokio::test]
 async fn read_only_breakdown_verdict_passes_children_through() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::ReadOnlyBreakdownVerdict);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::ReadOnlyBreakdownVerdict.runner(), true);
     let mut context = read_only_job_context("agent/breakdown-7", "breakdown-7");
     context.allowed_verdicts = vec!["needs_breakdown".to_string()];
 
@@ -492,70 +456,10 @@ async fn read_only_breakdown_verdict_passes_children_through() {
     assert_no_origin_branch(&fixture, "agent/breakdown-7");
 }
 
-#[test]
-fn worker_agent_result_parses_temper_agent_children_contract() {
-    let result = WorkspaceResult {
-        verdict: Some("needs_breakdown".to_string()),
-        summary: Some("planned breakdown".to_string()),
-        children: vec![
-            WorkspaceResultChild {
-                slug: "api-schema".to_string(),
-                title: "Define the API schema".to_string(),
-                body: "Write the shared API schema.".to_string(),
-                labels: vec!["code".to_string(), "ready".to_string()],
-                depends_on: Vec::new(),
-                target_repo: None,
-            },
-            WorkspaceResultChild {
-                slug: "web-client".to_string(),
-                title: "Implement the web client".to_string(),
-                body: "Build the web client against the API schema.".to_string(),
-                labels: Vec::new(),
-                depends_on: vec!["api-schema".to_string()],
-                target_repo: Some("acme/other".to_string()),
-            },
-        ],
-        ..WorkspaceResult::default()
-    };
-
-    let parsed: smith_worker::coding_executor::AgentResult =
-        serde_json::from_value(serde_json::to_value(&result).expect("agent result serializes"))
-            .expect("worker parses agent result");
-
-    assert_eq!(parsed.verdict.as_deref(), Some("needs_breakdown"));
-    assert_eq!(parsed.summary.as_deref(), Some("planned breakdown"));
-    assert_eq!(parsed.children.len(), 2);
-    assert_eq!(parsed.children[0].slug, "api-schema");
-    assert_eq!(parsed.children[0].title, "Define the API schema");
-    assert_eq!(parsed.children[0].body, "Write the shared API schema.");
-    assert_eq!(
-        parsed.children[0].labels,
-        vec!["code".to_string(), "ready".to_string()]
-    );
-    assert!(parsed.children[0].depends_on.is_empty());
-    assert_eq!(parsed.children[0].target_repo, None);
-    assert_eq!(parsed.children[1].slug, "web-client");
-    assert_eq!(parsed.children[1].title, "Implement the web client");
-    assert_eq!(
-        parsed.children[1].body,
-        "Build the web client against the API schema."
-    );
-    assert!(parsed.children[1].labels.is_empty());
-    assert_eq!(
-        parsed.children[1].depends_on,
-        vec!["api-schema".to_string()]
-    );
-    assert_eq!(
-        parsed.children[1].target_repo.as_deref(),
-        Some("acme/other")
-    );
-}
-
 #[tokio::test]
 async fn read_only_job_without_verdict_is_permanent() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::NoDiff);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::NoDiff.runner(), true);
 
     let outcome = executor
         .execute(assign_with_context(
@@ -575,8 +479,7 @@ async fn read_only_job_without_verdict_is_permanent() {
 #[tokio::test]
 async fn read_only_job_with_undeclared_verdict_is_permanent() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::UndeclaredVerdict);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::UndeclaredVerdict.runner(), true);
 
     let outcome = executor
         .execute(assign_with_context(
@@ -598,14 +501,10 @@ async fn read_only_job_with_undeclared_verdict_is_permanent() {
 }
 
 #[tokio::test]
-async fn review_job_checks_out_pr_head_and_returns_approve_verdict() {
+async fn review_job_returns_approve_verdict() {
     let fixture = Fixture::new();
-    let head_capture_path = fixture.pull_request_head_path();
-    let agent = fixture.agent(AgentBehavior::ReviewApprove {
-        head_capture_path: head_capture_path.clone(),
-        capture_path: None,
-    });
-    let executor = fixture.executor(&agent, true);
+    let agent = AgentBehavior::ReviewApprove.runner();
+    let executor = fixture.executor(agent.clone(), true);
 
     let (verdict, body, summary, children) = expect_verdict(
         executor
@@ -617,12 +516,9 @@ async fn review_job_checks_out_pr_head_and_returns_approve_verdict() {
     assert_eq!(body, None);
     assert_eq!(summary.as_deref(), Some("looks good"));
     assert!(children.is_empty());
-    assert_eq!(
-        fs::read_to_string(&head_capture_path)
-            .expect("fake agent captured HEAD")
-            .trim(),
-        fixture.pull_request_head_sha
-    );
+    // The runner ran in the prepared PR-head checkout: it observed the PR head
+    // sha, confirming the executor checked out `refs/pull/7/head`.
+    assert_eq!(agent.observed_head_sha(), fixture.pull_request_head_sha);
     assert_no_origin_branch(&fixture, "agent/review-7");
     assert_no_extra_origin_head_branches(&fixture, &["main"]);
 }
@@ -630,8 +526,7 @@ async fn review_job_checks_out_pr_head_and_returns_approve_verdict() {
 #[tokio::test]
 async fn review_job_changes_verdict_passes_review_body_through() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::ReviewChanges);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::ReviewChanges.runner(), true);
 
     let (verdict, body, summary, children) = expect_verdict(
         executor
@@ -655,8 +550,7 @@ async fn review_job_changes_verdict_passes_review_body_through() {
 #[tokio::test]
 async fn review_job_missing_verdict_is_permanent_failure() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::ReviewMissingVerdict);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::ReviewMissingVerdict.runner(), true);
 
     let outcome = executor
         .execute(pr_assign(
@@ -678,8 +572,7 @@ async fn review_job_missing_verdict_is_permanent_failure() {
 #[tokio::test]
 async fn review_job_undeclared_verdict_is_permanent_failure() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::ReviewUndeclaredVerdict);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::ReviewUndeclaredVerdict.runner(), true);
 
     let outcome = executor
         .execute(pr_assign(
@@ -705,8 +598,7 @@ async fn review_job_undeclared_verdict_is_permanent_failure() {
 #[tokio::test]
 async fn writable_job_with_allowed_escalation_verdict_returns_verdict() {
     let fixture = Fixture::new();
-    let agent = fixture.agent(AgentBehavior::WritableVerdict);
-    let executor = fixture.executor(&agent, true);
+    let executor = fixture.executor(AgentBehavior::WritableVerdict.runner(), true);
 
     let (verdict, body, summary, children) = expect_verdict(
         executor
@@ -728,6 +620,204 @@ async fn writable_job_with_allowed_escalation_verdict_returns_verdict() {
     assert_no_origin_branch(&fixture, "agent/pr-for-code-7");
     assert_workspace_clean(&fixture, "engineer");
 }
+
+// ---------------------------------------------------------------------------
+// In-process fake agent runner.
+// ---------------------------------------------------------------------------
+
+/// What the fake agent does for one turn. Each variant mirrors a behavior the
+/// old shell-script fakes produced, but expressed as in-process effects:
+/// capture the context, optionally write a product diff into the checkout, and
+/// return a [`WorkspaceResult`] or an [`AgentRunError`].
+#[derive(Clone, Copy)]
+enum AgentBehavior {
+    /// Engineer head path: write a product diff, return a summary-only result.
+    Success,
+    /// A transient provider error (the in-process analog of the old non-zero
+    /// subprocess exit).
+    TransientError,
+    /// Return a summary-only result and write no diff (engineer ⇒ "no diff").
+    NoDiff,
+    /// Return a writable verdict the executor does not route (permanent).
+    Verdict,
+    /// Architect read-only `ready_code` verdict with a rewritten body.
+    ReadOnlyVerdict,
+    /// Architect `needs_breakdown` verdict with children.
+    ReadOnlyBreakdownVerdict,
+    /// Read-only verdict that also (wrongly) writes a diff; the executor must
+    /// discard it and still route the verdict without pushing.
+    ReadOnlyVerdictWithDiff,
+    /// Read-only verdict outside the declared vocabulary (permanent).
+    UndeclaredVerdict,
+    /// Writable escalation verdict that also writes a diff to discard.
+    WritableVerdict,
+    /// Reviewer `approve` verdict (records the checked-out HEAD sha).
+    ReviewApprove,
+    /// Reviewer `changes` verdict with a review body; writes a diff to discard.
+    ReviewChanges,
+    /// Reviewer result with no verdict (permanent).
+    ReviewMissingVerdict,
+    /// Reviewer verdict outside the declared vocabulary (permanent).
+    ReviewUndeclaredVerdict,
+}
+
+impl AgentBehavior {
+    fn runner(self) -> FakeAgentRunner {
+        FakeAgentRunner {
+            behavior: self,
+            captured: Arc::new(Mutex::new(None)),
+            observed_head_sha: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct FakeAgentRunner {
+    behavior: AgentBehavior,
+    captured: Arc<Mutex<Option<WorkspaceContext>>>,
+    observed_head_sha: Arc<Mutex<Option<String>>>,
+}
+
+impl FakeAgentRunner {
+    /// The context the executor handed the runner (panics if the runner never
+    /// ran).
+    fn captured_context(&self) -> WorkspaceContext {
+        self.captured
+            .lock()
+            .expect("capture lock")
+            .clone()
+            .expect("fake agent runner captured a context")
+    }
+
+    /// The `git HEAD` sha the runner saw in the prepared checkout.
+    fn observed_head_sha(&self) -> String {
+        self.observed_head_sha
+            .lock()
+            .expect("head lock")
+            .clone()
+            .expect("fake agent runner observed HEAD")
+    }
+
+    fn write_diff(cwd: &Path) {
+        fs::write(cwd.join("agent-output.txt"), "agent diff\n").expect("write fake agent diff");
+    }
+}
+
+impl AgentRunner for FakeAgentRunner {
+    async fn run(
+        &self,
+        context: &WorkspaceContext,
+        cwd: &Path,
+    ) -> Result<WorkspaceResult, AgentRunError> {
+        *self.captured.lock().expect("capture lock") = Some(context.clone());
+        *self.observed_head_sha.lock().expect("head lock") = Some(git_output([
+            "-C",
+            path_str(cwd),
+            "rev-parse",
+            "HEAD",
+        ]));
+
+        match self.behavior {
+            AgentBehavior::Success => {
+                Self::write_diff(cwd);
+                Ok(WorkspaceResult {
+                    summary: Some("did the work".to_string()),
+                    ..WorkspaceResult::default()
+                })
+            }
+            AgentBehavior::TransientError => Err(AgentRunError::transient(
+                "LLM run failed: provider transport reset",
+            )),
+            AgentBehavior::NoDiff => Ok(WorkspaceResult {
+                summary: Some("nothing changed".to_string()),
+                ..WorkspaceResult::default()
+            }),
+            AgentBehavior::Verdict => Ok(WorkspaceResult {
+                verdict: Some("needs_design".to_string()),
+                summary: Some("cannot proceed".to_string()),
+                ..WorkspaceResult::default()
+            }),
+            AgentBehavior::ReadOnlyVerdict => Ok(WorkspaceResult {
+                verdict: Some("ready_code".to_string()),
+                body: Some("rewritten".to_string()),
+                summary: Some("did triage".to_string()),
+                ..WorkspaceResult::default()
+            }),
+            AgentBehavior::ReadOnlyVerdictWithDiff => {
+                Self::write_diff(cwd);
+                Ok(WorkspaceResult {
+                    verdict: Some("ready_code".to_string()),
+                    body: Some("rewritten".to_string()),
+                    summary: Some("did triage".to_string()),
+                    ..WorkspaceResult::default()
+                })
+            }
+            AgentBehavior::ReadOnlyBreakdownVerdict => Ok(WorkspaceResult {
+                verdict: Some("needs_breakdown".to_string()),
+                summary: Some("planned breakdown".to_string()),
+                children: vec![
+                    WorkspaceResultChild {
+                        slug: "api-schema".to_string(),
+                        title: "Define the API schema".to_string(),
+                        body: "Write the shared API schema.".to_string(),
+                        labels: vec!["code".to_string(), "ready".to_string()],
+                        depends_on: Vec::new(),
+                        target_repo: None,
+                    },
+                    WorkspaceResultChild {
+                        slug: "web-client".to_string(),
+                        title: "Implement the web client".to_string(),
+                        body: "Build the web client against the API schema.".to_string(),
+                        labels: Vec::new(),
+                        depends_on: vec!["api-schema".to_string()],
+                        target_repo: Some("acme/other".to_string()),
+                    },
+                ],
+                ..WorkspaceResult::default()
+            }),
+            AgentBehavior::UndeclaredVerdict => Ok(WorkspaceResult {
+                verdict: Some("needs_breakdown".to_string()),
+                summary: Some("needs splitting".to_string()),
+                ..WorkspaceResult::default()
+            }),
+            AgentBehavior::WritableVerdict => {
+                Self::write_diff(cwd);
+                Ok(WorkspaceResult {
+                    verdict: Some("needs_architect".to_string()),
+                    body: Some("blocked".to_string()),
+                    summary: Some("cannot proceed".to_string()),
+                    ..WorkspaceResult::default()
+                })
+            }
+            AgentBehavior::ReviewApprove => Ok(WorkspaceResult {
+                verdict: Some("approve".to_string()),
+                summary: Some("looks good".to_string()),
+                ..WorkspaceResult::default()
+            }),
+            AgentBehavior::ReviewChanges => {
+                Self::write_diff(cwd);
+                Ok(WorkspaceResult {
+                    verdict: Some("changes".to_string()),
+                    review_body: Some("please add error handling".to_string()),
+                    summary: Some("needs error handling".to_string()),
+                    ..WorkspaceResult::default()
+                })
+            }
+            AgentBehavior::ReviewMissingVerdict => Ok(WorkspaceResult {
+                summary: Some("no opinion".to_string()),
+                ..WorkspaceResult::default()
+            }),
+            AgentBehavior::ReviewUndeclaredVerdict => Ok(WorkspaceResult {
+                verdict: Some("merge_now".to_string()),
+                ..WorkspaceResult::default()
+            }),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Fixture + assertions (unchanged git/workspace machinery).
+// ---------------------------------------------------------------------------
 
 struct Fixture {
     temp: TempDir,
@@ -753,204 +843,34 @@ impl Fixture {
         }
     }
 
-    fn executor(&self, agent: &Path, include_identity: bool) -> CodingExecutor {
+    fn executor(&self, runner: FakeAgentRunner, include_identity: bool) -> CodingExecutor<FakeAgentRunner> {
         let mut role_identities = BTreeMap::new();
         if include_identity {
-            role_identities.insert(
-                "engineer".to_string(),
-                RoleGitIdentity {
-                    user: "Smith Engineer".to_string(),
-                    email: "smith-engineer@example.test".to_string(),
-                    token: "test-token".to_string(),
-                },
-            );
-            role_identities.insert(
-                "architect".to_string(),
-                RoleGitIdentity {
-                    user: "Smith Architect".to_string(),
-                    email: "smith-architect@example.test".to_string(),
-                    token: "test-token".to_string(),
-                },
-            );
-            role_identities.insert(
-                "reviewer".to_string(),
-                RoleGitIdentity {
-                    user: "Smith Reviewer".to_string(),
-                    email: "smith-reviewer@example.test".to_string(),
-                    token: "test-token".to_string(),
-                },
-            );
-        }
-
-        CodingExecutor::new(CodingExecutorConfig {
-            workspace_root: self.workspace_root.clone(),
-            git_base_url: format!("file://{}/git", path_str(self.temp.path())),
-            agent_command: vec![path_str(agent).to_string()],
-            role_identities,
-        })
-    }
-
-    fn agent(&self, behavior: AgentBehavior) -> PathBuf {
-        let path = self
-            .temp
-            .path()
-            .join(format!("agent-{}.sh", behavior.name()));
-        fs::write(&path, behavior.script()).expect("write fake agent script");
-        let mut permissions = fs::metadata(&path)
-            .expect("fake agent metadata")
-            .permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&path, permissions).expect("make fake agent executable");
-        path
-    }
-
-    fn pull_request_head_path(&self) -> PathBuf {
-        self.temp.path().join("pull-request-head")
-    }
-}
-
-enum AgentBehavior {
-    Success {
-        capture_path: PathBuf,
-    },
-    Exit3,
-    NoResultFile,
-    NoDiff,
-    Verdict,
-    ReadOnlyVerdict {
-        capture_path: Option<PathBuf>,
-    },
-    ReadOnlyBreakdownVerdict,
-    ReadOnlyVerdictWithDiff,
-    UndeclaredVerdict,
-    WritableVerdict,
-    ReviewApprove {
-        head_capture_path: PathBuf,
-        capture_path: Option<PathBuf>,
-    },
-    ReviewChanges,
-    ReviewMissingVerdict,
-    ReviewUndeclaredVerdict,
-}
-
-impl AgentBehavior {
-    fn name(&self) -> &'static str {
-        match self {
-            AgentBehavior::Success { .. } => "success",
-            AgentBehavior::Exit3 => "exit-3",
-            AgentBehavior::NoResultFile => "no-result",
-            AgentBehavior::NoDiff => "no-diff",
-            AgentBehavior::Verdict => "verdict",
-            AgentBehavior::ReadOnlyVerdict { .. } => "read-only-verdict",
-            AgentBehavior::ReadOnlyBreakdownVerdict => "read-only-breakdown-verdict",
-            AgentBehavior::ReadOnlyVerdictWithDiff => "read-only-verdict-with-diff",
-            AgentBehavior::UndeclaredVerdict => "undeclared-verdict",
-            AgentBehavior::WritableVerdict => "writable-verdict",
-            AgentBehavior::ReviewApprove { .. } => "review-approve",
-            AgentBehavior::ReviewChanges => "review-changes",
-            AgentBehavior::ReviewMissingVerdict => "review-missing-verdict",
-            AgentBehavior::ReviewUndeclaredVerdict => "review-undeclared-verdict",
-        }
-    }
-
-    fn script(&self) -> String {
-        match self {
-            AgentBehavior::Success { capture_path } => format!(
-                "#!/bin/sh\nset -eu\ncp \"$TEMPER_CODING_WORKSPACE_CONTEXT\" {}\nprintf 'agent diff\\n' > agent-output.txt\nprintf '{{\"summary\":\"did the work\"}}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n",
-                shell_quote(path_str(capture_path))
-            ),
-            AgentBehavior::Exit3 => {
-                "#!/bin/sh\necho 'fake agent failed' >&2\nexit 3\n".to_string()
-            }
-            AgentBehavior::NoResultFile => "#!/bin/sh\nexit 0\n".to_string(),
-            AgentBehavior::NoDiff => {
-                "#!/bin/sh\nprintf '{\"summary\":\"nothing changed\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
-            }
-            AgentBehavior::Verdict => {
-                "#!/bin/sh\nprintf '{\"verdict\":\"needs_design\",\"summary\":\"cannot proceed\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
-            }
-            AgentBehavior::ReadOnlyVerdict { capture_path } => {
-                read_only_verdict_script(capture_path.as_deref(), false)
-            }
-            AgentBehavior::ReadOnlyBreakdownVerdict => read_only_breakdown_verdict_script(),
-            AgentBehavior::ReadOnlyVerdictWithDiff => read_only_verdict_script(None, true),
-            AgentBehavior::UndeclaredVerdict => {
-                "#!/bin/sh\nprintf '{\"verdict\":\"needs_breakdown\",\"summary\":\"needs splitting\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
-            }
-            AgentBehavior::WritableVerdict => {
-                "#!/bin/sh\nset -eu\nprintf 'discard me\\n' > agent-output.txt\nprintf '{\"verdict\":\"needs_architect\",\"body\":\"blocked\",\"summary\":\"cannot proceed\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
-            }
-            AgentBehavior::ReviewApprove {
-                head_capture_path,
-                capture_path,
-            } => review_approve_script(path_str(head_capture_path), capture_path.as_deref()),
-            AgentBehavior::ReviewChanges => {
-                "#!/bin/sh\nset -eu\ngrep '\"checkout\": \"pull_request_read_only\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\nprintf 'discard me\\n' > agent-output.txt\nprintf '{\"verdict\":\"changes\",\"review_body\":\"please add error handling\",\"summary\":\"needs error handling\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
-            }
-            AgentBehavior::ReviewMissingVerdict => {
-                "#!/bin/sh\nset -eu\nprintf '{\"summary\":\"no opinion\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
-            }
-            AgentBehavior::ReviewUndeclaredVerdict => {
-                "#!/bin/sh\nset -eu\nprintf '{\"verdict\":\"merge_now\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
+            for (role, user, email) in [
+                ("engineer", "Smith Engineer", "smith-engineer@example.test"),
+                ("architect", "Smith Architect", "smith-architect@example.test"),
+                ("reviewer", "Smith Reviewer", "smith-reviewer@example.test"),
+            ] {
+                role_identities.insert(
+                    role.to_string(),
+                    RoleGitIdentity {
+                        user: user.to_string(),
+                        email: email.to_string(),
+                        token: "test-token".to_string(),
+                    },
+                );
             }
         }
-    }
-}
 
-fn read_only_verdict_script(capture_path: Option<&Path>, writes_diff: bool) -> String {
-    let mut script = "#!/bin/sh\nset -eu\n".to_string();
-    if let Some(capture_path) = capture_path {
-        script.push_str(&format!(
-            "cp \"$TEMPER_CODING_WORKSPACE_CONTEXT\" {}\n",
-            shell_quote(path_str(capture_path))
-        ));
+        CodingExecutor::new(
+            CodingExecutorConfig {
+                workspace_root: self.workspace_root.clone(),
+                git_base_url: format!("file://{}/git", path_str(self.temp.path())),
+                role_identities,
+            },
+            Arc::new(runner),
+        )
     }
-    script.push_str(
-        "grep '\"checkout\": \"read_only\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n",
-    );
-    script.push_str("grep '\"ready_code\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n");
-    script.push_str("grep '\"needs_design\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n");
-    if writes_diff {
-        script.push_str("printf 'discard me\\n' > agent-output.txt\n");
-    }
-    script.push_str("printf '{\"verdict\":\"ready_code\",\"body\":\"rewritten\",\"summary\":\"did triage\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n");
-    script
-}
-
-fn read_only_breakdown_verdict_script() -> String {
-    r#"#!/bin/sh
-set -eu
-grep '"checkout": "read_only"' "$TEMPER_CODING_WORKSPACE_CONTEXT" >/dev/null
-grep '"needs_breakdown"' "$TEMPER_CODING_WORKSPACE_CONTEXT" >/dev/null
-cat > "$TEMPER_CODING_WORKSPACE_RESULT" <<'JSON'
-{"verdict":"needs_breakdown","summary":"planned breakdown","children":[{"slug":"api-schema","title":"Define the API schema","body":"Write the shared API schema.","labels":["code","ready"]},{"slug":"web-client","title":"Implement the web client","body":"Build the web client against the API schema.","depends_on":["api-schema"],"target_repo":"acme/other"}]}
-JSON
-"#
-    .to_string()
-}
-
-fn review_approve_script(head_capture_path: &str, capture_path: Option<&Path>) -> String {
-    let mut script = "#!/bin/sh\nset -eu\n".to_string();
-    if let Some(capture_path) = capture_path {
-        script.push_str(&format!(
-            "cp \"$TEMPER_CODING_WORKSPACE_CONTEXT\" {}\n",
-            shell_quote(path_str(capture_path))
-        ));
-    }
-    script.push_str(
-        "grep '\"checkout\": \"pull_request_read_only\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n",
-    );
-    script.push_str("grep '\"approve\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n");
-    script.push_str("grep '\"changes\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n");
-    script.push_str("grep '\"escalate\"' \"$TEMPER_CODING_WORKSPACE_CONTEXT\" >/dev/null\n");
-    script.push_str(&format!(
-        "git rev-parse HEAD > {}\n",
-        shell_quote(head_capture_path)
-    ));
-    script.push_str(
-        "printf '{\"verdict\":\"approve\",\"summary\":\"looks good\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n",
-    );
-    script
 }
 
 fn assign(branch_hint: &str, correlation_key: &str) -> Assign {
@@ -1333,10 +1253,6 @@ fn path_str(path: &Path) -> &str {
     path.as_os_str()
         .to_str()
         .unwrap_or_else(|| panic!("non-utf8 path: {:?}", path.as_os_str()))
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn assert_is_sha(value: &str) {

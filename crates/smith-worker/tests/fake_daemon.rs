@@ -198,18 +198,32 @@ fn worker_config() -> WorkerConfig {
     }
 }
 
+/// Run the worker on its own single-threaded asupersync runtime in a dedicated
+/// thread. The worker now requires an asupersync runtime to host its sans-IO
+/// drive loop (and, in production, in-process agent jobs), so it cannot run as a
+/// tokio task. The fake daemon stays on tokio; the two communicate over real
+/// HTTP, exactly as in production. The thread is detached — the worker loops
+/// forever, and the test returns once the daemon has observed the result.
+fn spawn_worker_thread<E>(config: WorkerConfig, executor: std::sync::Arc<E>)
+where
+    E: smith_worker::JobExecutor + Send + Sync + 'static,
+{
+    std::thread::spawn(move || {
+        let _ = smith_io_engine::block_on(async move { run_worker(config, executor).await });
+    });
+}
+
 #[tokio::test]
 async fn success_stub_registers_polls_runs_and_posts_result() {
     let mut config = worker_config();
     let (daemon_url, observed) = spawn_fake_daemon(&config).await;
     config.daemon_url = daemon_url;
 
-    let worker = tokio::spawn(run_worker(config.clone(), StubExecutor::success().into()));
+    spawn_worker_thread(config.clone(), StubExecutor::success().into());
     let observed = tokio::time::timeout(Duration::from_secs(5), observed)
         .await
         .expect("fake daemon observes success result")
         .expect("fake daemon sends observed run");
-    worker.abort();
 
     assert_eq!(observed.registers.len(), 1);
     assert_eq!(observed.registers[0].worker_id, config.worker_id);
@@ -230,15 +244,14 @@ async fn failure_stub_registers_polls_runs_and_posts_failure_result() {
     let (daemon_url, observed) = spawn_fake_daemon(&config).await;
     config.daemon_url = daemon_url;
 
-    let worker = tokio::spawn(run_worker(
+    spawn_worker_thread(
         config,
         StubExecutor::failure(FailureClass::Permanent, "configured failure").into(),
-    ));
+    );
     let observed = tokio::time::timeout(Duration::from_secs(5), observed)
         .await
         .expect("fake daemon observes failure result")
         .expect("fake daemon sends observed run");
-    worker.abort();
 
     assert_eq!(observed.result.job_id, "job-123");
     assert_eq!(observed.result.status, ResultStatus::Failure);

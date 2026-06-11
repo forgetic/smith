@@ -2,7 +2,9 @@
 # Smith consolidated worker deployment installer (idempotent).
 #
 # Installs the Smith worker tier for the daemon/worker topology:
-#   - builds + installs the smith-worker and smith-coding-agent binaries,
+#   - builds + installs the smith-worker binary (the pi-SDK coding agent now
+#     runs in-process inside smith-worker; there is no separate
+#     smith-coding-agent binary),
 #   - installs the smith-worker-launcher ExecStart shim,
 #   - copies the smith-worker systemd user unit template,
 #   - copies config templates into ~/.config/smith/ WITHOUT clobbering files you
@@ -46,24 +48,22 @@ log() { printf '[install] %s\n' "$*"; }
 die() { printf '[install] error: %s\n' "$*" >&2; exit 1; }
 
 # --- Binaries -----------------------------------------------------------------
-# Build and install only the Smith binaries the worker tier invokes:
-#   - smith-worker (the daemon long-poll worker)
-#   - smith-coding-agent (the coding executor's agent command)
+# Build and install the one Smith binary the worker tier invokes:
+#   - smith-worker (the daemon long-poll worker; runs the pi-SDK coding agent
+#     in-process via `--agent-command smith`)
 # Installation is a copy into ~/.local/bin so the unit has stable absolute paths
 # independent of this checkout's target dir.
 build_smith_binaries() {
     if [ "${SMITH_SKIP_BUILD:-0}" != "1" ]; then
-        log "building Smith worker binaries in $REPO_ROOT ..."
+        log "building Smith worker binary in $REPO_ROOT ..."
         ( cd "$REPO_ROOT" \
-            && cargo build -j2 -p smith-worker --bin smith-worker \
-            && cargo build -j2 -p smith-temper-agent-cli --bin smith-coding-agent ) \
+            && cargo build -j2 -p smith-worker --bin smith-worker ) \
             || die 'Smith cargo build failed'
     else
         log 'skipping cargo build because SMITH_SKIP_BUILD=1'
     fi
 
     install_binary "$REPO_ROOT/target/$CARGO_PROFILE_DIR/smith-worker"
-    install_binary "$REPO_ROOT/target/$CARGO_PROFILE_DIR/smith-coding-agent"
 }
 
 install_binary() {

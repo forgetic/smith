@@ -21,21 +21,106 @@ pub struct WorkerConfig {
     pub executor: ExecutorSelection,
 }
 
+/// Default backoff before re-polling after the daemon returned no work, the
+/// long-poll timed out, a transport error occurred, or the worker was at
+/// capacity. Small so a freed slot is picked up promptly, but non-zero so an
+/// idle or erroring worker does not hot-loop the daemon. (The steady-state pace
+/// when work is flowing is set by the long-poll `max_wait_ms`, not this.)
+pub const DEFAULT_POLL_BACKOFF: Duration = Duration::from_millis(500);
+
+/// Identity + cadence knobs the pure [`WorkerMachine`](crate::worker_machine::WorkerMachine)
+/// needs: a projection of [`WorkerConfig`] without the daemon URL, executor
+/// selection, or any transport.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkerParams {
+    pub worker_id: String,
+    pub capabilities: Vec<CapabilitySpec>,
+    pub max_concurrent_jobs: u32,
+    pub poll_wait: Duration,
+    pub heartbeat_interval: Duration,
+    pub poll_backoff: Duration,
+}
+
+impl WorkerParams {
+    /// Projects a [`WorkerConfig`] into the machine's parameters, applying the
+    /// default poll backoff.
+    pub fn from_config(config: &WorkerConfig) -> Self {
+        Self {
+            worker_id: config.worker_id.clone(),
+            capabilities: config.capabilities.clone(),
+            max_concurrent_jobs: config.max_concurrent_jobs,
+            poll_wait: config.poll_wait,
+            heartbeat_interval: config.heartbeat_interval,
+            poll_backoff: DEFAULT_POLL_BACKOFF,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExecutorSelection {
     Stub,
     Coding(CodingSurface),
 }
 
+/// The coding-executor surface: the workspace/git wiring plus how one agent
+/// turn is produced ([`AgentSurface`]).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CodingSurface {
     pub workspace_root: PathBuf,
     pub git_base_url: String,
-    pub agent_command: Vec<String>,
+    pub agent: AgentSurface,
 }
+
+/// How the coding executor produces an agent turn.
+///
+/// `--agent-command` selects the program: the literal `smith` (or the legacy
+/// `smith-coding-agent`) runs the `pi`-SDK loop **in-process**; any other value
+/// is an external program spawned over the context/result file protocol (the
+/// examples' deterministic `greeting` stand-in, or an operator-provided coder).
+/// Trailing `--agent-arg` values are the agent's flags: for the in-process
+/// Smith agent they are parsed here (`--auth` / `--auth-file` / `--codex-model`
+/// / `--max-iterations` / `--config-dir`); for an external command they are
+/// passed through verbatim.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AgentSurface {
+    /// The in-process Smith `pi`-SDK coding agent.
+    Smith(SmithAgentSurface),
+    /// An external program spawned per job (program first, then args).
+    ExternalCommand(Vec<String>),
+}
+
+/// Parsed configuration for the in-process Smith coding agent — the flags the
+/// former `smith-coding-agent` binary parsed for itself.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SmithAgentSurface {
+    pub auth: AgentAuthChoice,
+    pub codex_model: Option<String>,
+    pub auth_file: Option<PathBuf>,
+    pub config_dir: Option<PathBuf>,
+    pub max_iterations: Option<usize>,
+}
+
+/// Which credential the in-process Smith agent authenticates with. Mirrors
+/// `smith_temper_agent::AuthChoice` but is parsed in the worker so the config
+/// crate stays free of the agent dependency; the binary maps it across.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AgentAuthChoice {
+    DeepSeek,
+    ChatGptOAuth,
+    AnthropicOAuth,
+}
+
+/// The program name that selects the in-process Smith agent.
+const SMITH_AGENT_PROGRAM: &str = "smith";
+/// Legacy program name (the former subprocess binary) — also selects in-process.
+const SMITH_AGENT_LEGACY_PROGRAM: &str = "smith-coding-agent";
 
 pub const USAGE: &str = "smith-worker --daemon-url <url> --worker-id <id> --capability <owner/name>:<role> [--capability ...] [--max-concurrent <n>] [--poll-wait-ms <n>] [--heartbeat-interval-ms <n>] [--executor <stub|coding>] [--workspace-root <path>] [--git-base-url <url>] [--agent-command <program>] [--agent-arg <arg> ...]";
 
+// `Run(WorkerConfig)` is far larger than `Help`, but `ParseOutcome` is produced
+// exactly once at process start and immediately destructured — the size
+// difference never matters, and boxing would only obscure the config flow.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ParseOutcome {
     Help,
@@ -212,7 +297,7 @@ fn executor_selection(
     workspace_root: Option<PathBuf>,
     git_base_url: Option<String>,
     agent_program: Option<String>,
-    mut agent_args: Vec<String>,
+    agent_args: Vec<String>,
 ) -> Result<ExecutorSelection, String> {
     match executor {
         ExecutorKind::Stub => {
@@ -237,16 +322,104 @@ fn executor_selection(
                 .ok_or_else(|| "--git-base-url is required when --executor coding".to_string())?;
             let agent_program = agent_program
                 .ok_or_else(|| "--agent-command is required when --executor coding".to_string())?;
-            let mut agent_command = Vec::with_capacity(agent_args.len() + 1);
-            agent_command.push(agent_program);
-            agent_command.append(&mut agent_args);
+            let agent = agent_surface(&agent_program, agent_args)?;
 
             Ok(ExecutorSelection::Coding(CodingSurface {
                 workspace_root,
                 git_base_url,
-                agent_command,
+                agent,
             }))
         }
+    }
+}
+
+/// Builds the [`AgentSurface`] for the `--agent-command` program and its
+/// trailing `--agent-arg` values. The Smith program names parse the agent flags
+/// in-process; any other program is spawned as an external command.
+fn agent_surface(program: &str, args: Vec<String>) -> Result<AgentSurface, String> {
+    if program == SMITH_AGENT_PROGRAM || program == SMITH_AGENT_LEGACY_PROGRAM {
+        Ok(AgentSurface::Smith(parse_smith_agent_surface(args)?))
+    } else {
+        let mut command = Vec::with_capacity(args.len() + 1);
+        command.push(program.to_string());
+        command.extend(args);
+        Ok(AgentSurface::ExternalCommand(command))
+    }
+}
+
+/// Parses the in-process Smith agent flags from the `--agent-arg` values — the
+/// same flags the former `smith-coding-agent` binary accepted.
+fn parse_smith_agent_surface(args: Vec<String>) -> Result<SmithAgentSurface, String> {
+    let mut auth = AgentAuthChoice::ChatGptOAuth;
+    let mut codex_model = None;
+    let mut auth_file = None;
+    let mut config_dir = None;
+    let mut max_iterations = None;
+
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--auth" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "--auth requires a value".to_string())?;
+                auth = parse_agent_auth(&value)?;
+            }
+            "--codex-model" => {
+                codex_model = Some(
+                    iter.next()
+                        .ok_or_else(|| "--codex-model requires a value".to_string())?,
+                );
+            }
+            "--auth-file" => {
+                auth_file = Some(PathBuf::from(
+                    iter.next()
+                        .ok_or_else(|| "--auth-file requires a value".to_string())?,
+                ));
+            }
+            "--config-dir" => {
+                config_dir = Some(PathBuf::from(
+                    iter.next()
+                        .ok_or_else(|| "--config-dir requires a value".to_string())?,
+                ));
+            }
+            "--max-iterations" => {
+                let value = iter
+                    .next()
+                    .ok_or_else(|| "--max-iterations requires a value".to_string())?;
+                let parsed: usize = value
+                    .parse()
+                    .map_err(|error| format!("--max-iterations must be a positive integer: {error}"))?;
+                if parsed == 0 {
+                    return Err("--max-iterations must be greater than zero".to_string());
+                }
+                max_iterations = Some(parsed);
+            }
+            other => {
+                return Err(format!(
+                    "unknown smith agent arg `{other}`; expected --auth, --codex-model, --auth-file, --config-dir, or --max-iterations"
+                ));
+            }
+        }
+    }
+
+    Ok(SmithAgentSurface {
+        auth,
+        codex_model,
+        auth_file,
+        config_dir,
+        max_iterations,
+    })
+}
+
+fn parse_agent_auth(value: &str) -> Result<AgentAuthChoice, String> {
+    match value {
+        "deepseek" => Ok(AgentAuthChoice::DeepSeek),
+        "chatgpt-oauth" => Ok(AgentAuthChoice::ChatGptOAuth),
+        "anthropic-oauth" => Ok(AgentAuthChoice::AnthropicOAuth),
+        other => Err(format!(
+            "unsupported --auth `{other}`; expected deepseek, chatgpt-oauth, or anthropic-oauth"
+        )),
     }
 }
 
@@ -404,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_coding_executor_surface_with_agent_args_in_order() {
+    fn parses_smith_agent_surface_from_agent_args() {
         let config = parse_ok(&[
             "--daemon-url",
             "http://daemon.example",
@@ -423,7 +596,15 @@ mod tests {
             "--agent-arg",
             "--auth",
             "--agent-arg",
-            "chatgpt-oauth",
+            "anthropic-oauth",
+            "--agent-arg",
+            "--auth-file",
+            "--agent-arg",
+            "/tmp/auth.json",
+            "--agent-arg",
+            "--max-iterations",
+            "--agent-arg",
+            "42",
         ]);
 
         assert_eq!(
@@ -431,17 +612,19 @@ mod tests {
             ExecutorSelection::Coding(CodingSurface {
                 workspace_root: PathBuf::from("/var/lib/smith/workspaces"),
                 git_base_url: "https://forgejo.example".to_string(),
-                agent_command: vec![
-                    "smith-coding-agent".to_string(),
-                    "--auth".to_string(),
-                    "chatgpt-oauth".to_string(),
-                ],
+                agent: AgentSurface::Smith(SmithAgentSurface {
+                    auth: AgentAuthChoice::AnthropicOAuth,
+                    codex_model: None,
+                    auth_file: Some(PathBuf::from("/tmp/auth.json")),
+                    config_dir: None,
+                    max_iterations: Some(42),
+                }),
             })
         );
     }
 
     #[test]
-    fn agent_arg_accepts_leading_dash_values() {
+    fn smith_agent_defaults_to_chatgpt_oauth_when_no_args() {
         let config = parse_ok(&[
             "--daemon-url",
             "http://daemon.example",
@@ -456,7 +639,41 @@ mod tests {
             "--git-base-url",
             "https://forgejo.example",
             "--agent-command",
-            "smith-coding-agent",
+            "smith",
+        ]);
+
+        let ExecutorSelection::Coding(surface) = config.executor else {
+            panic!("expected coding executor");
+        };
+        assert_eq!(
+            surface.agent,
+            AgentSurface::Smith(SmithAgentSurface {
+                auth: AgentAuthChoice::ChatGptOAuth,
+                codex_model: None,
+                auth_file: None,
+                config_dir: None,
+                max_iterations: None,
+            })
+        );
+    }
+
+    #[test]
+    fn non_smith_agent_command_is_external_passthrough() {
+        let config = parse_ok(&[
+            "--daemon-url",
+            "http://daemon.example",
+            "--worker-id",
+            "worker-1",
+            "--capability",
+            "ai/temper:coder",
+            "--executor",
+            "coding",
+            "--workspace-root",
+            "/workspaces",
+            "--git-base-url",
+            "https://forgejo.example",
+            "--agent-command",
+            "/opt/greeting-coder.sh",
             "--agent-arg",
             "--verbose",
         ]);
@@ -465,8 +682,37 @@ mod tests {
             panic!("expected coding executor");
         };
         assert_eq!(
-            surface.agent_command,
-            vec!["smith-coding-agent".to_string(), "--verbose".to_string()]
+            surface.agent,
+            AgentSurface::ExternalCommand(vec![
+                "/opt/greeting-coder.sh".to_string(),
+                "--verbose".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn smith_agent_rejects_unknown_arg() {
+        let error = parse_err(&[
+            "--daemon-url",
+            "http://daemon.example",
+            "--worker-id",
+            "worker-1",
+            "--capability",
+            "ai/temper:coder",
+            "--executor",
+            "coding",
+            "--workspace-root",
+            "/workspaces",
+            "--git-base-url",
+            "https://forgejo.example",
+            "--agent-command",
+            "smith",
+            "--agent-arg",
+            "--verbose",
+        ]);
+        assert!(
+            error.contains("unknown smith agent arg `--verbose`"),
+            "unexpected error: {error}"
         );
     }
 

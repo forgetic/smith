@@ -1,18 +1,27 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::Deserialize;
+use smith_temper_agent::{
+    WorkspaceContext, WorkspaceGuidance, WorkspaceRepository, WorkspaceResult, WorkspaceWorkItem,
+};
 use temper_worker_protocol::{
     Assign, Branch, FailureClass, JobArtifactSnapshot, JobChild, JobRepository,
 };
-use tokio::process::Command;
 
+use crate::agent_runner::{AgentRunError, AgentRunner};
 use crate::executor::{JobExecutor, JobOutcome};
 use crate::workspace::{
     RoleGitIdentity, Workspace, WorkspaceConfig, WorkspaceError, forgejo_remote_url,
 };
 
 /// Configuration for the real coding-job executor.
+///
+/// The agent turn itself is produced by an [`AgentRunner`] passed alongside this
+/// config (in-process `pi`-SDK by default; an external command or a test fake in
+/// other contexts), so this struct only carries the workspace/git/identity
+/// surface the executor owns.
 #[derive(Clone, Debug)]
 pub struct CodingExecutorConfig {
     /// Root for persistent per-(repo, role) workspaces (3b-i layout).
@@ -20,32 +29,41 @@ pub struct CodingExecutorConfig {
     /// Forge git base URL, e.g. `http://localhost:3000` (joined with the
     /// repo slug via `forgejo_remote_url`; `file://` URLs work for tests).
     pub git_base_url: String,
-    /// Coding-agent command: program followed by fixed arguments, e.g.
-    /// `["smith-coding-agent", "--auth", "chatgpt-oauth"]`.
-    pub agent_command: Vec<String>,
     /// Role id -> git identity (user, email, push token).
     pub role_identities: BTreeMap<String, RoleGitIdentity>,
 }
 
-#[derive(Clone, Debug)]
-pub struct CodingExecutor {
+/// Runs coding/triage/review jobs by preparing a checkout, driving one agent
+/// turn through its [`AgentRunner`], and mapping the result to a [`JobOutcome`]
+/// (commit/push on the writable head path, verdict routing otherwise).
+#[derive(Clone)]
+pub struct CodingExecutor<R: AgentRunner> {
     config: CodingExecutorConfig,
+    runner: Arc<R>,
 }
 
-impl CodingExecutor {
-    pub fn new(config: CodingExecutorConfig) -> Self {
-        Self { config }
+impl<R: AgentRunner> CodingExecutor<R> {
+    pub fn new(config: CodingExecutorConfig, runner: Arc<R>) -> Self {
+        Self {
+            config,
+            runner,
+        }
     }
 }
 
-impl JobExecutor for CodingExecutor {
+impl<R: AgentRunner + 'static> JobExecutor for CodingExecutor<R> {
     fn execute(&self, assign: Assign) -> impl std::future::Future<Output = JobOutcome> + Send {
         let config = self.config.clone();
-        async move { execute(config, assign).await }
+        let runner = Arc::clone(&self.runner);
+        async move { execute(config, runner, assign).await }
     }
 }
 
-async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
+async fn execute<R: AgentRunner>(
+    config: CodingExecutorConfig,
+    runner: Arc<R>,
+    assign: Assign,
+) -> JobOutcome {
     let artifact_item = assign.artifact.item.clone();
     let context = match serde_json::from_value::<WireJobContext>(assign.job_payload) {
         Ok(context) => context,
@@ -133,18 +151,7 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
         return workspace_failure("prepare workspace", error, &token);
     }
 
-    let temp = match tempfile::tempdir() {
-        Ok(temp) => temp,
-        Err(error) => {
-            return failure(
-                FailureClass::Transient,
-                format!("create coding-agent temp dir: {error}"),
-            );
-        }
-    };
-    let context_path = temp.path().join("context.json");
-    let result_path = temp.path().join("result.json");
-    let workspace_context = match workspace_context_payload(
+    let workspace_context = build_workspace_context(
         &repo,
         &role,
         &queue,
@@ -157,85 +164,14 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
         assign.artifact.kind.as_str(),
         &checkout,
         &allowed_verdicts,
-    ) {
-        Ok(payload) => payload,
-        Err(error) => {
-            return failure(
-                FailureClass::Transient,
-                format!("serialize coding-agent context: {error}"),
-            );
-        }
-    };
-    let context_bytes = match serde_json::to_vec_pretty(&workspace_context) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            return failure(
-                FailureClass::Transient,
-                format!("serialize coding-agent context: {error}"),
-            );
-        }
-    };
-    if let Err(error) = std::fs::write(&context_path, context_bytes) {
-        return failure(
-            FailureClass::Transient,
-            format!("write coding-agent context file: {error}"),
-        );
-    }
+    );
 
-    let Some((program, args)) = config.agent_command.split_first() else {
-        return failure(
-            FailureClass::Permanent,
-            "worker coding-agent command is empty".to_string(),
-        );
-    };
-    let output = match Command::new(program)
-        .args(args)
-        .current_dir(workspace.path())
-        .env("TEMPER_CODING_WORKSPACE_CONTEXT", &context_path)
-        .env("TEMPER_CODING_WORKSPACE_RESULT", &result_path)
-        .output()
-        .await
-    {
-        Ok(output) => output,
-        Err(error) => {
-            return failure(
-                FailureClass::Transient,
-                redact_secret(
-                    format!("spawn coding-agent command `{program}`: {error}"),
-                    &token,
-                ),
-            );
-        }
-    };
-    if !output.status.success() {
-        let status = output
-            .status
-            .code()
-            .map_or_else(|| output.status.to_string(), |code| code.to_string());
-        let stderr = stderr_tail_redacted(&output.stderr, 2_000, &token);
-        return failure(
-            FailureClass::Transient,
-            format!("coding-agent command exited with status {status}; stderr tail: {stderr}"),
-        );
-    }
-
-    let result_bytes = match std::fs::read(&result_path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            return failure(
-                FailureClass::Permanent,
-                format!("coding-agent did not write a valid result file: {error}"),
-            );
-        }
-    };
-    let result = match serde_json::from_slice::<AgentResult>(&result_bytes) {
+    // Run one agent turn in-process (the prepared checkout is the cwd). The
+    // runner owns the LLM/subprocess/test mechanism; the executor owns the
+    // workspace lifecycle around it.
+    let result = match runner.run(&workspace_context, workspace.path()).await {
         Ok(result) => result,
-        Err(error) => {
-            return failure(
-                FailureClass::Permanent,
-                format!("coding-agent result file is not valid JSON: {error}"),
-            );
-        }
+        Err(AgentRunError { class, message }) => return failure(class, redact_secret(message, &token)),
     };
 
     match mode {
@@ -309,17 +245,20 @@ async fn execute(config: CodingExecutorConfig, assign: Assign) -> JobOutcome {
 
 async fn verdict_only_outcome(
     workspace: &Workspace,
-    result: AgentResult,
+    result: WorkspaceResult,
     allowed_verdicts: &[String],
     correlation_key: &str,
     token: &str,
 ) -> JobOutcome {
-    let AgentResult {
+    let WorkspaceResult {
         verdict,
         summary,
         body,
         review_body,
         children,
+        // `labels` is a head-path PR-label override; read-only verdict routing
+        // does not consume it.
+        labels: _labels,
     } = result;
     let Some(verdict) = verdict else {
         return failure(FailureClass::Permanent, "read-only job returned no verdict");
@@ -394,8 +333,16 @@ fn failure(class: FailureClass, message: impl Into<String>) -> JobOutcome {
     }
 }
 
+/// Assembles the typed [`WorkspaceContext`] the agent turn receives.
+///
+/// This is the in-process equivalent of the JSON document the worker used to
+/// write to `$TEMPER_CODING_WORKSPACE_CONTEXT` for the subprocess: identical
+/// field shapes (the agent crate owns the struct), but built and handed over
+/// directly instead of round-tripping through a temp file. `work_item.context`
+/// stays a pretty-printed JSON *string* of the artifact, surfaced to the model
+/// verbatim, exactly as before.
 #[allow(clippy::too_many_arguments)]
-fn workspace_context_payload(
+fn build_workspace_context(
     repo: &str,
     role: &str,
     queue: &str,
@@ -408,7 +355,7 @@ fn workspace_context_payload(
     artifact_wire_kind: &str,
     checkout: &str,
     allowed_verdicts: &[String],
-) -> Result<serde_json::Value, serde_json::Error> {
+) -> WorkspaceContext {
     let (artifact_type, target_kind) = match artifact_wire_kind {
         "pull_request" => ("pull_request", "PullRequest"),
         _ => ("issue", "Issue"),
@@ -427,52 +374,32 @@ fn workspace_context_payload(
             "state": artifact.state.as_str(),
         }
     });
-    let work_item_context = serde_json::to_string_pretty(&work_item_context)?;
+    // `to_string_pretty` on an in-memory `Value` is infallible; fall back to the
+    // compact form rather than failing the job on the impossible error path.
+    let work_item_context = serde_json::to_string_pretty(&work_item_context)
+        .unwrap_or_else(|_| work_item_context.to_string());
 
-    Ok(serde_json::json!({
-        "repository": {
-            "id": repo,
-            "owner": repository.owner.as_str(),
-            "name": repository.name.as_str(),
-            "default_branch": repository.default_branch.as_str(),
+    WorkspaceContext {
+        repository: WorkspaceRepository {
+            id: repo.to_string(),
+            owner: repository.owner.clone(),
+            name: repository.name.clone(),
+            default_branch: repository.default_branch.clone(),
         },
-        "work_item": {
-            "role": role,
-            "queue": queue,
-            "kind": artifact_kind,
-            "target": format!("{target_kind} {{ number: ItemNumber({}) }}", artifact.number),
-            "context": work_item_context,
+        work_item: WorkspaceWorkItem {
+            role: role.to_string(),
+            queue: queue.to_string(),
+            kind: artifact_kind.to_string(),
+            target: format!("{target_kind} {{ number: ItemNumber({}) }}", artifact.number),
+            context: work_item_context,
         },
-        "base_branch": base_branch,
-        "branch_hint": branch_hint,
-        "correlation_key": correlation_key,
-        "checkout": checkout,
-        "allowed_verdicts": allowed_verdicts,
-        "guidance": {
-            "role_guidance": null,
-            "tool_guidance": null,
-            "tool_constraints": [],
-        }
-    }))
-}
-
-fn stderr_tail_redacted(stderr: &[u8], max_len: usize, secret: &str) -> String {
-    stderr_tail(
-        redact_secret(String::from_utf8_lossy(stderr).into_owned(), secret),
-        max_len,
-    )
-}
-
-fn stderr_tail(stderr: String, max_len: usize) -> String {
-    if stderr.len() <= max_len {
-        return stderr;
+        base_branch: base_branch.to_string(),
+        branch_hint: branch_hint.to_string(),
+        correlation_key: correlation_key.to_string(),
+        checkout: Some(checkout.to_string()),
+        allowed_verdicts: allowed_verdicts.to_vec(),
+        guidance: WorkspaceGuidance::default(),
     }
-
-    let mut start = stderr.len() - max_len;
-    while !stderr.is_char_boundary(start) {
-        start += 1;
-    }
-    stderr[start..].to_string()
 }
 
 fn redact_secret(text: String, secret: &str) -> String {
@@ -534,31 +461,4 @@ fn allowed_verdicts_display(allowed_verdicts: &[String]) -> String {
     } else {
         allowed_verdicts.join(", ")
     }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AgentResult {
-    #[serde(default)]
-    pub verdict: Option<String>,
-    #[serde(default)]
-    pub summary: Option<String>,
-    #[serde(default)]
-    pub body: Option<String>,
-    #[serde(default)]
-    pub review_body: Option<String>,
-    #[serde(default)]
-    pub children: Vec<AgentResultChild>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AgentResultChild {
-    pub slug: String,
-    pub title: String,
-    pub body: String,
-    #[serde(default)]
-    pub labels: Vec<String>,
-    #[serde(default)]
-    pub depends_on: Vec<String>,
-    #[serde(default)]
-    pub target_repo: Option<String>,
 }
