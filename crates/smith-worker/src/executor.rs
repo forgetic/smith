@@ -1,5 +1,6 @@
 use temper_worker_protocol::{
-    Assign, Branch, Failure, FailureClass, JobResult, ResultStatus, WORKER_PROTOCOL_VERSION,
+    Assign, Branch, Failure, FailureClass, JobChild, JobResult, ResultStatus,
+    WORKER_PROTOCOL_VERSION,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -12,6 +13,7 @@ pub enum JobOutcome {
         verdict: String,
         body: Option<String>,
         summary: Option<String>,
+        children: Vec<JobChild>,
     },
     Failure {
         class: FailureClass,
@@ -90,6 +92,7 @@ pub fn job_result(worker_id: &str, job_id: &str, outcome: JobOutcome) -> JobResu
             verdict,
             body,
             summary,
+            children,
         } => job_result_from_value(serde_json::json!({
             "protocol_version": WORKER_PROTOCOL_VERSION,
             "worker_id": worker_id,
@@ -101,6 +104,7 @@ pub fn job_result(worker_id: &str, job_id: &str, outcome: JobOutcome) -> JobResu
             "details": null,
             "verdict": verdict,
             "body": body,
+            "children": children,
         })),
         JobOutcome::Failure { class, message } => job_result_from_value(serde_json::json!({
             "protocol_version": WORKER_PROTOCOL_VERSION,
@@ -174,6 +178,7 @@ mod tests {
                 verdict: "ready_code".to_string(),
                 body: Some("rewritten issue body".to_string()),
                 summary: Some("triaged".to_string()),
+                children: Vec::new(),
             },
         );
 
@@ -184,16 +189,72 @@ mod tests {
         assert_eq!(result.branch, None);
         assert_eq!(result.failure, None);
         assert_eq!(result.summary.as_deref(), Some("triaged"));
+        assert!(result.children.is_empty());
 
-        // The current worker-protocol crate carries top-level `verdict`/`body`.
-        // Older path checkouts ignore unknown fields during deserialization; keep
-        // this compatibility assertion conditional so the smith tree can still be
-        // checked against both sides of the lockstep protocol change.
         let serialized = serde_json::to_value(&result).expect("JobResult serializes");
-        if serialized.get("verdict").is_some() {
-            assert_eq!(serialized["verdict"], "ready_code");
-            assert_eq!(serialized["body"], "rewritten issue body");
-        }
+        assert_eq!(serialized["verdict"], "ready_code");
+        assert_eq!(serialized["body"], "rewritten issue body");
+        assert!(
+            serialized.get("children").is_none(),
+            "empty children must stay wire-compatible: {serialized}"
+        );
+    }
+
+    #[test]
+    fn verdict_outcome_maps_children_to_success_result() {
+        let children = vec![
+            JobChild {
+                slug: "api-schema".to_string(),
+                title: "Define the API schema".to_string(),
+                body: "Write the shared API schema.".to_string(),
+                labels: vec!["code".to_string(), "ready".to_string()],
+                depends_on: Vec::new(),
+                target_repo: Some("acme/api".to_string()),
+            },
+            JobChild {
+                slug: "web-client".to_string(),
+                title: "Implement the web client".to_string(),
+                body: "Build the web client against the API schema.".to_string(),
+                labels: vec!["code".to_string()],
+                depends_on: vec!["api-schema".to_string()],
+                target_repo: None,
+            },
+        ];
+
+        let result = job_result(
+            "worker-3",
+            "job-789",
+            JobOutcome::Verdict {
+                verdict: "needs_breakdown".to_string(),
+                body: None,
+                summary: Some("planned breakdown".to_string()),
+                children: children.clone(),
+            },
+        );
+
+        assert_eq!(result.status, ResultStatus::Success);
+        assert_eq!(result.children, children);
+
+        let serialized = serde_json::to_value(&result).expect("JobResult serializes");
+        assert_eq!(serialized["verdict"], "needs_breakdown");
+        assert_eq!(serialized["children"][0]["slug"], "api-schema");
+        assert_eq!(serialized["children"][0]["title"], "Define the API schema");
+        assert_eq!(
+            serialized["children"][0]["body"],
+            "Write the shared API schema."
+        );
+        assert_eq!(
+            serialized["children"][0]["labels"],
+            json!(["code", "ready"])
+        );
+        assert_eq!(serialized["children"][0]["target_repo"], "acme/api");
+        assert_eq!(serialized["children"][1]["slug"], "web-client");
+        assert_eq!(
+            serialized["children"][1]["depends_on"],
+            json!(["api-schema"])
+        );
+        assert_eq!(serialized["children"][1]["labels"], json!(["code"]));
+        assert!(serialized["children"][1].get("target_repo").is_none());
     }
 
     #[tokio::test]

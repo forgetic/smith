@@ -6,11 +6,11 @@ use std::process::Command;
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use smith_temper_agent::WorkspaceContext;
+use smith_temper_agent::{WorkspaceContext, WorkspaceResult, WorkspaceResultChild};
 use smith_worker::{
     CodingExecutor, CodingExecutorConfig, JobExecutor, JobOutcome, RoleGitIdentity,
 };
-use temper_worker_protocol::{Artifact, Assign, FailureClass, WORKER_PROTOCOL_VERSION};
+use temper_worker_protocol::{Artifact, Assign, FailureClass, JobChild, WORKER_PROTOCOL_VERSION};
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -412,7 +412,7 @@ async fn read_only_job_returns_verdict_and_body() {
     let agent = fixture.agent(AgentBehavior::ReadOnlyVerdict { capture_path: None });
     let executor = fixture.executor(&agent, true);
 
-    let (verdict, body, summary) = expect_verdict(
+    let (verdict, body, summary, children) = expect_verdict(
         executor
             .execute(assign_with_context(
                 "triage-7",
@@ -424,6 +424,7 @@ async fn read_only_job_returns_verdict_and_body() {
     assert_eq!(verdict, "ready_code");
     assert_eq!(body.as_deref(), Some("rewritten"));
     assert_eq!(summary.as_deref(), Some("did triage"));
+    assert!(children.is_empty());
     assert_no_origin_branch(&fixture, "agent/triage-7");
 }
 
@@ -433,7 +434,7 @@ async fn read_only_job_with_diff_still_returns_verdict_without_push() {
     let agent = fixture.agent(AgentBehavior::ReadOnlyVerdictWithDiff);
     let executor = fixture.executor(&agent, true);
 
-    let (verdict, body, summary) = expect_verdict(
+    let (verdict, body, summary, children) = expect_verdict(
         executor
             .execute(assign_with_context(
                 "triage-with-diff-7",
@@ -445,8 +446,109 @@ async fn read_only_job_with_diff_still_returns_verdict_without_push() {
     assert_eq!(verdict, "ready_code");
     assert_eq!(body.as_deref(), Some("rewritten"));
     assert_eq!(summary.as_deref(), Some("did triage"));
+    assert!(children.is_empty());
     assert_no_origin_branch(&fixture, "agent/triage-with-diff-7");
     assert_workspace_clean(&fixture, "architect");
+}
+
+#[tokio::test]
+async fn read_only_breakdown_verdict_passes_children_through() {
+    let fixture = Fixture::new();
+    let agent = fixture.agent(AgentBehavior::ReadOnlyBreakdownVerdict);
+    let executor = fixture.executor(&agent, true);
+    let mut context = read_only_job_context("agent/breakdown-7", "breakdown-7");
+    context.allowed_verdicts = vec!["needs_breakdown".to_string()];
+
+    let (verdict, body, summary, children) = expect_verdict(
+        executor
+            .execute(assign_with_context("breakdown-7", context))
+            .await,
+    );
+
+    assert_eq!(verdict, "needs_breakdown");
+    assert_eq!(body, None);
+    assert_eq!(summary.as_deref(), Some("planned breakdown"));
+    assert_eq!(
+        children,
+        vec![
+            JobChild {
+                slug: "api-schema".to_string(),
+                title: "Define the API schema".to_string(),
+                body: "Write the shared API schema.".to_string(),
+                labels: vec!["code".to_string(), "ready".to_string()],
+                depends_on: Vec::new(),
+                target_repo: None,
+            },
+            JobChild {
+                slug: "web-client".to_string(),
+                title: "Implement the web client".to_string(),
+                body: "Build the web client against the API schema.".to_string(),
+                labels: Vec::new(),
+                depends_on: vec!["api-schema".to_string()],
+                target_repo: Some("acme/other".to_string()),
+            },
+        ]
+    );
+    assert_no_origin_branch(&fixture, "agent/breakdown-7");
+}
+
+#[test]
+fn worker_agent_result_parses_temper_agent_children_contract() {
+    let result = WorkspaceResult {
+        verdict: Some("needs_breakdown".to_string()),
+        summary: Some("planned breakdown".to_string()),
+        children: vec![
+            WorkspaceResultChild {
+                slug: "api-schema".to_string(),
+                title: "Define the API schema".to_string(),
+                body: "Write the shared API schema.".to_string(),
+                labels: vec!["code".to_string(), "ready".to_string()],
+                depends_on: Vec::new(),
+                target_repo: None,
+            },
+            WorkspaceResultChild {
+                slug: "web-client".to_string(),
+                title: "Implement the web client".to_string(),
+                body: "Build the web client against the API schema.".to_string(),
+                labels: Vec::new(),
+                depends_on: vec!["api-schema".to_string()],
+                target_repo: Some("acme/other".to_string()),
+            },
+        ],
+        ..WorkspaceResult::default()
+    };
+
+    let parsed: smith_worker::coding_executor::AgentResult =
+        serde_json::from_value(serde_json::to_value(&result).expect("agent result serializes"))
+            .expect("worker parses agent result");
+
+    assert_eq!(parsed.verdict.as_deref(), Some("needs_breakdown"));
+    assert_eq!(parsed.summary.as_deref(), Some("planned breakdown"));
+    assert_eq!(parsed.children.len(), 2);
+    assert_eq!(parsed.children[0].slug, "api-schema");
+    assert_eq!(parsed.children[0].title, "Define the API schema");
+    assert_eq!(parsed.children[0].body, "Write the shared API schema.");
+    assert_eq!(
+        parsed.children[0].labels,
+        vec!["code".to_string(), "ready".to_string()]
+    );
+    assert!(parsed.children[0].depends_on.is_empty());
+    assert_eq!(parsed.children[0].target_repo, None);
+    assert_eq!(parsed.children[1].slug, "web-client");
+    assert_eq!(parsed.children[1].title, "Implement the web client");
+    assert_eq!(
+        parsed.children[1].body,
+        "Build the web client against the API schema."
+    );
+    assert!(parsed.children[1].labels.is_empty());
+    assert_eq!(
+        parsed.children[1].depends_on,
+        vec!["api-schema".to_string()]
+    );
+    assert_eq!(
+        parsed.children[1].target_repo.as_deref(),
+        Some("acme/other")
+    );
 }
 
 #[tokio::test]
@@ -505,7 +607,7 @@ async fn review_job_checks_out_pr_head_and_returns_approve_verdict() {
     });
     let executor = fixture.executor(&agent, true);
 
-    let (verdict, body, summary) = expect_verdict(
+    let (verdict, body, summary, children) = expect_verdict(
         executor
             .execute(pr_assign("agent/review-7", "review-7", pr_job_context))
             .await,
@@ -514,6 +616,7 @@ async fn review_job_checks_out_pr_head_and_returns_approve_verdict() {
     assert_eq!(verdict, "approve");
     assert_eq!(body, None);
     assert_eq!(summary.as_deref(), Some("looks good"));
+    assert!(children.is_empty());
     assert_eq!(
         fs::read_to_string(&head_capture_path)
             .expect("fake agent captured HEAD")
@@ -530,7 +633,7 @@ async fn review_job_changes_verdict_passes_review_body_through() {
     let agent = fixture.agent(AgentBehavior::ReviewChanges);
     let executor = fixture.executor(&agent, true);
 
-    let (verdict, body, summary) = expect_verdict(
+    let (verdict, body, summary, children) = expect_verdict(
         executor
             .execute(pr_assign(
                 "agent/review-changes-7",
@@ -543,6 +646,7 @@ async fn review_job_changes_verdict_passes_review_body_through() {
     assert_eq!(verdict, "changes");
     assert_eq!(body.as_deref(), Some("please add error handling"));
     assert_eq!(summary.as_deref(), Some("needs error handling"));
+    assert!(children.is_empty());
     assert_no_origin_branch(&fixture, "agent/review-changes-7");
     assert_no_extra_origin_head_branches(&fixture, &["main"]);
     assert_workspace_clean(&fixture, "reviewer");
@@ -604,7 +708,7 @@ async fn writable_job_with_allowed_escalation_verdict_returns_verdict() {
     let agent = fixture.agent(AgentBehavior::WritableVerdict);
     let executor = fixture.executor(&agent, true);
 
-    let (verdict, body, summary) = expect_verdict(
+    let (verdict, body, summary, children) = expect_verdict(
         executor
             .execute(assign_with_context(
                 "pr-for-code-7",
@@ -620,6 +724,7 @@ async fn writable_job_with_allowed_escalation_verdict_returns_verdict() {
     assert_eq!(verdict, "needs_architect");
     assert_eq!(body.as_deref(), Some("blocked"));
     assert_eq!(summary.as_deref(), Some("cannot proceed"));
+    assert!(children.is_empty());
     assert_no_origin_branch(&fixture, "agent/pr-for-code-7");
     assert_workspace_clean(&fixture, "engineer");
 }
@@ -715,6 +820,7 @@ enum AgentBehavior {
     ReadOnlyVerdict {
         capture_path: Option<PathBuf>,
     },
+    ReadOnlyBreakdownVerdict,
     ReadOnlyVerdictWithDiff,
     UndeclaredVerdict,
     WritableVerdict,
@@ -736,6 +842,7 @@ impl AgentBehavior {
             AgentBehavior::NoDiff => "no-diff",
             AgentBehavior::Verdict => "verdict",
             AgentBehavior::ReadOnlyVerdict { .. } => "read-only-verdict",
+            AgentBehavior::ReadOnlyBreakdownVerdict => "read-only-breakdown-verdict",
             AgentBehavior::ReadOnlyVerdictWithDiff => "read-only-verdict-with-diff",
             AgentBehavior::UndeclaredVerdict => "undeclared-verdict",
             AgentBehavior::WritableVerdict => "writable-verdict",
@@ -765,6 +872,7 @@ impl AgentBehavior {
             AgentBehavior::ReadOnlyVerdict { capture_path } => {
                 read_only_verdict_script(capture_path.as_deref(), false)
             }
+            AgentBehavior::ReadOnlyBreakdownVerdict => read_only_breakdown_verdict_script(),
             AgentBehavior::ReadOnlyVerdictWithDiff => read_only_verdict_script(None, true),
             AgentBehavior::UndeclaredVerdict => {
                 "#!/bin/sh\nprintf '{\"verdict\":\"needs_breakdown\",\"summary\":\"needs splitting\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n".to_string()
@@ -807,6 +915,18 @@ fn read_only_verdict_script(capture_path: Option<&Path>, writes_diff: bool) -> S
     }
     script.push_str("printf '{\"verdict\":\"ready_code\",\"body\":\"rewritten\",\"summary\":\"did triage\"}' > \"$TEMPER_CODING_WORKSPACE_RESULT\"\n");
     script
+}
+
+fn read_only_breakdown_verdict_script() -> String {
+    r#"#!/bin/sh
+set -eu
+grep '"checkout": "read_only"' "$TEMPER_CODING_WORKSPACE_CONTEXT" >/dev/null
+grep '"needs_breakdown"' "$TEMPER_CODING_WORKSPACE_CONTEXT" >/dev/null
+cat > "$TEMPER_CODING_WORKSPACE_RESULT" <<'JSON'
+{"verdict":"needs_breakdown","summary":"planned breakdown","children":[{"slug":"api-schema","title":"Define the API schema","body":"Write the shared API schema.","labels":["code","ready"]},{"slug":"web-client","title":"Implement the web client","body":"Build the web client against the API schema.","depends_on":["api-schema"],"target_repo":"acme/other"}]}
+JSON
+"#
+    .to_string()
 }
 
 fn review_approve_script(head_capture_path: &str, capture_path: Option<&Path>) -> String {
@@ -1072,8 +1192,9 @@ fn expect_success(outcome: JobOutcome) -> (String, String, Option<String>) {
             verdict,
             body,
             summary,
+            children,
         } => {
-            panic!("expected success, got verdict {verdict:?} {body:?} {summary:?}")
+            panic!("expected success, got verdict {verdict:?} {body:?} {summary:?} {children:?}")
         }
         JobOutcome::Failure { class, message } => {
             panic!("expected success, got {class:?}: {message}")
@@ -1081,13 +1202,14 @@ fn expect_success(outcome: JobOutcome) -> (String, String, Option<String>) {
     }
 }
 
-fn expect_verdict(outcome: JobOutcome) -> (String, Option<String>, Option<String>) {
+fn expect_verdict(outcome: JobOutcome) -> (String, Option<String>, Option<String>, Vec<JobChild>) {
     match outcome {
         JobOutcome::Verdict {
             verdict,
             body,
             summary,
-        } => (verdict, body, summary),
+            children,
+        } => (verdict, body, summary, children),
         JobOutcome::Success { branch, summary } => {
             panic!("expected verdict, got success {branch:?} {summary:?}")
         }
@@ -1110,8 +1232,11 @@ fn expect_failure_class(outcome: JobOutcome, expected: FailureClass) -> String {
             verdict,
             body,
             summary,
+            children,
         } => {
-            panic!("expected {expected:?} failure, got verdict {verdict:?} {body:?} {summary:?}")
+            panic!(
+                "expected {expected:?} failure, got verdict {verdict:?} {body:?} {summary:?} {children:?}"
+            )
         }
     }
 }

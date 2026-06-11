@@ -164,7 +164,8 @@ pub struct WorkspaceResult {
 }
 
 /// A child issue for the architect `needs_breakdown` verdict. Mirrors temper's
-/// `WorkspaceResultChild` (all fields required, defaulting to empty).
+/// `WorkspaceResultChild` (all fields required, defaulting to empty, except
+/// `target_repo`, which defaults to the parent repository).
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct WorkspaceResultChild {
     pub slug: String,
@@ -174,6 +175,9 @@ pub struct WorkspaceResultChild {
     pub labels: Vec<String>,
     #[serde(default)]
     pub depends_on: Vec<String>,
+    /// Target repository as an `owner/name` path. `None` = the parent's repo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_repo: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +325,9 @@ pub fn system_prompt(capability: Capability, allowed_verdicts: &[String]) -> Str
              - `needs_design` with an authored `body` (a design proposal) when \
              design work is required first;\n\
              - `needs_breakdown` with a `children` list (each: slug, title, body, \
-             labels, depends_on) when the item must be split into child issues.\n",
+             labels, depends_on, and optional target_repo as an owner/name \
+             repository path when the intake plan names target repositories) \
+             when the item must be split into child issues.\n",
         ),
         Capability::ReviewWorkspace => prompt.push_str(
             "ROLE: reviewer (review_workspace capability).\n\
@@ -377,7 +383,8 @@ pub fn system_prompt(capability: Capability, allowed_verdicts: &[String]) -> Str
          JSON object (and nothing else) describing the result, with these \
          optional fields: `verdict` (string), `summary` (string), `body` \
          (string), `review_body` (string), `labels` (array of strings), and \
-         `children` (array of {slug, title, body, labels, depends_on}). Omit \
+         `children` (array of {slug, title, body, labels, depends_on, \
+         target_repo?}). Omit \
          fields you are not using. For the engineer success path, emit `{\"summary\": \
          \"...\"}` with no `verdict`. Do not wrap the JSON in prose or code fences.",
     );
