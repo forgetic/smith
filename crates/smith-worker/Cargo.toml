@@ -20,6 +20,10 @@ tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "process
 [dev-dependencies]
 axum = "0.8"
 smith-io-engine = { path = "../smith-io-engine" }
+smith-temper-agent = { path = "../smith-temper-agent", features = ["test-provider-base-url-override"] }
+smith-agent = { path = "../smith-agent" }
+jig-server = { path = "../../../jig/crates/jig-server" }
+jig-core = { path = "../../../jig/crates/jig-core" }
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "net", "process"] }
 
 [lints]

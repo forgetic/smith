@@ -15,8 +15,9 @@
 
 use std::path::Path;
 
+use std::process::Command;
+
 use smith_temper_agent::{WorkspaceContext, WorkspaceResult};
-use tokio::process::Command;
 
 use crate::agent_runner::{AgentRunError, AgentRunner};
 
@@ -62,16 +63,26 @@ impl AgentRunner for ExternalCommandRunner {
             AgentRunError::transient(format!("write agent context file: {error}"))
         })?;
 
-        let output = Command::new(program)
-            .args(args)
-            .current_dir(cwd)
-            .env(CONTEXT_ENV, &context_path)
-            .env(RESULT_ENV, &result_path)
-            .output()
-            .await
-            .map_err(|error| {
-                AgentRunError::transient(format!("spawn agent command `{program}`: {error}"))
-            })?;
+        // Run the external command on the blocking pool: the worker is on the
+        // asupersync runtime (no tokio reactor), so a blocking subprocess must
+        // go through `spawn_blocking`, not `tokio::process`.
+        let program_owned = program.clone();
+        let args_owned: Vec<String> = args.to_vec();
+        let cwd_owned = cwd.to_path_buf();
+        let context_path_owned = context_path.clone();
+        let result_path_owned = result_path.clone();
+        let output = asupersync::runtime::spawn_blocking(move || {
+            Command::new(&program_owned)
+                .args(&args_owned)
+                .current_dir(&cwd_owned)
+                .env(CONTEXT_ENV, &context_path_owned)
+                .env(RESULT_ENV, &result_path_owned)
+                .output()
+        })
+        .await
+        .map_err(|error| {
+            AgentRunError::transient(format!("spawn agent command `{program}`: {error}"))
+        })?;
 
         if !output.status.success() {
             let status = output

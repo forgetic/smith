@@ -1,8 +1,6 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
-use std::process::{ExitStatus, Output};
-
-use tokio::process::Command;
+use std::process::{Command, ExitStatus, Output};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RoleGitIdentity {
@@ -283,25 +281,38 @@ impl Workspace {
         command: String,
         args: Vec<OsString>,
     ) -> Result<Output, WorkspaceError> {
-        let mut git = Command::new("git");
-        git.env("GIT_TERMINAL_PROMPT", "0")
-            .arg("-c")
-            .arg(format!("user.name={}", self.identity.user))
-            .arg("-c")
-            .arg(format!("user.email={}", self.identity.email));
-
+        // Assemble the full argument vector up front so the actual `git`
+        // invocation can run on the blocking pool. The worker runs on the
+        // asupersync runtime (single-threaded, no tokio reactor), so git — a
+        // blocking subprocess — must go through `spawn_blocking`, not
+        // `tokio::process` (which would panic with no tokio reactor) and not
+        // inline on the loop thread (which would stall every other task).
+        let mut full_args: Vec<OsString> = vec![
+            OsString::from("-c"),
+            OsString::from(format!("user.name={}", self.identity.user)),
+            OsString::from("-c"),
+            OsString::from(format!("user.email={}", self.identity.email)),
+        ];
         if include_remote_header {
-            git.arg("-c").arg(format!(
+            full_args.push(OsString::from("-c"));
+            full_args.push(OsString::from(format!(
                 "http.extraheader=AUTHORIZATION: token {}",
                 self.identity.token
-            ));
+            )));
         }
-
         if let Some(current_dir) = current_dir {
-            git.arg("-C").arg(current_dir);
+            full_args.push(OsString::from("-C"));
+            full_args.push(current_dir.as_os_str().to_os_string());
         }
+        full_args.extend(args);
 
-        let output = git.args(args).output().await?;
+        let output = asupersync::runtime::spawn_blocking(move || {
+            Command::new("git")
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .args(&full_args)
+                .output()
+        })
+        .await?;
         if output.status.success() {
             Ok(output)
         } else {
