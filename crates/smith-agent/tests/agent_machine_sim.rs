@@ -286,3 +286,104 @@ fn assert_tool_results_follow_their_calls(messages: &[Message], seed: u64) {
         i += 1;
     }
 }
+
+/// Exhaustive arrival-order exploration for a parallel batch.
+///
+/// When a batch of read-only tools runs concurrently, their results can come
+/// back in ANY order — exactly the kind of race a chaos injector would perturb.
+/// This enumerates *every* permutation of the arrival order for a parallel batch
+/// and asserts the machine behaves identically: no model re-call until the whole
+/// batch is in, and the appended tool-result messages always follow original
+/// call order. Deterministic, exhaustive, no runtime — the achievable core of
+/// "chaos over interleavings".
+#[test]
+fn every_arrival_order_of_a_parallel_batch_is_safe() {
+    let effects = effects_map();
+    // A 4-read batch (all parallel-safe) ⇒ 4! = 24 arrival orders.
+    let ids = ["a", "b", "c", "d"];
+    let calls: Vec<(String, String)> = ids
+        .iter()
+        .map(|id| ((*id).to_string(), "read".to_string()))
+        .collect();
+
+    for perm in permutations(&ids) {
+        let mut m = AgentMachine::with_effects(vec![user("go")], 10, effects.clone());
+        let _ = m.on_start(EngineTime::ZERO);
+        let dispatched =
+            m.on_completion(EngineTime::ZERO, AgentCompletion::LlmResponded(assistant_tool_calls(&calls)));
+        // All four dispatched in one batch.
+        let mut running = collect_run_tool_ids(&dispatched);
+        running.sort();
+        assert_eq!(running, vec!["a", "b", "c", "d"]);
+
+        // Deliver results in this permutation; the model must NOT be re-called
+        // until the last one.
+        for (i, id) in perm.iter().enumerate() {
+            let step = m.on_completion(
+                EngineTime::ZERO,
+                AgentCompletion::ToolFinished {
+                    id: (*id).to_string(),
+                    output: output(),
+                },
+            );
+            let last = i == perm.len() - 1;
+            assert_eq!(
+                has_call_llm(&step),
+                last,
+                "perm {perm:?}: model re-call must happen exactly when the batch completes"
+            );
+            if last {
+                // End the run and verify result order is original (a,b,c,d).
+                let end = m.on_completion(
+                    EngineTime::ZERO,
+                    AgentCompletion::LlmResponded(assistant_text("done")),
+                );
+                let messages = end
+                    .iter()
+                    .find_map(|r| match r {
+                        AgentRequest::Finished { messages, .. } => Some(messages.clone()),
+                        _ => None,
+                    })
+                    .expect("finished");
+                let result_ids: Vec<String> = messages
+                    .iter()
+                    .filter_map(|m| match m {
+                        Message::ToolResult(r) => Some(r.tool_call_id.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    result_ids,
+                    vec!["a", "b", "c", "d"],
+                    "perm {perm:?}: results must keep original call order regardless of arrival order"
+                );
+            }
+        }
+    }
+}
+
+/// All permutations of a slice of &str (Heap's algorithm, small n).
+fn permutations<'a>(items: &[&'a str]) -> Vec<Vec<&'a str>> {
+    let mut result = Vec::new();
+    let mut arr = items.to_vec();
+    let n = arr.len();
+    let mut c = vec![0usize; n];
+    result.push(arr.clone());
+    let mut i = 0;
+    while i < n {
+        if c[i] < i {
+            if i % 2 == 0 {
+                arr.swap(0, i);
+            } else {
+                arr.swap(c[i], i);
+            }
+            result.push(arr.clone());
+            c[i] += 1;
+            i = 0;
+        } else {
+            c[i] = 0;
+            i += 1;
+        }
+    }
+    result
+}
