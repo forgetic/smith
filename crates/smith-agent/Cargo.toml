@@ -7,6 +7,7 @@ license.workspace = true
 description = "Sans-IO LLM agent loop for Smith: a pure AgentMachine driven by an asupersync shell that reuses pi-SDK providers and tools."
 
 [dependencies]
+async-trait = "0.1"
 asupersync.workspace = true
 futures = "0.3"
 pi_agent_rust.workspace = true

@@ -4393,6 +4393,7 @@ name = "smith-agent"
 version = "0.1.0"
 dependencies = [
  "asupersync",
+ "async-trait",
  "futures",
  "jig-core",
  "jig-server",
