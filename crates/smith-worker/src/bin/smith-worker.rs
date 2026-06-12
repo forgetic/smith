@@ -63,8 +63,10 @@ fn run(config: smith_worker::WorkerConfig) -> Result<(), String> {
                     let provider = build_provider(&smith)?;
                     let max_iterations = smith.max_iterations.unwrap_or(DEFAULT_MAX_ITERATIONS);
                     let config_dir = resolve_config_dir(smith.config_dir.as_deref());
-                    let runner =
-                        Arc::new(PiAgentRunner::new(provider, max_iterations, config_dir));
+                    let runner = Arc::new(
+                        PiAgentRunner::new(provider, max_iterations, config_dir)
+                            .with_subagents(smith.enable_subagents),
+                    );
                     let executor = Arc::new(CodingExecutor::new(executor_config, runner));
                     smith_io_engine::block_on(async move {
                         run_worker(config, executor)

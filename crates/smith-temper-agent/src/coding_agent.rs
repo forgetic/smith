@@ -441,6 +441,13 @@ pub fn user_context(context: &WorkspaceContext) -> String {
 /// capabilities get inspection tools plus bash (so they can `git diff`,
 /// `git log`, inspect CI artifacts, etc.) but no file-writing tools.
 pub fn tool_registry(capability: Capability, cwd: &Path) -> ToolRegistry {
+    ToolRegistry::from_tools(coding_tools_vec(capability, cwd))
+}
+
+/// The base tool list for a capability (read-only inspection tools for everyone,
+/// plus edit/write for the writable engineer). Returned as a `Vec` so callers
+/// can append extra tools (e.g. a sub-agent tool) before building the registry.
+fn coding_tools_vec(capability: Capability, cwd: &Path) -> Vec<Box<dyn pi::tools::Tool>> {
     let mut tools = vec![
         create_read_tool(cwd),
         create_ls_tool(cwd),
@@ -452,7 +459,60 @@ pub fn tool_registry(capability: Capability, cwd: &Path) -> ToolRegistry {
         tools.push(create_edit_tool(cwd));
         tools.push(create_write_tool(cwd));
     }
-    ToolRegistry::from_tools(tools)
+    tools
+}
+
+/// Read-only system prompt for the `investigate` sub-agent.
+const INVESTIGATE_SUBAGENT_PROMPT: &str = "You are an investigation sub-agent. \
+    Read the repository with the provided read-only tools and answer the task \
+    concisely. Make NO edits. Your final message is your report back to the \
+    calling agent.";
+
+/// Adds an `investigate` sub-agent tool to a coding tool registry.
+///
+/// The tool delegates a read-only investigation to a nested sub-agent scoped to
+/// the same checkout `cwd`, talking to the same provider. It declares read-only
+/// effects, so the parent agent can fan out several investigations in parallel
+/// and they cannot mutate the engineer's working tree.
+fn add_investigate_subagent(
+    mut base: ToolRegistry,
+    provider_config: &ProviderConfig,
+    stream_options: &pi::provider::StreamOptions,
+    cwd: &Path,
+) -> ToolRegistry {
+    // Capture what the nested sub-agent needs. The factory runs per call.
+    let provider_config = provider_config.clone();
+    let stream_options = stream_options.clone();
+    let cwd = cwd.to_path_buf();
+    let factory: smith_agent::SubAgentFactory = std::sync::Arc::new(move |task: String| {
+        // Build a fresh provider for the nested run (cheap; reuses the resolved
+        // bearer in stream_options).
+        let provider = provider_config
+            .build_provider()
+            .expect("sub-agent provider builds (parent already built one)");
+        smith_agent::SubAgent {
+            system_prompt: Some(INVESTIGATE_SUBAGENT_PROMPT.to_string()),
+            user_message: task,
+            tools: ToolRegistry::from_tools(vec![
+                create_read_tool(&cwd),
+                create_ls_tool(&cwd),
+                create_grep_tool(&cwd),
+                create_find_tool(&cwd),
+            ]),
+            max_iterations: 12,
+            provider,
+            stream_options: stream_options.clone(),
+        }
+    });
+    base.push(Box::new(smith_agent::SubAgentTool::new(
+        "investigate",
+        "Delegate a read-only investigation of the repository to a sub-agent. \
+         Input: { task: string }. Returns the sub-agent's findings. Safe to call \
+         several at once.",
+        pi::tools::ToolEffects::read(),
+        factory,
+    )));
+    base
 }
 
 // ---------------------------------------------------------------------------
@@ -554,6 +614,30 @@ pub async fn run_coding_agent_native(
     max_iterations: usize,
     config_dir: Option<&Path>,
 ) -> Result<WorkspaceResult, CodingAgentError> {
+    run_coding_agent_native_with_options(
+        provider_config,
+        context,
+        cwd,
+        max_iterations,
+        config_dir,
+        false,
+    )
+    .await
+}
+
+/// [`run_coding_agent_native`] with optional features. When `enable_subagents`
+/// is set, the role agent is given an `investigate` tool that delegates a
+/// read-only investigation to a nested sub-agent scoped to the same checkout
+/// (the parent can fan out several at once since the tool is read-only /
+/// parallel-safe). Default coding behavior is unchanged when it is off.
+pub async fn run_coding_agent_native_with_options(
+    provider_config: &ProviderConfig,
+    context: &WorkspaceContext,
+    cwd: &Path,
+    max_iterations: usize,
+    config_dir: Option<&Path>,
+    enable_subagents: bool,
+) -> Result<WorkspaceResult, CodingAgentError> {
     let capability = Capability::for_role(&context.work_item.role);
     let provider = provider_config.build_provider()?;
 
@@ -575,10 +659,15 @@ pub async fn run_coding_agent_native(
         ..pi::provider::StreamOptions::default()
     };
 
+    let mut tools = tool_registry(capability, cwd);
+    if enable_subagents {
+        tools = add_investigate_subagent(tools, provider_config, &stream_options, cwd);
+    }
+
     let outcome = smith_agent::run_sub_agent(smith_agent::SubAgent {
         system_prompt: Some(turns.system),
         user_message: turns.user,
-        tools: tool_registry(capability, cwd),
+        tools,
         max_iterations,
         provider,
         stream_options,

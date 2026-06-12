@@ -135,6 +135,124 @@ async fn worker_runs_a_real_coding_job_through_the_native_loop() {
     assert!(fake.requests().len() > 1, "expected the native loop to do a tool round");
 }
 
+/// The engineer agent delegates to an in-workspace `investigate` sub-agent
+/// (enabled via PiAgentRunner::with_subagents), the sub-agent runs its own loop
+/// reading the checkout and reporting a finding, the finding flows back into the
+/// engineer's context, and the engineer writes a product file citing it — all
+/// through the real worker against jig. Verifies sub-agents end to end in the
+/// production coding path.
+#[tokio::test]
+async fn worker_coding_job_uses_an_investigate_subagent() {
+    let fixture = GitFixture::new();
+
+    // One jig fake serves BOTH the engineer and the nested investigate
+    // sub-agent (they share the same provider/base-url). Branch on the system
+    // prompt: the sub-agent's system prompt says "investigation sub-agent".
+    let fake = FakeLlm::start(Script::rule(|view| {
+        let is_subagent = view
+            .messages
+            .iter()
+            .any(|m| m.role == "system" && m.content.contains("investigation sub-agent"));
+
+        if is_subagent {
+            // Investigator: read the seeded README, then report a finding.
+            if view.prior_tool_results == 0 {
+                Reply {
+                    turns: vec![Turn::ToolCall {
+                        id: "sub_read".to_string(),
+                        name: "read".to_string(),
+                        args: json!({ "path": "README.md" }),
+                    }],
+                    usage: Default::default(),
+                    stop: StopReason::ToolCalls,
+                }
+            } else {
+                Reply::text("Finding: the project seed marker is present.")
+            }
+        } else {
+            // Engineer: first delegate to the sub-agent, then (with its finding
+            // in context) write the product file and finish.
+            if view.prior_tool_results == 0 {
+                Reply {
+                    turns: vec![Turn::ToolCall {
+                        id: "call_investigate".to_string(),
+                        name: "investigate".to_string(),
+                        args: json!({ "task": "summarize the repository seed" }),
+                    }],
+                    usage: Default::default(),
+                    stop: StopReason::ToolCalls,
+                }
+            } else if view.prior_tool_results == 1 {
+                Reply {
+                    turns: vec![Turn::ToolCall {
+                        id: "call_write".to_string(),
+                        name: "write".to_string(),
+                        args: json!({
+                            "path": "GREETING.md",
+                            "content": "investigated then greeted\n"
+                        }),
+                    }],
+                    usage: Default::default(),
+                    stop: StopReason::ToolCalls,
+                }
+            } else {
+                Reply::text(r#"{"summary":"Investigated and wrote GREETING.md"}"#)
+            }
+        }
+    }))
+    .expect("start fake LLM");
+
+    let config = worker_config(&fixture);
+    let (daemon_url, observed) = spawn_fake_daemon(&fixture).await;
+    let config = WorkerConfig { daemon_url, ..config };
+
+    let provider = ProviderConfig::new(
+        "jig-openai-compatible",
+        "jig-coding-worker-subagent-e2e",
+        "https://example.invalid/unused",
+        "sk-jig-test",
+    )
+    .with_base_url_override(fake.base_url());
+    // Enable the in-workspace sub-agent tool.
+    let runner = Arc::new(PiAgentRunner::new(provider, 8, None).with_subagents(true));
+    let executor_config = CodingExecutorConfig {
+        workspace_root: fixture.workspace_root.clone(),
+        git_base_url: fixture.git_base_url(),
+        role_identities: role_identities(),
+    };
+    let executor = Arc::new(CodingExecutor::new(executor_config, runner));
+
+    spawn_worker_thread(config, executor);
+
+    let observed = tokio::time::timeout(std::time::Duration::from_secs(30), observed)
+        .await
+        .expect("daemon observes a result within the timeout")
+        .expect("daemon sends the observed run");
+
+    assert_eq!(
+        observed.result.status,
+        ResultStatus::Success,
+        "result: {:?}",
+        observed.result
+    );
+    let branch = observed.result.branch.expect("success carries a branch");
+    assert_eq!(branch.name, "agent/pr-for-code-7");
+
+    // The engineer's product file landed on origin.
+    let greeting = fixture.origin_show("refs/heads/agent/pr-for-code-7:GREETING.md");
+    assert_eq!(greeting, "investigated then greeted");
+
+    // The fake served BOTH the engineer's loop AND the nested sub-agent's loop:
+    // engineer (investigate call, write call, final text) + sub-agent (read,
+    // report) ⇒ several requests, and at least one sub-agent system prompt.
+    let requests = fake.requests();
+    assert!(
+        requests.len() >= 4,
+        "expected the engineer + nested sub-agent loops, got {} requests",
+        requests.len()
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Worker config + identities.
 // ---------------------------------------------------------------------------

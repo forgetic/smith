@@ -16,7 +16,8 @@
 use std::path::{Path, PathBuf};
 
 use smith_temper_agent::{
-    CodingAgentError, ProviderConfig, WorkspaceContext, WorkspaceResult, run_coding_agent_native,
+    CodingAgentError, ProviderConfig, WorkspaceContext, WorkspaceResult,
+    run_coding_agent_native_with_options,
 };
 use temper_worker_protocol::FailureClass;
 
@@ -28,10 +29,13 @@ pub struct PiAgentRunner {
     provider: ProviderConfig,
     max_iterations: usize,
     config_dir: Option<PathBuf>,
+    enable_subagents: bool,
 }
 
 impl PiAgentRunner {
-    /// Builds a runner from an already-resolved provider config.
+    /// Builds a runner from an already-resolved provider config. Sub-agents are
+    /// off by default; use [`PiAgentRunner::with_subagents`] to enable the
+    /// `investigate` sub-agent tool in the coding workspace.
     ///
     /// `provider` should be built via [`ProviderConfig::from_auth`] (which
     /// eagerly preflights credentials) at worker start, so the whole fleet
@@ -41,7 +45,14 @@ impl PiAgentRunner {
             provider,
             max_iterations,
             config_dir,
+            enable_subagents: false,
         }
+    }
+
+    /// Enable (or disable) the in-workspace `investigate` sub-agent tool.
+    pub fn with_subagents(mut self, enable: bool) -> Self {
+        self.enable_subagents = enable;
+        self
     }
 }
 
@@ -51,12 +62,13 @@ impl AgentRunner for PiAgentRunner {
         context: &WorkspaceContext,
         cwd: &Path,
     ) -> Result<WorkspaceResult, AgentRunError> {
-        run_coding_agent_native(
+        run_coding_agent_native_with_options(
             &self.provider,
             context,
             cwd,
             self.max_iterations,
             self.config_dir.as_deref(),
+            self.enable_subagents,
         )
         .await
         .map_err(map_coding_agent_error)

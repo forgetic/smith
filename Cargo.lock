@@ -4450,8 +4450,11 @@ version = "0.1.0"
 dependencies = [
  "asupersync",
  "axum",
+ "jig-core",
+ "jig-server",
  "serde",
  "serde_json",
+ "smith-agent",
  "smith-io-engine",
  "smith-temper-agent",
  "temper-worker-protocol",

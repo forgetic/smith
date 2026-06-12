@@ -111,6 +111,8 @@ pub struct SmithAgentSurface {
     pub auth_file: Option<PathBuf>,
     pub config_dir: Option<PathBuf>,
     pub max_iterations: Option<usize>,
+    /// Enable the in-workspace `investigate` sub-agent tool (off by default).
+    pub enable_subagents: bool,
 }
 
 /// Which credential the in-process Smith agent authenticates with. Mirrors
@@ -368,10 +370,14 @@ fn parse_smith_agent_surface(args: Vec<String>) -> Result<SmithAgentSurface, Str
     let mut auth_file = None;
     let mut config_dir = None;
     let mut max_iterations = None;
+    let mut enable_subagents = false;
 
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
+            "--enable-subagents" => {
+                enable_subagents = true;
+            }
             "--auth" => {
                 let value = iter
                     .next()
@@ -410,7 +416,7 @@ fn parse_smith_agent_surface(args: Vec<String>) -> Result<SmithAgentSurface, Str
             }
             other => {
                 return Err(format!(
-                    "unknown smith agent arg `{other}`; expected --auth, --codex-model, --auth-file, --config-dir, or --max-iterations"
+                    "unknown smith agent arg `{other}`; expected --auth, --codex-model, --auth-file, --config-dir, --max-iterations, or --enable-subagents"
                 ));
             }
         }
@@ -422,6 +428,7 @@ fn parse_smith_agent_surface(args: Vec<String>) -> Result<SmithAgentSurface, Str
         auth_file,
         config_dir,
         max_iterations,
+        enable_subagents,
     })
 }
 
@@ -631,9 +638,39 @@ mod tests {
                     auth_file: Some(PathBuf::from("/tmp/auth.json")),
                     config_dir: None,
                     max_iterations: Some(42),
+                    enable_subagents: false,
                 }),
             })
         );
+    }
+
+    #[test]
+    fn smith_agent_enable_subagents_flag_is_parsed() {
+        let config = parse_ok(&[
+            "--daemon-url",
+            "http://daemon.example",
+            "--worker-id",
+            "worker-1",
+            "--capability",
+            "ai/temper:coder",
+            "--executor",
+            "coding",
+            "--workspace-root",
+            "/workspaces",
+            "--git-base-url",
+            "https://forgejo.example",
+            "--agent-command",
+            "smith",
+            "--agent-arg",
+            "--enable-subagents",
+        ]);
+        let ExecutorSelection::Coding(surface) = config.executor else {
+            panic!("expected coding executor");
+        };
+        let AgentSurface::Smith(smith) = surface.agent else {
+            panic!("expected smith agent");
+        };
+        assert!(smith.enable_subagents);
     }
 
     #[test]
@@ -666,6 +703,7 @@ mod tests {
                 auth_file: None,
                 config_dir: None,
                 max_iterations: None,
+                enable_subagents: false,
             })
         );
     }
