@@ -1,7 +1,7 @@
 //! Out-of-process agent runner — the production agent boundary.
 //!
 //! Spawns an agent **program** (the `anvil-agent` binary by default, or any
-//! operator-provided coder) that speaks the `anvil-process-protocol`:
+//! operator-provided coder) that speaks the `smith-agent-protocol`:
 //!
 //! - the worker writes the [`WorkspaceContext`] to a temp file named by
 //!   [`CONTEXT_ENV`] and runs the program in the prepared checkout (cwd);
@@ -24,11 +24,11 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use anvil_process_protocol::{CONTEXT_ENV, RESULT_ENV, StepProgress, WorkspaceContext};
+use smith_agent_protocol::{CONTEXT_ENV, RESULT_ENV, StepProgress, WorkspaceContext};
 
 use crate::agent_runner::{AgentRunError, AgentRunner, ProgressSink, WorkspaceResult};
 
-/// Spawns an agent program speaking the `anvil-process-protocol`.
+/// Spawns an agent program speaking the `smith-agent-protocol`.
 #[derive(Clone, Debug)]
 pub struct OutOfProcessRunner {
     /// Program followed by fixed arguments, e.g.
@@ -229,7 +229,7 @@ mod tests {
     }
 
     fn test_context() -> WorkspaceContext {
-        use anvil_process_protocol::{WorkspaceRepository, WorkspaceWorkItem};
+        use smith_agent_protocol::{WorkspaceRepository, WorkspaceWorkItem};
         WorkspaceContext {
             repository: WorkspaceRepository {
                 id: "acme/svc".to_string(),

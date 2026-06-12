@@ -17,9 +17,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-use anvil_process_protocol::{WorkspaceContext, WorkspaceResultChild};
 use serde::Serialize;
 use serde_json::{Value, json};
+use smith_agent_protocol::{WorkspaceContext, WorkspaceResultChild};
 use smith_worker::{
     AgentRunError, AgentRunner, CodingExecutor, CodingExecutorConfig, JobExecutor, JobOutcome,
     ProgressSink, RoleGitIdentity, WorkspaceResult,

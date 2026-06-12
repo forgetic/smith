@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/smith-agent-protocol",
     "crates/smith-io-engine",
     "crates/smith-worker",
 ]
@@ -17,9 +18,9 @@ version = "0.1.0"
 [workspace.dependencies]
 # Smith is orchestration-only: the worker is an HTTP client + git driver on the
 # asupersync runtime and links no agent/LLM code (the coding agent moved
-# out-of-process into the `anvil` repo). Kept in lockstep with temper's `=0.3.2`
-# so smith, temper's serde DTO crates, and anvil-process-protocol resolve one
-# asupersync version.
+# out-of-process into the `anvil` repo; smith owns the wire contract in
+# `smith-agent-protocol`). Kept in lockstep with temper's `=0.3.2` so smith and
+# temper's serde DTO crates resolve one asupersync version.
 asupersync = "=0.3.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

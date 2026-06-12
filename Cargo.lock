@@ -9,14 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
-name = "anvil-process-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "anyhow"
 version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1413,6 +1405,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
+name = "smith-agent-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "smith-io-engine"
 version = "0.1.0"
 dependencies = [
@@ -1425,11 +1425,11 @@ dependencies = [
 name = "smith-worker"
 version = "0.1.0"
 dependencies = [
- "anvil-process-protocol",
  "asupersync",
  "axum",
  "serde",
  "serde_json",
+ "smith-agent-protocol",
  "smith-io-engine",
  "temper-worker-protocol",
  "tempfile",

@@ -1,5 +1,5 @@
 //! Deterministic hermetic agent for the worker e2e — speaks the
-//! `anvil-process-protocol` without an LLM or git.
+//! `smith-agent-protocol` without an LLM or git.
 //!
 //! Behavior is driven by env vars the test sets:
 //! - reads the [`WorkspaceContext`] from `$TEMPER_CODING_WORKSPACE_CONTEXT`;
@@ -18,7 +18,7 @@
 
 use std::io::Write;
 
-use anvil_process_protocol::{
+use smith_agent_protocol::{
     CONTEXT_ENV, RESULT_ENV, StepProgress, StepState, WorkspaceContext, WorkspaceResult,
 };
 

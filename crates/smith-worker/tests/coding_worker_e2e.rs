@@ -3,7 +3,7 @@
 //! A real `smith-worker` runs a real coding job by spawning a real agent
 //! **process** (`smith-fake-agent`, a deterministic protocol speaker — no LLM,
 //! no git), with NO external Forgejo or runner. This exercises the orchestration
-//! path and the `anvil-process-protocol` boundary; the agent's own LLM loop is
+//! path and the `smith-agent-protocol` boundary; the agent's own LLM loop is
 //! tested in the `anvil` repo against jig.
 //!
 //! Topology, all in one process:
@@ -36,7 +36,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-use anvil_process_protocol::{StepProgress, StepState};
 use axum::{
     Json, Router,
     extract::State,
@@ -45,6 +44,7 @@ use axum::{
     routing::post,
 };
 use serde_json::json;
+use smith_agent_protocol::{StepProgress, StepState};
 use smith_worker::config::CapabilitySpec;
 use smith_worker::{
     CodingExecutor, CodingExecutorConfig, ExecutorSelection, OutOfProcessRunner, ProgressSink,

@@ -6,7 +6,7 @@
 //! *agent turn itself* is abstracted behind [`AgentRunner`] so the orchestration
 //! is independent of how the turn is produced — and, crucially, so the worker
 //! links **no** agent/LLM code: the agent runs out-of-process behind the
-//! `anvil-process-protocol` wire contract.
+//! `smith-agent-protocol` wire contract.
 //!
 //! - [`OutOfProcessRunner`](crate::out_of_process_runner::OutOfProcessRunner)
 //!   spawns an agent program (the `anvil-agent` binary by default, or any coder)
@@ -23,10 +23,10 @@
 
 use std::path::Path;
 
-use anvil_process_protocol::{StepProgress, WorkspaceContext};
+use smith_agent_protocol::{StepProgress, WorkspaceContext};
 use temper_worker_protocol::FailureClass;
 
-pub use anvil_process_protocol::WorkspaceResult;
+pub use smith_agent_protocol::WorkspaceResult;
 
 /// Where an [`AgentRunner`] reports step-progress checkpoints during a turn.
 ///

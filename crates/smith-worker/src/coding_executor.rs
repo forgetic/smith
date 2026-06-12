@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use anvil_process_protocol::{
+use serde::Deserialize;
+use smith_agent_protocol::{
     WorkspaceContext, WorkspaceGuidance, WorkspaceRepository, WorkspaceResult, WorkspaceWorkItem,
 };
-use serde::Deserialize;
 use temper_worker_protocol::{
     Assign, Branch, FailureClass, JobArtifactSnapshot, JobChild, JobRepository,
 };
@@ -357,7 +357,7 @@ fn failure(class: FailureClass, message: impl Into<String>) -> JobOutcome {
 /// The [`OutOfProcessRunner`](crate::out_of_process_runner::OutOfProcessRunner)
 /// serializes this to the JSON document the agent reads from
 /// `$TEMPER_CODING_WORKSPACE_CONTEXT`; the struct (and thus the wire shape) is
-/// owned by `anvil-process-protocol`. `work_item.context` stays a pretty-printed
+/// owned by `smith-agent-protocol`. `work_item.context` stays a pretty-printed
 /// JSON *string* of the artifact, surfaced to the model verbatim.
 #[allow(clippy::too_many_arguments)]
 fn build_workspace_context(

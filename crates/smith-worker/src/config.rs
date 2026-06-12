@@ -87,7 +87,7 @@ pub struct CodingSurface {
 /// How the coding executor produces an agent turn.
 ///
 /// Both surfaces resolve to a **command the worker spawns out-of-process** over
-/// the `anvil-process-protocol`. `--agent-command` selects the program: the
+/// the `smith-agent-protocol`. `--agent-command` selects the program: the
 /// literal `smith` (or the legacy `smith-coding-agent`) selects the Smith agent
 /// surface, which spawns `anvil-agent` (overridable via `--agent-program`); any
 /// other value is spawned verbatim (the examples' deterministic `greeting`

@@ -27,7 +27,7 @@ fn main() {
 /// Builds the selected executor and runs the worker on the asupersync runtime.
 ///
 /// The worker links **no** agent/LLM code: every coding job runs out-of-process
-/// behind the `anvil-process-protocol`. The worker spawns the agent program
+/// behind the `smith-agent-protocol`. The worker spawns the agent program
 /// (the `anvil-agent` binary by default, or any operator-provided coder),
 /// relaying its step-progress checkpoints. Credentials are the agent process's
 /// concern — it preflights its own provider login at job start.

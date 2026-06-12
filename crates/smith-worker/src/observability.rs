@@ -5,7 +5,7 @@
 //! lines as data ([`WorkerRequest::Log`](crate::worker_machine::WorkerRequest))
 //! without doing I/O.
 
-use anvil_process_protocol::StepProgress;
+use smith_agent_protocol::StepProgress;
 use temper_worker_protocol::{Assign, FailureClass, JobResult, ResultStatus};
 
 pub fn registered_worker_line(worker_id: &str, capability_count: usize) -> String {
