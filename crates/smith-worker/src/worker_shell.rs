@@ -9,9 +9,11 @@
 
 use std::sync::Arc;
 
-use smith_io_engine::{CqSender, HttpCall, HttpResponseData, arm_timer, build_http_client, http_call};
 use asupersync::http::h1::http_client::HttpClient;
 use asupersync::runtime::RuntimeHandle;
+use smith_io_engine::{
+    CqSender, HttpCall, HttpResponseData, arm_timer, build_http_client, http_call,
+};
 use temper_worker_protocol::WorkerProtocolMessage;
 
 use crate::executor::{JobExecutor, job_result};
@@ -109,7 +111,9 @@ impl<E: JobExecutor + Send + Sync + 'static> smith_io_engine::Executor<WorkerMac
                 });
             }
             WorkerRequest::ArmPollTimer(delay) => {
-                arm_timer(&self.handle, &self.cq, delay, || WorkerCompletion::PollTimer);
+                arm_timer(&self.handle, &self.cq, delay, || {
+                    WorkerCompletion::PollTimer
+                });
             }
             WorkerRequest::ArmHeartbeatTimer(delay) => {
                 arm_timer(&self.handle, &self.cq, delay, || {
@@ -138,7 +142,9 @@ fn decode_reply(response: HttpResponseData) -> Result<Option<WorkerProtocolMessa
                 .map(Some)
                 .map_err(|error| {
                     let body = String::from_utf8_lossy(&response.body);
-                    format!("daemon response was not valid worker protocol JSON: {error}; body: {body}")
+                    format!(
+                        "daemon response was not valid worker protocol JSON: {error}; body: {body}"
+                    )
                 })
         }
         status => {
@@ -182,10 +188,7 @@ mod tests {
         });
         let bytes = serde_json::to_vec(&release).unwrap();
         let decoded = decode_reply(response(200, &bytes)).expect("decodes");
-        assert!(matches!(
-            decoded,
-            Some(WorkerProtocolMessage::Release(_))
-        ));
+        assert!(matches!(decoded, Some(WorkerProtocolMessage::Release(_))));
     }
 
     #[test]

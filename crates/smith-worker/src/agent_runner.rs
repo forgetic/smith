@@ -4,26 +4,64 @@
 //! lifecycle — prepare the checkout, run one agent turn, map the result to a
 //! [`JobOutcome`](crate::executor::JobOutcome), commit/push or discard. The
 //! *agent turn itself* is abstracted behind [`AgentRunner`] so the orchestration
-//! is independent of how the turn is produced:
+//! is independent of how the turn is produced — and, crucially, so the worker
+//! links **no** agent/LLM code: the agent runs out-of-process behind the
+//! `anvil-process-protocol` wire contract.
 //!
-//! - [`PiAgentRunner`] runs the `pi`-SDK coding loop **in-process** on the
-//!   worker's asupersync runtime (the consolidated path — no subprocess).
-//! - [`ExternalCommandRunner`] spawns an external program speaking the
-//!   `TEMPER_CODING_WORKSPACE_CONTEXT` / `_RESULT` file protocol (the generic
-//!   path; still used by the examples' deterministic `greeting` stand-in and any
-//!   non-Smith coder).
-//! - test fakes return scripted results without any LLM or subprocess.
+//! - [`OutOfProcessRunner`](crate::out_of_process_runner::OutOfProcessRunner)
+//!   spawns an agent program (the `anvil-agent` binary by default, or any coder)
+//!   speaking the protocol: context in via `TEMPER_CODING_WORKSPACE_CONTEXT`,
+//!   step-progress out on stdout (relayed via a [`ProgressSink`]), result back
+//!   via `TEMPER_CODING_WORKSPACE_RESULT`. This is the production path and the
+//!   reuse contract — "bring any agent that speaks the protocol".
+//! - test fakes return scripted results (and may emit scripted progress)
+//!   without any subprocess.
 //!
-//! This is the same boundary the future sans-IO sub-agent work plugs into: a
-//! sub-agent is "one LLM call with custom context and an optional workspace",
-//! i.e. another `AgentRunner`.
+//! The agent has git credentials only via the prepared checkout (to push
+//! commits/checkpoints); it never calls the forge API. Step-progress markers
+//! are crash-recovery checkpoints the worker relays onward to the forge.
 
 use std::path::Path;
 
-use smith_temper_agent::WorkspaceContext;
+use anvil_process_protocol::{StepProgress, WorkspaceContext};
 use temper_worker_protocol::FailureClass;
 
-pub use smith_temper_agent::WorkspaceResult;
+pub use anvil_process_protocol::WorkspaceResult;
+
+/// Where an [`AgentRunner`] reports step-progress checkpoints during a turn.
+///
+/// The runner emits one [`StepProgress`] per coherent step boundary (a marker
+/// of what was done and what was pushed); the sink is the worker's hook to
+/// relay it onward to the forge (via the daemon — the worker has no forge API
+/// client itself; the forge API is the daemon's job). Implementations must be
+/// cheap and non-blocking: a slow or failing sink must never stall or fail the
+/// agent turn, whose real product is the result + the pushed commits.
+pub trait ProgressSink: Send + Sync {
+    /// Records one checkpoint. Infallible by contract — swallow transport
+    /// trouble rather than surfacing it into the turn.
+    fn report(&self, progress: StepProgress);
+}
+
+/// A [`ProgressSink`] that logs each checkpoint via [`crate::observability`] and
+/// does nothing else. The default sink until the worker→daemon progress relay
+/// lands; safe in production now.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LoggingProgressSink;
+
+impl ProgressSink for LoggingProgressSink {
+    fn report(&self, progress: StepProgress) {
+        println!("{}", crate::observability::step_progress_line(&progress));
+    }
+}
+
+/// A [`ProgressSink`] that discards every checkpoint. For paths that do not
+/// relay progress (e.g. the stub executor, or tests not asserting on it).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NullProgressSink;
+
+impl ProgressSink for NullProgressSink {
+    fn report(&self, _progress: StepProgress) {}
+}
 
 /// Why an agent turn could not produce a [`WorkspaceResult`].
 ///
@@ -77,5 +115,6 @@ pub trait AgentRunner: Send + Sync {
         &self,
         context: &WorkspaceContext,
         cwd: &Path,
+        progress: &dyn ProgressSink,
     ) -> impl std::future::Future<Output = Result<WorkspaceResult, AgentRunError>> + Send;
 }

@@ -99,8 +99,21 @@ Properties and limits (state them honestly):
 
 ## The relay decision: (A) agent → worker → forge
 
+> **Relay path refinement (discovered during implementation).** The worker does
+> **git-push only** today; it has no forge-API client. The forge API (comments,
+> PR bodies, labels, verdict apply) is owned by the **daemon** (temper's
+> `apply_verdict`). So the full relay is **agent → worker → daemon → forge**,
+> reusing the existing worker→daemon channel rather than giving the worker a new
+> forge client (which would split forge-API ownership). This pass lands the
+> agent→worker half end-to-end (the agent emits step-progress; the worker spawns
+> the agent, parses the live stream, and routes each marker through a
+> `ProgressSink` seam — a logging sink ships now). The worker→daemon→forge half
+> (a temper protocol addition for progress markers + daemon body/comment update)
+> is the next slice; the seam is in place for it.
+
 When the agent finishes a step it reports progress **to the worker**, and the
-**worker** relays it to the forge (tick a todo box, update the PR body/comment).
+**worker** relays it onward to the forge (via the daemon: tick a todo box,
+update the PR body/comment).
 
 - The **agent has git credentials** (provided via the prepared workspace) to
   **push commits** — and that is *all* the forge access it has.
@@ -206,6 +219,28 @@ after crates move.
    drive the out-of-process agent; add coverage for the step-progress protocol,
    the progress→forge relay, and crash-recovery resume (partial push + marker →
    next agent resumes from the checkpoint).
+
+## Examples/deploy follow-up (tracked, not done in this pass)
+
+The hermetic test gate (smith `cargo dev-test`, incl. the out-of-process worker
+e2e) is green. What remains is an **ops/shell sweep** that needs full-topology
+verification (real Forgejo + runner), deliberately left for an operator-present
+session:
+
+- `examples/{basic,reference}-delivery/run.sh` and `deploy/` build/run the moved
+  bins (`smith-temper-agent-cli`, the responder bins, `smith-coding-agent`).
+  These must now build/run the **anvil** bins (`anvil-agent` + the responders
+  from the anvil repo). The worker's `--agent-command smith` already spawns
+  `anvil-agent` (resolve it on `PATH`, or pass `--agent-arg --agent-program
+  --agent-arg /path/to/anvil-agent`).
+- CI's two agent-side jig e2e steps were removed (the coding-agent⇄jig test is
+  anvil's; the basic-delivery topology e2e must be re-pointed at `anvil-agent`).
+- Docs in `deploy/README.md`, the example READMEs, and prompt dirs reference the
+  old in-process/`smith-coding-agent` model and should be updated to the
+  out-of-process `anvil-agent` model.
+
+None of these affect the smith library/worker correctness, which is fully
+covered by the hermetic suite.
 
 ## Non-goals / later
 

@@ -1,9 +1,6 @@
 [workspace]
 members = [
-    "crates/smith-agent",
     "crates/smith-io-engine",
-    "crates/smith-temper-agent",
-    "crates/smith-temper-agent-cli",
     "crates/smith-worker",
 ]
 resolver = "2"
@@ -18,12 +15,12 @@ rust-version = "1.88"
 version = "0.1.0"
 
 [workspace.dependencies]
-# Pinned to the exact version `pi_agent_rust 0.1.18` pulls in. The pi file/bash
-# tools (and, in-process now, the coding-agent loop) drive an asupersync reactor.
-# Kept in lockstep with temper's `=0.3.2` so the whole local toolchain — smith,
-# temper's serde DTO crates, and pi-sdk — resolves one asupersync version.
+# Smith is orchestration-only: the worker is an HTTP client + git driver on the
+# asupersync runtime and links no agent/LLM code (the coding agent moved
+# out-of-process into the `anvil` repo). Kept in lockstep with temper's `=0.3.2`
+# so smith, temper's serde DTO crates, and anvil-process-protocol resolve one
+# asupersync version.
 asupersync = "=0.3.2"
-pi_agent_rust = "0.1.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = "1"

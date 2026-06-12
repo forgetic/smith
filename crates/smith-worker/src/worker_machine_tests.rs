@@ -321,7 +321,9 @@ fn poll_transport_error_backs_off_and_logs() {
     run(&mut machine, vec![WorkerCompletion::Registered(Ok(()))]);
     let requests = run(
         &mut machine,
-        vec![WorkerCompletion::PollReply(Err("connection refused".to_string()))],
+        vec![WorkerCompletion::PollReply(Err(
+            "connection refused".to_string()
+        ))],
     );
     assert!(
         requests

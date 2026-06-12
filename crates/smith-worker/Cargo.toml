@@ -7,24 +7,31 @@ license.workspace = true
 description = "Smith worker process: long-polls a Temper daemon and runs role/coding jobs. Speaks only the worker/daemon wire protocol; never calls the Forge API."
 
 [dependencies]
+anvil-process-protocol = { path = "../../../anvil/crates/anvil-process-protocol" }
 asupersync.workspace = true
 smith-io-engine = { path = "../smith-io-engine" }
-smith-temper-agent = { path = "../smith-temper-agent" }
 temper-worker-protocol = { path = "../../../temper/crates/temper-worker-protocol" }
 serde.workspace = true
 serde_json.workspace = true
 tempfile = "3"
 thiserror = "2"
-tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "process"] }
+tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
 
 [dev-dependencies]
 axum = "0.8"
+anvil-process-protocol = { path = "../../../anvil/crates/anvil-process-protocol" }
 smith-io-engine = { path = "../smith-io-engine" }
-smith-temper-agent = { path = "../smith-temper-agent", features = ["test-provider-base-url-override"] }
-smith-agent = { path = "../smith-agent" }
-jig-server = { path = "../../../jig/crates/jig-server" }
-jig-core = { path = "../../../jig/crates/jig-core" }
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "net", "process"] }
+
+# A deterministic, hermetic agent that speaks the anvil-process-protocol: writes
+# a product file, emits step-progress, writes a result. Lets the worker e2e drive
+# the real out-of-process boundary without a cross-repo binary path or an LLM, via
+# CARGO_BIN_EXE_smith-fake-agent. (The real `anvil-agent` ⇄ jig integration is
+# tested in the anvil repo.)
+[[bin]]
+name = "smith-fake-agent"
+path = "tests/support/smith_fake_agent.rs"
+test = false
 
 [lints]
 workspace = true

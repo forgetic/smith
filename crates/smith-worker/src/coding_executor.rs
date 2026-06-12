@@ -2,15 +2,15 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde::Deserialize;
-use smith_temper_agent::{
+use anvil_process_protocol::{
     WorkspaceContext, WorkspaceGuidance, WorkspaceRepository, WorkspaceResult, WorkspaceWorkItem,
 };
+use serde::Deserialize;
 use temper_worker_protocol::{
     Assign, Branch, FailureClass, JobArtifactSnapshot, JobChild, JobRepository,
 };
 
-use crate::agent_runner::{AgentRunError, AgentRunner};
+use crate::agent_runner::{AgentRunError, AgentRunner, ProgressSink};
 use crate::executor::{JobExecutor, JobOutcome};
 use crate::workspace::{
     RoleGitIdentity, Workspace, WorkspaceConfig, WorkspaceError, forgejo_remote_url,
@@ -40,6 +40,9 @@ pub struct CodingExecutorConfig {
 pub struct CodingExecutor<R: AgentRunner> {
     config: CodingExecutorConfig,
     runner: Arc<R>,
+    /// Where agent step-progress checkpoints are relayed (logging by default;
+    /// the worker→daemon→forge relay plugs in here later).
+    progress: Arc<dyn ProgressSink>,
 }
 
 impl<R: AgentRunner> CodingExecutor<R> {
@@ -47,7 +50,15 @@ impl<R: AgentRunner> CodingExecutor<R> {
         Self {
             config,
             runner,
+            progress: Arc::new(crate::agent_runner::LoggingProgressSink),
         }
+    }
+
+    /// Overrides the step-progress sink (e.g. a daemon-relay sink, or a test
+    /// recorder).
+    pub fn with_progress_sink(mut self, progress: Arc<dyn ProgressSink>) -> Self {
+        self.progress = progress;
+        self
     }
 }
 
@@ -55,13 +66,15 @@ impl<R: AgentRunner + 'static> JobExecutor for CodingExecutor<R> {
     fn execute(&self, assign: Assign) -> impl std::future::Future<Output = JobOutcome> + Send {
         let config = self.config.clone();
         let runner = Arc::clone(&self.runner);
-        async move { execute(config, runner, assign).await }
+        let progress = Arc::clone(&self.progress);
+        async move { execute(config, runner, progress, assign).await }
     }
 }
 
 async fn execute<R: AgentRunner>(
     config: CodingExecutorConfig,
     runner: Arc<R>,
+    progress: Arc<dyn ProgressSink>,
     assign: Assign,
 ) -> JobOutcome {
     let artifact_item = assign.artifact.item.clone();
@@ -166,12 +179,18 @@ async fn execute<R: AgentRunner>(
         &allowed_verdicts,
     );
 
-    // Run one agent turn in-process (the prepared checkout is the cwd). The
-    // runner owns the LLM/subprocess/test mechanism; the executor owns the
-    // workspace lifecycle around it.
-    let result = match runner.run(&workspace_context, workspace.path()).await {
+    // Run one agent turn out-of-process (the prepared checkout is the cwd). The
+    // runner owns the agent mechanism (a spawned `anvil-agent`, an external
+    // coder, or a test fake) and streams step-progress checkpoints to the sink;
+    // the executor owns the workspace lifecycle around it.
+    let result = match runner
+        .run(&workspace_context, workspace.path(), progress.as_ref())
+        .await
+    {
         Ok(result) => result,
-        Err(AgentRunError { class, message }) => return failure(class, redact_secret(message, &token)),
+        Err(AgentRunError { class, message }) => {
+            return failure(class, redact_secret(message, &token));
+        }
     };
 
     match mode {
@@ -335,12 +354,11 @@ fn failure(class: FailureClass, message: impl Into<String>) -> JobOutcome {
 
 /// Assembles the typed [`WorkspaceContext`] the agent turn receives.
 ///
-/// This is the in-process equivalent of the JSON document the worker used to
-/// write to `$TEMPER_CODING_WORKSPACE_CONTEXT` for the subprocess: identical
-/// field shapes (the agent crate owns the struct), but built and handed over
-/// directly instead of round-tripping through a temp file. `work_item.context`
-/// stays a pretty-printed JSON *string* of the artifact, surfaced to the model
-/// verbatim, exactly as before.
+/// The [`OutOfProcessRunner`](crate::out_of_process_runner::OutOfProcessRunner)
+/// serializes this to the JSON document the agent reads from
+/// `$TEMPER_CODING_WORKSPACE_CONTEXT`; the struct (and thus the wire shape) is
+/// owned by `anvil-process-protocol`. `work_item.context` stays a pretty-printed
+/// JSON *string* of the artifact, surfaced to the model verbatim.
 #[allow(clippy::too_many_arguments)]
 fn build_workspace_context(
     repo: &str,
@@ -390,7 +408,10 @@ fn build_workspace_context(
             role: role.to_string(),
             queue: queue.to_string(),
             kind: artifact_kind.to_string(),
-            target: format!("{target_kind} {{ number: ItemNumber({}) }}", artifact.number),
+            target: format!(
+                "{target_kind} {{ number: ItemNumber({}) }}",
+                artifact.number
+            ),
             context: work_item_context,
         },
         base_branch: base_branch.to_string(),

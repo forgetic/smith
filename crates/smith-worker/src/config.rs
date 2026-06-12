@@ -86,26 +86,32 @@ pub struct CodingSurface {
 
 /// How the coding executor produces an agent turn.
 ///
-/// `--agent-command` selects the program: the literal `smith` (or the legacy
-/// `smith-coding-agent`) runs the `pi`-SDK loop **in-process**; any other value
-/// is an external program spawned over the context/result file protocol (the
-/// examples' deterministic `greeting` stand-in, or an operator-provided coder).
-/// Trailing `--agent-arg` values are the agent's flags: for the in-process
-/// Smith agent they are parsed here (`--auth` / `--auth-file` / `--codex-model`
-/// / `--max-iterations` / `--config-dir`); for an external command they are
-/// passed through verbatim.
+/// Both surfaces resolve to a **command the worker spawns out-of-process** over
+/// the `anvil-process-protocol`. `--agent-command` selects the program: the
+/// literal `smith` (or the legacy `smith-coding-agent`) selects the Smith agent
+/// surface, which spawns `anvil-agent` (overridable via `--agent-program`); any
+/// other value is spawned verbatim (the examples' deterministic `greeting`
+/// stand-in, or an operator-provided coder). Trailing `--agent-arg` values are
+/// the agent's flags: for the Smith surface they are parsed here and re-rendered
+/// onto the `anvil-agent` command (`--agent-program` / `--auth` / `--auth-file`
+/// / `--codex-model` / `--max-iterations` / `--config-dir` / `--enable-subagents`);
+/// for an external command they are passed through verbatim.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgentSurface {
-    /// The in-process Smith `pi`-SDK coding agent.
+    /// The Smith coding agent, spawned out-of-process as `anvil-agent`.
     Smith(SmithAgentSurface),
     /// An external program spawned per job (program first, then args).
     ExternalCommand(Vec<String>),
 }
 
 /// Parsed configuration for the in-process Smith coding agent — the flags the
-/// former `smith-coding-agent` binary parsed for itself.
+/// out-of-process `anvil-agent` binary parses for itself.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SmithAgentSurface {
+    /// The agent program the worker spawns. Defaults to [`ANVIL_AGENT_PROGRAM`]
+    /// (`anvil-agent`, resolved on `PATH`); override with an absolute path via
+    /// `--agent-program` when it is not on `PATH`.
+    pub agent_program: String,
     pub auth: AgentAuthChoice,
     pub codex_model: Option<String>,
     pub auth_file: Option<PathBuf>,
@@ -115,9 +121,47 @@ pub struct SmithAgentSurface {
     pub enable_subagents: bool,
 }
 
-/// Which credential the in-process Smith agent authenticates with. Mirrors
-/// `smith_temper_agent::AuthChoice` but is parsed in the worker so the config
-/// crate stays free of the agent dependency; the binary maps it across.
+impl SmithAgentSurface {
+    /// Renders the spawn command `OutOfProcessRunner` runs: the agent program
+    /// followed by the same flags `anvil-agent` parses (`--auth`, `--auth-file`,
+    /// `--codex-model`, `--config-dir`, `--max-iterations`, `--enable-subagents`).
+    pub fn into_command(self) -> Vec<String> {
+        let mut command = vec![self.agent_program];
+        command.push("--auth".to_string());
+        command.push(
+            match self.auth {
+                AgentAuthChoice::DeepSeek => "deepseek",
+                AgentAuthChoice::ChatGptOAuth => "chatgpt-oauth",
+                AgentAuthChoice::AnthropicOAuth => "anthropic-oauth",
+            }
+            .to_string(),
+        );
+        if let Some(codex_model) = self.codex_model {
+            command.push("--codex-model".to_string());
+            command.push(codex_model);
+        }
+        if let Some(auth_file) = self.auth_file {
+            command.push("--auth-file".to_string());
+            command.push(auth_file.to_string_lossy().into_owned());
+        }
+        if let Some(config_dir) = self.config_dir {
+            command.push("--config-dir".to_string());
+            command.push(config_dir.to_string_lossy().into_owned());
+        }
+        if let Some(max_iterations) = self.max_iterations {
+            command.push("--max-iterations".to_string());
+            command.push(max_iterations.to_string());
+        }
+        if self.enable_subagents {
+            command.push("--enable-subagents".to_string());
+        }
+        command
+    }
+}
+
+/// Which credential the Smith agent authenticates with. Mirrors the agent's
+/// `AuthChoice` but is parsed in the worker (which links no agent code); the
+/// worker renders it back to the `--auth` flag in [`SmithAgentSurface::into_command`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AgentAuthChoice {
     DeepSeek,
@@ -125,12 +169,15 @@ pub enum AgentAuthChoice {
     AnthropicOAuth,
 }
 
-/// The program name that selects the in-process Smith agent.
+/// The program name that selects the Smith out-of-process agent surface.
 const SMITH_AGENT_PROGRAM: &str = "smith";
-/// Legacy program name (the former subprocess binary) — also selects in-process.
+/// Legacy program name (the former in-process selector) — also selects the
+/// Smith surface.
 const SMITH_AGENT_LEGACY_PROGRAM: &str = "smith-coding-agent";
+/// The agent binary the Smith surface spawns by default.
+pub const ANVIL_AGENT_PROGRAM: &str = "anvil-agent";
 
-pub const USAGE: &str = "smith-worker --daemon-url <url> --worker-id <id> --capability <owner/name>:<role> [--capability ...] [--max-concurrent <n>] [--poll-wait-ms <n>] [--heartbeat-interval-ms <n>] [--executor <stub|coding>] [--workspace-root <path>] [--git-base-url <url>] [--agent-command <program>] [--agent-arg <arg> ...]";
+pub const USAGE: &str = "smith-worker --daemon-url <url> --worker-id <id> --capability <owner/name>:<role> [--capability ...] [--max-concurrent <n>] [--poll-wait-ms <n>] [--heartbeat-interval-ms <n>] [--executor <stub|coding>] [--workspace-root <path>] [--git-base-url <url>] [--agent-command <smith|program>] [--agent-arg <arg> ...]\n  --agent-command smith spawns the out-of-process anvil-agent; its --agent-arg values (--agent-program, --auth, --auth-file, --codex-model, --config-dir, --max-iterations, --enable-subagents) become the agent's flags. Any other --agent-command is spawned verbatim over the same protocol.";
 
 // `Run(WorkerConfig)` is far larger than `Help`, but `ParseOutcome` is produced
 // exactly once at process start and immediately destructured — the size
@@ -365,6 +412,7 @@ fn agent_surface(program: &str, args: Vec<String>) -> Result<AgentSurface, Strin
 /// Parses the in-process Smith agent flags from the `--agent-arg` values — the
 /// same flags the former `smith-coding-agent` binary accepted.
 fn parse_smith_agent_surface(args: Vec<String>) -> Result<SmithAgentSurface, String> {
+    let mut agent_program = ANVIL_AGENT_PROGRAM.to_string();
     let mut auth = AgentAuthChoice::ChatGptOAuth;
     let mut codex_model = None;
     let mut auth_file = None;
@@ -377,6 +425,11 @@ fn parse_smith_agent_surface(args: Vec<String>) -> Result<SmithAgentSurface, Str
         match arg.as_str() {
             "--enable-subagents" => {
                 enable_subagents = true;
+            }
+            "--agent-program" => {
+                agent_program = iter
+                    .next()
+                    .ok_or_else(|| "--agent-program requires a value".to_string())?;
             }
             "--auth" => {
                 let value = iter
@@ -397,18 +450,18 @@ fn parse_smith_agent_surface(args: Vec<String>) -> Result<SmithAgentSurface, Str
                 ));
             }
             "--config-dir" => {
-                config_dir = Some(PathBuf::from(
-                    iter.next()
-                        .ok_or_else(|| "--config-dir requires a value".to_string())?,
-                ));
+                config_dir =
+                    Some(PathBuf::from(iter.next().ok_or_else(|| {
+                        "--config-dir requires a value".to_string()
+                    })?));
             }
             "--max-iterations" => {
                 let value = iter
                     .next()
                     .ok_or_else(|| "--max-iterations requires a value".to_string())?;
-                let parsed: usize = value
-                    .parse()
-                    .map_err(|error| format!("--max-iterations must be a positive integer: {error}"))?;
+                let parsed: usize = value.parse().map_err(|error| {
+                    format!("--max-iterations must be a positive integer: {error}")
+                })?;
                 if parsed == 0 {
                     return Err("--max-iterations must be greater than zero".to_string());
                 }
@@ -416,13 +469,14 @@ fn parse_smith_agent_surface(args: Vec<String>) -> Result<SmithAgentSurface, Str
             }
             other => {
                 return Err(format!(
-                    "unknown smith agent arg `{other}`; expected --auth, --codex-model, --auth-file, --config-dir, --max-iterations, or --enable-subagents"
+                    "unknown smith agent arg `{other}`; expected --agent-program, --auth, --codex-model, --auth-file, --config-dir, --max-iterations, or --enable-subagents"
                 ));
             }
         }
     }
 
     Ok(SmithAgentSurface {
+        agent_program,
         auth,
         codex_model,
         auth_file,
@@ -633,6 +687,7 @@ mod tests {
                 workspace_root: PathBuf::from("/var/lib/smith/workspaces"),
                 git_base_url: "https://forgejo.example".to_string(),
                 agent: AgentSurface::Smith(SmithAgentSurface {
+                    agent_program: "anvil-agent".to_string(),
                     auth: AgentAuthChoice::AnthropicOAuth,
                     codex_model: None,
                     auth_file: Some(PathBuf::from("/tmp/auth.json")),
@@ -698,6 +753,7 @@ mod tests {
         assert_eq!(
             surface.agent,
             AgentSurface::Smith(SmithAgentSurface {
+                agent_program: "anvil-agent".to_string(),
                 auth: AgentAuthChoice::ChatGptOAuth,
                 codex_model: None,
                 auth_file: None,

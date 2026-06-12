@@ -1,22 +1,32 @@
-//! Hermetic full-worker end-to-end test: a real smith-worker runs a real coding
-//! job through the NATIVE agent loop against a jig fake LLM, with NO external
-//! Forgejo or runner.
+//! Hermetic full-worker end-to-end test of the **out-of-process agent boundary**.
+//!
+//! A real `smith-worker` runs a real coding job by spawning a real agent
+//! **process** (`smith-fake-agent`, a deterministic protocol speaker — no LLM,
+//! no git), with NO external Forgejo or runner. This exercises the orchestration
+//! path and the `anvil-process-protocol` boundary; the agent's own LLM loop is
+//! tested in the `anvil` repo against jig.
 //!
 //! Topology, all in one process:
-//! - a **jig `FakeLlm`** scripts the engineer agent to write a file, then finish;
 //! - a **fake daemon** (tokio axum) speaks the worker/daemon wire protocol:
 //!   accepts register, assigns one real coding job (a full `WireJobContext`
 //!   payload), then accepts the result;
-//! - a **real `smith-worker`** runs on its own asupersync runtime thread with
-//!   `ExecutorSelection::Coding` + `PiAgentRunner` pointed at the jig base URL;
+//! - a **real `smith-worker`** runs on its own asupersync runtime thread with an
+//!   [`OutOfProcessRunner`] pointed at the `smith-fake-agent` binary;
+//! - a **recording [`ProgressSink`]** captures every step-progress marker the
+//!   worker relayed from the agent's stdout;
 //! - git remotes are local `file://` bare repos seeded with an initial commit.
 //!
 //! This drives the entire production path: worker register → poll → assign →
-//! `CodingExecutor` prepares the checkout → `run_coding_agent_native`
-//! (AgentMachine + asupersync shell + pi tools) edits the working tree → the
-//! executor commits and pushes the branch to the `file://` origin → reports
-//! Success. The assertions verify the branch landed on origin with the agent's
-//! file, and the worker reported Success.
+//! `CodingExecutor` prepares the checkout → spawns `smith-fake-agent` over the
+//! protocol → the agent writes the product file + emits step-progress → the
+//! worker relays progress, commits and pushes the branch to the `file://` origin
+//! → reports Success. Assertions verify the branch landed with the agent's file,
+//! the worker reported Success, and the step-progress checkpoints were relayed.
+//!
+//! A second test injects an agent crash *after* it emits progress but *before* it
+//! writes the result — the crash-recovery scenario: the worker reports a
+//! transient failure (re-dispatchable) and the already-emitted progress markers
+//! were still relayed.
 //!
 //! Hermetic and fast; runs by default.
 
@@ -24,8 +34,9 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use anvil_process_protocol::{StepProgress, StepState};
 use axum::{
     Json, Router,
     extract::State,
@@ -33,15 +44,12 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
-use jig_core::{Reply, Script, StopReason, Turn};
-use jig_server::FakeLlm;
 use serde_json::json;
-use smith_temper_agent::ProviderConfig;
-use smith_worker::{
-    CodingExecutor, CodingExecutorConfig, ExecutorSelection, PiAgentRunner, RoleGitIdentity,
-    WorkerConfig, run_worker,
-};
 use smith_worker::config::CapabilitySpec;
+use smith_worker::{
+    CodingExecutor, CodingExecutorConfig, ExecutorSelection, OutOfProcessRunner, ProgressSink,
+    RoleGitIdentity, WorkerConfig, run_worker,
+};
 use temper_worker_protocol::{
     Artifact, Assign, ProtocolError, Release, ReleaseDisposition, ResultStatus,
     WORKER_PROTOCOL_VERSION, WorkerProtocolMessage,
@@ -49,178 +57,47 @@ use temper_worker_protocol::{
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 
+/// Records every step-progress marker the worker relays, so the test can assert
+/// the agent→worker→sink path fired.
+#[derive(Clone, Default)]
+struct RecordingProgressSink {
+    markers: Arc<Mutex<Vec<StepProgress>>>,
+}
+
+impl ProgressSink for RecordingProgressSink {
+    fn report(&self, progress: StepProgress) {
+        self.markers.lock().expect("markers lock").push(progress);
+    }
+}
+
+impl RecordingProgressSink {
+    fn snapshot(&self) -> Vec<StepProgress> {
+        self.markers.lock().expect("markers lock").clone()
+    }
+}
+
 #[tokio::test]
-async fn worker_runs_a_real_coding_job_through_the_native_loop() {
-    // --- Git fixture: a bare origin seeded with an initial commit on main. ---
+async fn worker_runs_a_real_coding_job_through_the_out_of_process_agent() {
     let fixture = GitFixture::new();
 
-    // --- Jig fake LLM: the engineer writes a product file, then finishes (head
-    //     path, no verdict). ---
-    let fake = FakeLlm::start(Script::rule(|view| {
-        if view.prior_tool_results == 0 {
-            Reply {
-                turns: vec![Turn::ToolCall {
-                    id: "call_write".to_string(),
-                    name: "write".to_string(),
-                    args: json!({
-                        "path": "GREETING.md",
-                        "content": "hello from the native loop\n"
-                    }),
-                }],
-                usage: Default::default(),
-                stop: StopReason::ToolCalls,
-            }
-        } else {
-            Reply::text(r#"{"summary":"Created GREETING.md"}"#)
-        }
-    }))
-    .expect("start fake LLM");
-
-    // --- Worker config: coding executor pointed at the jig provider. ---
-    let config = worker_config(&fixture);
-
-    // --- Fake daemon assigns one coding job, then accepts the result. ---
     let (daemon_url, observed) = spawn_fake_daemon(&fixture).await;
     let config = WorkerConfig {
         daemon_url,
-        ..config
+        ..worker_config()
     };
 
-    // --- Build the real coding executor with a jig-backed PiAgentRunner. ---
-    let provider = ProviderConfig::new(
-        "jig-openai-compatible",
-        "jig-coding-worker-e2e",
-        "https://example.invalid/unused",
-        "sk-jig-test",
-    )
-    .with_base_url_override(fake.base_url());
-    let runner = Arc::new(PiAgentRunner::new(provider, 6, None));
+    // The out-of-process runner spawns the deterministic fake agent binary,
+    // which writes GREETING.md and emits two step-progress markers.
+    let runner = Arc::new(OutOfProcessRunner::new(vec![fake_agent_bin()]));
     let executor_config = CodingExecutorConfig {
         workspace_root: fixture.workspace_root.clone(),
         git_base_url: fixture.git_base_url(),
         role_identities: role_identities(),
     };
-    let executor = Arc::new(CodingExecutor::new(executor_config, runner));
-
-    // --- Run the real worker on its own asupersync runtime thread. ---
-    spawn_worker_thread(config, executor);
-
-    // --- Await the daemon observing the result. ---
-    let observed = tokio::time::timeout(std::time::Duration::from_secs(30), observed)
-        .await
-        .expect("daemon observes a result within the timeout")
-        .expect("daemon sends the observed run");
-
-    // --- Assert: the worker reported Success with a branch. ---
-    assert_eq!(observed.result.status, ResultStatus::Success, "result: {:?}", observed.result);
-    let branch = observed.result.branch.expect("success carries a branch");
-    assert_eq!(branch.name, "agent/pr-for-code-7");
-    assert_eq!(branch.head_sha.len(), 40, "head sha looks like a real sha");
-
-    // --- Assert: the branch landed on origin with the agent's file. ---
-    let pushed_sha = fixture.origin_rev("refs/heads/agent/pr-for-code-7");
-    assert_eq!(pushed_sha, branch.head_sha, "the reported sha is what was pushed");
-    let greeting = fixture.origin_show("refs/heads/agent/pr-for-code-7:GREETING.md");
-    assert_eq!(
-        greeting, "hello from the native loop",
-        "the agent's product file was committed and pushed"
+    let sink = RecordingProgressSink::default();
+    let executor = Arc::new(
+        CodingExecutor::new(executor_config, runner).with_progress_sink(Arc::new(sink.clone())),
     );
-    // The commit message carries the correlation key + Closes trailer.
-    let subject = fixture.origin_log_format("refs/heads/agent/pr-for-code-7", "%s");
-    assert_eq!(subject, "Implement pr-for-code-7");
-    let body = fixture.origin_log_format("refs/heads/agent/pr-for-code-7", "%b");
-    assert_eq!(body, "Closes #7");
-
-    // The fake LLM was actually exercised (a tool loop, not a single turn).
-    assert!(fake.requests().len() > 1, "expected the native loop to do a tool round");
-}
-
-/// The engineer agent delegates to an in-workspace `investigate` sub-agent
-/// (enabled via PiAgentRunner::with_subagents), the sub-agent runs its own loop
-/// reading the checkout and reporting a finding, the finding flows back into the
-/// engineer's context, and the engineer writes a product file citing it — all
-/// through the real worker against jig. Verifies sub-agents end to end in the
-/// production coding path.
-#[tokio::test]
-async fn worker_coding_job_uses_an_investigate_subagent() {
-    let fixture = GitFixture::new();
-
-    // One jig fake serves BOTH the engineer and the nested investigate
-    // sub-agent (they share the same provider/base-url). Branch on the system
-    // prompt: the sub-agent's system prompt says "investigation sub-agent".
-    let fake = FakeLlm::start(Script::rule(|view| {
-        let is_subagent = view
-            .messages
-            .iter()
-            .any(|m| m.role == "system" && m.content.contains("investigation sub-agent"));
-
-        if is_subagent {
-            // Investigator: read the seeded README, then report a finding.
-            if view.prior_tool_results == 0 {
-                Reply {
-                    turns: vec![Turn::ToolCall {
-                        id: "sub_read".to_string(),
-                        name: "read".to_string(),
-                        args: json!({ "path": "README.md" }),
-                    }],
-                    usage: Default::default(),
-                    stop: StopReason::ToolCalls,
-                }
-            } else {
-                Reply::text("Finding: the project seed marker is present.")
-            }
-        } else {
-            // Engineer: first delegate to the sub-agent, then (with its finding
-            // in context) write the product file and finish.
-            if view.prior_tool_results == 0 {
-                Reply {
-                    turns: vec![Turn::ToolCall {
-                        id: "call_investigate".to_string(),
-                        name: "investigate".to_string(),
-                        args: json!({ "task": "summarize the repository seed" }),
-                    }],
-                    usage: Default::default(),
-                    stop: StopReason::ToolCalls,
-                }
-            } else if view.prior_tool_results == 1 {
-                Reply {
-                    turns: vec![Turn::ToolCall {
-                        id: "call_write".to_string(),
-                        name: "write".to_string(),
-                        args: json!({
-                            "path": "GREETING.md",
-                            "content": "investigated then greeted\n"
-                        }),
-                    }],
-                    usage: Default::default(),
-                    stop: StopReason::ToolCalls,
-                }
-            } else {
-                Reply::text(r#"{"summary":"Investigated and wrote GREETING.md"}"#)
-            }
-        }
-    }))
-    .expect("start fake LLM");
-
-    let config = worker_config(&fixture);
-    let (daemon_url, observed) = spawn_fake_daemon(&fixture).await;
-    let config = WorkerConfig { daemon_url, ..config };
-
-    let provider = ProviderConfig::new(
-        "jig-openai-compatible",
-        "jig-coding-worker-subagent-e2e",
-        "https://example.invalid/unused",
-        "sk-jig-test",
-    )
-    .with_base_url_override(fake.base_url());
-    // Enable the in-workspace sub-agent tool.
-    let runner = Arc::new(PiAgentRunner::new(provider, 8, None).with_subagents(true));
-    let executor_config = CodingExecutorConfig {
-        workspace_root: fixture.workspace_root.clone(),
-        git_base_url: fixture.git_base_url(),
-        role_identities: role_identities(),
-    };
-    let executor = Arc::new(CodingExecutor::new(executor_config, runner));
 
     spawn_worker_thread(config, executor);
 
@@ -229,6 +106,7 @@ async fn worker_coding_job_uses_an_investigate_subagent() {
         .expect("daemon observes a result within the timeout")
         .expect("daemon sends the observed run");
 
+    // The worker reported Success with a branch.
     assert_eq!(
         observed.result.status,
         ResultStatus::Success,
@@ -237,27 +115,115 @@ async fn worker_coding_job_uses_an_investigate_subagent() {
     );
     let branch = observed.result.branch.expect("success carries a branch");
     assert_eq!(branch.name, "agent/pr-for-code-7");
+    assert_eq!(branch.head_sha.len(), 40, "head sha looks like a real sha");
 
-    // The engineer's product file landed on origin.
-    let greeting = fixture.origin_show("refs/heads/agent/pr-for-code-7:GREETING.md");
-    assert_eq!(greeting, "investigated then greeted");
-
-    // The fake served BOTH the engineer's loop AND the nested sub-agent's loop:
-    // engineer (investigate call, write call, final text) + sub-agent (read,
-    // report) ⇒ several requests, and at least one sub-agent system prompt.
-    let requests = fake.requests();
-    assert!(
-        requests.len() >= 4,
-        "expected the engineer + nested sub-agent loops, got {} requests",
-        requests.len()
+    // The branch landed on origin with the agent's product file.
+    let pushed_sha = fixture.origin_rev("refs/heads/agent/pr-for-code-7");
+    assert_eq!(
+        pushed_sha, branch.head_sha,
+        "the reported sha is what was pushed"
     );
+    let greeting = fixture.origin_show("refs/heads/agent/pr-for-code-7:GREETING.md");
+    assert_eq!(
+        greeting, "hello from the fake agent",
+        "the agent's product file was committed and pushed"
+    );
+    // The commit message carries the correlation key + Closes trailer.
+    assert_eq!(
+        fixture.origin_log_format("refs/heads/agent/pr-for-code-7", "%s"),
+        "Implement pr-for-code-7"
+    );
+    assert_eq!(
+        fixture.origin_log_format("refs/heads/agent/pr-for-code-7", "%b"),
+        "Closes #7"
+    );
+
+    // The worker relayed the agent's step-progress checkpoints (the crash-recovery
+    // channel): a Started marker and a Done marker, both stamped with the job's
+    // correlation key.
+    let markers = sink.snapshot();
+    assert_eq!(
+        markers.len(),
+        2,
+        "expected two step-progress markers: {markers:?}"
+    );
+    assert!(markers.iter().all(|m| m.correlation_key == "pr-for-code-7"));
+    assert_eq!(markers[0].state, StepState::Started);
+    assert_eq!(markers[1].state, StepState::Done);
+}
+
+#[tokio::test]
+async fn worker_reports_transient_failure_when_agent_crashes_after_progress() {
+    let fixture = GitFixture::new();
+
+    let (daemon_url, observed) = spawn_fake_daemon(&fixture).await;
+    let config = WorkerConfig {
+        daemon_url,
+        ..worker_config()
+    };
+
+    // The fake agent emits progress, then exits non-zero before writing a result
+    // — a crash mid-task. (A future slice has the agent push its partial work
+    // first so the next agent resumes; here we assert the worker's handling: the
+    // emitted markers were relayed, and the job is a re-dispatchable transient.)
+    // The crash knob is a command arg, not an env var, so concurrent test
+    // threads cannot race on it.
+    let runner = Arc::new(OutOfProcessRunner::new(vec![
+        fake_agent_bin(),
+        "--crash-after-progress".to_string(),
+    ]));
+    let executor_config = CodingExecutorConfig {
+        workspace_root: fixture.workspace_root.clone(),
+        git_base_url: fixture.git_base_url(),
+        role_identities: role_identities(),
+    };
+    let sink = RecordingProgressSink::default();
+    let executor = Arc::new(
+        CodingExecutor::new(executor_config, runner).with_progress_sink(Arc::new(sink.clone())),
+    );
+
+    spawn_worker_thread(config, executor);
+
+    let observed = tokio::time::timeout(std::time::Duration::from_secs(30), observed)
+        .await
+        .expect("daemon observes a result within the timeout")
+        .expect("daemon sends the observed run");
+
+    // The worker reported a transient failure (the crash is re-dispatchable).
+    assert_eq!(
+        observed.result.status,
+        ResultStatus::Failure,
+        "result: {:?}",
+        observed.result
+    );
+    let failure = observed.result.failure.expect("failure carries detail");
+    assert_eq!(
+        failure.class,
+        temper_worker_protocol::FailureClass::Transient
+    );
+
+    // The progress the agent emitted *before* crashing was still relayed — the
+    // recovery channel survives the crash.
+    let markers = sink.snapshot();
+    assert!(
+        markers.iter().any(|m| m.state == StepState::Started),
+        "the pre-crash Started marker must have been relayed: {markers:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The fake agent binary path (built by cargo as a [[bin]] of this crate).
+// ---------------------------------------------------------------------------
+
+fn fake_agent_bin() -> String {
+    env!("CARGO_BIN_EXE_smith-fake-agent").to_string()
 }
 
 // ---------------------------------------------------------------------------
 // Worker config + identities.
 // ---------------------------------------------------------------------------
 
-fn worker_config(_fixture: &GitFixture) -> WorkerConfig {
+fn worker_config() -> WorkerConfig {
     WorkerConfig {
         daemon_url: "http://placeholder".to_string(),
         worker_id: "coding-worker-e2e".to_string(),
@@ -327,7 +293,10 @@ async fn message_handler(
     let (reply_tx, reply_rx) = oneshot::channel();
     if state
         .requests
-        .send(DaemonRequest { message, reply: reply_tx })
+        .send(DaemonRequest {
+            message,
+            reply: reply_tx,
+        })
         .await
         .is_err()
     {
@@ -336,7 +305,11 @@ async fn message_handler(
     match reply_rx.await {
         Ok(DaemonReply::NoContent) => StatusCode::NO_CONTENT.into_response(),
         Ok(DaemonReply::Message(reply)) => Json(*reply).into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "fake daemon dropped reply").into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "fake daemon dropped reply",
+        )
+            .into_response(),
     }
 }
 
@@ -346,11 +319,15 @@ async fn spawn_fake_daemon(fixture: &GitFixture) -> (String, oneshot::Receiver<O
     let assign = coding_assign(fixture);
     tokio::spawn(fake_daemon_controller(request_rx, observed_tx, assign));
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind fake daemon");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind fake daemon");
     let addr = listener.local_addr().expect("fake daemon addr");
     let app = Router::new()
         .route("/v1/message", post(message_handler))
-        .with_state(AppState { requests: request_tx });
+        .with_state(AppState {
+            requests: request_tx,
+        });
     tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");
     });
@@ -376,7 +353,9 @@ async fn fake_daemon_controller(
                 )));
             }
             WorkerProtocolMessage::Poll(_) | WorkerProtocolMessage::Heartbeat(_) => {
-                let _ = request.reply.send(DaemonReply::Message(Box::new(poll_timeout())));
+                let _ = request
+                    .reply
+                    .send(DaemonReply::Message(Box::new(poll_timeout())));
             }
             WorkerProtocolMessage::Result(result) => {
                 let release = WorkerProtocolMessage::Release(Release {
@@ -475,7 +454,11 @@ impl GitFixture {
         git(["init", "--bare", path_str(&origin)]);
         seed_origin(&origin, temp.path());
         let workspace_root = temp.path().join("workspaces");
-        Self { temp, origin, workspace_root }
+        Self {
+            temp,
+            origin,
+            workspace_root,
+        }
     }
 
     fn git_base_url(&self) -> String {
@@ -506,9 +489,35 @@ fn seed_origin(origin: &Path, temp: &Path) {
     let seed = temp.join("seed");
     git(["init", "-b", "main", path_str(&seed)]);
     fs::write(seed.join("README.md"), "# seed\n").expect("seed file");
-    git(["-C", path_str(&seed), "-c", "user.name=Seed", "-c", "user.email=seed@example.test", "add", "README.md"]);
-    git(["-C", path_str(&seed), "-c", "user.name=Seed", "-c", "user.email=seed@example.test", "commit", "-m", "initial"]);
-    git(["-C", path_str(&seed), "remote", "add", "origin", path_str(origin)]);
+    git([
+        "-C",
+        path_str(&seed),
+        "-c",
+        "user.name=Seed",
+        "-c",
+        "user.email=seed@example.test",
+        "add",
+        "README.md",
+    ]);
+    git([
+        "-C",
+        path_str(&seed),
+        "-c",
+        "user.name=Seed",
+        "-c",
+        "user.email=seed@example.test",
+        "commit",
+        "-m",
+        "initial",
+    ]);
+    git([
+        "-C",
+        path_str(&seed),
+        "remote",
+        "add",
+        "origin",
+        path_str(origin),
+    ]);
     git(["-C", path_str(&seed), "push", "origin", "main"]);
 }
 
@@ -530,7 +539,10 @@ fn git_output<const N: usize>(args: [&str; N]) -> String {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    String::from_utf8(output.stdout).expect("utf8").trim_end_matches('\n').to_string()
+    String::from_utf8(output.stdout)
+        .expect("utf8")
+        .trim_end_matches('\n')
+        .to_string()
 }
 
 fn path_str(p: &Path) -> &str {

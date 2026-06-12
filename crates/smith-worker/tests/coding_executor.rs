@@ -1,15 +1,15 @@
 //! End-to-end tests for [`CodingExecutor`]: workspace prep, the agent turn (an
-//! in-process [`FakeAgentRunner`] standing in for the `pi`-SDK loop), and the
-//! result → [`JobOutcome`] mapping (commit/push on the writable head path,
+//! in-process [`FakeAgentRunner`] standing in for the out-of-process agent), and
+//! the result → [`JobOutcome`] mapping (commit/push on the writable head path,
 //! verdict routing otherwise).
 //!
-//! Before the daemon/worker consolidation these tests drove a fake coding agent
-//! as a shell *script* over the `TEMPER_CODING_WORKSPACE_CONTEXT` / `_RESULT`
-//! file protocol. The agent now runs in-process behind the [`AgentRunner`]
-//! seam, so the fake is an in-process runner: it captures the typed
-//! [`WorkspaceContext`] it receives, optionally writes a product diff into the
-//! checkout, and returns a scripted [`WorkspaceResult`] (or [`AgentRunError`]).
-//! The workspace/git/result-mapping coverage is unchanged.
+//! These exercise the executor's workspace/git/result-mapping logic, which is
+//! independent of *how* the agent turn is produced. The fake is an in-process
+//! [`AgentRunner`]: it captures the typed [`WorkspaceContext`] it receives,
+//! optionally writes a product diff into the checkout, and returns a scripted
+//! [`WorkspaceResult`] (or [`AgentRunError`]). The real out-of-process boundary
+//! (spawning an agent program, streaming step-progress) is covered separately by
+//! `coding_worker_e2e.rs`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -17,12 +17,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
+use anvil_process_protocol::{WorkspaceContext, WorkspaceResultChild};
 use serde::Serialize;
 use serde_json::{Value, json};
-use smith_temper_agent::{WorkspaceContext, WorkspaceResultChild};
 use smith_worker::{
     AgentRunError, AgentRunner, CodingExecutor, CodingExecutorConfig, JobExecutor, JobOutcome,
-    RoleGitIdentity, WorkspaceResult,
+    ProgressSink, RoleGitIdentity, WorkspaceResult,
 };
 use temper_worker_protocol::{Artifact, Assign, FailureClass, JobChild, WORKER_PROTOCOL_VERSION};
 use tempfile::TempDir;
@@ -708,14 +708,11 @@ impl AgentRunner for FakeAgentRunner {
         &self,
         context: &WorkspaceContext,
         cwd: &Path,
+        _progress: &dyn ProgressSink,
     ) -> Result<WorkspaceResult, AgentRunError> {
         *self.captured.lock().expect("capture lock") = Some(context.clone());
-        *self.observed_head_sha.lock().expect("head lock") = Some(git_output([
-            "-C",
-            path_str(cwd),
-            "rev-parse",
-            "HEAD",
-        ]));
+        *self.observed_head_sha.lock().expect("head lock") =
+            Some(git_output(["-C", path_str(cwd), "rev-parse", "HEAD"]));
 
         match self.behavior {
             AgentBehavior::Success => {
@@ -843,12 +840,20 @@ impl Fixture {
         }
     }
 
-    fn executor(&self, runner: FakeAgentRunner, include_identity: bool) -> CodingExecutor<FakeAgentRunner> {
+    fn executor(
+        &self,
+        runner: FakeAgentRunner,
+        include_identity: bool,
+    ) -> CodingExecutor<FakeAgentRunner> {
         let mut role_identities = BTreeMap::new();
         if include_identity {
             for (role, user, email) in [
                 ("engineer", "Smith Engineer", "smith-engineer@example.test"),
-                ("architect", "Smith Architect", "smith-architect@example.test"),
+                (
+                    "architect",
+                    "Smith Architect",
+                    "smith-architect@example.test",
+                ),
                 ("reviewer", "Smith Reviewer", "smith-reviewer@example.test"),
             ] {
                 role_identities.insert(
