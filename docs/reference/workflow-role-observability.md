@@ -11,7 +11,7 @@ events, read the sibling checkout docs:
 
 ## Structured stderr events
 
-`smith-workflow-role-decision` writes one JSON object per line on stderr. Stdout
+`anvil-workflow-role-decision` writes one JSON object per line on stderr. Stdout
 remains the single Temper `WorkflowRoleDecisionReply` JSON value.
 
 Common fields, when Temper supplied them in
@@ -22,16 +22,16 @@ identity: `provider`, `model`, and `auth_mode`.
 
 Events:
 
-- `smith.workflow_role_decision.request` — allowed actions, bound external-tool
+- `anvil.workflow_role_decision.request` — allowed actions, bound external-tool
   ids, prompt/context character counts, workflow/role/work-item identity.
-- `smith.workflow_role_decision.provider_call.start` — provider call start with
+- `anvil.workflow_role_decision.provider_call.start` — provider call start with
   the same identity fields.
-- `smith.workflow_role_decision.provider_call.finish` — `latency_ms`, `outcome`,
+- `anvil.workflow_role_decision.provider_call.finish` — `latency_ms`, `outcome`,
   `model_action` on success, or compact provider/parse failure classes.
-- `smith.workflow_role_decision.reply` — `outcome`, `model_action`,
+- `anvil.workflow_role_decision.reply` — `outcome`, `model_action`,
   `returned_action`, `unauthorized_action_downgraded`, and bounded
   `reason_preview`.
-- `smith.workflow_role_decision.capture.written` / `.capture.write_failed` — the
+- `anvil.workflow_role_decision.capture.written` / `.capture.write_failed` — the
   capture path or a bounded warning when optional capture writing failed.
 
 Join Smith events to Temper `role_decision_request` / `role_decision_reply`
@@ -43,8 +43,8 @@ and `repo`/`repository`, `role`, `queue`, and artifact fields as checks.
 Captures are disabled by default. Enable them only for an operator debugging run:
 
 ```sh
-mkdir -p /tmp/smith-role-captures
-export SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR=/tmp/smith-role-captures
+mkdir -p /tmp/anvil-role-captures
+export ANVIL_WORKFLOW_ROLE_DECISION_CAPTURE_DIR=/tmp/anvil-role-captures
 ```
 
 When Temper launches the responder, allow-list that one variable in the worker's

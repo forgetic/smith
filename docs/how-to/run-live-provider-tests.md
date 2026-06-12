@@ -1,12 +1,12 @@
 # Run live provider checks
 
-Default Smith validation and CI are hermetic. Do not use the commands on this
-page in CI: they can call real model providers, refresh real OAuth credentials,
-or require real API keys.
+The provider code and these tests live in the sibling **anvil** checkout — run
+every command on this page from `../anvil`. Do not use them in CI: they can
+call real model providers, refresh real OAuth credentials, or require real API
+keys.
 
-For CI-safe jig e2e commands that use `SMITH_JIG_E2E=1`, see
-[Testing and coverage](../reference/testing.md). `SMITH_JIG_E2E=1` is a hermetic
-jig gate, not a live/provider gate.
+For the CI-safe hermetic gates, see
+[Testing and coverage](../reference/testing.md).
 
 ## ChatGPT/OpenAI Codex OAuth
 
@@ -24,7 +24,7 @@ The request-oracle leg for ChatGPT/OpenAI Codex OAuth is also manual-only:
 
 ```sh
 TEMPER_CHATGPT_OAUTH=1 \
-  cargo test -p smith-temper-agent \
+  cargo test -p anvil-temper-agent \
   --test jig_request_oracle \
   --features test-provider-base-url-override \
   -- --ignored --nocapture
@@ -43,7 +43,7 @@ The request-oracle leg for Anthropic OAuth is also manual-only:
 
 ```sh
 TEMPER_ANTHROPIC_OAUTH=1 \
-  cargo test -p smith-temper-agent \
+  cargo test -p anvil-temper-agent \
   --test jig_request_oracle \
   --features test-provider-base-url-override \
   -- --ignored --nocapture
@@ -58,7 +58,7 @@ and makes real provider calls. Provide the key inline or via
 ```sh
 TEMPER_DEEPSEEK_REQUEST_ORACLE=1 \
 TEMPER_DEEPSEEK_API_KEY=... \
-  cargo test -p smith-temper-agent \
+  cargo test -p anvil-temper-agent \
   --test jig_request_oracle \
   --features test-provider-base-url-override \
   -- --ignored --nocapture
@@ -69,9 +69,9 @@ runs only when its own provider gate is set.
 
 ## Real Forgejo + real agent checks
 
-The Smith-owned Forgejo workflow-role e2e path is currently hermetic: it boots a
-throwaway Forgejo and uses a jig fake LLM behind `SMITH_JIG_E2E=1`, as documented
-in the testing reference. There is no separate Smith real Forgejo + real agent CI
-gate on this checkout. If a future test uses real provider-backed agents with
-Forgejo, keep it ignored and document its live provider gate here rather than in
-CI.
+The full-topology path with a real agent is the operator-driven
+`examples/basic-delivery/run.sh` (default coder: the sibling checkout's
+`anvil-agent` with `--auth chatgpt-oauth`). There is no real-provider CI gate
+on this checkout; if a future test uses real provider-backed agents with
+Forgejo, keep it ignored and document its live provider gate here rather than
+in CI.

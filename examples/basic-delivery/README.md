@@ -114,10 +114,10 @@ Other prerequisites:
   explicit paths.
 - A host that permits **host-mode** CI jobs (spawning child processes and binding
   loopback ports). The runner executes steps directly on the host, no containers.
-- Smith provider/auth for the default LLM mode. By default the launcher builds
-  this checkout's `smith-coding-agent` and runs it with `--auth chatgpt-oauth`.
-  Smith owns provider/auth setup; Temper and `smith-worker` only pass opaque
-  agent arguments and role credentials.
+- Anvil provider/auth for the default LLM mode. By default the launcher builds
+  the sibling anvil checkout's `anvil-agent` and runs it with
+  `--auth chatgpt-oauth`. Anvil owns provider/auth setup; Temper and
+  `smith-worker` only pass opaque agent arguments and role credentials.
 
 ## Single-outcome triage (how the architect is constrained)
 
@@ -135,7 +135,7 @@ is the proof this example exists to provide.
 
 The verdict vocabulary now travels daemon → worker in the wire protocol:
 `JobContext.allowed_verdicts` is a v1 additive field, and `smith-worker` writes it
-into the workspace context file. `smith-coding-agent` reads that field and
+into the workspace context file. `anvil-agent` reads that field and
 constrains the role prompt to exactly that set, so a single-outcome triage
 collapses to one valid verdict. The worker also enforces read-only verdict jobs:
 a verdict must be present and in vocabulary, and the job is not allowed to commit
@@ -172,9 +172,9 @@ examples/basic-delivery/
   `TEMPER_FORGEJO_RUNNER_BINARY`;
 - Temper entry points: `TEMPER_DAEMON_BIN`, `TEMPER_PROVISION_BIN`,
   `TEMPER_BUILD_PACKAGE`;
-- Smith worker and agent: `SMITH_WORKSPACE_ROOT`, `SMITH_BUILD_PACKAGE`,
-  `SMITH_WORKER_BIN`, `WORKER_MAX_CONCURRENT`, `BASIC_DELIVERY_CODER`,
-  `SMITH_CODING_AGENT_BIN`, `SMITH_CODING_AGENT_ARGS`.
+- Smith worker and anvil agent: `SMITH_WORKSPACE_ROOT`, `SMITH_WORKER_BIN`,
+  `ANVIL_WORKSPACE_ROOT`, `WORKER_MAX_CONCURRENT`, `BASIC_DELIVERY_CODER`,
+  `ANVIL_AGENT_BIN`, `ANVIL_AGENT_ARGS`.
 
 Secrets never live in `config/temper.env`. Provisioning writes role identities to
 `secrets/roles.env`; operator-only provider or local overrides may go in the
@@ -202,12 +202,12 @@ URL, and where logs live); per-process logs land under `logs/`. The checked-in
 long `DAEMON_POLL_CADENCE_SECS=120` is intentional: polling is only the liveness
 backstop, while the seed-last webhook-wake path should make the demo visibly
 progress before that two-minute deadline. Edit `config/temper.env` for the
-org/repo, endpoint, cadences, binary paths, worker knobs, and Smith agent args;
+org/repo, endpoint, cadences, binary paths, worker knobs, and anvil agent args;
 any matching environment variable exported before `./run.sh` wins over the file.
 
 ### Offline / no-LLM smoke
 
-The default `./run.sh` path uses the real `smith-coding-agent` command. For a
+The default `./run.sh` path uses the real `anvil-agent` binary. For a
 fully provider-free smoke of the full daemon/worker head path, select the
 deterministic stand-in:
 
@@ -224,7 +224,7 @@ rewritten body; for the writable engineer job it writes the product diff
 commit, push, and result delivery.
 
 This greeting mode is only for the basic-delivery smoke/demo path. It is not a
-replacement for the default Smith LLM agent when you want real design and coding
+replacement for the default anvil LLM agent when you want real design and coding
 behavior.
 
 ## Coding agent binding
@@ -233,8 +233,9 @@ behavior.
 `--executor coding`, a workspace root under `run/workspaces/`, the Forgejo base
 URL, one `--capability <repo>:<role>` per role, and an `--agent-command`:
 
-- default `BASIC_DELIVERY_CODER=smith`: the built `smith-coding-agent` from this
-  checkout, plus `SMITH_CODING_AGENT_ARGS` (default `--auth chatgpt-oauth`);
+- default `BASIC_DELIVERY_CODER=anvil`: `--agent-command anvil-native`, pointing
+  `--agent-program` at the `anvil-agent` binary built from the sibling anvil
+  checkout, plus `ANVIL_AGENT_ARGS` (default `--auth chatgpt-oauth`);
 - `BASIC_DELIVERY_CODER=greeting`: the deterministic `tools/greeting-coder.sh`
   stand-in.
 

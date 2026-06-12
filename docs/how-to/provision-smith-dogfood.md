@@ -25,8 +25,9 @@ for a production-like local deployment that points at an existing `ai/smith`.
   `--existing-repo` / `--access repo-collaborator` provisioning support tracked
   in `../temper/provision-tweaks.md`. The basic-delivery launcher refreshes
   `target/debug` on start unless `TEMPER_SKIP_BUILD=1`.
-- This Smith checkout built for the LLM roles (`smith-coding-agent`,
-  `smith-workflow-role-decision`); the basic-delivery launcher auto-binds them.
+- The sibling anvil checkout for the LLM roles: the basic-delivery launcher
+  auto-builds `anvil-agent` from `../anvil` and binds it via
+  `--agent-command anvil-native`.
 - The pinned `forgejo` / `forgejo-runner` binaries staged (see the example's
   Prerequisites), and a host that permits **host-mode** CI jobs.
 
@@ -88,19 +89,19 @@ Clone the repo once per LLM role so workers do not race on first checkout:
 The architect's checkout is read-only; the engineer's is writable and carries
 push credentials. This may be folded into the install script (issue #9 child B).
 
-### 5. Provider auth (Smith-owned)
+### 5. Provider auth (anvil-owned)
 
-Log in once so `~/.pi/agent/auth.json` has the codex credential, then run the
-Smith preflight:
+Log in once so `~/.pi/agent/auth.json` has the codex credential, then run
+anvil's preflight (from `../anvil`):
 
 ```sh
 pi /login openai-codex
-cargo run -p smith-temper-agent-cli -- preflight --auth chatgpt-oauth
+cargo run --bin anvil -- preflight --auth chatgpt-oauth
 ```
 
 See [Configure provider auth](configure-provider-auth.md) for the other
 providers and override env vars. Never pass provider secrets on argv, and never
-allow-list Forge tokens into Smith.
+allow-list Forge tokens into the agent.
 
 ### 6. Start the delivery target
 

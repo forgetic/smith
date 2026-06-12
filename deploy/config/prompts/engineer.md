@@ -1,10 +1,10 @@
 <!--
 Optional engineer prompt OVERLAY template for the Smith coding agent.
 
-Installed to ~/.config/smith/prompts/engineer.md by deploy/install.sh (only if no
+Installed to ~/.config/anvil/prompts/engineer.md by deploy/install.sh (only if no
 file is already there — your edits are never clobbered).
 
-smith-coding-agent loads this when running the engineer's CodingWorkspace tool
+anvil-agent loads this when running the engineer's CodingWorkspace tool
 and appends it, verbatim, as an `Operator guidance` block AFTER the built-in role
 contract and BEFORE the repository AGENTS.md (see
 docs/reference/coding-agent-prompts.md). It is additive only: it CANNOT remove or
@@ -13,7 +13,7 @@ to house style and repo-specific implementation hints. Delete this file to run
 with just the built-in prompt.
 
 This is a deployment scaffold, not a checked-in production role prompt: it lives
-on the operator's machine under ~/.config/smith, which is exactly what the
+on the operator's machine under ~/.config/anvil, which is exactly what the
 no-checked-in-prompts rule permits (docs/reference/development-conventions.md).
 -->
 

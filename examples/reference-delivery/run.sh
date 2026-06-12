@@ -55,6 +55,7 @@ else
     SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 fi
 SMITH_WORKSPACE_ROOT_DEFAULT=$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)
+ANVIL_WORKSPACE_ROOT_DEFAULT=$(CDPATH='' cd -- "$SMITH_WORKSPACE_ROOT_DEFAULT/../anvil" && pwd)
 WORKSPACE_ROOT=${TEMPER_WORKSPACE_ROOT:-$(CDPATH='' cd -- "$SMITH_WORKSPACE_ROOT_DEFAULT/../temper" && pwd)}
 CONFIG_DIR="$SCRIPT_DIR/config"
 SECRETS_DIR="$SCRIPT_DIR/secrets"
@@ -198,10 +199,10 @@ cmd_stop() {
 CONFIG_KNOBS="OWNER NAME REPOS DEFAULT_BRANCH WORKFLOW_FILE SERVED_ROLES INTAKE_TITLE INTAKE_BODY_FILE \
 CROSS_REPO_INTAKE CROSS_REPO_INTAKE_TITLE BASE_URL DAEMON_BIND WEBHOOK_URL \
 DAEMON_POLL_CADENCE_SECS DAEMON_MECHANICAL_CADENCE_SECS DAEMON_LEASE_TTL_SECS RUN_SECS \
-WORKER_MAX_CONCURRENT REFERENCE_DELIVERY_CODER SMITH_CODING_AGENT_BIN SMITH_CODING_AGENT_ARGS \
+WORKER_MAX_CONCURRENT REFERENCE_DELIVERY_CODER ANVIL_AGENT_BIN ANVIL_AGENT_ARGS \
 TEMPER_FORGEJO_GOMAXPROCS TEMPER_FORGEJO_BINARY TEMPER_FORGEJO_RUNNER_BINARY \
 TEMPER_DAEMON_BIN TEMPER_PROVISION_BIN TEMPER_VALIDATE_BIN TEMPER_BUILD_PACKAGE \
-SMITH_WORKSPACE_ROOT SMITH_BUILD_PACKAGE SMITH_WORKER_BIN"
+SMITH_WORKSPACE_ROOT SMITH_WORKER_BIN ANVIL_WORKSPACE_ROOT"
 
 repo_owner() { printf '%s\n' "${1%%/*}"; }
 repo_name() { printf '%s\n' "${1#*/}"; }
@@ -270,15 +271,15 @@ load_config() {
     DAEMON_LEASE_TTL_SECS=${DAEMON_LEASE_TTL_SECS:-300}
     RUN_SECS=${RUN_SECS:-600}
     WORKER_MAX_CONCURRENT=${WORKER_MAX_CONCURRENT:-1}
-    REFERENCE_DELIVERY_CODER=${REFERENCE_DELIVERY_CODER:-smith}
+    REFERENCE_DELIVERY_CODER=${REFERENCE_DELIVERY_CODER:-anvil}
     case "$REFERENCE_DELIVERY_CODER" in
-        smith | greeting) ;;
-        *) die "REFERENCE_DELIVERY_CODER must be smith or greeting, got '$REFERENCE_DELIVERY_CODER'" ;;
+        anvil | greeting) ;;
+        *) die "REFERENCE_DELIVERY_CODER must be anvil or greeting, got '$REFERENCE_DELIVERY_CODER'" ;;
     esac
-    SMITH_CODING_AGENT_BIN=${SMITH_CODING_AGENT_BIN:-}
-    SMITH_CODING_AGENT_ARGS=${SMITH_CODING_AGENT_ARGS:-}
-    if [ -z "$SMITH_CODING_AGENT_ARGS" ]; then
-        SMITH_CODING_AGENT_ARGS='--auth chatgpt-oauth'
+    ANVIL_AGENT_BIN=${ANVIL_AGENT_BIN:-}
+    ANVIL_AGENT_ARGS=${ANVIL_AGENT_ARGS:-}
+    if [ -z "$ANVIL_AGENT_ARGS" ]; then
+        ANVIL_AGENT_ARGS='--auth chatgpt-oauth'
     fi
     TEMPER_FORGEJO_GOMAXPROCS=${TEMPER_FORGEJO_GOMAXPROCS:-2}
     TEMPER_FORGEJO_BINARY=${TEMPER_FORGEJO_BINARY:-}
@@ -288,7 +289,7 @@ load_config() {
     TEMPER_VALIDATE_BIN=${TEMPER_VALIDATE_BIN:-}
     TEMPER_BUILD_PACKAGE=${TEMPER_BUILD_PACKAGE:-temper}
     SMITH_WORKSPACE_ROOT=${SMITH_WORKSPACE_ROOT:-$SMITH_WORKSPACE_ROOT_DEFAULT}
-    SMITH_BUILD_PACKAGE=${SMITH_BUILD_PACKAGE:-smith-temper-agent-cli}
+    ANVIL_WORKSPACE_ROOT=${ANVIL_WORKSPACE_ROOT:-$ANVIL_WORKSPACE_ROOT_DEFAULT}
     SMITH_WORKER_BIN=${SMITH_WORKER_BIN:-}
 
     require_positive_int DAEMON_POLL_CADENCE_SECS "$DAEMON_POLL_CADENCE_SECS"
@@ -382,6 +383,11 @@ resolve_binaries() {
         log 'ensuring Smith worker is current (cargo build -p smith-worker)...'
         ( cd "$SMITH_WORKSPACE_ROOT" && cargo build -p smith-worker ) \
             || die 'Smith worker cargo build failed'
+        if [ "$REFERENCE_DELIVERY_CODER" = "anvil" ]; then
+            log 'ensuring anvil-agent is current (cargo build --bin anvil-agent)...'
+            ( cd "$ANVIL_WORKSPACE_ROOT" && cargo build --bin anvil-agent ) \
+                || die 'anvil-agent cargo build failed'
+        fi
     fi
 
     [ -x "$DAEMON_BIN" ] || die "daemon binary not found: $DAEMON_BIN"
@@ -425,12 +431,15 @@ resolve_binaries() {
             [ -x "$GREETING_CODER_BIN" ] || die "greeting coder script is not executable: $GREETING_CODER_BIN"
             log "coding agent: deterministic greeting stand-in ($GREETING_CODER_BIN)"
             ;;
-        smith)
-            # The Smith pi-SDK coding agent now runs in-process inside
-            # smith-worker (no separate smith-coding-agent binary). The worker is
-            # selected with `--agent-command smith`; SMITH_CODING_AGENT_ARGS still
-            # carries the agent's auth flags, passed through as --agent-arg.
-            log "coding agent: Smith pi-SDK agent (in-process; args: $SMITH_CODING_AGENT_ARGS)"
+        anvil)
+            # The coding agent is anvil-agent, spawned out-of-process by
+            # smith-worker (`--agent-command anvil-native`). The built binary is
+            # passed via --agent-program; ANVIL_AGENT_ARGS carries the agent's
+            # auth flags, passed through as --agent-arg.
+            AGENT_BIN=${ANVIL_AGENT_BIN:-$ANVIL_WORKSPACE_ROOT/target/debug/anvil-agent}
+            [ -x "$AGENT_BIN" ] || die "anvil-agent binary not found: $AGENT_BIN
+       Set ANVIL_AGENT_BIN, or build it with: cargo build --bin anvil-agent (in $ANVIL_WORKSPACE_ROOT)"
+            log "coding agent: anvil-agent ($AGENT_BIN; args: $ANVIL_AGENT_ARGS)"
             ;;
     esac
 }
@@ -845,9 +854,10 @@ boot_worker() {
 
     case "$REFERENCE_DELIVERY_CODER" in
         greeting) _agent_command=$GREETING_CODER_BIN ;;
-        # `smith` selects the in-process pi-SDK agent: the worker recognizes the
-        # literal program name `smith` and runs the coding loop itself.
-        smith) _agent_command=smith ;;
+        # `anvil-native` selects the native anvil agent surface: the worker
+        # spawns anvil-agent out-of-process; --agent-program points it at the
+        # binary built from the sibling anvil checkout.
+        anvil) _agent_command=anvil-native ;;
         *) die "unknown REFERENCE_DELIVERY_CODER '$REFERENCE_DELIVERY_CODER'" ;;
     esac
 
@@ -863,8 +873,9 @@ boot_worker() {
             set -- "$@" --capability "$_repo:$_role"
         done
     done
-    if [ "$REFERENCE_DELIVERY_CODER" = "smith" ]; then
-        for _agent_arg in $SMITH_CODING_AGENT_ARGS; do
+    if [ "$REFERENCE_DELIVERY_CODER" = "anvil" ]; then
+        set -- "$@" --agent-arg --agent-program --agent-arg "$AGENT_BIN"
+        for _agent_arg in $ANVIL_AGENT_ARGS; do
             set -- "$@" --agent-arg "$_agent_arg"
         done
     fi

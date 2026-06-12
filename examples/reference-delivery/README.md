@@ -33,8 +33,8 @@ real and what is canned:
 - **Canned:** `config/ci.yml` is demo CI. It parse-checks shell scripts so a
   greeting diff can land through a genuine CI gate. Replace it with your real
   build/test workflow for a real project.
-- **Optional canned agent:** by default the worker runs Smith's
-  `smith-coding-agent`. Set `REFERENCE_DELIVERY_CODER=greeting` to use the
+- **Optional canned agent:** by default the worker spawns the sibling anvil
+  checkout's `anvil-agent`. Set `REFERENCE_DELIVERY_CODER=greeting` to use the
   deterministic `tools/greeting-coder.sh` stand-in for an offline/no-provider
   smoke. That stand-in still traverses the real daemon/worker and Forgejo state.
 
@@ -161,8 +161,8 @@ set, start refreshes the development binaries before boot:
   `temper-daemon`, `temper-provision-forgejo`, and
   `temper-validate-reference-delivery`;
 - in this Smith checkout, `cargo build -p smith-worker`;
-- in the default Smith-agent mode, `cargo build -p smith-temper-agent-cli --bin
-  smith-coding-agent`.
+- in the default anvil-agent mode, `cargo build --bin anvil-agent` in the
+  sibling anvil checkout.
 
 The launcher then refuses stale or incompatible binaries with `--help` probes:
 
@@ -225,8 +225,8 @@ full topology:
 REFERENCE_DELIVERY_CODER=greeting ./run.sh start
 ```
 
-The default `REFERENCE_DELIVERY_CODER=smith` runs the built
-`smith-coding-agent` with `SMITH_CODING_AGENT_ARGS` (default
+The default `REFERENCE_DELIVERY_CODER=anvil` spawns the built `anvil-agent`
+(via `--agent-command anvil-native`) with `ANVIL_AGENT_ARGS` (default
 `--auth chatgpt-oauth`). The greeting mode binds `tools/greeting-coder.sh` as the
 worker's `--agent-command`: architect triage/breakdown, engineer edits, and
 reviewer approval are fixed and deterministic, while the daemon, worker, Forgejo,
@@ -258,15 +258,16 @@ operator-only provider overrides may go in gitignored `secrets/.env`.
   `TEMPER_FORGEJO_BINARY`, and `TEMPER_FORGEJO_RUNNER_BINARY`.
 - **Temper entry points:** `TEMPER_DAEMON_BIN`, `TEMPER_PROVISION_BIN`,
   `TEMPER_VALIDATE_BIN`, and `TEMPER_BUILD_PACKAGE`.
-- **Smith worker and agent:** `SMITH_WORKSPACE_ROOT`, `SMITH_BUILD_PACKAGE`,
-  `SMITH_WORKER_BIN`, `WORKER_MAX_CONCURRENT`, `REFERENCE_DELIVERY_CODER`,
-  `SMITH_CODING_AGENT_BIN`, and `SMITH_CODING_AGENT_ARGS`.
+- **Smith worker and anvil agent:** `SMITH_WORKSPACE_ROOT`, `SMITH_WORKER_BIN`,
+  `ANVIL_WORKSPACE_ROOT`, `WORKER_MAX_CONCURRENT`, `REFERENCE_DELIVERY_CODER`,
+  `ANVIL_AGENT_BIN`, and `ANVIL_AGENT_ARGS`.
 
 The coding-agent binding is now just the worker's `--agent-command`. `run.sh`
 starts `smith-worker --executor coding` with a workspace root under
 `run/workspaces/`, one `--capability <repo>:<role>` per configured pair, role git
-credentials from `secrets/roles.env`, and either the built `smith-coding-agent`
-or `tools/greeting-coder.sh` as that command. The worker owns checkout
+credentials from `secrets/roles.env`, and either the anvil-native surface
+(spawning the built `anvil-agent`) or `tools/greeting-coder.sh` as that
+command. The worker owns checkout
 preparation, read-only vs writable job handling, commits, pushes, and result
 submission.
 
@@ -313,8 +314,8 @@ validators before teardown. Its closest automated relatives are:
 
 - Temper's daemon Forgejo e2e test, `tests/daemon_forgejo_e2e.rs`; see
   `../temper/docs/how-to/run-daemon-e2e.md` in the sibling Temper checkout;
-- Smith's CI-gated `basic_delivery_jig_e2e` coverage in
-  `crates/smith-temper-agent-cli/tests/basic_delivery_jig_e2e.rs`.
+- Smith's hermetic out-of-process worker e2e in
+  `crates/smith-worker/tests/coding_worker_e2e.rs`.
 
 ## Troubleshooting
 

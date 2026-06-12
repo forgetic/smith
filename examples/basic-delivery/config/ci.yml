@@ -3,7 +3,7 @@
 # The production Forgejo provisioner commits a COMMIT-MESSAGE-MARKER CI workflow
 # ("[ci-pass]") that only the deterministic temper-testing fake worker can
 # satisfy. This Smith example instead pairs the engineer with a REAL pi-SDK
-# coding workspace (smith-coding-agent), whose PR-head commits carry an ordinary
+# coding workspace (anvil-agent), whose PR-head commits carry an ordinary
 # message ("Implement ..."), not the demo marker. So `run.sh` overrides the
 # provisioned marker workflow with this workflow — it commits this file onto the
 # repo's default branch before the workers start, so a real product diff clears

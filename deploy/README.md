@@ -50,7 +50,7 @@ deploy/
 - **runs coding jobs** with `--executor coding`: each enriched job lands in a
   persistent per-`(repo, role)` git workspace under `WORKER_WORKSPACE_ROOT`
   (default `~/.local/state/smith/worker`; fetch + `checkout -B`, never wiped),
-  spawns `smith-coding-agent`, requires a diff, commits and **pushes the branch
+  spawns `anvil-agent`, requires a diff, commits and **pushes the branch
   as the role** using the git credentials from `secrets/roles.env`
   (`TEMPER_FORGEJO_{USER,TOKEN}_<ROLEKEY>`, optional
   `TEMPER_FORGEJO_EMAIL_<ROLEKEY>`), and reports a structured result;
@@ -78,7 +78,8 @@ belongs to the daemon deployment (`~/.config/temper/secrets/`), not here.
 deploy/install.sh
 ```
 
-Builds the two Smith binaries (`smith-worker`, `smith-coding-agent`) into
+Builds the worker tier binaries (`smith-worker`, plus `anvil-agent` from the
+sibling anvil checkout) into
 `~/.local/bin` (skip rebuilds with `SMITH_SKIP_BUILD=1`), installs the launcher
 shim and the `smith-worker.service` template, copies config templates into
 `~/.config/smith/` **without clobbering existing live edits**, and creates the

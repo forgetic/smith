@@ -11,11 +11,12 @@ set -- --daemon-url "${WORKER_DAEMON_URL:-http://127.0.0.1:8080}" \
        --executor coding \
        --workspace-root "${WORKER_WORKSPACE_ROOT:-$HOME/.local/state/smith/worker}" \
        --git-base-url "${BASE_URL:?BASE_URL not set (smith.env)}" \
-       --agent-command "$HOME/.local/bin/smith-coding-agent"
+       --agent-command anvil-native \
+       --agent-arg --agent-program --agent-arg "$HOME/.local/bin/anvil-agent"
 for _capability in ${WORKER_CAPABILITIES:?WORKER_CAPABILITIES not set (smith.env)}; do
     set -- "$@" --capability "$_capability"
 done
-for _agent_arg in ${SMITH_CODING_AGENT_ARGS:-}; do
+for _agent_arg in ${ANVIL_AGENT_ARGS:-}; do
     set -- "$@" --agent-arg "$_agent_arg"
 done
 if [ -n "${WORKER_MAX_CONCURRENT:-}" ]; then

@@ -9,14 +9,14 @@ state mutation are Temper-owned.
 Binary:
 
 ```text
-smith-workflow-role-decision [--auth ...] [--codex-model MODEL] [--auth-file PATH]
+anvil-workflow-role-decision [--auth ...] [--codex-model MODEL] [--auth-file PATH]
 ```
 
 Optional capture env (allow-list it in Temper worker process config when the
 responder is launched by Temper):
 
 ```text
-SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR=/existing/writable/dir
+ANVIL_WORKFLOW_ROLE_DECISION_CAPTURE_DIR=/existing/writable/dir
 ```
 
 Input: one `temper_process_protocol::WorkflowRoleDecisionRequest` JSON value on stdin.
@@ -31,7 +31,7 @@ name. Unauthorized model actions are downgraded to `no_action`; unsupported
 protocol versions fail before a model call.
 
 Redacted decision captures are disabled by default. When
-`SMITH_WORKFLOW_ROLE_DECISION_CAPTURE_DIR` names an existing writable directory,
+`ANVIL_WORKFLOW_ROLE_DECISION_CAPTURE_DIR` names an existing writable directory,
 Smith writes one bounded JSON capture per decision with trace/work-item ids,
 workflow/repo/role/queue/artifact metadata, provider/model/auth mode, allowed
 actions, external-tool ids, prompt/context sizes and redacted previews, model and
@@ -45,7 +45,7 @@ produce bounded warning logs and do not change a successful decision result.
 Binary:
 
 ```text
-smith-product-manager-responder [--auth ...] [--codex-model MODEL] [--auth-file PATH]
+anvil-product-manager-responder [--auth ...] [--codex-model MODEL] [--auth-file PATH]
 ```
 
 Input: one `temper_process_protocol::ConversationRequest` JSON value on stdin.

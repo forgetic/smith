@@ -1,6 +1,7 @@
 # Configure provider auth
 
-Smith responder binaries accept the same provider flags:
+Provider auth belongs to the agent side: anvil's binaries (`anvil-agent` and
+the responders) accept the same provider flags:
 
 ```sh
 --auth deepseek|chatgpt-oauth|anthropic-oauth
@@ -8,11 +9,11 @@ Smith responder binaries accept the same provider flags:
 --auth-file PATH
 ```
 
-The binaries default to `chatgpt-oauth`. Run preflight before wiring a provider
-into Temper:
+The binaries default to `chatgpt-oauth`. Run preflight (from the sibling
+`../anvil` checkout) before wiring a provider into Temper:
 
 ```sh
-cargo run -p smith-temper-agent-cli -- preflight --auth chatgpt-oauth
+cargo run --bin anvil -- preflight --auth chatgpt-oauth
 ```
 
 ## ChatGPT/OpenAI Codex OAuth
@@ -23,7 +24,7 @@ cargo run -p smith-temper-agent-cli -- preflight --auth chatgpt-oauth
    pi /login openai-codex
    ```
 
-2. Smith reads the `openai-codex` entry from `~/.pi/agent/auth.json`, accepting
+2. Anvil reads the `openai-codex` entry from `~/.pi/agent/auth.json`, accepting
    both nodejs and Rust pi schemas and preserving the schema on refresh.
 3. Optional overrides:
 
@@ -32,7 +33,7 @@ cargo run -p smith-temper-agent-cli -- preflight --auth chatgpt-oauth
    TEMPER_AGENTS_CODEX_MODEL=gpt-5.5
    ```
 
-The Codex access token is short-lived. Smith resolves and refreshes it per
+The Codex access token is short-lived. Anvil resolves and refreshes it per
 request; live refresh may rotate the refresh token and write back to the auth
 file.
 
@@ -53,7 +54,7 @@ file.
    TEMPER_AGENTS_ANTHROPIC_MODEL=claude-opus-4-8
    ```
 
-Smith injects the Claude Code-compatible request identity required by Anthropic
+Anvil injects the Claude Code-compatible request identity required by Anthropic
 subscription OAuth.
 
 ## DeepSeek API key
@@ -71,11 +72,11 @@ printf '%s' '...' > .cache/deepseek-api-key
 
 ## Coding-agent prompt overlays
 
-`smith-coding-agent` also accepts `--config-dir PATH` to point at an operator
+`anvil-agent` also accepts `--config-dir PATH` to point at an operator
 config dir holding optional prompt overlays (`prompts/engineer.md`,
 `prompts/architect.md`, `prompts/reviewer.md`, and a shared
-`prompts/coding-agent.md`). When unset it defaults to `$SMITH_CONFIG_DIR`, then
-`$XDG_CONFIG_HOME/smith`, then `~/.config/smith`. The checkout's root `AGENTS.md`
+`prompts/coding-agent.md`). When unset it defaults to `$ANVIL_CONFIG_DIR`, then
+`$XDG_CONFIG_HOME/anvil`, then `~/.config/anvil`. The checkout's root `AGENTS.md`
 is injected as context by default. Missing dirs/files are a clean no-op. See
 [Coding-agent prompt overlays and AGENTS.md](../reference/coding-agent-prompts.md)
 for the full contract.
@@ -84,5 +85,5 @@ for the full contract.
 
 - Never pass provider secrets on argv.
 - Never commit auth files, copied `auth.json`, tokens, or `.env` files.
-- When Temper launches Smith, allow-list only provider env vars Smith must read;
-  never allow-list Forge tokens or workflow credentials.
+- When Temper launches an anvil responder, allow-list only provider env vars it
+  must read; never allow-list Forge tokens or workflow credentials.

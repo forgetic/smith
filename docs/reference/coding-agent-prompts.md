@@ -1,7 +1,7 @@
 # Coding-agent prompt overlays and `AGENTS.md`
 
-The coding-workspace agent (`smith-coding-agent`, implemented in
-`crates/smith-temper-agent/src/coding_agent.rs`) builds a hard-coded per-role
+The coding-workspace agent (`anvil-agent`, implemented in the sibling anvil
+checkout's `crates/anvil-temper-agent/src/coding_agent.rs`) builds a hard-coded per-role
 system prompt. Two optional context sources layer on top of that built-in text,
 in this precedence order:
 
@@ -22,7 +22,7 @@ text, never weaken the role's verdict/diff guarantees.
 > generated from user workflow manifests and not to add checked-in,
 > role-specific *production* prompt files. That rule governs the **role-decision**
 > prompts and forbids checking prompts **into this repo**. Operator overlays live
-> in `~/.config/smith` (an operator's machine), not the repo, so they are
+> in `~/.config/anvil` (an operator's machine), not the repo, so they are
 > consistent with the rule.
 
 ## Config directory resolution
@@ -30,9 +30,9 @@ text, never weaken the role's verdict/diff guarantees.
 The config dir is resolved with this precedence (first match wins):
 
 1. The `--config-dir PATH` CLI flag.
-2. The `SMITH_CONFIG_DIR` environment variable.
-3. `$XDG_CONFIG_HOME/smith` (an empty `XDG_CONFIG_HOME` is treated as unset).
-4. `~/.config/smith`.
+2. The `ANVIL_CONFIG_DIR` environment variable.
+3. `$XDG_CONFIG_HOME/anvil` (an empty `XDG_CONFIG_HOME` is treated as unset).
+4. `~/.config/anvil`.
 
 A missing directory or any missing/blank file is a **clean no-op**: the agent
 runs with just its built-in prompt. I/O errors reading an overlay are swallowed
@@ -57,7 +57,7 @@ block so injected text cannot be confused with the built-in contract.
 Example layout:
 
 ```text
-~/.config/smith/
+~/.config/anvil/
 └── prompts/
     ├── coding-agent.md   # shared house style for all roles
     ├── engineer.md       # engineer-only guidance

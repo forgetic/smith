@@ -6,6 +6,13 @@
 > API writer, deployed from `temper/deploy/`) plus one `smith-worker.service`
 > — is documented in [`deploy/README.md`](../../deploy/README.md), including
 > the cutover steps from this pool.
+>
+> The installer this page describes no longer exists in the repo: today's
+> `deploy/install.sh` installs the two-tier worker (`smith-worker` plus
+> `anvil-agent` from the sibling anvil checkout), and the binaries named below
+> (`smith-coding-agent`, `temper-worker`, …) are no longer built anywhere. The
+> page is kept as a record of the still-deployed legacy fleet until the
+> operator cutover completes.
 
 This guide installs and runs the basic-delivery workflow against `ai/smith` as
 **real systemd user services** — the legacy deployment counterpart to the
