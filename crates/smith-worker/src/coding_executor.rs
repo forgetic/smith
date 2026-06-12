@@ -222,17 +222,28 @@ async fn execute<R: AgentRunner>(
                 );
             }
 
+            // The agent may have checkpoint-committed (and pushed) some or
+            // all of its work mid-run; only a run that left neither tree
+            // changes nor commits beyond base produced no product.
             match workspace.has_changes().await {
-                Ok(true) => {}
-                Ok(false) => return failure(FailureClass::Permanent, "agent produced no diff"),
+                Ok(true) => {
+                    if let Err(error) = workspace
+                        .commit_all(&commit_message(&correlation_key, &artifact_item))
+                        .await
+                    {
+                        return workspace_failure("commit workspace changes", error, &token);
+                    }
+                }
+                Ok(false) => match workspace.commits_ahead_of_base().await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        return failure(FailureClass::Permanent, "agent produced no diff");
+                    }
+                    Err(error) => {
+                        return workspace_failure("inspect workspace commits", error, &token);
+                    }
+                },
                 Err(error) => return workspace_failure("inspect workspace changes", error, &token),
-            }
-
-            if let Err(error) = workspace
-                .commit_all(&commit_message(&correlation_key, &artifact_item))
-                .await
-            {
-                return workspace_failure("commit workspace changes", error, &token);
             }
             let head_sha = match workspace.push_branch(&branch_hint).await {
                 Ok(head_sha) => head_sha,

@@ -69,19 +69,49 @@ impl Workspace {
     pub async fn prepare(&self, work_branch: &str) -> Result<(), WorkspaceError> {
         self.prepare_base_checkout().await?;
 
+        // Crash-resume: when the work branch already exists on the forge (a
+        // prior dispatch pushed checkpoints or a full result before dying, or
+        // a revise round is re-entering an existing PR head), resume from it
+        // instead of resetting to base — resetting would orphan the pushed
+        // commits and make the agent's next checkpoint push non-fast-forward.
+        // A fetch failure (most commonly: the branch does not exist yet) falls
+        // back to a fresh branch from base.
+        let start_point = match self.try_fetch_work_branch(work_branch).await {
+            true => format!("origin/{work_branch}"),
+            false => format!("origin/{}", self.base_branch),
+        };
         self.run_workspace_git(
             false,
-            format!("git checkout -B {work_branch} origin/{}", self.base_branch),
+            format!("git checkout -B {work_branch} {start_point}"),
             vec![
                 OsString::from("checkout"),
                 OsString::from("-B"),
                 OsString::from(work_branch),
-                OsString::from(format!("origin/{}", self.base_branch)),
+                OsString::from(start_point),
             ],
         )
         .await?;
 
         Ok(())
+    }
+
+    /// Fetches the remote work branch if it exists. `false` when the fetch
+    /// fails (branch absent, or transient trouble — in which case the fresh
+    /// start is safe: a later non-fast-forward push fails loudly rather than
+    /// clobbering remote state).
+    async fn try_fetch_work_branch(&self, work_branch: &str) -> bool {
+        let refspec = format!("+refs/heads/{work_branch}:refs/remotes/origin/{work_branch}");
+        self.run_workspace_git(
+            true,
+            format!("git fetch origin {work_branch}"),
+            vec![
+                OsString::from("fetch"),
+                OsString::from("origin"),
+                OsString::from(refspec),
+            ],
+        )
+        .await
+        .is_ok()
     }
 
     /// Prepare the workspace at a pull request's head (read-only review checkout):
@@ -245,6 +275,27 @@ impl Workspace {
             .map_err(|error| WorkspaceError::Utf8(error.to_string()))?;
 
         Ok(stdout.trim().to_string())
+    }
+
+    /// True when HEAD carries commits beyond the fetched base branch — the
+    /// agent checkpoint-committed (and pushed) work mid-run, so a clean
+    /// working tree can still hold a product.
+    pub async fn commits_ahead_of_base(&self) -> Result<bool, WorkspaceError> {
+        let range = format!("origin/{}..HEAD", self.base_branch);
+        let output = self
+            .run_workspace_git(
+                false,
+                format!("git rev-list --count {range}"),
+                vec![
+                    OsString::from("rev-list"),
+                    OsString::from("--count"),
+                    OsString::from(range),
+                ],
+            )
+            .await?;
+        let count = String::from_utf8(output.stdout)
+            .map_err(|error| WorkspaceError::Utf8(error.to_string()))?;
+        Ok(count.trim() != "0")
     }
 
     /// True when the working tree has any staged, unstaged, or untracked change.

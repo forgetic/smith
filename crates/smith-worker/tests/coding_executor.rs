@@ -638,6 +638,9 @@ enum AgentBehavior {
     TransientError,
     /// Return a summary-only result and write no diff (engineer ⇒ "no diff").
     NoDiff,
+    /// Engineer that checkpoint-commits and pushes its whole product itself
+    /// (phase 6b), leaving a clean working tree for the executor.
+    CheckpointCommits,
     /// Return a writable verdict the executor does not route (permanent).
     Verdict,
     /// Architect read-only `ready_code` verdict with a rewritten body.
@@ -729,6 +732,33 @@ impl AgentRunner for FakeAgentRunner {
                 summary: Some("nothing changed".to_string()),
                 ..WorkspaceResult::default()
             }),
+            AgentBehavior::CheckpointCommits => {
+                Self::write_diff(cwd);
+                let work_branch = context.branch_hint.clone();
+                git_output(["-C", path_str(cwd), "add", "-A"]);
+                git_output([
+                    "-C",
+                    path_str(cwd),
+                    "-c",
+                    "user.name=Agent Checkpoint",
+                    "-c",
+                    "user.email=agent@example.test",
+                    "commit",
+                    "-m",
+                    "checkpoint(step 2): push checkpoint",
+                ]);
+                git_output([
+                    "-C",
+                    path_str(cwd),
+                    "push",
+                    "origin",
+                    &format!("HEAD:refs/heads/{work_branch}"),
+                ]);
+                Ok(WorkspaceResult {
+                    summary: Some("checkpointed the work".to_string()),
+                    ..WorkspaceResult::default()
+                })
+            }
             AgentBehavior::Verdict => Ok(WorkspaceResult {
                 verdict: Some("needs_design".to_string()),
                 summary: Some("cannot proceed".to_string()),
@@ -1265,5 +1295,71 @@ fn assert_is_sha(value: &str) {
     assert!(
         value.chars().all(|ch| ch.is_ascii_hexdigit()),
         "not hex: {value}"
+    );
+}
+
+/// Phase 6b: an agent that checkpoint-commits and pushes its whole product
+/// leaves a clean tree; the executor must still report success with the
+/// checkpointed head rather than failing with "agent produced no diff".
+#[tokio::test]
+async fn checkpoint_committed_work_with_clean_tree_succeeds() {
+    let fixture = Fixture::new();
+    let executor = fixture.executor(AgentBehavior::CheckpointCommits.runner(), true);
+
+    let outcome = executor
+        .execute(assign("agent/pr-for-code-11", "pr-for-code-11"))
+        .await;
+
+    let (branch_name, head_sha, summary) = expect_success(outcome);
+    assert_eq!(branch_name, "agent/pr-for-code-11");
+    assert_eq!(summary.as_deref(), Some("checkpointed the work"));
+    assert_eq!(
+        git_output([
+            "-C",
+            path_str(&fixture.origin),
+            "rev-parse",
+            "refs/heads/agent/pr-for-code-11",
+        ]),
+        head_sha
+    );
+    assert_eq!(
+        git_output([
+            "-C",
+            path_str(&fixture.origin),
+            "log",
+            "-1",
+            "--format=%s",
+            "refs/heads/agent/pr-for-code-11",
+        ]),
+        "checkpoint(step 2): push checkpoint"
+    );
+}
+
+/// Phase 6b: a re-dispatch for the same branch resumes from the pushed remote
+/// branch (the prior dispatch's checkpoints) instead of resetting to base.
+#[tokio::test]
+async fn redispatch_resumes_from_pushed_work_branch() {
+    let fixture = Fixture::new();
+    let first = AgentBehavior::CheckpointCommits.runner();
+    let executor = fixture.executor(first, true);
+    let (_, first_head, _) = expect_success(
+        executor
+            .execute(assign("agent/pr-for-code-12", "pr-for-code-12"))
+            .await,
+    );
+
+    // Second dispatch, same branch: the runner must observe the prior
+    // checkpoint as HEAD, not a fresh base checkout.
+    let second = AgentBehavior::Success.runner();
+    let executor = fixture.executor(second.clone(), true);
+    expect_success(
+        executor
+            .execute(assign("agent/pr-for-code-12", "pr-for-code-12"))
+            .await,
+    );
+    assert_eq!(
+        second.observed_head_sha(),
+        first_head,
+        "prepare must resume from the pushed work branch"
     );
 }
