@@ -85,6 +85,15 @@ pub async fn run_sub_agent_with_events(
         .map(|tool| tool_to_definition(tool.as_ref()))
         .collect();
 
+    // Effect map for parallel batching: each tool declares its effects, which
+    // the machine uses to plan which adjacent tool calls may run concurrently.
+    let effects: std::collections::BTreeMap<String, pi::tools::ToolEffects> = sub_agent
+        .tools
+        .tools()
+        .iter()
+        .map(|tool| (tool.name().to_string(), tool.effects()))
+        .collect();
+
     let initial = vec![Message::User(UserMessage {
         content: UserContent::Text(sub_agent.user_message),
         timestamp: 0,
@@ -104,7 +113,7 @@ pub async fn run_sub_agent_with_events(
         events,
         outcome_tx,
     );
-    let machine = AgentMachine::new(initial, sub_agent.max_iterations);
+    let machine = AgentMachine::with_effects(initial, sub_agent.max_iterations, effects);
 
     // Drive to completion. The machine stops itself on `Finished`, which also
     // resolves the outcome oneshot.

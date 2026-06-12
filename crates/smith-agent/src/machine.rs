@@ -19,10 +19,12 @@
 //! still supporting live interaction (the user's stated control goal); pi's
 //! finer-grained mid-batch steering is deliberately not reproduced.
 
+use std::collections::BTreeMap;
+
 use pi::model::{
     AssistantMessage, ContentBlock, Message, StopReason, ToolCall, ToolResultMessage,
 };
-use pi::tools::ToolOutput;
+use pi::tools::{ToolEffects, ToolOutput};
 
 /// An observability event the machine emits as data (the shell renders/records
 /// it). Keeping events as machine output — rather than callbacks fired from
@@ -110,10 +112,17 @@ pub struct AgentMachine {
     iterations: usize,
     phase: Phase,
     turn: usize,
-    /// Tool calls still outstanding in the current batch (id -> name), and the
-    /// results collected so far, kept in the model's tool-call order so the
-    /// tool-result messages are appended deterministically.
-    pending_tools: Vec<PendingTool>,
+    /// Per-tool-name effect declarations, used to plan effect-compatible
+    /// parallel batches. Unknown tools default to a write effect (fail-closed:
+    /// serialize). Static config, supplied at construction by the shell.
+    effects: BTreeMap<String, ToolEffects>,
+    /// Effect-compatible batches still to run this turn, in original tool-call
+    /// order (front = the batch currently in flight). Each batch's calls run
+    /// concurrently; batches run strictly in sequence.
+    pending_batches: std::collections::VecDeque<Vec<PendingTool>>,
+    /// Results collected this turn across all batches, in original tool-call
+    /// order, so the tool-result messages are appended deterministically.
+    turn_results: Vec<PendingTool>,
     /// The most recent assistant message (the run's product on completion).
     last_assistant: Option<AssistantMessage>,
     /// Steering messages to inject at the next turn boundary.
@@ -128,19 +137,42 @@ struct PendingTool {
 
 impl AgentMachine {
     /// Build a machine seeded with the initial conversation (typically a single
-    /// user message), bounded to `max_iterations` tool rounds.
+    /// user message), bounded to `max_iterations` tool rounds. Tools run
+    /// serialized (every tool is treated as a write) — use [`AgentMachine::with_effects`]
+    /// to supply effect declarations and enable parallel batching.
     pub fn new(initial_messages: Vec<Message>, max_iterations: usize) -> Self {
+        Self::with_effects(initial_messages, max_iterations, BTreeMap::new())
+    }
+
+    /// Build a machine that plans effect-compatible parallel tool batches from
+    /// `effects` (tool name → its [`ToolEffects`]). Adjacent calls whose effects
+    /// are mutually parallel-safe (read-only) run concurrently; a write/network/
+    /// process tool — or an unknown tool, fail-closed — forms a serialized
+    /// batch boundary, mirroring pi's tool-effect batching policy.
+    pub fn with_effects(
+        initial_messages: Vec<Message>,
+        max_iterations: usize,
+        effects: BTreeMap<String, ToolEffects>,
+    ) -> Self {
         Self {
             messages: initial_messages,
             max_iterations,
             iterations: 0,
             phase: Phase::AwaitingLlm,
             turn: 0,
-            pending_tools: Vec::new(),
+            effects,
+            pending_batches: std::collections::VecDeque::new(),
+            turn_results: Vec::new(),
             last_assistant: None,
             queued_steering: Vec::new(),
             aborted: false,
         }
+    }
+
+    /// The effect declaration for a tool name, defaulting to write (serialize)
+    /// for unknown tools — fail-closed, matching pi.
+    fn effects_for(&self, name: &str) -> ToolEffects {
+        self.effects.get(name).copied().unwrap_or_else(ToolEffects::write)
     }
 
     /// The current conversation (test/observability accessor).
@@ -214,20 +246,67 @@ impl AgentMachine {
             return requests;
         }
 
+        // Plan effect-compatible batches: adjacent parallel-safe calls run
+        // together; a barrier (write/network/process/unknown) starts a new
+        // serialized batch. This is pure policy over the calls' declared effects.
         self.phase = Phase::AwaitingTools;
-        self.pending_tools = tool_calls
-            .iter()
-            .map(|call| PendingTool {
-                call: call.clone(),
-                result: None,
-            })
-            .collect();
-        for call in &tool_calls {
+        self.turn_results.clear();
+        self.pending_batches = self.plan_batches(&tool_calls);
+        requests.extend(self.dispatch_current_batch());
+        requests
+    }
+
+    /// Partition tool calls into contiguous effect-compatible batches (front of
+    /// the deque first). Mirrors pi's `plan_tool_effect_batches`: never reorders
+    /// calls, groups adjacent mutually-parallel-safe effects, breaks at the
+    /// first incompatible effect.
+    fn plan_batches(&self, calls: &[ToolCall]) -> std::collections::VecDeque<Vec<PendingTool>> {
+        let mut batches = std::collections::VecDeque::new();
+        let mut current: Vec<PendingTool> = Vec::new();
+        let mut active: Option<ToolEffects> = None;
+        for call in calls {
+            let call_effects = self.effects_for(&call.name);
+            let compatible = match active {
+                Some(active_effects) => active_effects.compatible_with(call_effects),
+                None => true,
+            };
+            if compatible && !current.is_empty() {
+                active = Some(active.expect("active set when current non-empty").union(call_effects));
+                current.push(PendingTool {
+                    call: call.clone(),
+                    result: None,
+                });
+            } else {
+                if !current.is_empty() {
+                    batches.push_back(std::mem::take(&mut current));
+                }
+                active = Some(call_effects);
+                current.push(PendingTool {
+                    call: call.clone(),
+                    result: None,
+                });
+            }
+        }
+        if !current.is_empty() {
+            batches.push_back(current);
+        }
+        batches
+    }
+
+    /// Emit ToolStart + RunTool for every call in the front batch (they run
+    /// concurrently in the shell). The batch's calls are moved into
+    /// `turn_results` slots as they finish.
+    fn dispatch_current_batch(&mut self) -> Vec<AgentRequest> {
+        let Some(batch) = self.pending_batches.front() else {
+            return Vec::new();
+        };
+        let mut requests = Vec::new();
+        for pending in batch {
             requests.push(AgentRequest::Emit(AgentEvent::ToolStart {
-                id: call.id.clone(),
-                name: call.name.clone(),
+                id: pending.call.id.clone(),
+                name: pending.call.name.clone(),
             }));
-            requests.push(AgentRequest::RunTool(call.clone()));
+            requests.push(AgentRequest::RunTool(pending.call.clone()));
         }
         requests
     }
@@ -238,25 +317,52 @@ impl AgentMachine {
             is_error: output.is_error,
         })];
 
-        if let Some(pending) = self.pending_tools.iter_mut().find(|p| p.call.id == id) {
+        // Record the result into the in-flight (front) batch.
+        if let Some(batch) = self.pending_batches.front_mut()
+            && let Some(pending) = batch.iter_mut().find(|p| p.call.id == id)
+        {
             let tool_name = pending.call.name.clone();
             pending.result = Some(tool_result_message(&id, &tool_name, output));
         }
 
-        // When every tool in the batch has a result, append them in order and
-        // start the next model turn.
-        if self.pending_tools.iter().all(|p| p.result.is_some()) {
-            for pending in self.pending_tools.drain(..) {
-                if let Some(result) = pending.result {
-                    self.messages
-                        .push(Message::ToolResult(std::sync::Arc::new(result)));
-                }
+        // Is the front batch fully resolved?
+        let batch_done = self
+            .pending_batches
+            .front()
+            .is_some_and(|batch| batch.iter().all(|p| p.result.is_some()));
+        if !batch_done {
+            return requests;
+        }
+
+        // Retire the batch: its results join the turn's results in original
+        // tool-call order (batches were planned in order, so appending preserves
+        // it). Then run the next batch, or finish the turn.
+        if let Some(batch) = self.pending_batches.pop_front() {
+            self.turn_results.extend(batch);
+        }
+
+        // If an abort arrived mid-turn, drain the in-flight batch (done above)
+        // but do NOT start any further batches — stop after appending results.
+        if !self.aborted && !self.pending_batches.is_empty() {
+            // More serialized batches remain — dispatch the next one. The
+            // in-flight batch always drains fully before the run reacts to
+            // steering/abort, keeping tool-result state untorn.
+            requests.extend(self.dispatch_current_batch());
+            return requests;
+        }
+
+        // All batches done: append every tool-result message in order, then
+        // begin the next model turn (or stop if aborted mid-turn).
+        for pending in std::mem::take(&mut self.turn_results) {
+            if let Some(result) = pending.result {
+                self.messages
+                    .push(Message::ToolResult(std::sync::Arc::new(result)));
             }
-            if self.aborted {
-                requests.extend(self.finish(AgentStop::Aborted));
-            } else {
-                requests.extend(self.begin_turn());
-            }
+        }
+        if self.aborted {
+            requests.extend(self.finish(AgentStop::Aborted));
+        } else {
+            requests.extend(self.begin_turn());
         }
         requests
     }

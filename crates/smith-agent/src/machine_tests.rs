@@ -4,16 +4,27 @@
 //! requests — the call/tool/stop cycle the pi loop hides behind async/await is
 //! here a plain, replayable function from `(state, completion)` to `[request]`.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use pi::model::{
     AssistantMessage, ContentBlock, Message, StopReason, TextContent, ToolCall, UserContent,
     UserMessage, Usage,
 };
-use pi::tools::ToolOutput;
+use pi::tools::{ToolEffects, ToolOutput};
 use smith_io_engine::{EngineTime, Machine};
 
 use super::{AgentCompletion, AgentEvent, AgentMachine, AgentRequest, AgentStop};
+
+/// A machine whose named tools are all read-only (parallel-safe), so adjacent
+/// tool calls batch together and run concurrently.
+fn machine_read_tools(names: &[&str]) -> AgentMachine {
+    let effects: BTreeMap<String, ToolEffects> = names
+        .iter()
+        .map(|name| ((*name).to_string(), ToolEffects::read()))
+        .collect();
+    AgentMachine::with_effects(vec![user("do the thing")], 10, effects)
+}
 
 fn user(text: &str) -> Message {
     Message::User(UserMessage {
@@ -170,17 +181,19 @@ fn single_tool_round_then_completes() {
 }
 
 #[test]
-fn waits_for_whole_tool_batch_before_next_model_call() {
-    let mut m = machine();
-    // Two tool calls in one turn.
+fn parallel_batch_runs_concurrently_and_waits_for_all_before_next_call() {
+    // Two read-only tools ⇒ one parallel batch: both dispatched at once, and the
+    // model is not re-called until BOTH finish.
+    let mut m = machine_read_tools(&["read", "grep"]);
     let mut requests = m.on_start(EngineTime::ZERO);
     requests.extend(m.on_completion(
         EngineTime::ZERO,
         AgentCompletion::LlmResponded(assistant_tool_calls(&[("a", "read"), ("b", "grep")])),
     ));
+    // Both run together (one batch).
     assert_eq!(run_tools(&requests), vec!["a".to_string(), "b".to_string()]);
 
-    // First tool finishes — must NOT call the model yet.
+    // First tool finishes — must NOT call the model yet (batch incomplete).
     let after_first = m.on_completion(
         EngineTime::ZERO,
         AgentCompletion::ToolFinished {
@@ -193,6 +206,8 @@ fn waits_for_whole_tool_batch_before_next_model_call() {
         0,
         "must wait for the whole batch before re-calling the model"
     );
+    // No second batch dispatched either — they were in the same batch.
+    assert!(run_tools(&after_first).is_empty());
 
     // Second tool finishes — now the model is called again.
     let after_second = m.on_completion(
@@ -332,7 +347,10 @@ fn steering_is_injected_at_the_next_turn_boundary() {
 
 #[test]
 fn final_conversation_has_tool_results_in_order() {
-    let mut m = machine();
+    // Two read-only tools run in one parallel batch; results arrive out of order
+    // (y before x) but the tool-result messages must still be appended in
+    // original tool-call order (x before y).
+    let mut m = machine_read_tools(&["read", "grep"]);
     let requests = run(
         &mut m,
         vec![
@@ -367,4 +385,123 @@ fn final_conversation_has_tool_results_in_order() {
         .collect();
     assert_eq!(tool_result_ids, vec!["x".to_string(), "y".to_string()]);
     let _ = Arc::new(());
+}
+
+#[test]
+fn mixed_effects_serialize_into_ordered_batches() {
+    // read, write, read ⇒ three serialized batches (a write is a barrier): the
+    // machine dispatches one call at a time, in order, never two at once.
+    let mut effects = BTreeMap::new();
+    effects.insert("read".to_string(), ToolEffects::read());
+    effects.insert("write".to_string(), ToolEffects::write());
+    let mut m = AgentMachine::with_effects(vec![user("mix")], 10, effects);
+
+    let mut requests = m.on_start(EngineTime::ZERO);
+    requests.extend(m.on_completion(
+        EngineTime::ZERO,
+        AgentCompletion::LlmResponded(assistant_tool_calls(&[
+            ("r1", "read"),
+            ("w", "write"),
+            ("r2", "read"),
+        ])),
+    ));
+    // Only the first batch (r1) is dispatched.
+    assert_eq!(run_tools(&requests), vec!["r1".to_string()]);
+
+    // r1 finishes ⇒ dispatch the write batch (w), still no model call.
+    let after_r1 = m.on_completion(
+        EngineTime::ZERO,
+        AgentCompletion::ToolFinished {
+            id: "r1".to_string(),
+            output: tool_output("r1", false),
+        },
+    );
+    assert_eq!(run_tools(&after_r1), vec!["w".to_string()]);
+    assert_eq!(calls_llm(&after_r1), 0);
+
+    // w finishes ⇒ dispatch the last read batch (r2).
+    let after_w = m.on_completion(
+        EngineTime::ZERO,
+        AgentCompletion::ToolFinished {
+            id: "w".to_string(),
+            output: tool_output("w", false),
+        },
+    );
+    assert_eq!(run_tools(&after_w), vec!["r2".to_string()]);
+    assert_eq!(calls_llm(&after_w), 0);
+
+    // r2 finishes ⇒ all batches done ⇒ the model is re-called.
+    let after_r2 = m.on_completion(
+        EngineTime::ZERO,
+        AgentCompletion::ToolFinished {
+            id: "r2".to_string(),
+            output: tool_output("r2", false),
+        },
+    );
+    assert_eq!(calls_llm(&after_r2), 1);
+}
+
+#[test]
+fn unknown_tools_are_serialized_fail_closed() {
+    // With no effect declarations (the default `machine()`), every tool is
+    // treated as a write ⇒ each is its own serial batch. Two calls ⇒ the second
+    // is not dispatched until the first finishes.
+    let mut m = machine();
+    let mut requests = m.on_start(EngineTime::ZERO);
+    requests.extend(m.on_completion(
+        EngineTime::ZERO,
+        AgentCompletion::LlmResponded(assistant_tool_calls(&[("a", "mystery"), ("b", "mystery")])),
+    ));
+    assert_eq!(run_tools(&requests), vec!["a".to_string()]);
+
+    let after_a = m.on_completion(
+        EngineTime::ZERO,
+        AgentCompletion::ToolFinished {
+            id: "a".to_string(),
+            output: tool_output("a", false),
+        },
+    );
+    assert_eq!(run_tools(&after_a), vec!["b".to_string()]);
+    assert_eq!(calls_llm(&after_a), 0);
+}
+
+#[test]
+fn results_across_serial_batches_preserve_original_order() {
+    // read, write ⇒ two batches; even though they run in sequence, the appended
+    // tool-result messages keep original order (r before w).
+    let mut effects = BTreeMap::new();
+    effects.insert("read".to_string(), ToolEffects::read());
+    effects.insert("write".to_string(), ToolEffects::write());
+    let mut m = AgentMachine::with_effects(vec![user("order")], 10, effects);
+
+    let requests = run(
+        &mut m,
+        vec![
+            AgentCompletion::LlmResponded(assistant_tool_calls(&[("r", "read"), ("w", "write")])),
+            AgentCompletion::ToolFinished {
+                id: "r".to_string(),
+                output: tool_output("r", false),
+            },
+            AgentCompletion::ToolFinished {
+                id: "w".to_string(),
+                output: tool_output("w", false),
+            },
+            AgentCompletion::LlmResponded(assistant_text("done")),
+        ],
+    );
+    let messages = requests
+        .iter()
+        .find_map(|r| match r {
+            AgentRequest::Finished { messages, .. } => Some(messages.clone()),
+            _ => None,
+        })
+        .expect("a finished payload");
+    let ids: Vec<String> = messages
+        .iter()
+        .filter_map(|m| match m {
+            Message::ToolResult(result) => Some(result.tool_call_id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec!["r".to_string(), "w".to_string()]);
 }

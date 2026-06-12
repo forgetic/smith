@@ -15,6 +15,19 @@ pub struct WorkerConfig {
     pub daemon_url: String,
     pub worker_id: String,
     pub capabilities: Vec<CapabilitySpec>,
+    /// How many jobs this worker runs at once.
+    ///
+    /// The design point is **one job at a time** (the default, and what the
+    /// examples and dogfood deploy set): a worker claims a ticket, works it to
+    /// completion, then claims the next — Forgejo-runner-shaped. A worker spends
+    /// most of a job blocked on LLM latency, so to run more jobs in parallel the
+    /// intended path is **more worker processes** (dozens is fine on one host),
+    /// not more concurrency inside one worker. Values >1 are still honored — the
+    /// capacity bookkeeping in [`crate::worker_machine::WorkerMachine`] is
+    /// invariant-checked and fuzzed for any value — but they are not the design
+    /// point. If a single worker ever genuinely needs several *top-level* agents,
+    /// the cleaner move is a per-job fan-out (tag completions with a job id and
+    /// route to a child machine) rather than relying on this knob.
     pub max_concurrent_jobs: u32,
     pub poll_wait: Duration,
     pub heartbeat_interval: Duration,
