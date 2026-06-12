@@ -1,16 +1,22 @@
-//! In-process `pi`-SDK agent runner.
+//! In-process coding-agent runner.
 //!
-//! Runs the Smith coding loop ([`smith_temper_agent::run_coding_agent`])
-//! directly on the worker's asupersync runtime instead of spawning the former
-//! `smith-coding-agent` subprocess. The provider/auth config the subprocess
-//! used to parse from `--auth` / `--auth-file` / `--codex-model` flags is now
-//! held here and resolved once at worker start, so a missing credential fails
-//! the worker's preflight rather than every job.
+//! Runs the Smith coding loop directly on the worker's asupersync runtime
+//! instead of spawning the former `smith-coding-agent` subprocess — and, as of
+//! the sub-agent work, on Smith's **native sans-IO agent loop**
+//! ([`smith_temper_agent::run_coding_agent_native`] →
+//! [`smith_agent::run_sub_agent`]) rather than pi's imperative `Agent::run`.
+//! Same role prompts, tools, and contract validation; the loop itself is the
+//! deterministic `AgentMachine`.
+//!
+//! The provider/auth config the subprocess used to parse from `--auth` /
+//! `--auth-file` / `--codex-model` flags is now held here and resolved once at
+//! worker start, so a missing credential fails the worker's preflight rather
+//! than every job.
 
 use std::path::{Path, PathBuf};
 
 use smith_temper_agent::{
-    CodingAgentError, ProviderConfig, WorkspaceContext, WorkspaceResult, run_coding_agent,
+    CodingAgentError, ProviderConfig, WorkspaceContext, WorkspaceResult, run_coding_agent_native,
 };
 use temper_worker_protocol::FailureClass;
 
@@ -45,7 +51,7 @@ impl AgentRunner for PiAgentRunner {
         context: &WorkspaceContext,
         cwd: &Path,
     ) -> Result<WorkspaceResult, AgentRunError> {
-        run_coding_agent(
+        run_coding_agent_native(
             &self.provider,
             context,
             cwd,

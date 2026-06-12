@@ -10,6 +10,7 @@ description = "Temper-specific provider/auth/decision core for Smith agents."
 pi_agent_rust.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+smith-agent = { path = "../smith-agent" }
 temper-process-protocol = { path = "../../../temper/crates/temper-process-protocol" }
 uuid.workspace = true
 
@@ -19,6 +20,7 @@ test-provider-base-url-override = []
 
 [dev-dependencies]
 smith-temper-agent = { path = ".", features = ["test-provider-base-url-override"] }
+smith-io-engine = { path = "../smith-io-engine" }
 jig-server = { path = "../../../jig/crates/jig-server" }
 jig-core = { path = "../../../jig/crates/jig-core" }
 jig-record = { path = "../../../jig/crates/jig-record" }

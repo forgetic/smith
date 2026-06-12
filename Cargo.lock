@@ -4422,6 +4422,8 @@ dependencies = [
  "pi_agent_rust",
  "serde",
  "serde_json",
+ "smith-agent",
+ "smith-io-engine",
  "smith-temper-agent",
  "temper-process-protocol",
  "tokio",

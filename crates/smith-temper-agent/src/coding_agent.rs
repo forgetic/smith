@@ -534,6 +534,75 @@ pub async fn run_coding_agent(
     Ok(result)
 }
 
+/// Runs one capability/role-aware coding-workspace turn on Smith's **native
+/// sans-IO agent loop** ([`smith_agent::run_sub_agent`]) instead of pi's
+/// imperative `Agent::run`.
+///
+/// Behaviorally identical to [`run_coding_agent`] — same role prompt, overlays,
+/// tools, stream options, JSON parsing, and contract validation — but the loop
+/// itself is the deterministic [`smith_agent::AgentMachine`] driven by an
+/// asupersync shell that reuses pi's provider + tools. This is the path the
+/// worker takes in production; the pi-loop version is retained for comparison
+/// and for callers that have not migrated.
+///
+/// Must be awaited inside an asupersync engine task (the sub-agent's drive loop
+/// reads the runtime clock and its shell spawns I/O).
+pub async fn run_coding_agent_native(
+    provider_config: &ProviderConfig,
+    context: &WorkspaceContext,
+    cwd: &Path,
+    max_iterations: usize,
+    config_dir: Option<&Path>,
+) -> Result<WorkspaceResult, CodingAgentError> {
+    let capability = Capability::for_role(&context.work_item.role);
+    let provider = provider_config.build_provider()?;
+
+    let role_prompt = system_prompt(capability, &context.allowed_verdicts);
+    let user = user_context(context);
+    let overlays = PromptOverlays::load(config_dir, cwd, capability);
+    let turns = overlays.compose_turns(
+        &role_prompt,
+        &user,
+        provider_config.required_system_identity(),
+    );
+
+    // Same per-request stream options the pi path sets.
+    let stream_options = pi::provider::StreamOptions {
+        api_key: Some(provider_config.resolve_bearer().await?),
+        temperature: provider_config.temperature(),
+        thinking_level: provider_config.coding_thinking_level(),
+        headers: provider_config.request_headers(),
+        ..pi::provider::StreamOptions::default()
+    };
+
+    let outcome = smith_agent::run_sub_agent(smith_agent::SubAgent {
+        system_prompt: Some(turns.system),
+        user_message: turns.user,
+        tools: tool_registry(capability, cwd),
+        max_iterations,
+        provider,
+        stream_options,
+    })
+    .await
+    .map_err(|error| CodingAgentError::Run(error.to_string()))?;
+
+    if matches!(outcome.stop, smith_agent::AgentStop::ModelError) {
+        return Err(CodingAgentError::AgentStopped(
+            outcome
+                .final_message
+                .error_message
+                .clone()
+                .unwrap_or_else(|| "provider reported an error stop".to_string()),
+        ));
+    }
+
+    let text = collect_text(&outcome.final_message.content);
+    let result = parse_result(&text)?;
+    validate_verdict_vocabulary(&result, &context.allowed_verdicts)?;
+    validate_contract(capability, &result, cwd)?;
+    Ok(result)
+}
+
 /// Concatenates the assistant message's text blocks (ignoring thinking/tool
 /// blocks).
 fn collect_text(content: &[ContentBlock]) -> String {
