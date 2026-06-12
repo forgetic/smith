@@ -10,7 +10,7 @@
 //! - a **fake daemon** (tokio axum) speaks the worker/daemon wire protocol:
 //!   accepts register, assigns one real coding job (a full `WireJobContext`
 //!   payload), then accepts the result;
-//! - a **real `smith-worker`** runs on its own asupersync runtime thread with an
+//! - a **real `smith-worker`** runs on its own skein runtime thread with an
 //!   [`OutOfProcessRunner`] pointed at the `smith-fake-agent` binary;
 //! - a **recording [`ProgressSink`]** captures every step-progress marker the
 //!   worker relayed from the agent's stdout;

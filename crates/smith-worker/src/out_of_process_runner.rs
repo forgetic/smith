@@ -16,8 +16,8 @@
 //! `ExternalCommandRunner` (same file protocol) — an external coder that ignores
 //! stdout simply emits no progress, which is fine.
 //!
-//! Spawning goes through [`asupersync::runtime::spawn_blocking`], never
-//! `tokio::process`: the worker runs on the asupersync runtime, which has no
+//! Spawning goes through [`skein::runtime::spawn_blocking`], never
+//! `tokio::process`: the worker runs on the skein runtime, which has no
 //! tokio reactor, so a blocking child must run on the blocking pool.
 
 use std::io::{BufRead, BufReader};
@@ -79,10 +79,10 @@ impl AgentRunner for OutOfProcessRunner {
         let cwd_owned = cwd.to_path_buf();
         let context_path_owned = context_path.clone();
         let result_path_owned = result_path.clone();
-        // `asupersync::runtime::spawn_blocking` returns the closure's value
+        // `skein::runtime::spawn_blocking` returns the closure's value
         // directly (no JoinError wrapper), so the closure's own
         // `Result<ChildOutcome, AgentRunError>` is what comes back.
-        let outcome = asupersync::runtime::spawn_blocking(move || {
+        let outcome = skein::runtime::spawn_blocking(move || {
             run_child(
                 &program_owned,
                 &args_owned,

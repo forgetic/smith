@@ -31,7 +31,7 @@ where
     // The runtime handle for spawning shell I/O. Available because run_worker is
     // awaited inside an engine task (block_on).
     let handle =
-        asupersync::runtime::Runtime::current_handle().ok_or(WorkerError::RuntimeUnavailable)?;
+        skein::runtime::Runtime::current_handle().ok_or(WorkerError::RuntimeUnavailable)?;
 
     let shell = WorkerShell::new(
         handle,

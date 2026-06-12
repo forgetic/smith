@@ -3,14 +3,14 @@
 //! [`WorkerShell`] implements [`smith_io_engine::Executor`] for
 //! [`WorkerMachine`](crate::worker_machine::WorkerMachine): it performs the I/O
 //! each [`WorkerRequest`] asks for — POST worker-protocol messages to the daemon
-//! over the asupersync HTTP client, run dispatched jobs through the
+//! over the skein HTTP client, run dispatched jobs through the
 //! [`JobExecutor`], and arm timers — and feeds every result back into the
 //! completion queue as a [`WorkerCompletion`]. It never calls into the machine.
 
 use std::sync::Arc;
 
-use asupersync::http::h1::http_client::HttpClient;
-use asupersync::runtime::RuntimeHandle;
+use skein::http::h1::http_client::HttpClient;
+use skein::runtime::RuntimeHandle;
 use smith_io_engine::{
     CqSender, HttpCall, HttpResponseData, arm_timer, build_http_client, http_call,
 };
@@ -19,7 +19,7 @@ use temper_worker_protocol::WorkerProtocolMessage;
 use crate::executor::{JobExecutor, job_result};
 use crate::worker_machine::{WorkerCompletion, WorkerMachine, WorkerRequest};
 
-/// Performs the worker's I/O on the asupersync runtime.
+/// Performs the worker's I/O on the skein runtime.
 pub struct WorkerShell<E: JobExecutor> {
     handle: RuntimeHandle,
     cq: CqSender<WorkerCompletion>,

@@ -9,19 +9,20 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT OR Apache-2.0"
-# asupersync 0.3.2 uses let-chains (stable since 1.88) without declaring its own
-# MSRV, so the workspace floor is 1.88 to match. This also matches temper, whose
-# serde DTO crates smith depends on by path.
+# skein uses edition-2024 and let-chains (stable since 1.88), so the workspace
+# floor is 1.88 to match. This also matches temper, whose serde DTO crates
+# smith depends on by path.
 rust-version = "1.88"
 version = "0.1.0"
 
 [workspace.dependencies]
 # Smith is orchestration-only: the worker is an HTTP client + git driver on the
-# asupersync runtime and links no agent/LLM code (the coding agent moved
+# skein runtime and links no agent/LLM code (the coding agent moved
 # out-of-process into the `anvil` repo; smith owns the wire contract in
-# `smith-agent-protocol`). Kept in lockstep with temper's `=0.3.2` so smith and
-# temper's serde DTO crates resolve one asupersync version.
-asupersync = "=0.3.2"
+# `smith-agent-protocol`). skein is our maintained, MIT, cancel-correct async
+# runtime (a clean-room fork of asupersync 0.2.4 — the last plain-MIT upstream
+# release); it lives in its own repo at ../skein and is shared with temper.
+skein = { path = "../skein/crates/skein" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = "1"

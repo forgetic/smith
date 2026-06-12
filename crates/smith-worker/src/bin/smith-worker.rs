@@ -24,7 +24,7 @@ fn main() {
     }
 }
 
-/// Builds the selected executor and runs the worker on the asupersync runtime.
+/// Builds the selected executor and runs the worker on the skein runtime.
 ///
 /// The worker links **no** agent/LLM code: every coding job runs out-of-process
 /// behind the `smith-agent-protocol`. The worker spawns the agent program

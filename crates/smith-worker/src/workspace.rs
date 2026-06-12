@@ -283,7 +283,7 @@ impl Workspace {
     ) -> Result<Output, WorkspaceError> {
         // Assemble the full argument vector up front so the actual `git`
         // invocation can run on the blocking pool. The worker runs on the
-        // asupersync runtime (single-threaded, no tokio reactor), so git — a
+        // skein runtime (single-threaded, no tokio reactor), so git — a
         // blocking subprocess — must go through `spawn_blocking`, not
         // `tokio::process` (which would panic with no tokio reactor) and not
         // inline on the loop thread (which would stall every other task).
@@ -306,7 +306,7 @@ impl Workspace {
         }
         full_args.extend(args);
 
-        let output = asupersync::runtime::spawn_blocking(move || {
+        let output = skein::runtime::spawn_blocking(move || {
             Command::new("git")
                 .env("GIT_TERMINAL_PROMPT", "0")
                 .args(&full_args)

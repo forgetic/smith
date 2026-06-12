@@ -7,7 +7,7 @@
 //! machine's safety invariants hold after *every* transition, across thousands
 //! of interleavings.
 //!
-//! This is the first layer of the asupersync-lab simulation goal — the pure
+//! This is the first layer of the skein-lab simulation goal — the pure
 //! core fuzzed exhaustively in-process. A companion lab-runtime test
 //! (`worker_lab_sim.rs`) drives the imperative shell (spawned I/O + virtual
 //! timers) under a seeded lab schedule.

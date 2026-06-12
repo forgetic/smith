@@ -198,8 +198,8 @@ fn worker_config() -> WorkerConfig {
     }
 }
 
-/// Run the worker on its own single-threaded asupersync runtime in a dedicated
-/// thread. The worker now requires an asupersync runtime to host its sans-IO
+/// Run the worker on its own single-threaded skein runtime in a dedicated
+/// thread. The worker now requires an skein runtime to host its sans-IO
 /// drive loop (and, in production, in-process agent jobs), so it cannot run as a
 /// tokio task. The fake daemon stays on tokio; the two communicate over real
 /// HTTP, exactly as in production. The thread is detached — the worker loops

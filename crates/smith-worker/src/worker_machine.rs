@@ -12,7 +12,7 @@
 //! interleavings the tokio `select!` loop used to hide — is unit-testable with
 //! [`smith_io_engine::drive_sync`]: feed a completion sequence and assert on the
 //! emitted requests, with no runtime and no races. That is also what makes it a
-//! target for asupersync-lab simulation later.
+//! target for skein-lab simulation later.
 
 use std::collections::BTreeSet;
 
