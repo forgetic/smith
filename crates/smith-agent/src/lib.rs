@@ -20,7 +20,10 @@ pub mod run;
 pub mod shell;
 pub mod subagent_tool;
 
-pub use machine::{AgentCompletion, AgentEvent, AgentMachine, AgentRequest, AgentStop};
-pub use run::{run_sub_agent, run_sub_agent_with_events, SubAgent, SubAgentError};
+pub use machine::{AgentCompletion, AgentEvent, AgentMachine, AgentRequest, AgentStop, StreamDelta};
+pub use run::{
+    run_sub_agent, run_sub_agent_controllable, run_sub_agent_with_events, SubAgent, SubAgentControl,
+    SubAgentError,
+};
 pub use shell::{AgentOutcome, AgentShell, EventSink, NullEventSink};
 pub use subagent_tool::{SubAgentFactory, SubAgentTool};

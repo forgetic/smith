@@ -34,6 +34,12 @@ use pi::tools::{ToolEffects, ToolOutput};
 pub enum AgentEvent {
     /// A model turn is starting (about to call the LLM).
     TurnStart { turn: usize },
+    /// A live streaming delta from the model, emitted by the shell as the
+    /// response streams in (before the turn's full [`AgentEvent::AssistantMessage`]).
+    /// Lets observers — a TUI, a transcript recorder — watch tokens and tool
+    /// calls arrive in real time. The machine never sees these; they are the
+    /// shell's responsibility, so the loop stays pure.
+    StreamDelta(StreamDelta),
     /// The model produced an assistant message.
     AssistantMessage { content: Vec<ContentBlock> },
     /// A tool is about to run.
@@ -44,6 +50,17 @@ pub enum AgentEvent {
     Steered { count: usize },
     /// The agent run ended (with the reason it stopped).
     AgentEnd { reason: AgentStop },
+}
+
+/// A live streaming fragment of a model response, forwarded by the shell.
+#[derive(Clone, Debug)]
+pub enum StreamDelta {
+    /// A chunk of assistant text.
+    Text(String),
+    /// A chunk of model "thinking" (extended reasoning).
+    Thinking(String),
+    /// A tool call finished streaming (its arguments are now complete).
+    ToolCall { id: String, name: String },
 }
 
 /// Why the agent loop stopped.

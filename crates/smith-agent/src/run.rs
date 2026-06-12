@@ -17,10 +17,44 @@ use pi::model::{Message, UserContent, UserMessage};
 use pi::provider::{Provider, StreamOptions, ToolDef};
 use pi::sdk::tool_to_definition;
 use pi::tools::ToolRegistry;
-use smith_io_engine::{channel, drive, oneshot};
+use smith_io_engine::{CqSender, channel, drive, oneshot};
 
-use crate::machine::AgentMachine;
+use crate::machine::{AgentCompletion, AgentMachine};
 use crate::shell::{AgentOutcome, AgentShell, EventSink, NullEventSink};
+
+/// A live control handle for a running sub-agent: inject steering messages or
+/// abort it from outside the run.
+///
+/// The handle wraps a clone of the run's completion-queue sender, so it can be
+/// moved to another task/thread (it is `Send + Clone`) and used while the run is
+/// in flight. Steering is applied at the next turn boundary; abort drains any
+/// in-flight tool batch and then stops the run with [`AgentStop::Aborted`].
+/// Calls after the run has finished are harmless no-ops (the queue is closed).
+#[derive(Clone)]
+pub struct SubAgentControl {
+    cq: CqSender<AgentCompletion>,
+}
+
+impl SubAgentControl {
+    /// Inject steering messages, applied at the next turn boundary.
+    pub fn steer(&self, messages: Vec<Message>) {
+        let _ = self.cq.send(AgentCompletion::Steer(messages));
+    }
+
+    /// Inject a plain-text steering message.
+    pub fn steer_text(&self, text: impl Into<String>) {
+        self.steer(vec![Message::User(UserMessage {
+            content: UserContent::Text(text.into()),
+            timestamp: 0,
+        })]);
+    }
+
+    /// Abort the run. The current tool batch (if any) drains first, then the run
+    /// stops with [`crate::AgentStop::Aborted`].
+    pub fn abort(&self) {
+        let _ = self.cq.send(AgentCompletion::Abort);
+    }
+}
 
 /// The definition of one sub-agent run.
 pub struct SubAgent {
@@ -75,6 +109,33 @@ pub async fn run_sub_agent_with_events(
     sub_agent: SubAgent,
     events: Arc<dyn EventSink>,
 ) -> Result<AgentOutcome, SubAgentError> {
+    let (_control, run) = run_sub_agent_controllable(sub_agent, events)?;
+    run.await
+}
+
+/// Builds a controllable sub-agent run: returns a [`SubAgentControl`] handle for
+/// live steering/abort plus a future that drives the run to its
+/// [`AgentOutcome`]. The control is available *before* the run is awaited, so a
+/// caller can hand it to another task/thread and steer or abort while the run is
+/// in flight, e.g.:
+///
+/// ```ignore
+/// let (control, run) = run_sub_agent_controllable(sub_agent, events)?;
+/// handle.spawn(async move { /* … */ control.abort(); });
+/// let outcome = run.await?;
+/// ```
+///
+/// Must be called inside an engine task (it needs the runtime handle).
+pub fn run_sub_agent_controllable(
+    sub_agent: SubAgent,
+    events: Arc<dyn EventSink>,
+) -> Result<
+    (
+        SubAgentControl,
+        impl std::future::Future<Output = Result<AgentOutcome, SubAgentError>>,
+    ),
+    SubAgentError,
+> {
     let handle = asupersync::runtime::Runtime::current_handle()
         .ok_or(SubAgentError::RuntimeUnavailable)?;
 
@@ -102,6 +163,10 @@ pub async fn run_sub_agent_with_events(
     let (cq_tx, cq_rx) = channel();
     let (outcome_tx, outcome_rx) = oneshot();
 
+    // The control handle is a clone of the completion sender — steering/abort
+    // are just completions the machine already knows how to handle.
+    let control = SubAgentControl { cq: cq_tx.clone() };
+
     let shell = AgentShell::new(
         handle,
         cq_tx,
@@ -115,9 +180,11 @@ pub async fn run_sub_agent_with_events(
     );
     let machine = AgentMachine::with_effects(initial, sub_agent.max_iterations, effects);
 
-    // Drive to completion. The machine stops itself on `Finished`, which also
-    // resolves the outcome oneshot.
-    let _ = drive(machine, &shell, cq_rx).await;
-
-    outcome_rx.recv().await.ok_or(SubAgentError::NoOutcome)
+    let run = async move {
+        // Drive to completion. The machine stops itself on `Finished`, which
+        // also resolves the outcome oneshot.
+        let _ = drive(machine, &shell, cq_rx).await;
+        outcome_rx.recv().await.ok_or(SubAgentError::NoOutcome)
+    };
+    Ok((control, run))
 }

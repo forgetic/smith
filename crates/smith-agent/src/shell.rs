@@ -19,7 +19,9 @@ use pi::provider::{Context, Provider, StreamOptions, ToolDef};
 use pi::tools::ToolRegistry;
 use smith_io_engine::{CqSender, Executor};
 
-use crate::machine::{AgentCompletion, AgentEvent, AgentMachine, AgentRequest, AgentStop};
+use crate::machine::{
+    AgentCompletion, AgentEvent, AgentMachine, AgentRequest, AgentStop, StreamDelta,
+};
 
 /// The settled result of a sub-agent run.
 #[derive(Clone, Debug)]
@@ -91,6 +93,7 @@ impl Executor<AgentMachine> for AgentShell {
                 let system_prompt = self.system_prompt.clone();
                 let tool_defs = Arc::clone(&self.tool_defs);
                 let stream_options = Arc::clone(&self.stream_options);
+                let events = Arc::clone(&self.events);
                 let cq = self.cq.clone();
                 self.handle.spawn(async move {
                     let completion = stream_to_completion(
@@ -99,6 +102,7 @@ impl Executor<AgentMachine> for AgentShell {
                         &messages,
                         &tool_defs,
                         &stream_options,
+                        events.as_ref(),
                     )
                     .await;
                     let _ = cq.send(completion);
@@ -155,6 +159,7 @@ async fn stream_to_completion(
     messages: &[Message],
     tool_defs: &[ToolDef],
     stream_options: &StreamOptions,
+    events: &dyn EventSink,
 ) -> AgentCompletion {
     let context = Context {
         system_prompt: system_prompt.map(std::borrow::Cow::Borrowed),
@@ -183,10 +188,23 @@ async fn stream_to_completion(
                 final_message = Some(message);
                 break;
             }
-            // Intermediate deltas (text/thinking/tool-call streaming) are not
-            // needed for the loop's decision; the terminal event carries the
-            // assembled message. A live view would forward these via the event
-            // sink — a future enhancement.
+            // Live deltas: forwarded to the event sink so observers see tokens
+            // and tool calls arrive in real time. They do not affect the loop's
+            // decision (the terminal event carries the assembled message), so
+            // the machine never sees them — the streaming layer is purely the
+            // shell's responsibility.
+            Ok(StreamEvent::TextDelta { delta, .. }) => {
+                events.emit(AgentEvent::StreamDelta(StreamDelta::Text(delta)));
+            }
+            Ok(StreamEvent::ThinkingDelta { delta, .. }) => {
+                events.emit(AgentEvent::StreamDelta(StreamDelta::Thinking(delta)));
+            }
+            Ok(StreamEvent::ToolCallEnd { tool_call, .. }) => {
+                events.emit(AgentEvent::StreamDelta(StreamDelta::ToolCall {
+                    id: tool_call.id,
+                    name: tool_call.name,
+                }));
+            }
             Ok(_) => {}
             Err(error) => return AgentCompletion::LlmFailed(error.to_string()),
         }
