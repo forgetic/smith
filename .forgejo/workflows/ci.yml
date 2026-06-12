@@ -66,7 +66,7 @@ jobs:
       # agent: the coding-agent loop ⇄ jig test now lives in the `anvil` repo
       # (its own CI), and the basic-delivery topology e2e must be re-pointed at
       # the `anvil-agent` binary as part of the examples/deploy sweep tracked in
-      # smith/agent-process-split.md (§Examples/deploy follow-up). Until that
+      # docs/explanation/agent-process-split.md (examples/deploy follow-up). Until that
       # lands, smith CI gates on the hermetic out-of-process worker e2e in
       # `cargo dev-test` (tests/coding_worker_e2e.rs), which drives the full
       # orchestration path against a deterministic protocol-speaking agent.

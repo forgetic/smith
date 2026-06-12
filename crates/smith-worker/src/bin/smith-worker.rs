@@ -56,10 +56,10 @@ fn run(config: smith_worker::WorkerConfig) -> Result<(), String> {
             };
 
             // Both surfaces resolve to a command the out-of-process runner spawns:
-            // the Smith surface assembles `anvil-agent` + auth/iteration flags; an
+            // the anvil-native surface assembles `anvil-agent` + auth/iteration flags; an
             // external command is passed through verbatim.
             let command = match surface.agent {
-                AgentSurface::Smith(smith) => smith.into_command(),
+                AgentSurface::AnvilNative(smith) => smith.into_command(),
                 AgentSurface::ExternalCommand(command) => command,
             };
             let runner = Arc::new(OutOfProcessRunner::new(command));

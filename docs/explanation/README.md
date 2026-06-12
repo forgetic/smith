@@ -6,3 +6,4 @@ Current pages:
 
 - [Codebase map](codebase-map.md)
 - [Temper/Smith process boundary](process-boundary.md)
+- [The agent / orchestration split](agent-process-split.md)

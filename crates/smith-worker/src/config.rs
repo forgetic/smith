@@ -88,26 +88,26 @@ pub struct CodingSurface {
 ///
 /// Both surfaces resolve to a **command the worker spawns out-of-process** over
 /// the `smith-agent-protocol`. `--agent-command` selects the program: the
-/// literal `smith` (or the legacy `smith-coding-agent`) selects the Smith agent
-/// surface, which spawns `anvil-agent` (overridable via `--agent-program`); any
-/// other value is spawned verbatim (the examples' deterministic `greeting`
-/// stand-in, or an operator-provided coder). Trailing `--agent-arg` values are
-/// the agent's flags: for the Smith surface they are parsed here and re-rendered
+/// literal `anvil-native` selects the native anvil agent surface, which spawns
+/// `anvil-agent` (overridable via `--agent-program`); any other value is
+/// spawned verbatim (the examples' deterministic `greeting` stand-in, or an
+/// operator-provided coder). Trailing `--agent-arg` values are the agent's
+/// flags: for the anvil-native surface they are parsed here and re-rendered
 /// onto the `anvil-agent` command (`--agent-program` / `--auth` / `--auth-file`
 /// / `--codex-model` / `--max-iterations` / `--config-dir` / `--enable-subagents`);
 /// for an external command they are passed through verbatim.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgentSurface {
-    /// The Smith coding agent, spawned out-of-process as `anvil-agent`.
-    Smith(SmithAgentSurface),
+    /// The native anvil coding agent, spawned out-of-process as `anvil-agent`.
+    AnvilNative(AnvilNativeAgentSurface),
     /// An external program spawned per job (program first, then args).
     ExternalCommand(Vec<String>),
 }
 
-/// Parsed configuration for the in-process Smith coding agent — the flags the
+/// Parsed configuration for the anvil-native agent surface — the flags the
 /// out-of-process `anvil-agent` binary parses for itself.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SmithAgentSurface {
+pub struct AnvilNativeAgentSurface {
     /// The agent program the worker spawns. Defaults to [`ANVIL_AGENT_PROGRAM`]
     /// (`anvil-agent`, resolved on `PATH`); override with an absolute path via
     /// `--agent-program` when it is not on `PATH`.
@@ -121,7 +121,7 @@ pub struct SmithAgentSurface {
     pub enable_subagents: bool,
 }
 
-impl SmithAgentSurface {
+impl AnvilNativeAgentSurface {
     /// Renders the spawn command `OutOfProcessRunner` runs: the agent program
     /// followed by the same flags `anvil-agent` parses (`--auth`, `--auth-file`,
     /// `--codex-model`, `--config-dir`, `--max-iterations`, `--enable-subagents`).
@@ -159,9 +159,9 @@ impl SmithAgentSurface {
     }
 }
 
-/// Which credential the Smith agent authenticates with. Mirrors the agent's
+/// Which credential the agent authenticates with. Mirrors the agent's
 /// `AuthChoice` but is parsed in the worker (which links no agent code); the
-/// worker renders it back to the `--auth` flag in [`SmithAgentSurface::into_command`].
+/// worker renders it back to the `--auth` flag in [`AnvilNativeAgentSurface::into_command`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AgentAuthChoice {
     DeepSeek,
@@ -169,15 +169,12 @@ pub enum AgentAuthChoice {
     AnthropicOAuth,
 }
 
-/// The program name that selects the Smith out-of-process agent surface.
-const SMITH_AGENT_PROGRAM: &str = "smith";
-/// Legacy program name (the former in-process selector) — also selects the
-/// Smith surface.
-const SMITH_AGENT_LEGACY_PROGRAM: &str = "smith-coding-agent";
-/// The agent binary the Smith surface spawns by default.
+/// The program name that selects the anvil-native out-of-process agent surface.
+const ANVIL_NATIVE_PROGRAM: &str = "anvil-native";
+/// The agent binary the anvil-native surface spawns by default.
 pub const ANVIL_AGENT_PROGRAM: &str = "anvil-agent";
 
-pub const USAGE: &str = "smith-worker --daemon-url <url> --worker-id <id> --capability <owner/name>:<role> [--capability ...] [--max-concurrent <n>] [--poll-wait-ms <n>] [--heartbeat-interval-ms <n>] [--executor <stub|coding>] [--workspace-root <path>] [--git-base-url <url>] [--agent-command <smith|program>] [--agent-arg <arg> ...]\n  --agent-command smith spawns the out-of-process anvil-agent; its --agent-arg values (--agent-program, --auth, --auth-file, --codex-model, --config-dir, --max-iterations, --enable-subagents) become the agent's flags. Any other --agent-command is spawned verbatim over the same protocol.";
+pub const USAGE: &str = "smith-worker --daemon-url <url> --worker-id <id> --capability <owner/name>:<role> [--capability ...] [--max-concurrent <n>] [--poll-wait-ms <n>] [--heartbeat-interval-ms <n>] [--executor <stub|coding>] [--workspace-root <path>] [--git-base-url <url>] [--agent-command <anvil-native|program>] [--agent-arg <arg> ...]\n  --agent-command anvil-native spawns the out-of-process anvil-agent; its --agent-arg values (--agent-program, --auth, --auth-file, --codex-model, --config-dir, --max-iterations, --enable-subagents) become the agent's flags. Any other --agent-command is spawned verbatim over the same protocol.";
 
 // `Run(WorkerConfig)` is far larger than `Help`, but `ParseOutcome` is produced
 // exactly once at process start and immediately destructured — the size
@@ -396,11 +393,13 @@ fn executor_selection(
 }
 
 /// Builds the [`AgentSurface`] for the `--agent-command` program and its
-/// trailing `--agent-arg` values. The Smith program names parse the agent flags
+/// trailing `--agent-arg` values. The `anvil-native` program name parses the agent flags
 /// in-process; any other program is spawned as an external command.
 fn agent_surface(program: &str, args: Vec<String>) -> Result<AgentSurface, String> {
-    if program == SMITH_AGENT_PROGRAM || program == SMITH_AGENT_LEGACY_PROGRAM {
-        Ok(AgentSurface::Smith(parse_smith_agent_surface(args)?))
+    if program == ANVIL_NATIVE_PROGRAM {
+        Ok(AgentSurface::AnvilNative(parse_anvil_native_agent_surface(
+            args,
+        )?))
     } else {
         let mut command = Vec::with_capacity(args.len() + 1);
         command.push(program.to_string());
@@ -409,9 +408,9 @@ fn agent_surface(program: &str, args: Vec<String>) -> Result<AgentSurface, Strin
     }
 }
 
-/// Parses the in-process Smith agent flags from the `--agent-arg` values — the
-/// same flags the former `smith-coding-agent` binary accepted.
-fn parse_smith_agent_surface(args: Vec<String>) -> Result<SmithAgentSurface, String> {
+/// Parses the anvil-native agent flags from the `--agent-arg` values — the
+/// flags the `anvil-agent` binary parses for itself.
+fn parse_anvil_native_agent_surface(args: Vec<String>) -> Result<AnvilNativeAgentSurface, String> {
     let mut agent_program = ANVIL_AGENT_PROGRAM.to_string();
     let mut auth = AgentAuthChoice::ChatGptOAuth;
     let mut codex_model = None;
@@ -469,13 +468,13 @@ fn parse_smith_agent_surface(args: Vec<String>) -> Result<SmithAgentSurface, Str
             }
             other => {
                 return Err(format!(
-                    "unknown smith agent arg `{other}`; expected --agent-program, --auth, --codex-model, --auth-file, --config-dir, --max-iterations, or --enable-subagents"
+                    "unknown anvil-native agent arg `{other}`; expected --agent-program, --auth, --codex-model, --auth-file, --config-dir, --max-iterations, or --enable-subagents"
                 ));
             }
         }
     }
 
-    Ok(SmithAgentSurface {
+    Ok(AnvilNativeAgentSurface {
         agent_program,
         auth,
         codex_model,
@@ -651,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_smith_agent_surface_from_agent_args() {
+    fn parses_anvil_native_agent_surface_from_agent_args() {
         let config = parse_ok(&[
             "--daemon-url",
             "http://daemon.example",
@@ -666,7 +665,7 @@ mod tests {
             "--git-base-url",
             " https://forgejo.example ",
             "--agent-command",
-            " smith-coding-agent ",
+            " anvil-native ",
             "--agent-arg",
             "--auth",
             "--agent-arg",
@@ -686,7 +685,7 @@ mod tests {
             ExecutorSelection::Coding(CodingSurface {
                 workspace_root: PathBuf::from("/var/lib/smith/workspaces"),
                 git_base_url: "https://forgejo.example".to_string(),
-                agent: AgentSurface::Smith(SmithAgentSurface {
+                agent: AgentSurface::AnvilNative(AnvilNativeAgentSurface {
                     agent_program: "anvil-agent".to_string(),
                     auth: AgentAuthChoice::AnthropicOAuth,
                     codex_model: None,
@@ -700,7 +699,7 @@ mod tests {
     }
 
     #[test]
-    fn smith_agent_enable_subagents_flag_is_parsed() {
+    fn anvil_native_enable_subagents_flag_is_parsed() {
         let config = parse_ok(&[
             "--daemon-url",
             "http://daemon.example",
@@ -715,21 +714,21 @@ mod tests {
             "--git-base-url",
             "https://forgejo.example",
             "--agent-command",
-            "smith",
+            "anvil-native",
             "--agent-arg",
             "--enable-subagents",
         ]);
         let ExecutorSelection::Coding(surface) = config.executor else {
             panic!("expected coding executor");
         };
-        let AgentSurface::Smith(smith) = surface.agent else {
-            panic!("expected smith agent");
+        let AgentSurface::AnvilNative(native) = surface.agent else {
+            panic!("expected anvil-native agent");
         };
-        assert!(smith.enable_subagents);
+        assert!(native.enable_subagents);
     }
 
     #[test]
-    fn smith_agent_defaults_to_chatgpt_oauth_when_no_args() {
+    fn anvil_native_defaults_to_chatgpt_oauth_when_no_args() {
         let config = parse_ok(&[
             "--daemon-url",
             "http://daemon.example",
@@ -744,7 +743,7 @@ mod tests {
             "--git-base-url",
             "https://forgejo.example",
             "--agent-command",
-            "smith",
+            "anvil-native",
         ]);
 
         let ExecutorSelection::Coding(surface) = config.executor else {
@@ -752,7 +751,7 @@ mod tests {
         };
         assert_eq!(
             surface.agent,
-            AgentSurface::Smith(SmithAgentSurface {
+            AgentSurface::AnvilNative(AnvilNativeAgentSurface {
                 agent_program: "anvil-agent".to_string(),
                 auth: AgentAuthChoice::ChatGptOAuth,
                 codex_model: None,
@@ -765,7 +764,7 @@ mod tests {
     }
 
     #[test]
-    fn non_smith_agent_command_is_external_passthrough() {
+    fn non_native_agent_command_is_external_passthrough() {
         let config = parse_ok(&[
             "--daemon-url",
             "http://daemon.example",
@@ -798,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn smith_agent_rejects_unknown_arg() {
+    fn anvil_native_rejects_unknown_arg() {
         let error = parse_err(&[
             "--daemon-url",
             "http://daemon.example",
@@ -813,12 +812,12 @@ mod tests {
             "--git-base-url",
             "https://forgejo.example",
             "--agent-command",
-            "smith",
+            "anvil-native",
             "--agent-arg",
             "--verbose",
         ]);
         assert!(
-            error.contains("unknown smith agent arg `--verbose`"),
+            error.contains("unknown anvil-native agent arg `--verbose`"),
             "unexpected error: {error}"
         );
     }
@@ -843,7 +842,7 @@ mod tests {
                 args.extend(["--git-base-url", "https://forgejo.example"]);
             }
             if missing_flag != "--agent-command" {
-                args.extend(["--agent-command", "smith-coding-agent"]);
+                args.extend(["--agent-command", "anvil-native"]);
             }
 
             let error = parse_err(&args);
