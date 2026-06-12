@@ -63,7 +63,16 @@ fn run(config: smith_worker::WorkerConfig) -> Result<(), String> {
                 AgentSurface::ExternalCommand(command) => command,
             };
             let runner = Arc::new(OutOfProcessRunner::new(command));
-            let executor = Arc::new(CodingExecutor::new(executor_config, runner));
+            // Relay agent step-progress checkpoints to the daemon (which
+            // applies them to the forge idempotently); transport trouble is
+            // logged and dropped, never failing the turn.
+            let progress_sink = Arc::new(smith_worker::DaemonRelayProgressSink::new(
+                &config.daemon_url,
+                config.worker_id.clone(),
+            ));
+            let executor = Arc::new(
+                CodingExecutor::new(executor_config, runner).with_progress_sink(progress_sink),
+            );
             smith_io_engine::block_on(async move {
                 run_worker(config, executor)
                     .await

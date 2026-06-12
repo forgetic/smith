@@ -5,6 +5,7 @@ pub mod config;
 pub mod executor;
 pub mod observability;
 pub mod out_of_process_runner;
+pub mod progress_relay;
 pub mod run;
 pub mod worker_machine;
 pub mod worker_shell;
@@ -23,6 +24,7 @@ pub use config::{
 pub use executor::{JobExecutor, JobOutcome, StubExecutor, job_result};
 pub use observability::{assigned_job_line, registered_worker_line, result_sent_line};
 pub use out_of_process_runner::OutOfProcessRunner;
+pub use progress_relay::{DaemonRelayProgressSink, progress_message};
 pub use run::run_worker;
 pub use worker_machine::{WorkerCompletion, WorkerMachine, WorkerRequest};
 pub use workspace::{
