@@ -2,18 +2,18 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use serde::Deserialize;
 use smith_agent_protocol::{
     WorkspaceContext, WorkspaceGuidance, WorkspaceRepository, WorkspaceResult, WorkspaceWorkItem,
 };
 use temper_worker_protocol::{
-    Assign, Branch, FailureClass, JobArtifactSnapshot, JobChild, JobRepository,
+    Assign, Branch, FailureClass, JobArtifactSnapshot, JobChild, JobContext, RepoAccess,
+    RepoOutcome, WorkspaceManifest,
 };
 
 use crate::agent_runner::{AgentRunError, AgentRunner, ProgressSink};
 use crate::executor::{JobExecutor, JobOutcome};
 use crate::workspace::{
-    RoleGitIdentity, Workspace, WorkspaceConfig, WorkspaceError, forgejo_remote_url,
+    RoleGitIdentity, Workspace, WorkspaceError, forgejo_remote_url,
 };
 
 /// Configuration for the real coding-job executor.
@@ -24,7 +24,9 @@ use crate::workspace::{
 /// surface the executor owns.
 #[derive(Clone, Debug)]
 pub struct CodingExecutorConfig {
-    /// Root for persistent per-(repo, role) workspaces (3b-i layout).
+    /// Root under which coordinated workspaces are assembled. Each job gets a
+    /// `<workspace_root>/<coordination_key>/<role>` directory holding the
+    /// manifest's repos as siblings (ADR 0023).
     pub workspace_root: PathBuf,
     /// Forge git base URL, e.g. `http://localhost:3000` (joined with the
     /// repo slug via `forgejo_remote_url`; `file://` URLs work for tests).
@@ -33,9 +35,11 @@ pub struct CodingExecutorConfig {
     pub role_identities: BTreeMap<String, RoleGitIdentity>,
 }
 
-/// Runs coding/triage/review jobs by preparing a checkout, driving one agent
-/// turn through its [`AgentRunner`], and mapping the result to a [`JobOutcome`]
-/// (commit/push on the writable head path, verdict routing otherwise).
+/// Runs coding/triage/review jobs by assembling the manifest's repos into one
+/// workspace, driving one agent turn over the combined root through its
+/// [`AgentRunner`], and mapping the result to a [`JobOutcome`] (one
+/// commit/push/PR per changed writable repo on the head path, verdict routing
+/// otherwise).
 #[derive(Clone)]
 pub struct CodingExecutor<R: AgentRunner> {
     config: CodingExecutorConfig,
@@ -71,6 +75,14 @@ impl<R: AgentRunner + 'static> JobExecutor for CodingExecutor<R> {
     }
 }
 
+/// One prepared sibling checkout plus its manifest entry.
+struct PreparedRepo {
+    repo: String,
+    writable: bool,
+    branch_hint: Option<String>,
+    workspace: Workspace,
+}
+
 async fn execute<R: AgentRunner>(
     config: CodingExecutorConfig,
     runner: Arc<R>,
@@ -78,7 +90,8 @@ async fn execute<R: AgentRunner>(
     assign: Assign,
 ) -> JobOutcome {
     let artifact_item = assign.artifact.item.clone();
-    let context = match serde_json::from_value::<WireJobContext>(assign.job_payload) {
+    let artifact_wire_kind = assign.artifact.kind.clone();
+    let context: JobContext = match serde_json::from_value(assign.job_payload) {
         Ok(context) => context,
         Err(error) => {
             return failure(
@@ -88,41 +101,32 @@ async fn execute<R: AgentRunner>(
         }
     };
 
-    let WireJobContext {
+    let JobContext {
         role,
-        repo,
+        repo: _primary_repo,
         queue,
         artifact_kind,
-        repository,
-        base_branch,
-        branch_hint,
-        correlation_key,
         artifact,
+        workspace,
         action: _action,
         checkout_capability,
         allowed_verdicts,
     } = context;
 
-    let repository = match require_enriched_field(repository, "repository") {
-        Ok(repository) => repository,
-        Err(outcome) => return outcome,
-    };
-    let base_branch = match require_enriched_field(base_branch, "base_branch") {
-        Ok(base_branch) => base_branch,
-        Err(outcome) => return outcome,
-    };
-    let branch_hint = match require_enriched_field(branch_hint, "branch_hint") {
-        Ok(branch_hint) => branch_hint,
-        Err(outcome) => return outcome,
-    };
-    let correlation_key = match require_enriched_field(correlation_key, "correlation_key") {
-        Ok(correlation_key) => correlation_key,
-        Err(outcome) => return outcome,
-    };
     let artifact = match require_enriched_field(artifact, "artifact") {
         Ok(artifact) => artifact,
         Err(outcome) => return outcome,
     };
+    let manifest = match require_enriched_field(workspace, "workspace") {
+        Ok(manifest) => manifest,
+        Err(outcome) => return outcome,
+    };
+    if manifest.repos.is_empty() {
+        return failure(
+            FailureClass::Protocol,
+            "workspace manifest declared no repositories",
+        );
+    }
     let checkout = checkout_capability.unwrap_or_else(|| "writable".to_string());
     let mode = match JobMode::from_checkout(&checkout) {
         Ok(mode) => mode,
@@ -140,51 +144,91 @@ async fn execute<R: AgentRunner>(
     };
     let token = identity.token.clone();
 
-    let remote_url = match forgejo_remote_url(&config.git_base_url, &repo) {
-        Ok(remote_url) => remote_url,
-        Err(error) => return workspace_failure("construct git remote URL", error, ""),
-    };
-    let workspace_config = WorkspaceConfig {
-        root: config.workspace_root,
-        base_branch: base_branch.clone(),
-    };
-    let workspace = match Workspace::new(&workspace_config, &repo, &role, identity, remote_url) {
-        Ok(workspace) => workspace,
-        Err(error) => return workspace_failure("configure workspace", error, &token),
-    };
-    let prepare_result = match mode {
-        JobMode::Writable | JobMode::ReadOnly => workspace.prepare(&branch_hint).await,
-        JobMode::PullRequestReadOnly => {
-            workspace
-                .prepare_pull_request_head(artifact.number, &branch_hint)
-                .await
+    let coordination_key = manifest.coordination_key.clone();
+    // Coordinated workspace root: the manifest repos are checked out as flat
+    // siblings under here (one dir each) so their inter-repo path dependencies
+    // resolve. Keyed by role so the per-repo checkouts (and their git object
+    // caches) persist across this role's jobs; with single-job-per-worker
+    // capacity, coordinated jobs never share the root concurrently.
+    let workspace_root = config.workspace_root.join(&role);
+
+    // Prepare each manifest repo into its sibling dir. The PR-review path only
+    // needs the primary repo (at its PR head); coding/triage prepare them all.
+    let mut prepared: Vec<PreparedRepo> = Vec::new();
+    for repo_spec in &manifest.repos {
+        let remote_url = match forgejo_remote_url(&config.git_base_url, &repo_spec.repo) {
+            Ok(remote_url) => remote_url,
+            Err(error) => return workspace_failure("construct git remote URL", error, ""),
+        };
+        let base_branch = if repo_spec.base_branch.trim().is_empty() {
+            "main".to_string()
+        } else {
+            repo_spec.base_branch.clone()
+        };
+        let checkout_path = workspace_root.join(&repo_spec.dir);
+        let workspace =
+            Workspace::at(checkout_path, base_branch, identity.clone(), remote_url);
+
+        let writable = repo_spec.is_writable();
+        let prepare_result = match mode {
+            JobMode::PullRequestReadOnly => {
+                let branch_hint = repo_spec
+                    .branch_hint
+                    .clone()
+                    .unwrap_or_else(|| format!("agent/{coordination_key}"));
+                workspace
+                    .prepare_pull_request_head(artifact.number, &branch_hint)
+                    .await
+            }
+            JobMode::Writable if writable => {
+                let Some(branch_hint) = repo_spec.branch_hint.clone() else {
+                    return failure(
+                        FailureClass::Protocol,
+                        format!(
+                            "writable workspace repo {} is missing a branch hint",
+                            repo_spec.repo
+                        ),
+                    );
+                };
+                workspace.prepare(&branch_hint).await
+            }
+            // Read-only sibling in a writable job, or any repo in a read-only
+            // (triage) job: materialize the base branch, never push.
+            JobMode::Writable | JobMode::ReadOnly => workspace.prepare_read_only().await,
+        };
+        if let Err(error) = prepare_result {
+            return workspace_failure("prepare workspace", error, &token);
         }
-    };
-    if let Err(error) = prepare_result {
-        return workspace_failure("prepare workspace", error, &token);
+
+        prepared.push(PreparedRepo {
+            repo: repo_spec.repo.clone(),
+            writable,
+            branch_hint: repo_spec.branch_hint.clone(),
+            workspace,
+        });
+
+        // Review acts on the single PR head; don't assemble siblings for it.
+        if mode == JobMode::PullRequestReadOnly {
+            break;
+        }
     }
 
     let workspace_context = build_workspace_context(
-        &repo,
         &role,
         &queue,
         &artifact_kind,
-        &repository,
-        &base_branch,
-        &branch_hint,
-        &correlation_key,
+        &manifest,
         &artifact,
-        assign.artifact.kind.as_str(),
+        &artifact_wire_kind,
         &checkout,
         &allowed_verdicts,
     );
 
-    // Run one agent turn out-of-process (the prepared checkout is the cwd). The
-    // runner owns the agent mechanism (a spawned `anvil-agent`, an external
-    // coder, or a test fake) and streams step-progress checkpoints to the sink;
-    // the executor owns the workspace lifecycle around it.
+    // Run one agent turn out-of-process with the cwd set to the workspace root
+    // (not a single repo), so the agent can read and build every sibling. The
+    // runner owns the agent mechanism and streams step-progress to the sink.
     let result = match runner
-        .run(&workspace_context, workspace.path(), progress.as_ref())
+        .run(&workspace_context, &workspace_root, progress.as_ref())
         .await
     {
         Ok(result) => result,
@@ -195,19 +239,22 @@ async fn execute<R: AgentRunner>(
 
     match mode {
         JobMode::Writable => {
+            // A mid-work escalation verdict (e.g. needs_architect) discards all
+            // edits and routes like a read-only verdict.
             if let Some(verdict) = result.verdict {
                 if allowed_verdicts.contains(&verdict) {
-                    if let Err(error) = workspace.discard_changes().await {
-                        return workspace_failure(
-                            "discard verdict workspace changes",
-                            error,
-                            &token,
-                        );
+                    for prepared in &prepared {
+                        if let Err(error) = prepared.workspace.discard_changes().await {
+                            return workspace_failure(
+                                "discard verdict workspace changes",
+                                error,
+                                &token,
+                            );
+                        }
                     }
-
                     let summary = result
                         .summary
-                        .or_else(|| Some(format!("implemented {correlation_key}")));
+                        .or_else(|| Some(format!("implemented {coordination_key}")));
                     return JobOutcome::Verdict {
                         verdict,
                         body: result.body.or(result.review_body),
@@ -215,57 +262,82 @@ async fn execute<R: AgentRunner>(
                         children: Vec::new(),
                     };
                 }
-
                 return failure(
                     FailureClass::Permanent,
                     format!("verdict routing not supported by smith-worker yet: {verdict}"),
                 );
             }
 
-            // The agent may have checkpoint-committed (and pushed) some or
-            // all of its work mid-run; only a run that left neither tree
-            // changes nor commits beyond base produced no product.
-            match workspace.has_changes().await {
-                Ok(true) => {
-                    if let Err(error) = workspace
-                        .commit_all(&commit_message(&correlation_key, &artifact_item))
-                        .await
-                    {
+            // One commit/push per writable repo that produced a diff → one PR.
+            let mut outcomes = Vec::new();
+            for (index, prepared) in prepared.iter().enumerate() {
+                if !prepared.writable {
+                    continue;
+                }
+                let branch = prepared
+                    .branch_hint
+                    .clone()
+                    .expect("writable repo carries a branch hint (checked at prepare)");
+
+                let has_tree_changes = match prepared.workspace.has_changes().await {
+                    Ok(changed) => changed,
+                    Err(error) => {
+                        return workspace_failure("inspect workspace changes", error, &token);
+                    }
+                };
+                let produced_diff = if has_tree_changes {
+                    true
+                } else {
+                    match prepared.workspace.commits_ahead_of_base().await {
+                        Ok(ahead) => ahead,
+                        Err(error) => {
+                            return workspace_failure("inspect workspace commits", error, &token);
+                        }
+                    }
+                };
+                if !produced_diff {
+                    continue;
+                }
+
+                if has_tree_changes {
+                    let message = commit_message(&coordination_key, &artifact_item, index == 0);
+                    if let Err(error) = prepared.workspace.commit_all(&message).await {
                         return workspace_failure("commit workspace changes", error, &token);
                     }
                 }
-                Ok(false) => match workspace.commits_ahead_of_base().await {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        return failure(FailureClass::Permanent, "agent produced no diff");
-                    }
-                    Err(error) => {
-                        return workspace_failure("inspect workspace commits", error, &token);
-                    }
-                },
-                Err(error) => return workspace_failure("inspect workspace changes", error, &token),
+                let head_sha = match prepared.workspace.push_branch(&branch).await {
+                    Ok(head_sha) => head_sha,
+                    Err(error) => return workspace_failure("push workspace branch", error, &token),
+                };
+                outcomes.push(RepoOutcome {
+                    repo: prepared.repo.clone(),
+                    branch: Branch {
+                        name: branch,
+                        head_sha,
+                    },
+                });
             }
-            let head_sha = match workspace.push_branch(&branch_hint).await {
-                Ok(head_sha) => head_sha,
-                Err(error) => return workspace_failure("push workspace branch", error, &token),
-            };
+
+            if outcomes.is_empty() {
+                return failure(
+                    FailureClass::Permanent,
+                    "agent produced no diff in any writable repo",
+                );
+            }
 
             JobOutcome::Success {
-                branch: Branch {
-                    name: branch_hint,
-                    head_sha,
-                },
+                repos: outcomes,
                 summary: result
                     .summary
-                    .or_else(|| Some(format!("implemented {correlation_key}"))),
+                    .or_else(|| Some(format!("implemented {coordination_key}"))),
             }
         }
         JobMode::ReadOnly | JobMode::PullRequestReadOnly => {
             verdict_only_outcome(
-                &workspace,
+                &prepared[0].workspace,
                 result,
                 &allowed_verdicts,
-                &correlation_key,
+                &coordination_key,
                 &token,
             )
             .await
@@ -345,14 +417,17 @@ fn workspace_failure(action: &str, error: WorkspaceError, token: &str) -> JobOut
 
 /// Builds the implementation commit message.
 ///
-/// Numeric issue artifacts gain a `Closes #<n>` trailer so the forge's native
-/// close-on-merge closes the source issue when the implementation PR lands —
-/// the daemon applies no issue transition on success, so this trailer is what
-/// retires the source issue (and its queue entry) at merge time.
-fn commit_message(correlation_key: &str, artifact_item: &serde_json::Value) -> String {
-    match artifact_item.as_u64() {
-        Some(number) => format!("Implement {correlation_key}\n\nCloses #{number}"),
-        None => format!("Implement {correlation_key}"),
+/// The primary repo's commit gains a `Closes #<n>` trailer so the forge's
+/// native close-on-merge retires the coordinating issue when that PR lands.
+/// Secondary repos cannot close a cross-repo issue, so they omit the trailer.
+fn commit_message(
+    coordination_key: &str,
+    artifact_item: &serde_json::Value,
+    is_primary: bool,
+) -> String {
+    match (is_primary, artifact_item.as_u64()) {
+        (true, Some(number)) => format!("Implement {coordination_key}\n\nCloses #{number}"),
+        _ => format!("Implement {coordination_key}"),
     }
 }
 
@@ -363,23 +438,16 @@ fn failure(class: FailureClass, message: impl Into<String>) -> JobOutcome {
     }
 }
 
-/// Assembles the typed [`WorkspaceContext`] the agent turn receives.
-///
-/// The [`OutOfProcessRunner`](crate::out_of_process_runner::OutOfProcessRunner)
-/// serializes this to the JSON document the agent reads from
-/// `$TEMPER_CODING_WORKSPACE_CONTEXT`; the struct (and thus the wire shape) is
-/// owned by `smith-agent-protocol`. `work_item.context` stays a pretty-printed
-/// JSON *string* of the artifact, surfaced to the model verbatim.
+/// Assembles the typed [`WorkspaceContext`] the agent turn receives, listing
+/// every manifest repo with its sibling dir and access. The
+/// `OutOfProcessRunner` serializes this to the JSON document the agent reads
+/// from `$TEMPER_CODING_WORKSPACE_CONTEXT`.
 #[allow(clippy::too_many_arguments)]
 fn build_workspace_context(
-    repo: &str,
     role: &str,
     queue: &str,
     artifact_kind: &str,
-    repository: &JobRepository,
-    base_branch: &str,
-    branch_hint: &str,
-    correlation_key: &str,
+    manifest: &WorkspaceManifest,
     artifact: &JobArtifactSnapshot,
     artifact_wire_kind: &str,
     checkout: &str,
@@ -389,8 +457,13 @@ fn build_workspace_context(
         "pull_request" => ("pull_request", "PullRequest"),
         _ => ("issue", "Issue"),
     };
+    let primary_repo = manifest
+        .repos
+        .first()
+        .map(|repo| repo.repo.clone())
+        .unwrap_or_default();
     let work_item_context = serde_json::json!({
-        "repository": repo,
+        "repository": primary_repo,
         "role": role,
         "queue": queue,
         "kind": artifact_kind,
@@ -403,18 +476,33 @@ fn build_workspace_context(
             "state": artifact.state.as_str(),
         }
     });
-    // `to_string_pretty` on an in-memory `Value` is infallible; fall back to the
-    // compact form rather than failing the job on the impossible error path.
     let work_item_context = serde_json::to_string_pretty(&work_item_context)
         .unwrap_or_else(|_| work_item_context.to_string());
 
+    let repos = manifest
+        .repos
+        .iter()
+        .map(|repo| {
+            let (owner, name) = repo.owner_name().unwrap_or(("", ""));
+            WorkspaceRepository {
+                id: repo.repo.clone(),
+                owner: owner.to_string(),
+                name: name.to_string(),
+                default_branch: repo.default_branch.clone(),
+                dir: repo.dir.clone(),
+                access: match repo.access {
+                    RepoAccess::Writable => "writable",
+                    RepoAccess::ReadOnly => "read_only",
+                }
+                .to_string(),
+                base_branch: repo.base_branch.clone(),
+                branch_hint: repo.branch_hint.clone(),
+            }
+        })
+        .collect();
+
     WorkspaceContext {
-        repository: WorkspaceRepository {
-            id: repo.to_string(),
-            owner: repository.owner.clone(),
-            name: repository.name.clone(),
-            default_branch: repository.default_branch.clone(),
-        },
+        repos,
         work_item: WorkspaceWorkItem {
             role: role.to_string(),
             queue: queue.to_string(),
@@ -425,9 +513,7 @@ fn build_workspace_context(
             ),
             context: work_item_context,
         },
-        base_branch: base_branch.to_string(),
-        branch_hint: branch_hint.to_string(),
-        correlation_key: correlation_key.to_string(),
+        correlation_key: manifest.coordination_key.clone(),
         checkout: Some(checkout.to_string()),
         allowed_verdicts: allowed_verdicts.to_vec(),
         guidance: WorkspaceGuidance::default(),
@@ -440,30 +526,6 @@ fn redact_secret(text: String, secret: &str) -> String {
     } else {
         text.replace(secret, "<redacted>")
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct WireJobContext {
-    role: String,
-    repo: String,
-    queue: String,
-    artifact_kind: String,
-    #[serde(default)]
-    repository: Option<JobRepository>,
-    #[serde(default)]
-    base_branch: Option<String>,
-    #[serde(default)]
-    branch_hint: Option<String>,
-    #[serde(default)]
-    correlation_key: Option<String>,
-    #[serde(default)]
-    artifact: Option<JobArtifactSnapshot>,
-    #[serde(default)]
-    action: Option<String>,
-    #[serde(default)]
-    checkout_capability: Option<String>,
-    #[serde(default)]
-    allowed_verdicts: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

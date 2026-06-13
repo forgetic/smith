@@ -1,12 +1,13 @@
 use temper_worker_protocol::{
-    Assign, Branch, Failure, FailureClass, JobChild, JobResult, ResultStatus,
+    Assign, Branch, Failure, FailureClass, JobChild, JobResult, RepoOutcome, ResultStatus,
     WORKER_PROTOCOL_VERSION,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum JobOutcome {
     Success {
-        branch: Branch,
+        /// One pushed head per writable repo that produced a diff (ADR 0023).
+        repos: Vec<RepoOutcome>,
         summary: Option<String>,
     },
     Verdict {
@@ -62,10 +63,13 @@ impl JobExecutor for StubExecutor {
         async move {
             match mode {
                 StubMode::Success => JobOutcome::Success {
-                    branch: Branch {
-                        name: format!("smith-worker/stub/{}", assign.job_id),
-                        head_sha: "0000000000000000000000000000000000000000".to_string(),
-                    },
+                    repos: vec![RepoOutcome {
+                        repo: assign.repo.clone(),
+                        branch: Branch {
+                            name: format!("smith-worker/stub/{}", assign.job_id),
+                            head_sha: "0000000000000000000000000000000000000000".to_string(),
+                        },
+                    }],
                     summary: Some("stub executor completed without doing IO".to_string()),
                 },
                 StubMode::Failure { class, message } => JobOutcome::Failure { class, message },
@@ -76,12 +80,12 @@ impl JobExecutor for StubExecutor {
 
 pub fn job_result(worker_id: &str, job_id: &str, outcome: JobOutcome) -> JobResult {
     match outcome {
-        JobOutcome::Success { branch, summary } => job_result_from_value(serde_json::json!({
+        JobOutcome::Success { repos, summary } => job_result_from_value(serde_json::json!({
             "protocol_version": WORKER_PROTOCOL_VERSION,
             "worker_id": worker_id,
             "job_id": job_id,
             "status": ResultStatus::Success,
-            "branch": branch,
+            "repos": repos,
             "failure": null,
             "summary": summary,
             "details": null,
@@ -98,7 +102,7 @@ pub fn job_result(worker_id: &str, job_id: &str, outcome: JobOutcome) -> JobResu
             "worker_id": worker_id,
             "job_id": job_id,
             "status": ResultStatus::Success,
-            "branch": null,
+            "repos": [],
             "failure": null,
             "summary": summary,
             "details": null,
@@ -111,7 +115,7 @@ pub fn job_result(worker_id: &str, job_id: &str, outcome: JobOutcome) -> JobResu
             "worker_id": worker_id,
             "job_id": job_id,
             "status": ResultStatus::Failure,
-            "branch": null,
+            "repos": [],
             "failure": Failure { class, message },
             "summary": null,
             "details": null,
@@ -161,11 +165,14 @@ mod tests {
             Some("stub executor completed without doing IO")
         );
         assert_eq!(
-            result.branch,
-            Some(Branch {
-                name: "smith-worker/stub/job-123".to_string(),
-                head_sha: "0000000000000000000000000000000000000000".to_string(),
-            })
+            result.repos,
+            vec![RepoOutcome {
+                repo: "ai/temper".to_string(),
+                branch: Branch {
+                    name: "smith-worker/stub/job-123".to_string(),
+                    head_sha: "0000000000000000000000000000000000000000".to_string(),
+                },
+            }]
         );
     }
 
@@ -186,7 +193,7 @@ mod tests {
         assert_eq!(result.worker_id, "worker-3");
         assert_eq!(result.job_id, "job-789");
         assert_eq!(result.status, ResultStatus::Success);
-        assert_eq!(result.branch, None);
+        assert!(result.repos.is_empty());
         assert_eq!(result.failure, None);
         assert_eq!(result.summary.as_deref(), Some("triaged"));
         assert!(result.children.is_empty());
@@ -268,7 +275,7 @@ mod tests {
         assert_eq!(result.worker_id, "worker-2");
         assert_eq!(result.job_id, "job-456");
         assert_eq!(result.status, ResultStatus::Failure);
-        assert_eq!(result.branch, None);
+        assert!(result.repos.is_empty());
         assert_eq!(result.summary, None);
         assert_eq!(
             result.failure,

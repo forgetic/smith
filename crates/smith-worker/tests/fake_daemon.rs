@@ -238,7 +238,7 @@ async fn success_stub_registers_polls_runs_and_posts_result() {
 
     assert_eq!(observed.result.job_id, "job-123");
     assert_eq!(observed.result.status, ResultStatus::Success);
-    assert!(observed.result.branch.is_some());
+    assert_eq!(observed.result.repos.len(), 1);
     assert_eq!(observed.result.failure, None);
 }
 
@@ -259,7 +259,7 @@ async fn failure_stub_registers_polls_runs_and_posts_failure_result() {
 
     assert_eq!(observed.result.job_id, "job-123");
     assert_eq!(observed.result.status, ResultStatus::Failure);
-    assert_eq!(observed.result.branch, None);
+    assert!(observed.result.repos.is_empty());
     let failure = observed.result.failure.expect("failure details present");
     assert_eq!(failure.class, FailureClass::Permanent);
     assert_eq!(failure.message, "configured failure");
