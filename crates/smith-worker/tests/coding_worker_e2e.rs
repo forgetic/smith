@@ -259,7 +259,11 @@ where
     E: smith_worker::JobExecutor + Send + Sync + 'static,
 {
     std::thread::spawn(move || {
-        let _ = smith_io_engine::block_on(async move { run_worker(config, executor).await });
+        let runtime = smith_io_engine::build_runtime().expect("build engine runtime");
+        let handle = runtime.handle();
+        let _ = smith_io_engine::block_on_runtime(&runtime, async move {
+            run_worker(config, executor, handle).await
+        });
     });
 }
 

@@ -9,6 +9,7 @@
 
 use std::sync::Arc;
 
+use skein::runtime::RuntimeHandle;
 use smith_io_engine::{channel, drive};
 
 use crate::client::WorkerError;
@@ -21,18 +22,21 @@ use crate::worker_shell::WorkerShell;
 /// report/heartbeat forever, driven by the completion queue. Returns only if
 /// the machine stops or every completion sender is dropped (no I/O can complete
 /// again) — in normal operation it runs until the process is signalled.
-pub async fn run_worker<E>(config: WorkerConfig, executor: Arc<E>) -> Result<(), WorkerError>
+pub async fn run_worker<E>(
+    config: WorkerConfig,
+    executor: Arc<E>,
+    handle: RuntimeHandle,
+) -> Result<(), WorkerError>
 where
     E: JobExecutor + Send + Sync + 'static,
 {
     let params = WorkerParams::from_config(&config);
     let (cq_tx, cq_rx) = channel();
 
-    // The runtime handle for spawning shell I/O. Available because run_worker is
-    // awaited inside an engine task (block_on).
-    let handle =
-        skein::runtime::Runtime::current_handle().ok_or(WorkerError::RuntimeUnavailable)?;
-
+    // The runtime handle for spawning shell I/O is supplied by the caller, which
+    // builds the engine runtime and drives this future on it (skein dropped the
+    // ambient `Runtime::current_handle()` accessor, so the handle is threaded in
+    // explicitly — see the bin and the test harnesses).
     let shell = WorkerShell::new(
         handle,
         cq_tx,

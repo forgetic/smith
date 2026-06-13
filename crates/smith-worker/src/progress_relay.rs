@@ -13,6 +13,7 @@
 use std::sync::Arc;
 
 use skein::http::h1::http_client::HttpClient;
+use skein::runtime::RuntimeHandle;
 use smith_agent_protocol::{StepProgress, StepState};
 use smith_io_engine::{HttpCall, build_http_client, http_call};
 use temper_worker_protocol::{JobProgress, WORKER_PROTOCOL_VERSION, WorkerProtocolMessage};
@@ -44,16 +45,25 @@ pub struct DaemonRelayProgressSink {
     http: Arc<HttpClient>,
     endpoint: String,
     worker_id: String,
+    handle: RuntimeHandle,
 }
 
 impl DaemonRelayProgressSink {
     /// `daemon_url` is the base daemon URL; progress posts to
     /// `<daemon_url>/v1/message` like every other worker-protocol message.
-    pub fn new(daemon_url: &str, worker_id: impl Into<String>) -> Self {
+    /// `handle` is the engine runtime handle used to spawn the fire-and-forget
+    /// relay task (skein dropped the ambient `Runtime::current_handle()`, so the
+    /// caller threads it in).
+    pub fn new(
+        daemon_url: &str,
+        worker_id: impl Into<String>,
+        handle: RuntimeHandle,
+    ) -> Self {
         Self {
             http: build_http_client(),
             endpoint: format!("{}/v1/message", daemon_url.trim_end_matches('/')),
             worker_id: worker_id.into(),
+            handle,
         }
     }
 }
@@ -69,21 +79,13 @@ impl ProgressSink for DaemonRelayProgressSink {
             headers: vec![("Content-Type".to_string(), "application/json".to_string())],
             body: serde_json::to_vec(&message).unwrap_or_default(),
         };
-        // report() is called from inside an engine task (the runner relays
-        // markers there), so the runtime handle is ambient; without one we
-        // keep the local log line and drop the relay, honoring the
-        // never-fail contract.
-        let Some(handle) = skein::runtime::Runtime::current_handle() else {
-            eprintln!(
-                "smith-worker: progress relay skipped (no runtime handle) correlation={} step={}",
-                progress.correlation_key, progress.step
-            );
-            return;
-        };
+        // report() fire-and-forgets the relay onto the engine runtime via the
+        // handle threaded in at construction; HTTP/transport trouble inside the
+        // task is logged and dropped, honoring the never-fail contract.
         let http = Arc::clone(&self.http);
         let correlation = progress.correlation_key.clone();
         let step = progress.step;
-        handle.spawn_with_cx(move |cx| async move {
+        self.handle.spawn_with_cx(move |cx| async move {
             match http_call(&cx, &http, call).await {
                 Ok(response) if (200..300).contains(&response.status) => {}
                 Ok(response) => {

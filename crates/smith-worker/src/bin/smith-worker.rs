@@ -32,11 +32,16 @@ fn main() {
 /// relaying its step-progress checkpoints. Credentials are the agent process's
 /// concern — it preflights its own provider login at job start.
 fn run(config: smith_worker::WorkerConfig) -> Result<(), String> {
+    // Build the engine runtime up front so its handle can be threaded into the
+    // worker (shell I/O spawns) and the progress sink — skein no longer exposes
+    // an ambient `Runtime::current_handle()`.
+    let runtime = smith_io_engine::build_runtime()?;
+    let handle = runtime.handle();
     match config.executor.clone() {
         ExecutorSelection::Stub => {
             let executor = Arc::new(StubExecutor::success());
-            smith_io_engine::block_on(async move {
-                run_worker(config, executor)
+            smith_io_engine::block_on_runtime(&runtime, async move {
+                run_worker(config, executor, handle)
                     .await
                     .map_err(|error| error.to_string())
             })
@@ -69,12 +74,13 @@ fn run(config: smith_worker::WorkerConfig) -> Result<(), String> {
             let progress_sink = Arc::new(smith_worker::DaemonRelayProgressSink::new(
                 &config.daemon_url,
                 config.worker_id.clone(),
+                handle.clone(),
             ));
             let executor = Arc::new(
                 CodingExecutor::new(executor_config, runner).with_progress_sink(progress_sink),
             );
-            smith_io_engine::block_on(async move {
-                run_worker(config, executor)
+            smith_io_engine::block_on_runtime(&runtime, async move {
+                run_worker(config, executor, handle)
                     .await
                     .map_err(|error| error.to_string())
             })
