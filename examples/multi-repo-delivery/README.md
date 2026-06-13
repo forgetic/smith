@@ -40,25 +40,36 @@ job's `WorkspaceManifest`:
 
 ## The runnable proof
 
-The end-to-end mechanic — worker assembles the sibling workspace, drives a real
-out-of-process agent over the combined root, and pushes a branch to each writable
-repo — is exercised by an automated, hermetic test that uses real `git` and the
-real worker↔agent process boundary (no LLM, no Forgejo):
-
 ```sh
 ./run.sh
 ```
 
-It runs `smith-worker`'s `worker_runs_a_coordinated_multi_repo_job_and_pushes_each_writable_repo`
-e2e: a two-repo writable manifest (`acme/service` + `acme/lib`) driven through a
-fake daemon and the `smith-fake-agent` process, asserting that:
+`run.sh` exercises the two halves of the path hermetically (real `git`, no
+Forgejo, no live model), each using the **real** component for its layer:
 
-- the worker reports **one `RepoOutcome` per writable repo** (the daemon turns
-  each into a PR);
-- the shared `agent/coord-for-code-7` branch **landed on each origin** at exactly
-  the reported sha, carrying the agent's product file;
-- only the **primary** repo's commit carries the `Closes #7` trailer (cross-repo
-  close-on-merge does not exist).
+1. **The real anvil agent edits multiple repos in one workspace.**
+   `../anvil`'s `jig_coding_agent_native_edits_two_sibling_repos_in_one_workspace`
+   drives the production agent loop (`run_coding_agent_native`) with a jig fake
+   LLM standing in for the model: the agent's cwd is the workspace root with
+   `alpha/` and `beta/` checked out as siblings, it writes a product file into
+   each, and the agent's contract passes because **both** writable repos produced
+   a diff. This is the same agent the worker spawns in production
+   (`anvil-agent`) — not a stand-in.
+
+2. **The worker turns that into one branch (→ one PR) per repo.**
+   `smith-worker`'s `worker_runs_a_coordinated_multi_repo_job_and_pushes_each_writable_repo`
+   drives the worker↔agent process boundary over a two-repo writable manifest
+   (`acme/service` + `acme/lib`), asserting that:
+   - the worker reports **one `RepoOutcome` per writable repo** (the daemon turns
+     each into a PR);
+   - the shared `agent/coord-for-code-7` branch **landed on each origin** at
+     exactly the reported sha, carrying the agent's product file;
+   - only the **primary** repo's commit carries the `Closes #7` trailer
+     (cross-repo close-on-merge does not exist).
+
+   (This half exercises the worker's orchestration; it uses a deterministic
+   `smith-fake-agent` for the process boundary, since the *agent's* multi-repo
+   behavior is what step 1 proves with the real anvil agent.)
 
 ## How this maps to the production topology
 
