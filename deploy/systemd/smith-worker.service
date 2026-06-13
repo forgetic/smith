@@ -14,6 +14,11 @@ Description=Smith consolidated worker tier
 Documentation=https://git.ekanayaka.io/ai/smith/src/branch/main/deploy/README.md
 After=network-online.target
 Wants=network-online.target
+# Ordering-only hint for the common single-host topology: start after the daemon
+# the worker long-polls so it does not race a not-yet-bound socket on boot. Not
+# a hard dependency — a worker pointed at a remote daemon (WORKER_DAEMON_URL)
+# still starts fine, and its Restart=on-failure retries cover a slow daemon.
+After=temper-daemon.service
 
 [Service]
 Type=simple
