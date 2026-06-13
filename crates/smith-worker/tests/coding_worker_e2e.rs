@@ -612,7 +612,6 @@ fn multi_repo_worker_config() -> WorkerConfig {
 struct GitFixture {
     temp: tempfile::TempDir,
     git_root: PathBuf,
-    origin: PathBuf,
     workspace_root: PathBuf,
 }
 
@@ -627,12 +626,10 @@ impl GitFixture {
             git(["init", "--bare", path_str(&origin)]);
             seed_origin(&origin, &temp.path().join(format!("seed-{}", repo.replace('/', "-"))));
         }
-        let origin = git_root.join("acme/service.git");
         let workspace_root = temp.path().join("workspaces");
         Self {
             temp,
             git_root,
-            origin,
             workspace_root,
         }
     }
