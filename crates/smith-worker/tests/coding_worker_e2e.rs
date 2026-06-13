@@ -113,7 +113,14 @@ async fn worker_runs_a_real_coding_job_through_the_out_of_process_agent() {
         "result: {:?}",
         observed.result
     );
-    let branch = observed.result.branch.expect("success carries a branch");
+    assert_eq!(
+        observed.result.repos.len(),
+        1,
+        "single-repo job reports one repo outcome"
+    );
+    let outcome = &observed.result.repos[0];
+    assert_eq!(outcome.repo, "acme/service");
+    let branch = outcome.branch.clone();
     assert_eq!(branch.name, "agent/pr-for-code-7");
     assert_eq!(branch.head_sha.len(), 40, "head sha looks like a real sha");
 
@@ -407,20 +414,23 @@ fn coding_assign(_fixture: &GitFixture) -> Assign {
         "repo": "acme/service",
         "queue": "code_ready",
         "artifact_kind": "code",
-        "repository": {
-            "owner": "acme",
-            "name": "service",
-            "default_branch": "main"
-        },
-        "base_branch": "main",
-        "branch_hint": "agent/pr-for-code-7",
-        "correlation_key": "pr-for-code-7",
         "artifact": {
             "number": 7,
             "title": "Add a greeting file",
             "body": "Create GREETING.md.",
             "labels": ["code", "ready"],
             "state": "Open"
+        },
+        "workspace": {
+            "coordination_key": "pr-for-code-7",
+            "repos": [{
+                "repo": "acme/service",
+                "dir": "service",
+                "access": "writable",
+                "default_branch": "main",
+                "base_branch": "main",
+                "branch_hint": "agent/pr-for-code-7"
+            }]
         },
         "action": "open_pr",
         "checkout_capability": "writable",

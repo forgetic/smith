@@ -198,16 +198,19 @@ struct ExpectedWorkspaceContext<'a> {
 }
 
 fn assert_workspace_context(context: &WorkspaceContext, expected: ExpectedWorkspaceContext<'_>) {
-    assert_eq!(context.repository.id, "acme/service");
-    assert_eq!(context.repository.owner, "acme");
-    assert_eq!(context.repository.name, "service");
-    assert_eq!(context.repository.default_branch, "main");
+    let primary = context.primary().expect("primary repo present");
+    assert_eq!(primary.id, "acme/service");
+    assert_eq!(primary.owner, "acme");
+    assert_eq!(primary.name, "service");
+    assert_eq!(primary.default_branch, "main");
+    assert_eq!(primary.dir, "service");
+    assert!(primary.is_writable());
     assert_eq!(context.work_item.role, expected.role);
     assert_eq!(context.work_item.queue, expected.queue);
     assert_eq!(context.work_item.kind, expected.kind);
     assert_eq!(context.work_item.target, expected.target);
-    assert_eq!(context.base_branch, "main");
-    assert_eq!(context.branch_hint, expected.branch_hint);
+    assert_eq!(primary.base_branch, "main");
+    assert_eq!(primary.branch_hint.as_deref(), Some(expected.branch_hint));
     assert_eq!(context.correlation_key, expected.correlation_key);
     assert_eq!(context.checkout.as_deref(), Some(expected.checkout));
     assert_eq!(
@@ -246,7 +249,7 @@ async fn workspace_is_reused_across_successful_jobs_for_same_repo_and_role() {
             .execute(assign("agent/pr-for-code-7", "pr-for-code-7"))
             .await,
     );
-    let workspace_path = fixture.workspace_root.join("acme__service/engineer");
+    let workspace_path = fixture.workspace_root.join("engineer/service");
     assert!(workspace_path.exists());
     let sentinel = workspace_path.join(".git/smith-sentinel");
     fs::write(&sentinel, "keep object cache").expect("write sentinel");
@@ -714,12 +717,19 @@ impl AgentRunner for FakeAgentRunner {
         _progress: &dyn ProgressSink,
     ) -> Result<WorkspaceResult, AgentRunError> {
         *self.captured.lock().expect("capture lock") = Some(context.clone());
+        // The agent's cwd is the workspace root; it edits inside each repo's
+        // sibling dir. This fake operates on the primary repo (ADR 0023).
+        let primary_dir = context
+            .primary()
+            .map(|repo| repo.dir.clone())
+            .unwrap_or_default();
+        let repo_cwd = cwd.join(&primary_dir);
         *self.observed_head_sha.lock().expect("head lock") =
-            Some(git_output(["-C", path_str(cwd), "rev-parse", "HEAD"]));
+            Some(git_output(["-C", path_str(&repo_cwd), "rev-parse", "HEAD"]));
 
         match self.behavior {
             AgentBehavior::Success => {
-                Self::write_diff(cwd);
+                Self::write_diff(&repo_cwd);
                 Ok(WorkspaceResult {
                     summary: Some("did the work".to_string()),
                     ..WorkspaceResult::default()
@@ -733,12 +743,15 @@ impl AgentRunner for FakeAgentRunner {
                 ..WorkspaceResult::default()
             }),
             AgentBehavior::CheckpointCommits => {
-                Self::write_diff(cwd);
-                let work_branch = context.branch_hint.clone();
-                git_output(["-C", path_str(cwd), "add", "-A"]);
+                Self::write_diff(&repo_cwd);
+                let work_branch = context
+                    .primary()
+                    .and_then(|repo| repo.branch_hint.clone())
+                    .expect("primary repo carries a branch hint");
+                git_output(["-C", path_str(&repo_cwd), "add", "-A"]);
                 git_output([
                     "-C",
-                    path_str(cwd),
+                    path_str(&repo_cwd),
                     "-c",
                     "user.name=Agent Checkpoint",
                     "-c",
@@ -749,7 +762,7 @@ impl AgentRunner for FakeAgentRunner {
                 ]);
                 git_output([
                     "-C",
-                    path_str(cwd),
+                    path_str(&repo_cwd),
                     "push",
                     "origin",
                     &format!("HEAD:refs/heads/{work_branch}"),
@@ -948,21 +961,28 @@ struct TestJobContext {
     repo: String,
     queue: String,
     artifact_kind: String,
-    repository: Option<TestJobRepository>,
-    base_branch: Option<String>,
-    branch_hint: Option<String>,
-    correlation_key: Option<String>,
     artifact: Option<TestJobArtifactSnapshot>,
+    workspace: Option<TestWorkspaceManifest>,
     action: Option<String>,
     checkout_capability: Option<String>,
     allowed_verdicts: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-struct TestJobRepository {
-    owner: String,
-    name: String,
+struct TestWorkspaceManifest {
+    coordination_key: String,
+    repos: Vec<TestWorkspaceRepo>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct TestWorkspaceRepo {
+    repo: String,
+    dir: String,
+    access: String,
     default_branch: String,
+    base_branch: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch_hint: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -974,20 +994,26 @@ struct TestJobArtifactSnapshot {
     state: String,
 }
 
+fn single_repo_manifest(coordination_key: &str, branch_hint: &str) -> TestWorkspaceManifest {
+    TestWorkspaceManifest {
+        coordination_key: coordination_key.to_string(),
+        repos: vec![TestWorkspaceRepo {
+            repo: "acme/service".to_string(),
+            dir: "service".to_string(),
+            access: "writable".to_string(),
+            default_branch: "main".to_string(),
+            base_branch: "main".to_string(),
+            branch_hint: Some(branch_hint.to_string()),
+        }],
+    }
+}
+
 fn job_context(branch_hint: &str, correlation_key: &str) -> TestJobContext {
     TestJobContext {
         role: "engineer".to_string(),
         repo: "acme/service".to_string(),
         queue: "code_ready".to_string(),
         artifact_kind: "code".to_string(),
-        repository: Some(TestJobRepository {
-            owner: "acme".to_string(),
-            name: "service".to_string(),
-            default_branch: "main".to_string(),
-        }),
-        base_branch: Some("main".to_string()),
-        branch_hint: Some(branch_hint.to_string()),
-        correlation_key: Some(correlation_key.to_string()),
         artifact: Some(TestJobArtifactSnapshot {
             number: 7,
             title: "Implement the thing".to_string(),
@@ -995,6 +1021,7 @@ fn job_context(branch_hint: &str, correlation_key: &str) -> TestJobContext {
             labels: vec!["code".to_string(), "ready".to_string()],
             state: "Open".to_string(),
         }),
+        workspace: Some(single_repo_manifest(correlation_key, branch_hint)),
         action: None,
         checkout_capability: None,
         allowed_verdicts: vec![],
@@ -1142,7 +1169,11 @@ fn seed_origin(origin: &Path, temp: &Path) -> String {
 
 fn expect_success(outcome: JobOutcome) -> (String, String, Option<String>) {
     match outcome {
-        JobOutcome::Success { branch, summary } => (branch.name, branch.head_sha, summary),
+        JobOutcome::Success { repos, summary } => {
+            assert_eq!(repos.len(), 1, "single-repo job produces one outcome");
+            let branch = repos.into_iter().next().expect("one repo outcome").branch;
+            (branch.name, branch.head_sha, summary)
+        }
         JobOutcome::Verdict {
             verdict,
             body,
@@ -1165,8 +1196,8 @@ fn expect_verdict(outcome: JobOutcome) -> (String, Option<String>, Option<String
             summary,
             children,
         } => (verdict, body, summary, children),
-        JobOutcome::Success { branch, summary } => {
-            panic!("expected verdict, got success {branch:?} {summary:?}")
+        JobOutcome::Success { repos, summary } => {
+            panic!("expected verdict, got success {repos:?} {summary:?}")
         }
         JobOutcome::Failure { class, message } => {
             panic!("expected verdict, got {class:?}: {message}")
@@ -1180,8 +1211,8 @@ fn expect_failure_class(outcome: JobOutcome, expected: FailureClass) -> String {
             assert_eq!(class, expected, "unexpected failure message: {message}");
             message
         }
-        JobOutcome::Success { branch, summary } => {
-            panic!("expected {expected:?} failure, got success {branch:?} {summary:?}")
+        JobOutcome::Success { repos, summary } => {
+            panic!("expected {expected:?} failure, got success {repos:?} {summary:?}")
         }
         JobOutcome::Verdict {
             verdict,
@@ -1242,7 +1273,7 @@ fn assert_workspace_clean(fixture: &Fixture, role: &str) {
     assert_eq!(
         git_output([
             "-C",
-            path_str(&fixture.workspace_root.join("acme__service").join(role)),
+            path_str(&fixture.workspace_root.join(role).join("service")),
             "status",
             "--porcelain=v1",
             "--untracked-files=all",
