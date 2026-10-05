@@ -486,7 +486,7 @@ fn actual_root_malformed_call_has_no_effect_and_corrected_call_runs_once() {
         adapter::completion_worst_case(&bounds.client, settings.limits.decoded_call_bytes)
             .expect("full translated reservation");
     settings.limits.session.completion_blocks = bounds.client.dialect.parts;
-    let mut world = World::with_wire(settings, configuration, bounds, correction_script());
+    let mut world = World::with_wire(settings, None, configuration, bounds, correction_script());
     world.wall_at(Wall::from_nanos(9000));
     await_query(&mut world, 2);
     assert!(world.host_submissions().is_empty(), "malformed actual call confers no host effect");

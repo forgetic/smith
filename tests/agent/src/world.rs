@@ -460,15 +460,21 @@ impl World {
     /// actual Clients are prepared only when the root issues Complete. Receiving
     /// metadata comes only from each actual Complete. The fixture asserts a
     /// 256-call ceiling and compatible admission before any wire effect.
-    /// Contract: domain/client.md, sections 1, 5 and 6; domain/run.md, sections 3 and 14.
+    /// The host supplies optional concrete history and committed results; the
+    /// charter's resume flag selects it, and root/session admission precedes
+    /// any provider effect. Success queues the original Start; its one Answer
+    /// and every actual lower Closed remain owed while the caller drives it.
+    /// Contract: domain/client.md, sections 1, 3, 5 and 6; domain/run.md,
+    /// sections 3, 6.2, 10 and 14; domain/session.md, section 3.
     #[must_use]
     pub fn with_wire(
         settings: Settings,
+        transcript: Option<agent::Transcript>,
         configuration: wire::Configuration,
         limits: WireLimits,
         scripts: Box<[provider::api::Script]>,
     ) -> World {
-        Self::with_backend(&settings, None, Backend::Wire(wire::Composition::new(configuration, limits, scripts)))
+        Self::with_backend(&settings, transcript, Backend::Wire(wire::Composition::new(configuration, limits, scripts)))
     }
 
     /// Set the externally injected wall clock before the next iteration.

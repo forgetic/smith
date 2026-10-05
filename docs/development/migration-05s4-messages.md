@@ -3,21 +3,14 @@
 This is the implementation ledger for the approved messages increment. Source
 is in progress; the early compiler checkpoint is
 `49d15601c4346251eb3c514a4ba68058b9da6f83`, rebased onto Smith `45a2eea`.
-The original author base was `51fdd24`. The current temporary draft is
-checkpoint `1a0bdfee5c64fe3377033bf976f1f5a70dd3c72e` plus frozen backend Rust
-blob `9e8979dcca2063b5ee20cc263437137573400282`, pending its temporary checkpoint.
-It passes formatting, full
-workspace/all-target clippy, 504 focused tests and eleven fuzzy tests, with idle
-serial measurements recorded below. Its root/Wire source, host-delivery
-composition, adapter boundary controls, public documentation, memory controls
-and observed message sweep have independent scoped approval. The continuation
-checkpoint adds actual native replay, usage and selected failure evidence. The
-committed memory increment meters a single actual Anthropic Wire lifecycle while root
-and caller owners remain live; simultaneous retained bindings and the full
-World memory envelope remain open. These results do not claim full replacement
-acceptance, a main merge, migration completion or legacy adapter removal.
-The current increment selects one backend before World construction, removing
-unused typed-provider ownership from the wire path without changing typed stories.
+The original author base was `51fdd24`. The current temporary increment follows
+reviewed checkpoint `c645669` and adds genuine native root restoration.
+Independent source review covers actual Start/discovery, concrete root records,
+new Client continuation, parking and physical cleanup in both configured dialects.
+Root-entry/caller-copy memory and single-lifecycle native memory were reviewed
+separately; overlapping physical ownership remains a subsequent control.
+These results do not claim a main merge, migration completion or copied-package
+removal. The runtime path uses only the shared Skein Client.
 
 The narrow root/Wire increment follows temporary checkpoint
 `9b7990a79953ca8e662c9731522b6de9528eb64c`. It adds an opt-in actual-wire backend
@@ -397,10 +390,14 @@ zero. The unchanged attained arrays, restored real Turn, exact payload cap and
 both independent one-over refusals still pass. This control passed in 0.672
 seconds; exact source and lock have independent approval.
 
-This is single-lifecycle combined memory evidence. Simultaneous retained
-physical bindings, Composition maps/traces and the full World outside envelope
-remain unmeasured. It does not claim full failure-enum coverage or opaque native
-root Restore; full replacement memory acceptance remains open.
+This checkpoint proves single-lifecycle combined component ownership. Actual
+overlapping physical Clients remain unmeasured here. Passive Composition routing,
+trace and referee bookkeeping are excluded by the shared heap harness contract;
+the earlier demand for an analytical full World envelope was self-imposed, not
+an acceptance requirement. See testing-strategy.md, section 6,
+programming-model.md, section 6.3, and skein-world/src/heap.rs. Owned operational
+Client/peer queues and buffers remain inside the component measurement.
+The later native root-restore control is described below.
 
 The passing `bounded_message_schedules_replay_with_every_required_actual_class`
 runs 16 pinned seeds across four bounded input/cancellation fixtures, through
@@ -418,15 +415,41 @@ claim native Client cancellation coverage or independent Env.wall jumps.
 Detailed actual counts and seed bounds are recorded in
 `/tmp/temper-next-migration/smith-message-sweep-focused-1.log`.
 
+## Genuine native root restoration
+
+The new `native_root_restore` story enters the existing World through original
+Start and actual guide discovery, then completes two real native turns and
+parks. Both caller-configured dialects supply literal opaque reasoning/thinking,
+sealed content and nested extension metadata alongside an actual decoded Wait.
+The saved Transcript comes only from genuine root Turns. A second activation
+restores that full history through a new root and actual shared Client, commits
+two new Turns, parks and physically closes every binding. A separate activation
+moves the genuine first Turn's concrete Wait result into Transcript.after,
+proving the real post-tail path without manufacturing feedback.
+
+The outside oracle checks whole opaque objects in actual continued queries,
+roles, call IDs and exact paired feedback; handwritten envelope literals check
+opaque and optional Text/call replay metadata in concrete root Turns. Query
+projects away Text phase and call item ID metadata, so those optional envelopes
+are not independently observed on the next native wire request in this story.
+Positive observations precede independent missing/rewritten/version/tag/proof,
+role, ID and result corruptions. Real header version/endpoint/dialect refusals
+start no provider or host effects. Every completion conserves all four SDK usage
+fields, typed cumulative activation spend and historical sequence numbering;
+history is not charged again. Record prices remain the separate zero-price
+transitional contract. Actual Wait deadlines, receiving bounds before Start,
+Parked endings and Completed/Reusable/Close/Closed chronology are asserted.
+
 ## Remaining checkpoint work and validation
 
 The current checkpoint retains the approved actual wire/root binding composition,
 submitted-delivery extension of live host composition, adapter boundary controls,
 public documentation, attained root-entry/caller-copy memory evidence and the
-single-lifecycle combined native memory control. Allocation peaks with multiple
-retained physical bindings, Composition maps/traces and the full World outside
-envelope remain outstanding. Native adapter continuation now has actual
-terminal/history evidence for its selected cases; the bounded message sweep has actual counts
+single-lifecycle combined native memory control and native root-restore story.
+Allocation peaks with simultaneous retained physical Client/peer owners remain
+outstanding; passive trace/referee/routing bookkeeping is outside this component
+contract. Native adapter continuation has actual terminal/history evidence for
+its selected cases; the bounded message sweep has actual counts
 and independent source approval. All named
 source distinctions and existing tests remain in scope; no passing subset
 replaces these requirements. New public items continue
@@ -441,7 +464,7 @@ host-call origins, cancellation and settlement contracts remain unchanged.
 The corrected session LLM module documentation assigns native wire/replay formats
 and classification to Skein and application vocabulary/translation to Smith.
 Both exact source changes have independent scoped approval. This cleanup removes
-one passive owner; it does not establish a full World ownership price.
+one passive owner; it does not change the attributed component memory claim.
 
 The approved wire composition consumes the receiving fields of the actual root
 `Complete`. Its active logical-owner lookup is distinct from its retained physical bindings: one
@@ -475,11 +498,12 @@ proof before cleanup settles. Its separate channel-loss control retains the
 parent right through actual withdrawal, process exit, empty tree and EOF, then
 consumes the parent's actual terminal without inventing an agent response.
 
-The remaining memory acceptance must measure simultaneous retained native
-physical bindings, Composition maps/traces and the full World outside envelope.
-The single-lifecycle native span keeps root/caller owners live but closes and
-drops its Wire before the next root entrance; it does not price native binding
-overlap or establish full enum/opaque root Restore coverage.
+The remaining component memory control must measure simultaneous retained
+native physical Client/peer ownership through actual Closed/drop. The earlier
+single-lifecycle span keeps root/caller owners live but drops its Wire before
+the next root entrance. An analytical full World price for passive harness
+storage is not required by the foundation. Selected failure controls retain
+their stated scope; genuine opaque root Restore is now covered below.
 The bounded message sweep counts actual endings, read fences, bounces and
 terminal races and requires every class to occur. Shared replay preserves its
 full boundary trace and actual outcome digest; fixture selection supplies no
@@ -492,13 +516,17 @@ The frozen temporary draft has the following parent-run evidence on 2026-10-05:
 | --- | --- |
 | `cargo fmt --check` | Passed. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed. |
-| `cargo nextest run --workspace` | 504 passed, zero skipped, 2.094 seconds. |
-| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.410 seconds. |
-| Idle serial focused measurement | 504 passed, zero skipped, 7.054 seconds. |
-| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.358 seconds. |
+| `cargo nextest run --workspace` | 505 passed, zero skipped, 2.285 seconds. |
+| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.958 seconds. |
+| Idle serial focused measurement | 505 passed, zero skipped, 7.512 seconds. |
+| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.431 seconds. |
 
 Latest logs are `/tmp/temper-next-migration/`'s
-`smith-wire-backend-{fmt-final,clippy-final,default,fuzzy,serial-default,serial-fuzzy}.log`.
+`smith-native-root-restore-{fmt-final,clippy-final,default-final,fuzzy-final,serial-default,serial-fuzzy}.log`.
+Final gates ran from the stable integration worktree with a fresh isolated target;
+an earlier cross-worktree shared-target default run reused a different root-memory
+artifact and is not acceptance evidence. No test exclusions or budget changes
+were used. Frozen restore source SHA-256 is `10ea20a5f82438afd88c38ea7fb425acf1379a94f1b2faf49765edccbb796800`.
 The preceding combined-memory checkpoint `1a0bdfe` passed 504 focused / 2.097
 seconds and eleven fuzzy / 4.445 seconds; idle serial runs passed 504 / 7.355
 seconds and eleven / 8.509 seconds. Its logs remain in

@@ -83,7 +83,8 @@ until required shared and consumer acceptance permits their coherent removal.
 | Observed bounded message sweep | Smith a54edcb | Reviewed; fmt/clippy pass; 499 focused / 2.141 s; 11 fuzzy / 4.478 s. |
 | Native continuation and host-origin oracle | Smith 8010bf4 | Reviewed; fmt/clippy pass; 504 focused / 2.103 s; 11 fuzzy / 4.403 s; 13 scoped controls / 0.075 s. |
 | Single-lifecycle combined native memory | Smith 1a0bdfee5c64fe3377033bf976f1f5a70dd3c72e | Exact source/lock reviewed; fmt/clippy pass; one scoped control / 0.672 s; 504 focused / 2.097 s; 11 fuzzy / 4.445 s. |
-| Exclusive World backend ownership and session LLM documentation | Smith base 1a0bdfe plus frozen World blob 9e8979dcca2063b5ee20cc263437137573400282 | Exact source reviewed; fmt/clippy pass; 504 focused / 2.094 s; 11 fuzzy / 4.410 s; temporary checkpoint pending. |
+| Genuine native root restore | This increment on c645669 | Source reviewed; fmt/clippy pass; 505 focused / 2.285 s; 11 fuzzy / 4.958 s. |
+| Exclusive World backend ownership and session LLM documentation | Smith c645669 | Exact source reviewed; fmt/clippy pass; 504 focused / 2.094 s; 11 fuzzy / 4.410 s. |
 
 The adapter boundary increment adds six positive-first controls over actual native Clients
 in both configured wire formats. It preserves matching owners at Completed,
@@ -154,9 +155,10 @@ transferred terminal; final reclamation leaves all held bytes at zero. The
 original 12/six and 28/14 Message/Turn counts, 8,192-byte person input, restored
 real Turn, reservation-inclusive exact cap and independent count/byte refusals
 remain asserted. Idle serial suites pass 504 / 7.355 s and eleven / 8.509 s,
-with zero skips. This measures single lifecycles; simultaneous physical bindings,
-Composition maps/traces and the full World outside envelope remain open. It
-does not establish full failure-enum or opaque native root Restore coverage.
+with zero skips. This measures single lifecycles; overlapping physical Client/peer ownership
+remains open at that checkpoint. It
+does not establish full failure-enum coverage. Native root Restore is covered
+by the subsequent genuine-record story below.
 
 The current backend cleanup selects one private Typed or Wire backend before
 World construction. Native worlds retain no unused typed fake Domain, Stage or
@@ -167,7 +169,7 @@ correctly assigns native wire/replay formats and classification to Skein and
 application vocabulary/translation to Smith. Both source changes have independent
 scoped approval. Idle serial suites pass 504 / 7.054 s and eleven / 8.358 s,
 with zero skips. Removing this unused owner supplies no
-new combined-binding or full World memory claim. Logs are in
+new overlapping component memory claim. Logs are in
 `smith-wire-backend-{fmt-final,clippy-final,default,fuzzy,serial-default,serial-fuzzy}.log`.
 
 Skein's reviewed temporary fake mechanics restore query-cap, checked-overflow
@@ -185,9 +187,23 @@ Remaining replacement acceptance:
 
 - Complete acceptance beyond the selected native continuation and failure cases;
   the four passing controls do not establish every failure classification.
-- Measure simultaneous retained physical bindings, Composition maps/traces and
-  the full World outside memory envelope beyond the measured single lifecycle.
-- Complete the remaining continuation/message-sweep scope; selected native
-  evidence does not establish opaque native root Restore or wall-jump coverage.
+- Measure simultaneous retained physical Client/peer ownership beyond the
+  single lifecycle; preserve root/caller copies and exact handoffs. Passive
+  trace/referee/routing bookkeeping is outside the component heap contract.
+- Preserve the stated continuation/message-sweep scope; independent native
+  wall-clock schedule jumps remain outside the selected controls.
 - Pass final shared/consumer gates and exact independent cleanup review before
   removing copied packages or advancing original main branches.
+
+The native root-restore increment uses original Start/discovery and genuine
+emitted Turns in both configured wire dialects. Full saved history and a genuine
+Wait result in Transcript.after each resume through a new root and actual Client,
+then commit two new Turns and park with physical Closed. Whole opaque native
+objects are checked in continued queries; optional Text/call replay envelopes
+are checked independently in root Turns because Query projects those fields.
+All four usage fields and activation-only accounting are exact. Independent
+source review covers positive-first metadata controls and real header refusals
+before provider/host effects. The component memory requirement follows
+foundation testing-strategy.md, section 6, programming-model.md, section 6.3,
+and skein-world/src/heap.rs; an analytical whole test World envelope was an
+earlier self-imposed requirement and is not claimed or needed here.

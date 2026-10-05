@@ -124,7 +124,7 @@ fn root_story(configuration: Configuration) {
             .expect("complete actual translated reservation");
     settings.limits.session.completion_blocks = bounds.client.dialect.parts;
     let expected_receiving = settings.limits;
-    let mut world = World::with_wire(settings, configuration, bounds, scripts());
+    let mut world = World::with_wire(settings, None, configuration, bounds, scripts());
     world.wall_at(Wall::from_nanos(9000));
     for _ in 0..100_000 {
         assert!(!world.drive(1), "continued query precedes parent cancellation");
