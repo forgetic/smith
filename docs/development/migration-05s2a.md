@@ -66,10 +66,11 @@ The current session cannot write original repository metadata or Smith/Skein
 source. These reviewed checkpoints live under `/tmp/temper-smith-resume/`;
 original main branches have not moved. The current temporary consumer pins
 all 13 canonical Skein packages coherently to temporary
-`bea15062f84ee361ac10e28c3da094b33f52074b`, including raw argument history,
-`Exchange::at(now, wall)`, reviewed fake mechanics and raw `World::prepared`
-adoption of one actual Client. Provider codecs remain exclusively Skein-owned on
-the new runtime path. Copied packages have no application consumers and remain
+`5bf93a60e05fab568af6a5c2acedcb1ec5456a51`, including raw argument history,
+`Exchange::at(now, wall)`, reviewed fake mechanics, raw `World::prepared`
+adoption of one actual Client and bounded peer ownership/reclamation. Provider
+codecs remain exclusively Skein-owned on the new runtime path. Copied packages
+have no application consumers and remain
 until required shared and consumer acceptance permits their coherent removal.
 
 | Increment | Source | Evidence |
@@ -80,7 +81,8 @@ until required shared and consumer acceptance permits their coherent removal.
 | Actual submitted delivery through the host | Smith 9d2ec84 | Reviewed; fmt/clippy pass; 498 focused / 1.930 s; 10 fuzzy / 4.321 s. |
 | Attained root-entry and caller-copy memory | Smith 8c51dff | Reviewed; fmt/clippy pass; 499 focused / 2.047 s; 10 fuzzy / 4.305 s. |
 | Observed bounded message sweep | Smith a54edcb | Reviewed; fmt/clippy pass; 499 focused / 2.141 s; 11 fuzzy / 4.478 s. |
-| Native continuation and host-origin oracle | Smith a54edcb plus frozen continuation increment | Fmt/clippy pass; 504 focused / 2.103 s; 11 fuzzy / 4.403 s; 13 scoped controls / 0.075 s. |
+| Native continuation and host-origin oracle | Smith 8010bf4 | Reviewed; fmt/clippy pass; 504 focused / 2.103 s; 11 fuzzy / 4.403 s; 13 scoped controls / 0.075 s. |
+| Single-lifecycle combined native memory | Smith base 8010bf4 plus frozen Rust blob 739c102e0a05575d2810b1f718b3480c0be4f33d | Exact source/lock reviewed; fmt/clippy pass; one scoped control / 0.672 s; 504 focused / 2.097 s; 11 fuzzy / 4.445 s. |
 
 The adapter boundary increment adds six positive-first controls over actual native Clients
 in both configured wire formats. It preserves matching owners at Completed,
@@ -107,10 +109,10 @@ Turns from real native records, including an actual 8,192-byte person message.
 It verifies reservation-inclusive payload admission, independent count/byte
 refusals, root-entry allocation peaks and separately measured caller-copy/handoff
 peaks. It passes in 0.586 s; idle serial suites pass 499 focused / 6.900 s and
-ten fuzzy / 7.935 s, with zero skips and unchanged budgets. Native Client/peer
-allocation transients between root entries remain unmeasured; this is scoped
-memory evidence, not full combined memory acceptance. Exact source, observations
-and logs are recorded in the messages ledger.
+ten fuzzy / 7.935 s, with zero skips and unchanged budgets. That earlier
+checkpoint meters root entries and caller copies; the current single-lifecycle
+native extension is recorded below. Exact source, observations and logs are in
+the messages ledger.
 
 The bounded message sweep observes all 19 required actual classes through
 16 pinned seeds/four fixtures and shared replay with the unchanged oracle.
@@ -140,19 +142,39 @@ preserving prior chronology, recovery and exact feedback assertions. Idle serial
 suites pass 504 focused / 7.010 s and eleven fuzzy / 8.370 s, with zero skips
 and unchanged budgets. Named controls and logs are in the messages ledger.
 
+The current memory extension keeps root/session state and all retained caller
+history, prompt/Turn copies and configuration live under the same persistent
+Meter across one actual Anthropic Wire's prepare, Start, native progress,
+translation, Close, actual Closed, drainage and drop. Independent public-field
+prices cover configuration, metadata/schema/script/resolution scratch and finite
+Vec wrappers. The adapter prices one Client and the shared peer extra price
+excludes it. Exact net ownership accounts for the taken Prompt and genuine
+transferred terminal; final reclamation leaves all held bytes at zero. The
+original 12/six and 28/14 Message/Turn counts, 8,192-byte person input, restored
+real Turn, reservation-inclusive exact cap and independent count/byte refusals
+remain asserted. Idle serial suites pass 504 / 7.355 s and eleven / 8.509 s,
+with zero skips. This measures single lifecycles; simultaneous physical bindings,
+Composition maps/traces and the full World outside envelope remain open. It
+does not establish full failure-enum or opaque native root Restore coverage.
+
 Skein's reviewed temporary fake mechanics restore query-cap, checked-overflow
-and random/scripted generation-scratch coverage. Reviewed raw adoption adds two
-native controls / 0.005 s; its shared-client scope passes 134 / 0.855 s and
-full fuzzy diagnostic 64 / 15.773 s.
-The mandatory full SDK default gate is still blocked at `io_uring` setup with
-`EPERM`: eight setup failures left 1,055 of 1,063 tests unrun. Diagnostics do
-not replace that gate. Earlier reviewed temporary checkpoints
+and random/scripted generation-scratch coverage. Raw adoption adds two native
+controls / 0.005 s. The current bounded-peer increment adds opt-in observation
+caps, a checked extra price excluding the Client and real service reclamation.
+Formatting/full all-target clippy pass; its four controls pass in 0.129 s,
+shared-client scope passes 138 / 0.920 s and full fuzzy diagnostic 64 / 17.628 s.
+The mandatory full SDK default gate fails at `io_uring` setup with `EPERM`:
+eight failures out of 1,067 tests leave 1,059 unrun. Diagnostics do not replace
+that gate. Earlier reviewed temporary checkpoints
 are preserved in verified bundles under Temper's `target/next-domain-handoff`.
 
 Remaining replacement acceptance:
 
 - Complete acceptance beyond the selected native continuation and failure cases;
   the four passing controls do not establish every failure classification.
-- Finish combined native Client/peer transient memory acceptance.
+- Measure simultaneous retained physical bindings, Composition maps/traces and
+  the full World outside memory envelope beyond the measured single lifecycle.
+- Complete the remaining continuation/message-sweep scope; selected native
+  evidence does not establish opaque native root Restore or wall-jump coverage.
 - Pass final shared/consumer gates and exact independent cleanup review before
   removing copied packages or advancing original main branches.

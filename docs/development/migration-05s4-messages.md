@@ -4,16 +4,17 @@ This is the implementation ledger for the approved messages increment. Source
 is in progress; the early compiler checkpoint is
 `49d15601c4346251eb3c514a4ba68058b9da6f83`, rebased onto Smith `45a2eea`.
 The original author base was `51fdd24`. The current temporary draft is
-checkpoint `a54edcb3ea96a301c77f360aae1970db5fe24ef1` plus the frozen native
-adapter continuation and host-origin oracle increment. It passes formatting, full
+checkpoint `8010bf4` plus frozen root-memory Rust blob
+`739c102e0a05575d2810b1f718b3480c0be4f33d`. It passes formatting, full
 workspace/all-target clippy, 504 focused tests and eleven fuzzy tests, with idle
 serial measurements recorded below. Its root/Wire source, host-delivery
-composition, adapter boundary controls, public documentation and root-entry/caller-copy
-memory control and observed message sweep have independent scoped approval.
-The continuation increment adds actual native replay, usage and selected failure
-evidence. Combined native Client/peer allocation peaks remain pending. These
-results do not claim full replacement acceptance, a main merge, migration
-completion or legacy adapter removal.
+composition, adapter boundary controls, public documentation, memory controls
+and observed message sweep have independent scoped approval. The continuation
+checkpoint adds actual native replay, usage and selected failure evidence. The
+current increment meters a single actual Anthropic Wire lifecycle while root
+and caller owners remain live; simultaneous retained bindings and the full
+World memory envelope remain open. These results do not claim full replacement
+acceptance, a main merge, migration completion or legacy adapter removal.
 
 The narrow root/Wire increment follows temporary checkpoint
 `9b7990a79953ca8e662c9731522b6de9528eb64c`. It adds an opt-in actual-wire backend
@@ -191,9 +192,10 @@ is translated only after shared lower settlement. Root and Client/peer clocks
 come from the same iteration, including independently moved wall time, and
 immediate wire progress prevents a jump to the root deadline. Outside records
 have a finite 256-call ceiling and four lifecycle observations per binding;
-this binding story is not an attained allocation measurement. Arbitrary application Finish
-decoding and combined native Client/peer
-transient allocation peaks remain pending. The passing gates cover the scoped increment; final replacement
+this binding story is not an attained allocation measurement. Arbitrary
+application Finish decoding and allocation peaks with multiple retained bindings
+remain pending. The single-lifecycle memory control below does not measure that
+overlap. The passing gates cover the scoped increment; final replacement
 acceptance remains outstanding.
 
 Four passing controls in `tests/agent/tests/adapter_continuation.rs` adopt the
@@ -364,11 +366,38 @@ The shared allocator meters Domain construction and root-entry peaks, including
 rewrites and concrete Turn transients. Its persistent baseline counts retained
 source records, saved history, restored prompt copies and a caller-held Turn
 copy. Separate shared Meters check complete caller-copy and record-handoff
-construction peaks against public wrapper/payload/replay ownership; final
-reclamation returns held bytes to zero. This control passed in 0.586 seconds
-and has independent source approval. Native Client/peer allocation transients
-between root entries remain unmeasured, so full combined memory acceptance is
-still open.
+construction peaks against public wrapper/payload/replay ownership. The earlier
+root-entry/caller-copy increment passed in 0.586 seconds and has independent
+source approval.
+
+The current increment extends the same persistent Meter across each single
+actual Anthropic Wire lifecycle while root/session state, caller configuration,
+retained records, history, prompts and Turn copies remain live. It measures
+preparation, Start, native byte-peer progress, application translation, Close,
+actual Closed, remaining drainage and Wire drop. Each peer receives the root's
+actual Time/Wall snapshot; genuine settlement leaves Service calls at zero
+before drop. No nested caller-copy Meter runs within this native span.
+
+The checked price combines the root bound, independently counted outside owners,
+the original taken Prompt, the adapter bound for one Client/context/translation
+and the shared peer extra bound, which excludes the Client. Public wrapper and
+owning-field ledgers separately price configuration construction/retention,
+endpoint metadata clones, schema Vec/Box handoff, script arrays, Wait resolution
+and decoder scratch, finite observation/returned vectors and the transferred
+terminal. Schema construction has a separate measured peak and reclaims before
+native work. Actual queries, requests, responses, literal Text/decoded Wait and
+full replay ownership supply the outside observations. The native span checks
+raw peak allocation and exact net ownership after Wire drop: its incoming
+baseline minus the original Prompt plus the genuine transferred terminal.
+Final root, configuration and caller-copy reclamation returns all held bytes to
+zero. The unchanged attained arrays, restored real Turn, exact payload cap and
+both independent one-over refusals still pass. This control passed in 0.672
+seconds; exact source and lock have independent approval.
+
+This is single-lifecycle combined memory evidence. Simultaneous retained
+physical bindings, Composition maps/traces and the full World outside envelope
+remain unmeasured. It does not claim full failure-enum coverage or opaque native
+root Restore; full replacement memory acceptance remains open.
 
 The passing `bounded_message_schedules_replay_with_every_required_actual_class`
 runs 16 pinned seeds across four bounded input/cancellation fixtures, through
@@ -390,10 +419,11 @@ Detailed actual counts and seed bounds are recorded in
 
 The current checkpoint retains the approved actual wire/root binding composition,
 submitted-delivery extension of live host composition, adapter boundary controls,
-public documentation and attained root-entry/caller-copy memory evidence.
-Combined native Client/peer transient memory remains outstanding. Native
-adapter continuation now has actual terminal/history evidence for its selected
-cases; the bounded message sweep has actual counts
+public documentation, attained root-entry/caller-copy memory evidence and the
+single-lifecycle combined native memory control. Allocation peaks with multiple
+retained physical bindings, Composition maps/traces and the full World outside
+envelope remain outstanding. Native adapter continuation now has actual
+terminal/history evidence for its selected cases; the bounded message sweep has actual counts
 and independent source approval. All named
 source distinctions and existing tests remain in scope; no passing subset
 replaces these requirements. New public items continue
@@ -432,10 +462,11 @@ proof before cleanup settles. Its separate channel-loss control retains the
 parent right through actual withdrawal, process exit, empty tree and EOF, then
 consumes the parent's actual terminal without inventing an agent response.
 
-The remaining memory acceptance must measure combined native Client/peer
-transient allocation peaks alongside the attained root-entry and caller-copy
-ownership. Actual physical settlement and retained input/terminal ownership
-do not by themselves price those native allocation transients.
+The remaining memory acceptance must measure simultaneous retained native
+physical bindings, Composition maps/traces and the full World outside envelope.
+The single-lifecycle native span keeps root/caller owners live but closes and
+drops its Wire before the next root entrance; it does not price native binding
+overlap or establish full enum/opaque root Restore coverage.
 The bounded message sweep counts actual endings, read fences, bounces and
 terminal races and requires every class to occur. Shared replay preserves its
 full boundary trace and actual outcome digest; fixture selection supplies no
@@ -448,15 +479,19 @@ The frozen temporary draft has the following parent-run evidence on 2026-10-05:
 | --- | --- |
 | `cargo fmt --check` | Passed. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed. |
-| `cargo nextest run --workspace` | 504 passed, zero skipped, 2.103 seconds. |
-| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.403 seconds. |
-| Idle serial focused measurement | 504 passed, zero skipped, 7.010 seconds. |
-| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.370 seconds. |
+| `cargo nextest run --workspace` | 504 passed, zero skipped, 2.097 seconds. |
+| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.445 seconds. |
+| Idle serial focused measurement | 504 passed, zero skipped, 7.355 seconds. |
+| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.509 seconds. |
 
 Latest logs are `/tmp/temper-next-migration/`'s
-`smith-adapter-continuation-clippy-5.log`, `smith-adapter-continuation-focused-2.log`,
-`smith-adapter-continuation-default.log`, `smith-adapter-continuation-fuzzy.log`,
-`smith-adapter-continuation-serial-default.log` and `smith-adapter-continuation-serial-fuzzy.log`.
+`smith-combined-native-memory-clippy-1.log`, `smith-combined-native-memory-focused-1.log`,
+`smith-combined-native-memory-default.log`, `smith-combined-native-memory-fuzzy.log`,
+`smith-combined-native-memory-serial-default.log` and `smith-combined-native-memory-serial-fuzzy.log`.
+The preceding continuation checkpoint `8010bf4` passed 504 focused / 2.103
+seconds and eleven fuzzy / 4.403 seconds; idle serial runs passed 504 / 7.010
+seconds and eleven / 8.370 seconds. Its logs remain in
+`smith-adapter-continuation-{clippy-5,focused-2,default,fuzzy,serial-default,serial-fuzzy}.log`.
 The preceding message-sweep draft passed 499 focused / 2.141 seconds and eleven
 fuzzy / 4.478 seconds; idle serial runs passed 499 / 7.104 seconds and eleven /
 8.541 seconds. Those logs remain in
@@ -478,17 +513,23 @@ review approved final formatted driver blob
 not approval of all source or the remaining integration stories.
 
 All 13 canonical Skein packages are pinned coherently to temporary revision
-`bea15062f84ee361ac10e28c3da094b33f52074b`, incorporating reviewed raw history,
-`Exchange::at(now, wall)`, shared fake mechanics and raw `World::prepared`
-adoption. The latter adopts one actual Client without a second preparation or
-new scheduling/codec authority. Its two native controls pass in 0.005 seconds,
-the shared-client scope passes 134 / 0.855 seconds and the full SDK fuzzy
-diagnostic passes 64 / 15.773 seconds. The mandatory SDK default gate remains
-blocked by sandbox `io_uring` permission (`EPERM`): eight tests failed at setup,
-and 1,055 of 1,063 were not run. These diagnostics are in
-`shared-raw-adoption-{focused,scope,default,fuzzy-diagnostic}.log`. No
-full SDK gate or main merge is claimed. Original repository metadata remains
-read-only; no original main has moved for this temporary checkpoint.
+`5bf93a60e05fab568af6a5c2acedcb1ec5456a51`, incorporating reviewed raw history,
+`Exchange::at(now, wall)`, shared fake mechanics, raw `World::prepared` adoption
+and bounded peer ownership/reclamation. Raw adoption retains one actual Client
+without a second preparation or new scheduling/codec authority. The checked
+extra price for opt-in bounded peer observations excludes the Client; real service
+reclamation follows delivered outputs. The four bounded-peer controls pass in
+0.129 seconds, formatting/full all-target clippy pass, the shared-client scope
+passes 138 / 0.920 seconds and the full SDK fuzzy diagnostic passes 64 / 17.628
+seconds. The mandatory SDK default gate fails at sandbox `io_uring` setup
+(`EPERM`): eight failures out of 1,067 tests leave 1,059 unrun. These diagnostics
+are in `shared-peer-memory-{fmt-final,clippy-reference,focused-reference,scope,default-reference,fuzzy-diagnostic}.log`.
+The earlier raw-adoption controls passed two / 0.005 seconds, shared-client
+scope 134 / 0.855 seconds and full fuzzy diagnostic 64 / 15.773 seconds. Those
+logs remain in
+`shared-raw-adoption-{focused,scope,default,fuzzy-diagnostic}.log`. No full SDK
+gate, copied-package deletion or main merge is claimed. Original repository
+metadata remains read-only; no original main has moved for this temporary checkpoint.
 
 The final gate remains workspace formatting, all-target clippy, focused and
 fuzzy suites on the final exact rebased tip, with idle serial measurements under

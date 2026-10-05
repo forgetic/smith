@@ -1,20 +1,23 @@
 //! Attained V2 root ownership at public Start, Complete and concrete Turn seams.
 //! Records come from actual shared Client terminals, including the real Wait
 //! result; fixture ownership is counted independently from production pricing.
-//! Root entrances and caller-copy transients are measured separately. Native
-//! Client/peer allocation transients are outside these root/caller spans.
-//! Contract: domain/run.md, sections 3, 6, 13 and 14; domain/session.md, section 3;
+//! Root entrances and caller-copy transients are measured separately. One whole
+//! actual Client/adapter/peer lifecycle is also measured while root and caller
+//! histories remain live. Retained multiple physical bindings are a separate
+//! memory scope. Contract: domain/client.md, sections 1, 4, 5 and 6;
+//! domain/run.md, sections 3, 6, 13 and 14; domain/session.md, section 3;
 //! programming-model.md, section 6.3; testing-strategy.md, sections 2.3 and 6.
 
 use skein_fake_llm_domain::api::{Finish, Line, Script, Turn as ScriptTurn};
 use skein_lib::{Duration, Env, Queue, ReplyTo, Time, Token, Wall};
+use skein_llm_world::fake::{ObservationLimits, extra_worst_case};
 use skein_world::domain::heap::{Counting, Meter};
 use smith_agent_world::{
     LIMITS,
     wire::{self, Configuration, Observed, Wire},
 };
 use smith_domain::{self as root, Domain, Event, Grant, GrantName, Limits, Request, llm, run, session};
-use smith_protocol_llm::{self as adapter, Receiving};
+use smith_protocol_llm::{self as adapter, Receiving, ResolvedCall, ToolKind, ToolSchema};
 
 #[global_allocator]
 static HEAP: Counting = Counting;
@@ -32,6 +35,53 @@ fn size<T>() -> u64 {
 
 fn len(value: &[u8]) -> u64 {
     u64::try_from(value.len()).expect("bounded fixture payload")
+}
+
+fn sum(values: impl IntoIterator<Item = u64>) -> u64 {
+    values.into_iter().try_fold(0_u64, u64::checked_add).expect("checked fixture ownership sum")
+}
+
+fn cells<T>(count: usize) -> u64 {
+    u64::try_from(count).expect("bounded fixture cells").checked_mul(size::<T>()).expect("checked fixture array")
+}
+
+fn endpoint_bytes(endpoint: &skein_llm::Endpoint) -> u64 {
+    sum([
+        len(&endpoint.authority),
+        len(&endpoint.target),
+        u64::try_from(core::mem::size_of_val(endpoint.headers.as_ref())).expect("public header array"),
+        sum(endpoint.headers.iter().map(|header| sum([len(&header.name), len(&header.value)]))),
+    ])
+}
+
+fn credential_bytes(credential: &skein_llm::Credential) -> u64 {
+    sum([len(&credential.access_token), len(&credential.account_id)])
+}
+
+fn configuration_bytes(configuration: &Configuration) -> u64 {
+    sum([
+        endpoint_bytes(&configuration.endpoint),
+        credential_bytes(&configuration.credential),
+        len(&configuration.error_prefix),
+        len(&configuration.continuation_arguments),
+    ])
+}
+
+fn observation_limits(limits: &adapter::Limits) -> ObservationLimits {
+    ObservationLimits {
+        events: skein_llm::client::MAX_OUT.above,
+        event_bytes: 32768,
+        queries: 1,
+        query_bytes: 32768,
+        pending: 0,
+        request_bytes: limits
+            .client
+            .http
+            .request
+            .checked_add(limits.client.dialect.request_bytes)
+            .expect("whole request tape"),
+        response_bytes: 4096,
+    }
 }
 
 fn bounds(messages: u32) -> Limits {
@@ -132,7 +182,8 @@ fn charter(restoring: bool) -> run::Charter {
 }
 
 fn scripts(cycles: u32) -> Box<[Script]> {
-    let mut turns = Vec::new();
+    let count = cycles.checked_mul(2).and_then(|turns| turns.checked_add(1)).expect("finite scripted turns");
+    let mut turns = Vec::with_capacity(usize::try_from(count).expect("bounded scripted array"));
     for _ in 0..cycles {
         turns.push(ScriptTurn {
             lines: Box::new([Line::Call { name: b"wait".as_slice().into(), arguments: b"{}".as_slice().into() }]),
@@ -142,6 +193,7 @@ fn scripts(cycles: u32) -> Box<[Script]> {
         turns.push(ScriptTurn { lines: Box::new([Line::Text { text: SAID.into() }]), finish: Finish::Stop, tokens: 1 });
     }
     turns.push(ScriptTurn { lines: Box::new([Line::Text { text: RESTORED.into() }]), finish: Finish::Stop, tokens: 1 });
+    assert_eq!(turns.capacity(), usize::try_from(count).expect("exact caller array reservation"));
     Box::new([Script { cue: b"@root-memory".as_slice().into(), turns: turns.into() }])
 }
 
@@ -163,31 +215,145 @@ struct Complete {
     receiving: Receiving,
 }
 
-fn actual(complete: Complete, configuration: &Configuration, cycles: u32) -> Event {
+fn actual(complete: Complete, configuration: &Configuration, cycles: u32, now: Time, wall: Wall) -> Event {
     let owner = complete.owner;
-    let mut wire =
-        Wire::prepare(owner, complete.prompt, complete.receiving, configuration, &wire_limits(), scripts(cycles))
-            .expect("actual root receiving contract admits the Client");
+    let messages = complete.prompt.messages.len();
+    let large = complete.prompt.messages.iter().flat_map(|message| &message.content).any(|block| {
+        matches!(block, llm::Block::Text { text, .. } if text.len() == LARGE && text.iter().all(|byte| *byte == b'x'))
+    });
+    let limits = wire_limits();
+    let mut wire = Wire::prepare(owner, complete.prompt, complete.receiving, configuration, &limits, scripts(cycles))
+        .expect("actual root receiving contract admits the Client");
+    wire.peer.observe(observation_limits(&limits));
+    wire.observed.reserve_exact(4);
+    wire.peer.at(now, wall);
     assert!(wire.start().is_empty());
     let mut terminal = None;
+    let mut quiet = false;
     for _ in 0..100_000 {
+        wire.peer.at(now, wall);
         let (progress, returned) = wire.tick();
+        assert!(returned.capacity() <= 4, "one actual terminal's public vector reservation");
         for event in returned {
             assert!(terminal.replace(event).is_none(), "one genuine native terminal");
         }
         if !progress {
+            quiet = true;
             break;
         }
     }
+    assert!(quiet, "actual byte peer reached bounded drainage");
     let terminal = terminal.expect("bounded actual byte peer completed");
     assert!(matches!(&terminal, Event::Completed { owner: got, .. } if *got == owner));
     assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable]);
+    assert_native_query(&wire, messages, large);
+    wire.peer.at(now, wall);
     assert!(wire.close().is_empty());
+    wire.peer.at(now, wall);
     assert!(wire.settle().is_empty());
+    wire.peer.at(now, wall);
     assert!(wire.settle().is_empty());
+    assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable, Observed::Close, Observed::Closed]);
+    assert_eq!(wire.observed.capacity(), 4);
+    let mut closed_quiet = false;
+    for _ in 0..128 {
+        wire.peer.at(now, wall);
+        let (progress, returned) = wire.tick();
+        assert!(returned.is_empty(), "settled native binding owes no second callback");
+        if !progress {
+            closed_quiet = true;
+            break;
+        }
+    }
+    assert!(closed_quiet, "genuine Closed drains remaining bounded peer work");
+    assert_eq!(wire.peer.machine.waiting(), skein_llm::client::Waiting::Nothing);
+    assert_eq!(wire.peer.service.calls(), 0, "retired native provider routes reclaimed before drop");
     assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable, Observed::Close, Observed::Closed]);
     drop(wire);
     terminal
+}
+
+// These passive public observations allocate no scratch inside the measured
+// native lifecycle. The shared peer's focused control independently validates
+// raw response chunk payloads with the shared HTTP reference reader.
+fn assert_native_query(wire: &Wire, messages: usize, large: bool) {
+    let [query] = wire.peer.queries.as_slice() else { panic!("one actual native query") };
+    assert_eq!(query.model.as_ref(), b"fixture-model");
+    assert_eq!(query.messages.len(), messages, "actual whole alternating history reached the native peer");
+    assert!(query.system.windows(b"@root-memory".len()).any(|bytes| bytes == b"@root-memory"));
+    assert_eq!(wire.peer.service.count(), 1);
+    assert_eq!(wire.peer.service.calls(), 0);
+    assert!(!wire.peer.requests.is_empty());
+    assert!(!wire.peer.responses.is_empty());
+    assert!(wire.peer.responses.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    if large {
+        assert!(query.messages.iter().flat_map(|message| &message.parts).any(|part| {
+            matches!(part, skein_fake_llm_domain::api::Part::Text { text } if text.len() == LARGE && text.iter().all(|byte| *byte == b'x'))
+        }));
+        assert!(wire.peer.requests.windows(LARGE).any(|bytes| bytes.iter().all(|byte| *byte == b'x')));
+    }
+}
+
+fn terminal_bytes(event: &Event) -> u64 {
+    let Event::Completed { completion, .. } = event else { panic!("actual native successful terminal") };
+    let [said] = completion.content.as_ref() else { panic!("one actual scripted assistant block") };
+    let payload = match said {
+        llm::Said::Text { text, replay } => {
+            assert!(text.as_ref() == SAID || text.as_ref() == RESTORED);
+            assert_eq!(completion.stop, llm::Stop::EndTurn);
+            sum([len(text), replay.as_ref().map_or(0, |value| len(&value.bytes))])
+        }
+        llm::Said::ToolCall { id, name, input, call: llm::Decoded::Served { ask: run::Ask::Wait }, replay } => {
+            assert_eq!(id.as_ref(), ID);
+            assert_eq!(name.as_ref(), b"wait");
+            assert_eq!(input.as_ref(), b"{}");
+            assert_eq!(completion.stop, llm::Stop::ToolUse);
+            sum([len(id), len(name), len(input), replay.as_ref().map_or(0, |value| len(&value.bytes))])
+        }
+        llm::Said::Refusal { .. } | llm::Said::Opaque { .. } | llm::Said::ToolCall { .. } => {
+            panic!("only actual literal Text and decoded Wait terminals belong to this measured fixture")
+        }
+    };
+    sum([size::<llm::Said>(), payload])
+}
+
+fn schemas_bytes(schemas: &[ToolSchema]) -> u64 {
+    assert_eq!(schemas.len(), 2, "actual fixture offers only Finish and Wait");
+    assert!(schemas.iter().any(|schema| schema.kind == ToolKind::Finish && schema.name.as_ref() == b"finish"));
+    assert!(schemas.iter().any(|schema| schema.kind == ToolKind::Wait && schema.name.as_ref() == b"wait"));
+    sum([
+        cells::<ToolSchema>(schemas.len()),
+        sum(schemas.iter().map(|schema| sum([len(&schema.name), len(&schema.description), len(&schema.schema)]))),
+    ])
+}
+
+fn caller_native_bytes(configuration: &Configuration, cycles: u32, schema_constructor: u64) -> u64 {
+    let endpoint = endpoint_bytes(&configuration.endpoint);
+    let peer_temporary =
+        endpoint.checked_sub(len(&configuration.endpoint.target)).expect("target is one endpoint field");
+    let turns = cycles.checked_mul(2).and_then(|turns| turns.checked_add(1)).expect("finite caller script");
+    // The shared peer price already owns its target and credential. The
+    // adapter's metadata input plus the peer's discarded endpoint fields are
+    // separate caller copies. Scripts reserve exactly their final Turn count;
+    // count an additional array while converting to the final boxed owner.
+    // The Wait-only decoder owns a four-cell collect buffer plus one boxed
+    // ResolvedCall, its literal name/input clones and the eight-byte minimum
+    // byte-vector allocation while checking the literal two-byte arguments.
+    // Public Wire observations reserve four cells and a returned terminal Vec
+    // exposes a capacity of at most four, checked in actual().
+    sum([
+        endpoint,
+        credential_bytes(&configuration.credential),
+        peer_temporary,
+        schema_constructor,
+        cells::<ScriptTurn>(usize::try_from(turns).expect("bounded script scratch")),
+        cells::<ResolvedCall>(5),
+        len(b"wait"),
+        len(b"{}"),
+        cells::<u8>(8),
+        cells::<Observed>(4),
+        cells::<Event>(4),
+    ])
 }
 
 // The fixture ledger counts actual public cells and owning byte fields. It
@@ -387,6 +553,7 @@ struct Counted {
     env: Env<Limits>,
     out: Queue<Request>,
     queue_bytes: u64,
+    configuration_bytes: u64,
     records: Vec<session::record::Turn>,
     prefix: Option<root::Transcript>,
     saved: Option<root::Transcript>,
@@ -418,6 +585,7 @@ impl Counted {
             env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits: *limits },
             out,
             queue_bytes,
+            configuration_bytes: 0,
             records: Vec::new(),
             prefix: None,
             saved: None,
@@ -435,11 +603,42 @@ impl Counted {
         }
     }
 
+    fn configuration(&mut self) -> Configuration {
+        let before = self.meter.held();
+        self.meter.start();
+        let configurations = wire::configurations();
+        assert_eq!(configurations.len(), 2, "finite public native fixture configuration array");
+        let constructor =
+            sum([cells::<Configuration>(configurations.len()), sum(configurations.iter().map(configuration_bytes))]);
+        let constructed = self.meter.end();
+        assert_eq!(
+            constructed.held(),
+            sum([before, constructor]),
+            "all configuration fields and outer wrappers owned independently"
+        );
+        assert!(
+            constructed.peak() <= sum([before, constructor]),
+            "configuration construction has no unpriced transient"
+        );
+        self.meter.start();
+        let configuration = configurations.into_vec().pop().expect("actual native Anthropic fixture");
+        self.configuration_bytes = configuration_bytes(&configuration);
+        let selected = self.meter.end();
+        assert!(selected.peak() <= sum([before, constructor]));
+        assert_eq!(
+            selected.held(),
+            sum([before, self.configuration_bytes]),
+            "selected caller configuration remains owned after dropping the other fixture"
+        );
+        configuration
+    }
+
     fn outside(&self) -> u64 {
         let records = u64::try_from(self.records.capacity()).expect("bounded outside vector")
             * size::<session::record::Turn>()
             + self.records.iter().map(turn_bytes).sum::<u64>();
         self.queue_bytes
+            + self.configuration_bytes
             + records
             + self.prefix.as_ref().map_or(0, transcript_bytes)
             + self.saved.as_ref().map_or(0, transcript_bytes)
@@ -573,7 +772,7 @@ impl Counted {
                 if self.initial.is_none() {
                     self.initial = Some(copy_prompt(&complete.prompt));
                 }
-                let event = actual(complete, configuration, cycles);
+                let event = self.native(complete, configuration, cycles);
                 self.step(event);
             } else {
                 self.resume();
@@ -585,6 +784,68 @@ impl Counted {
         assert!(self.complete.is_none());
         assert!(!self.domain.as_ref().expect("live root").is_ready());
         assert!(self.waiting || self.answer.is_some(), "bounded root loop reached an outside wait or actual terminal");
+    }
+
+    fn schema_constructor(&self, prompt: &llm::Prompt) -> u64 {
+        let before = self.meter.held();
+        self.meter.start();
+        let schemas = wire::schemas(prompt);
+        let owned = schemas_bytes(&schemas);
+        // Two descriptors collect into a four-cell Vec before the final
+        // two-cell boxed slice. Price both arrays if reboxing overlaps them.
+        let constructor = sum([owned, cells::<ToolSchema>(4)]);
+        let built = self.meter.end();
+        assert_eq!(
+            built.held(),
+            sum([before, owned]),
+            "public caller schema boxes own exactly their arrays and fields"
+        );
+        assert!(
+            built.peak() <= sum([before, constructor]),
+            "caller schema construction fits its independently priced arrays"
+        );
+        drop(schemas);
+        assert_eq!(self.meter.held(), before, "schema preflight reclaims every temporary owner before the native span");
+        constructor
+    }
+
+    fn native(&mut self, complete: Complete, configuration: &Configuration, cycles: u32) -> Event {
+        let incoming = prompt_bytes(&complete.prompt);
+        let schema_constructor = self.schema_constructor(&complete.prompt);
+        let limits = wire_limits();
+        let observations = observation_limits(&limits);
+        let bound = sum([
+            root::worst_case(&self.env.limits).expect("live root's independent bound"),
+            self.outside(),
+            incoming,
+            adapter::worst_case(&limits, &complete.receiving).expect("one actual Client/context/translation bound"),
+            extra_worst_case(&limits.client, &observations, &configuration.endpoint, &configuration.credential)
+                .expect("independent peer price excludes Client"),
+            caller_native_bytes(configuration, cycles, schema_constructor),
+            complete.receiving.max_completion_bytes,
+        ]);
+        let terminal_cap = complete.receiving.max_completion_bytes;
+        let before = self.meter.held();
+        self.meter.start();
+        let event = actual(complete, configuration, cycles, self.env.now, self.env.wall);
+        let measured = self.meter.end();
+        assert!(
+            measured.peak() <= bound,
+            "combined root/caller/one-native-lifecycle peak {} exceeds {bound}",
+            measured.peak()
+        );
+        let terminal = terminal_bytes(&event);
+        assert!(terminal <= terminal_cap, "actual transferred terminal fits the root's advertised caller reserve");
+        let expected = before
+            .checked_sub(incoming)
+            .and_then(|held| held.checked_add(terminal))
+            .expect("native ownership transfer is bounded");
+        assert_eq!(
+            measured.held(),
+            expected,
+            "closed/dropped native owners release exactly the input Prompt and retain only the actual caller terminal"
+        );
+        event
     }
 
     fn replace_root(&mut self, limits: &Limits) {
@@ -812,7 +1073,7 @@ fn refuse_one_over(counted: &mut Counted, configuration: &Configuration, cycles:
     }
 }
 
-fn reclaim_every_owner(mut counted: Counted, tight: &Limits) {
+fn reclaim_every_owner(mut counted: Counted, tight: &Limits, configuration: Configuration) {
     let final_bound = root::worst_case(tight).expect("compatible final caps") + counted.outside();
     counted.meter.start();
     drop(counted.domain.take());
@@ -824,22 +1085,24 @@ fn reclaim_every_owner(mut counted: Counted, tight: &Limits) {
     drop(counted.turn_copy.take());
     counted.records.clear();
     counted.records.shrink_to_fit();
+    drop(configuration);
+    counted.configuration_bytes = 0;
     let measured = counted.meter.end();
     counted.meter.check(measured, final_bound, tight);
     let Counted { meter, out, .. } = counted;
     drop(out);
-    assert_eq!(meter.held(), 0, "all root allocations and retained outside copies reclaimed");
+    assert_eq!(meter.held(), 0, "all root, native fixture configuration and retained outside copies reclaimed");
 }
 
 #[test]
 fn restored_root_arrays_payload_rewrites_and_turn_copies_stay_within_the_attained_bound() {
-    let configuration = wire::configurations().into_vec().pop().expect("actual native Anthropic fixture");
     for messages in [16, 32] {
         let cycles = (messages - 4) / 4;
         let mut counted = Counted::new(&bounds(messages));
+        let configuration = counted.configuration();
         let tight = generate_prefix(&mut counted, &configuration, messages, cycles);
         restore_exact(&mut counted, &configuration, messages, cycles, &tight);
         refuse_one_over(&mut counted, &configuration, cycles, &tight);
-        reclaim_every_owner(counted, &tight);
+        reclaim_every_owner(counted, &tight, configuration);
     }
 }
