@@ -138,5 +138,6 @@ seconds, with no skips. The affected agent world has 49 focused tests /
 33 focused tests / 0.566 seconds and one fuzzy test / 0.314 seconds.
 Shares sum rounded individual PASS durations. Full opaque inputs and replies,
 settled recovery, actual shutdown and the existing memory/replay sweeps remain.
-Workspace budgets are unchanged. Exact source-commit gate results are recorded
-in the migration evidence companion after validation.
+Workspace budgets are unchanged. Source `ab15cae` passed the exact-tip four
+gates before merging: 411 focused / 1.786 seconds and nine fuzzy / 3.111
+seconds, without skips; formatting and all-target clippy also passed.

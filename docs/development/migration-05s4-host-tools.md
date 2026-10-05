@@ -106,8 +106,9 @@ seconds and nine fuzzy tests in 15.212 seconds; affected world shares are in
 [workflow.md](workflow.md). These measurements include the actual composed
 cancellation control and cap-reaching memory driver, without raising budgets.
 
-The parent reruns all four workflow gates on the committed source before main
-moves and records that source's exact counts/times in the evidence companion.
+The exact committed source `ab15cae` passed all four workflow gates before its
+fast-forward to main: formatting, workspace all-target clippy, 411 focused tests
+in 1.786 seconds and nine fuzzy tests in 3.111 seconds, with no skips.
 Independent static review approved the complete implementation, docs, outside
 judge and ownership bounds. No channel/provider schema adapter, complete run
 restart or local-host completion is claimed by this increment.
