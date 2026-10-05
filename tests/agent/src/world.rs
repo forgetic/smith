@@ -8,6 +8,10 @@
 //! jumps. Provider grammar and generic stream scheduling remain unknown here.
 //! Entrances are original Start, bounded drive, parent message/cancel and wall
 //! injection (domain/client.md, sections 1, 4 and 5; programming-model.md, section 9).
+//! The separate parent-delivery entrance exposes whole actual submissions and
+//! retains their existing flight/snapshot until an actual outside terminal is
+//! scheduled. It never chooses that parent's durable decision or fabricates a
+//! channel return (domain/run.md, section 8.2; domain/host.md, section 9).
 
 use std::collections::BTreeMap;
 
@@ -197,6 +201,35 @@ pub enum HostSchedule {
     LateAnswer,
 }
 
+/// Outside record of an actual root delivery handed to an opt-in parent bridge.
+/// The World retains at most 256 bounded submission records. They expose no private state.
+/// The existing flight ledger retains each operation until its actual terminal.
+/// Contract: domain/run.md, sections 8.2, 10 and 14; domain/host.md, sections 2 and 9.
+#[derive(Clone, Debug)]
+pub struct DeliverySubmission {
+    /// Original parent logical scope, echoed unchanged. Contract: domain/run.md, section 8.2.
+    pub worker: Token,
+
+    /// Actual callback right, distinct from the durable name. Contract: domain/run.md, section 8.2.
+    pub owner: Token,
+
+    /// Actual transcript-derived operation identity. Contract: domain/run.md, section 8.2.
+    pub name: run::CallName,
+
+    /// Whole validated opaque metadata, bounded by root outcome limits.
+
+    /// Contract: domain/run.md, sections 7.1 and 8.2; domain/host.md, section 2.
+    pub change: run::outcome::Change,
+
+    /// Actual operation deadline; withdrawal never consumes this right.
+
+    /// Contract: domain/run.md, sections 8.2 and 10.
+    pub deadline: Time,
+
+    /// Observed root submission clock. Contract: domain/run.md, section 14.
+    pub at: Time,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum Family {
     Completion,
@@ -243,6 +276,8 @@ pub struct World {
     provider_stage: Stage<provider::Config, provider::Event, provider::Request>,
     provider_calls: Ledger<Token, (tools::Grants, Box<[llm::Served]>)>,
     wire: Option<wire::Composition>,
+    parent_deliveries: bool,
+    delivery_submissions: Vec<DeliverySubmission>,
     schedule: Schedule<Delivery>,
     flights: Ledger<(Family, Token), Flight>,
     disk: Checkout,
@@ -341,6 +376,8 @@ impl World {
             provider_stage: Stage::new(settings.provider, provider::MAX_OUT, provider::MAX_OUT + 3),
             provider_calls: Ledger::new("fake provider call"),
             wire: None,
+            parent_deliveries: false,
+            delivery_submissions: Vec::new(),
             schedule,
             flights: Ledger::new("agent request"),
             disk,
@@ -399,6 +436,53 @@ impl World {
         self.provider_stage.env.wall = wall;
     }
 
+    /// Original Start/discovery with actual delivery rights routed to the outside
+    /// parent rather than automatically answered. Existing schedule and ledger
+    /// retain ownership; drive yields at the current clock while a parent reply
+    /// is owed. Caller must supply that actual terminal through `return_delivery`.
+    /// At most 256 bounded submission records are retained by this fixture.
+    /// Contract: domain/run.md, sections 8.2, 10 and 14; domain/host.md, section 9.
+    #[must_use]
+    pub fn with_parent_deliveries(settings: Settings) -> World {
+        let mut world = Self::new(settings);
+        world.parent_deliveries = true;
+        world
+    }
+
+    /// Actual root submissions observed by the opt-in parent; default worlds
+    /// expose none. Records carry the whole bounded request and no extra right.
+    /// Contract: domain/run.md, sections 8.2 and 14; testing-strategy.md, section 2.3.
+    #[must_use]
+    pub fn delivery_submissions(&self) -> &[DeliverySubmission] {
+        &self.delivery_submissions
+    }
+
+    /// Parent supplies one actual sealed operation terminal for a previously
+    /// observed root submission. It enters the existing shared schedule at now;
+    /// only its actual delivery consumes the existing flight/snapshot/referee.
+    /// Cancellation never substitutes a reply or removes the operation right.
+    /// Contract: domain/run.md, sections 8.2 and 10; domain/host.md, sections 2 and 9.
+    ///
+    /// # Errors
+    /// Refuses non-bridge worlds, unknown callbacks and already queued terminals
+    /// before scheduling any effect. The refused supplied value is dropped.
+    pub fn return_delivery(&mut self, owner: Token, push: run::Delivery) -> Result<(), &'static str> {
+        if !self.parent_deliveries {
+            return Err("parent delivery bridge is disabled");
+        }
+        let Some(flight) = self.flights.get_mut((Family::Delivery, owner)) else {
+            return Err("no actual parent delivery right");
+        };
+        if flight.key.is_some() {
+            return Err("actual parent terminal is already queued");
+        }
+        flight.key = Some(self.schedule.send(
+            self.now,
+            Delivery::Terminal { family: Family::Delivery, owner, event: Event::Delivered { owner, push } },
+        ));
+        Ok(())
+    }
+
     /// Queue a real parent cancellation for the admitted original run. Its
     /// Start reply and all actual lower terminals remain owed through close.
     /// Contract: domain/run.md, sections 10 and 13; domain/client.md, section 5.
@@ -447,6 +531,9 @@ impl World {
     /// Advance up to this many real loop rounds, allowing another real domain
     /// to translate the emitted boundary records before the next round. Returns
     /// true only after the original root/provider/IO ledgers actually settle.
+    /// An opt-in parent delivery awaiting its external terminal keeps the current
+    /// clock and returns control; it never advances a deadline in place of that
+    /// parent. The caller schedules the actual reply before driving settlement.
     /// Contract: domain/host.md, section 9; testing-strategy.md, section 2.3.
     pub fn drive(&mut self, iterations: u32) -> bool {
         for _ in 0..iterations {
@@ -495,8 +582,14 @@ impl World {
                 self.settled();
                 return true;
             }
-            let immediate =
-                wire_immediate || self.stage.has_events() || self.provider_stage.has_events() || self.agent.is_ready();
+            let immediate = wire_immediate
+                || (self.parent_deliveries
+                    && self.flights.keys().any(|key| {
+                        key.0 == Family::Delivery && self.flights.get(*key).is_some_and(|flight| flight.key.is_none())
+                    }))
+                || self.stage.has_events()
+                || self.provider_stage.has_events()
+                || self.agent.is_ready();
             if !immediate {
                 self.now = [
                     self.schedule.next_time(),
@@ -759,6 +852,18 @@ impl World {
                 self.observe(Seen::Pushing { owner, name, tree: tree.clone(), finishing });
                 self.snapshots.insert(owner, tree);
                 self.flights.open((Family::Delivery, owner), Flight { key: None, cancelled: false });
+                if self.parent_deliveries {
+                    assert!(self.delivery_submissions.len() < 256, "finite actual parent delivery story ceiling");
+                    self.delivery_submissions.push(DeliverySubmission {
+                        worker,
+                        owner,
+                        name,
+                        change,
+                        deadline,
+                        at: self.now,
+                    });
+                    return;
+                }
                 let after = self.settings.network.draw(&mut self.rng);
                 let complete = self.now.saturating_add(after);
                 let push = if complete > deadline {

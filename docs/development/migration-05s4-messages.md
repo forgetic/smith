@@ -3,11 +3,12 @@
 This is the implementation ledger for the approved messages increment. Source
 is in progress; the early compiler checkpoint is
 `49d15601c4346251eb3c514a4ba68058b9da6f83`, rebased onto Smith `45a2eea`.
-The original author base was `51fdd24`. The frozen temporary root/Wire draft
-passes formatting, full workspace/all-target clippy, 490 focused tests and ten
-fuzzy tests, with idle serial measurements recorded below. Its root/Wire source
-and public documentation backfill have independent scoped approval. Further
-composed ownership evidence and adapter boundary controls remain pending. These
+The original author base was `51fdd24`. The frozen temporary host-delivery draft
+passes formatting, full workspace/all-target clippy, 498 focused tests and ten
+fuzzy tests, with idle serial measurements recorded below. Its root/Wire source,
+host-delivery composition, adapter ownership/inventory/attestation controls and
+public documentation backfill have independent scoped approval. Attained memory,
+observed message sweep and further adapter evidence remain pending. These
 results do not claim full replacement acceptance, a main merge, migration
 completion or legacy adapter removal.
 
@@ -19,6 +20,10 @@ review and the four parent-run checks cover this increment. Public documentation
 backfill at temporary `edc583ebebe2a97a936224e6cfd9aa9adfbcad2b` separately passed
 the four checks, including 489 focused tests in 1.937 seconds and ten fuzzy
 tests in 4.294 seconds, before integration with the root/Wire increment.
+The approved root/Wire checkpoint is temporary `240838d`; boundary checkpoint
+`9b8630e` adds six actual adapter owner, inventory and attestation controls,
+passing formatting, all-target clippy, 496 focused tests in 1.968 seconds and
+ten fuzzy tests in 4.219 seconds before the host-delivery increment.
 
 ## Source and contract
 
@@ -127,6 +132,38 @@ evidence and final acceptance.
 
 ## Written focused evidence
 
+Two passing controls are `actual_root_delivery_receipt_turn_and_host_rights_settle_after_cancel`
+and `actual_root_submission_parent_right_outlives_exit_tree_eof_without_fabricated_return`.
+These tests use the existing MidReport script and original root Start/discovery,
+checks and actual Deliver request. A separate opt-in world entrance exposes at
+most 256 whole bounded submissions and awaits the outside parent; existing
+Schedule, flight ledger, snapshot and referee still own actual terminal routing.
+Default typed and wire worlds retain their current scheduling. No automatic
+terminal coexists with a bridge submission; unknown and already queued callback
+replies refuse before scheduling another terminal.
+
+The live control translates actual scope/name/deadline/opaque fields into a real
+host Up::Call. It holds the parent operation through original-root cancellation
+and an earlier Turn ACK Send, then maps only the actually issued sealed parent
+receipt to the root. Exact paired receipt feedback must appear in a concrete
+Turn; the final Delivered/Cancelled name and receipts must agree with the real
+host proof. Positive evidence precedes altered-name/receipt negative controls.
+The reply Send survives root settlement. While the channel still listens, the
+parent acknowledges the actual final Turn before forwarding the root's last
+word. Its ACK queues behind that held reply Send; only the actual reply Sent
+issues `Down::Acknowledge { turn: 2 }`. That genuine final ACK Send then survives the last
+word, process exit, empty tree and EOF until its actual Sent terminal. No ACK
+Send is invented after the host has stopped listening.
+
+The channel-loss control uses another actual root submission. Real host Stop and
+Cancel precede process exit, generated withdrawal, empty tree and EOF. The
+parent operation remains outstanding after earlier Turn ACK/Send settlement;
+only its actual sealed parent reply permits Gone. The simulated root is no
+longer driven after actual process exit. This control claims neither a returned
+receipt nor a post-EOF Turn, and requires zero fabricated downlink answers.
+Both controls passed in 0.010 seconds; independent source review and the four
+parent-run checks cover the final frozen host-delivery slice.
+
 The passing `actual_root_wire_host_feedback_and_reused_owner_close_survive_parent_cancel`
 starts the original root and discovery under the Codex and Anthropic caller
 endpoint fixtures.
@@ -150,7 +187,7 @@ come from the same iteration, including independently moved wall time, and
 immediate wire progress prevents a jump to the root deadline. Outside records
 have a finite 256-call ceiling and four lifecycle observations per binding;
 this is not an attained allocation measurement. Arbitrary application Finish
-decoding, actual submitted delivery composition, remaining receiving corruption
+decoding, remaining receiving continuation
 controls, full memory attainment and a bounded actual message schedule sweep
 remain pending. The passing gates cover the scoped increment; final replacement
 acceptance remains outstanding.
@@ -269,11 +306,11 @@ not replace the pending attained root/handoff memory story or message sweep.
 
 ## Remaining checkpoint work and validation
 
-The current checkpoint retains the approved actual wire/root binding composition
-and public documentation backfill. The submitted-delivery extension of live host
-composition, attained many-tiny Message/Turn plus cap-filled payload transit
-memory driver, and bounded randomized message race sweep with observed
-classification counts remain outstanding. All named source distinctions and
+The current checkpoint retains the approved actual wire/root binding composition,
+submitted-delivery extension of live host composition, adapter boundary controls
+and public documentation backfill. The attained many-tiny Message/Turn plus
+cap-filled payload transit memory driver and bounded randomized message race
+sweep with observed classification counts remain outstanding. All named source distinctions and
 existing tests remain in scope; no passing subset replaces these requirements. New public items continue
 to require full module/type/variant/field/entry documentation and independent
 subset review alongside later integration work.
@@ -290,20 +327,24 @@ continued result and parent cancellation; it makes no unsupported application
 `Finish` decoder claim. All participating stages receive the same injected
 monotonic and wall clocks through the shared world's clock entrance.
 
-Remaining adapter consumer controls must reject wrong owners at all three
-terminal entrances; malformed, duplicate or unused ResolvedCall position/name/
-input/kind entries; and missing, duplicate or unoffered schema/result inventory.
-Actual failure class/evidence/detail, refusal/reasoning, all four usage counters
-and malformed-call no-effect continuation still need explicit outside evidence.
+Six passing adapter consumer controls now check actual Completed, Failed and
+Cancelled owners, including wrong-owner refusal at all three entrances; missing,
+duplicate or unoffered schema inventory; missing, duplicate, unused or mispaired
+result renderings; and ResolvedCall position/name/literal-input/kind, uniqueness
+and consumption. The real failed fixture retains Overloaded, Response evidence
+and exact `overloaded_error` detail under the matching context. Remaining continuation evidence includes
+broader failure-class/evidence/detail cases, replay, refusal/reasoning, all four
+usage counters and malformed-call no-effect behavior.
 The compact literal schema-extension observation now supplements parsed schema
 equality; it does not discharge these other boundary requirements.
 
-The live-host extension must submit an actual delivery through the root and
-host entrances and retain its parent operation right independently from Turn
-commitment, ACK Send, process exit, EOF and empty-tree proofs. A withdrawal is
-an observation, not an operation terminal. Only the actual parent answer can
-consume that delivery right; its sealed receipt and subsequent concrete Turn
-must agree before durable ACK and physical cleanup settle.
+The approved live-host extension submits an actual delivery through root and
+host entrances and retains its parent operation right independently from Turn
+commitment and ACK Send. Only the actual parent answer consumes that operation
+right; its sealed receipt agrees with the concrete Turn and final Delivered
+proof before cleanup settles. Its separate channel-loss control retains the
+parent right through actual withdrawal, process exit, empty tree and EOF, then
+consumes the parent's actual terminal without inventing an agent response.
 
 The remaining memory driver must attain independent Message and Turn array
 caps using many tiny records, alongside a cap-filled payload; selected Start
@@ -321,14 +362,16 @@ The frozen temporary draft has the following parent-run evidence on 2026-10-05:
 | --- | --- |
 | `cargo fmt --check` | Passed. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed. |
-| `cargo nextest run --workspace` | 490 passed, zero skipped, 1.983 seconds. |
-| `cargo nextest run --workspace --profile fuzzy` | Ten passed, zero skipped, 4.310 seconds. |
-| Idle serial focused measurement | 490 passed in 6.292 seconds. |
-| Idle serial fuzzy measurement | Ten passed in 7.893 seconds. |
+| `cargo nextest run --workspace` | 498 passed, zero skipped, 1.930 seconds. |
+| `cargo nextest run --workspace --profile fuzzy` | Ten passed, zero skipped, 4.321 seconds. |
+| Idle serial focused measurement | 498 passed in 6.509 seconds. |
+| Idle serial fuzzy measurement | Ten passed in 8.016 seconds. |
 
 Runtime logs are `/tmp/temper-next-migration/`'s
-`smith-root-wire-default-final.log`, `smith-root-wire-fuzzy-final.log`,
-`smith-root-wire-serial-default.log` and `smith-root-wire-serial-fuzzy.log`.
+`smith-host-delivery-default.log`, `smith-host-delivery-fuzzy.log`,
+`smith-host-delivery-serial-default.log` and `smith-host-delivery-serial-fuzzy.log`.
+Scoped host controls are recorded in `smith-host-delivery-focused-2.log`; final
+all-target clippy is recorded in `smith-host-delivery-clippy-final.log`.
 The earlier messages checkpoint remains documented by
 `smith-client-messages-resume-default-6.log` and
 `smith-client-messages-resume-fuzzy-4.log`. Independent receiving/counter

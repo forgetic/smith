@@ -74,9 +74,10 @@ until required shared and consumer acceptance permits their coherent removal.
 |---|---|---|
 | Public boundary documentation | Smith edc583e | Reviewed; fmt/clippy pass; 489 focused / 1.937 s; 10 fuzzy / 4.294 s. |
 | Original root through actual shared Client | Smith 240838d | Reviewed; fmt/clippy pass; 490 focused / 1.983 s; 10 fuzzy / 4.310 s. |
-| Adapter owner, inventory and attestation controls | This temporary increment | Reviewed; fmt/clippy pass; 496 focused / 1.968 s; 10 fuzzy / 4.219 s. |
+| Adapter owner, inventory and attestation controls | Smith 9b8630e | Reviewed; fmt/clippy pass; 496 focused / 1.968 s; 10 fuzzy / 4.219 s. |
+| Actual submitted delivery through the host | This temporary increment | Reviewed; fmt/clippy pass; 498 focused / 1.930 s; 10 fuzzy / 4.321 s. |
 
-The last increment adds six positive-first controls over actual native Clients
+The adapter boundary increment adds six positive-first controls over actual native Clients
 in both configured wire formats. It preserves matching owners at Completed,
 Failed and Cancelled entrances; literal overloaded class, response evidence and
 detail; exact schema and owned-result rendering inventories; and an actual
@@ -86,6 +87,16 @@ Physical Close/Closed and repeated-settlement observations remain separate
 from adapter context consumption. No application decoder or Finish policy is
 invented by these tests. Idle serial measurements are 496 focused / 6.433 s
 and ten fuzzy / 7.958 s, with zero skips and unchanged suite budgets.
+
+The later host control routes a real root delivery submission through the host
+kit. It retains the actual receipt in the final Turn after cancellation and
+issues the exact final ACK before the last word, holding its real Send through
+exit, empty tree and EOF. A separate channel-loss control retains the parent's
+operation right until an actual reply, without inventing a post-EOF agent
+response. Both controls pass in 0.010 s; idle serial suites pass 498 focused /
+6.509 s and ten fuzzy / 8.016 s. Scope and named outside observations are in
+[migration-05s4-messages.md](migration-05s4-messages.md).
+
 
 Skein's reviewed temporary fake mechanics restore query-cap, checked-overflow
 and random/scripted generation-scratch coverage. Its focused shared-client
@@ -98,7 +109,7 @@ Remaining replacement acceptance:
 
 - Retain explicit full usage/replay, refusal/reasoning and malformed-call
   no-effect feedback controls, alongside remaining failure classifications.
-- Finish actual submitted-delivery host composition, attained root/handoff
-  allocation evidence and an observed bounded message schedule sweep.
+- Finish attained root/handoff allocation evidence and an observed bounded
+  message schedule sweep.
 - Pass final shared/consumer gates and exact independent cleanup review before
   removing copied packages or advancing original main branches.

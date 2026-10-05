@@ -8,6 +8,9 @@
 //! synchronizes their clocks with the root iteration. Active logical callbacks
 //! and retained physical close rights have separate ownership until actual Closed
 //! (domain/client.md, sections 1, 4, 5 and 6).
+//! Its separate opt-in parent-delivery bridge exposes only actual root requests
+//! and accepts one actual sealed terminal through the existing shared schedule
+//! and flight ledger (domain/run.md, section 8.2; domain/host.md, section 9).
 //! It calls the real agent's step, fire and resume entrances under bounded
 //! output pressure. Its host starts one charter, receives one answer and
 //! supplies typed push replies. No engine, worker, forge, channel or agent
@@ -43,4 +46,4 @@ pub use limits::{BUDGET, LIMITS, TIGHT};
 
 pub use script::{JOBS, Job};
 
-pub use world::{HostReply, HostSchedule, Settings, World, delivered};
+pub use world::{DeliverySubmission, HostReply, HostSchedule, Settings, World, delivered};
