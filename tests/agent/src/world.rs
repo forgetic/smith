@@ -259,6 +259,7 @@ enum Delivery {
 struct Flight {
     key: Option<Key>,
     cancelled: bool,
+    completion_message: Option<u32>,
 }
 
 /// The real agent on a typed scripted host. [`World::run`] drives every
@@ -722,7 +723,12 @@ impl World {
             } => {
                 self.host_history.prompt(&prompt).expect("exact feedback for observed provider host call");
                 self.observe(Seen::Completing { owner });
-                self.flights.open((Family::Completion, owner), Flight { key: None, cancelled: false });
+                let completion_message =
+                    u32::try_from(prompt.messages.len()).expect("bounded actual prompt message count");
+                self.flights.open(
+                    (Family::Completion, owner),
+                    Flight { key: None, cancelled: false, completion_message: Some(completion_message) },
+                );
                 if let Some(wire) = &mut self.wire {
                     let receiving = Receiving {
                         max_completion_bytes,
@@ -747,7 +753,8 @@ impl World {
                 }
             }
             Request::Io { owner, op, deadline } => {
-                self.flights.open((Family::Io, owner), Flight { key: None, cancelled: false });
+                self.flights
+                    .open((Family::Io, owner), Flight { key: None, cancelled: false, completion_message: None });
                 let delivery = match op {
                     tools::Op::Spawn { cwd, command, env, roots, head, tail } => {
                         match io::spawn(&self.disk, &cwd, &command, &env, &roots, (head, tail)) {
@@ -800,7 +807,8 @@ impl World {
                     complete.min(deadline),
                     Delivery::Terminal { family: Family::Read, owner, event: Event::Read { owner, read } },
                 );
-                self.flights.open((Family::Read, owner), Flight { key: Some(key), cancelled: false });
+                self.flights
+                    .open((Family::Read, owner), Flight { key: Some(key), cancelled: false, completion_message: None });
             }
             Request::Probe { owner, at, deadline } => {
                 let complete = self.now.saturating_add(self.settings.network.draw(&mut self.rng));
@@ -813,13 +821,17 @@ impl World {
                     complete.min(deadline),
                     Delivery::Terminal { family: Family::Probe, owner, event: Event::Probed { owner, executable } },
                 );
-                self.flights.open((Family::Probe, owner), Flight { key: Some(key), cancelled: false });
+                self.flights.open(
+                    (Family::Probe, owner),
+                    Flight { key: Some(key), cancelled: false, completion_message: None },
+                );
             }
             Request::Check { owner, program, deadline, tail } => {
                 self.observe(Seen::Checking { owner, tree: self.code() });
                 assert_eq!(&*program.path, fixture::CHECKS, "the copied run checks its baseline convention");
                 let (passed, output) = fixture::check(&self.disk, program.root.raw());
-                self.flights.open((Family::Check, owner), Flight { key: None, cancelled: false });
+                self.flights
+                    .open((Family::Check, owner), Flight { key: None, cancelled: false, completion_message: None });
                 let duration = self.settings.check.draw(&mut self.rng);
                 let complete = self.now.saturating_add(duration);
                 let key = self.schedule.send(
@@ -851,7 +863,8 @@ impl World {
                 let finishing = !change.fields.iter().any(|field| field.name.as_ref() == b"ticket");
                 self.observe(Seen::Pushing { owner, name, tree: tree.clone(), finishing });
                 self.snapshots.insert(owner, tree);
-                self.flights.open((Family::Delivery, owner), Flight { key: None, cancelled: false });
+                self.flights
+                    .open((Family::Delivery, owner), Flight { key: None, cancelled: false, completion_message: None });
                 if self.parent_deliveries {
                     assert!(self.delivery_submissions.len() < 256, "finite actual parent delivery story ceiling");
                     self.delivery_submissions.push(DeliverySubmission {
@@ -1046,22 +1059,40 @@ impl World {
         }
     }
 
+    fn observe_host_call(&mut self, completion: &llm::Completion, message: Option<u32>) {
+        for (position, part) in completion.content.iter().enumerate() {
+            match part {
+                llm::Said::ToolCall {
+                    id,
+                    name,
+                    input,
+                    call: llm::Decoded::Served { ask: run::Ask::Host { .. } },
+                    ..
+                } if completion.stop == llm::Stop::ToolUse && name.as_ref() == b"host_action" => {
+                    self.host_history
+                        .called(
+                            message.expect("actual completion flight retains its prompt origin"),
+                            u32::try_from(position).expect("bounded actual completion block position"),
+                            id.clone(),
+                            name.clone(),
+                            input.clone(),
+                        )
+                        .expect("observed single executable provider host operation");
+                }
+                llm::Said::Text { .. }
+                | llm::Said::Refusal { .. }
+                | llm::Said::Opaque { .. }
+                | llm::Said::ToolCall { .. } => {}
+            }
+        }
+    }
+
     fn terminal(&mut self, family: Family, owner: Token, event: Event) {
-        self.flights.end((family, owner));
+        let flight = self.flights.end((family, owner));
         self.terminals += 1;
         match &event {
             Event::Completed { completion, .. } => {
-                for part in &completion.content {
-                    match part {
-                        llm::Said::ToolCall { id, name, .. } if name.as_ref() == b"host_action" => {
-                            self.host_history.called(id.clone()).expect("observed single provider host operation");
-                        }
-                        llm::Said::Text { .. }
-                        | llm::Said::Refusal { .. }
-                        | llm::Said::Opaque { .. }
-                        | llm::Said::ToolCall { .. } => {}
-                    }
-                }
+                self.observe_host_call(completion, flight.completion_message);
                 self.observe(Seen::Completed {
                     owner,
                     spent: run::Spend {

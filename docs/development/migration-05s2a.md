@@ -64,9 +64,11 @@ removal remain open. Their earlier evidence updates changed Markdown only.
 
 The current session cannot write original repository metadata or Smith/Skein
 source. These reviewed checkpoints live under `/tmp/temper-smith-resume/`;
-original main branches have not moved. Canonical Smith dependencies in these
-checkpoints use shared revision `e86a7d69`, including raw argument history and
-`Exchange::at(now, wall)`. Provider codecs remain exclusively Skein-owned on
+original main branches have not moved. The current temporary consumer pins
+all 13 canonical Skein packages coherently to temporary
+`bea15062f84ee361ac10e28c3da094b33f52074b`, including raw argument history,
+`Exchange::at(now, wall)`, reviewed fake mechanics and raw `World::prepared`
+adoption of one actual Client. Provider codecs remain exclusively Skein-owned on
 the new runtime path. Copied packages have no application consumers and remain
 until required shared and consumer acceptance permits their coherent removal.
 
@@ -77,7 +79,8 @@ until required shared and consumer acceptance permits their coherent removal.
 | Adapter owner, inventory and attestation controls | Smith 9b8630e | Reviewed; fmt/clippy pass; 496 focused / 1.968 s; 10 fuzzy / 4.219 s. |
 | Actual submitted delivery through the host | Smith 9d2ec84 | Reviewed; fmt/clippy pass; 498 focused / 1.930 s; 10 fuzzy / 4.321 s. |
 | Attained root-entry and caller-copy memory | Smith 8c51dff | Reviewed; fmt/clippy pass; 499 focused / 2.047 s; 10 fuzzy / 4.305 s. |
-| Observed bounded message sweep | Smith 8c51dff plus test blob 11b5599 | Reviewed; fmt/clippy pass; 499 focused / 2.141 s; 11 fuzzy / 4.478 s. |
+| Observed bounded message sweep | Smith a54edcb | Reviewed; fmt/clippy pass; 499 focused / 2.141 s; 11 fuzzy / 4.478 s. |
+| Native continuation and host-origin oracle | Smith a54edcb plus frozen continuation increment | Fmt/clippy pass; 504 focused / 2.103 s; 11 fuzzy / 4.403 s; 13 scoped controls / 0.075 s. |
 
 The adapter boundary increment adds six positive-first controls over actual native Clients
 in both configured wire formats. It preserves matching owners at Completed,
@@ -115,17 +118,41 @@ It passes in 0.512 s; idle serial suites pass 499 focused / 7.104 s and eleven
 fuzzy / 8.541 s, with zero skips. Scope is the typed shared-fake root world;
 native Client cancellation and independent wall-clock jumps are not claimed.
 
+The four native continuation controls use handwritten HTTP/SSE, durable replay
+headers/payloads and continued native objects. Actual Codex terminals preserve
+encrypted reasoning/extensions, commentary ID/phase, refusal text/ID/stop and
+usage 8/3/4/0. Actual Anthropic terminals retain signed/redacted thinking and
+all four input/output/cache-read/cache-write counters, 7/9/11/13. Their continued
+prompts prove adapter/caller history handoff, without a new root-restore or
+combined native memory claim. Original root discovery separately carries a
+malformed raw Codex host call to exact Invalid feedback with no host effect,
+then one corrected actual host call/result and genuine cancellation/settlement.
+Actual failures retain RateLimited/Response, Unavailable/Unknown after a send
+and transport loss, and Unavailable/Unsent before Start, with exact details.
+These selected cases do not claim full failure-enum coverage.
+
+The host-history oracle retains the actual assistant-message/block origin and
+original call bytes from the existing completion flight. It binds only ToolUse
+calls decoded as served Host asks and checks their uniquely paired User result;
+older historical IDs may repeat. A positive-first regression rejects 13 local
+call/receipt corruptions, wrong origins and mismatched relay name/input while
+preserving prior chronology, recovery and exact feedback assertions. Idle serial
+suites pass 504 focused / 7.010 s and eleven fuzzy / 8.370 s, with zero skips
+and unchanged budgets. Named controls and logs are in the messages ledger.
+
 Skein's reviewed temporary fake mechanics restore query-cap, checked-overflow
-and random/scripted generation-scratch coverage. Its focused shared-client
-scope passes 132 tests / 0.838 s and full fuzzy diagnostic 64 / 18.997 s.
+and random/scripted generation-scratch coverage. Reviewed raw adoption adds two
+native controls / 0.005 s; its shared-client scope passes 134 / 0.855 s and
+full fuzzy diagnostic 64 / 15.773 s.
 The mandatory full SDK default gate is still blocked at `io_uring` setup with
-`EPERM`; diagnostics do not replace that gate. Earlier reviewed temporary checkpoints
+`EPERM`: eight setup failures left 1,055 of 1,063 tests unrun. Diagnostics do
+not replace that gate. Earlier reviewed temporary checkpoints
 are preserved in verified bundles under Temper's `target/next-domain-handoff`.
 
 Remaining replacement acceptance:
 
-- Retain explicit full usage/replay, refusal/reasoning and malformed-call
-  no-effect feedback controls, alongside remaining failure classifications.
+- Complete acceptance beyond the selected native continuation and failure cases;
+  the four passing controls do not establish every failure classification.
 - Finish combined native Client/peer transient memory acceptance.
 - Pass final shared/consumer gates and exact independent cleanup review before
   removing copied packages or advancing original main branches.

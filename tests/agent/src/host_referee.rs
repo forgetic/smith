@@ -1,5 +1,10 @@
 //! Outside relay history judge: immutable operations, settled recovery and exact
-//! first-decision feedback (domain/run.md, section 5.2; testing-strategy.md, section 7).
+//! first-decision feedback. One executable call retains its observed assistant
+//! message/block origin and complete ID/name/input; IDs in other historical turns
+//! confer no authority. Entrances observe calls, submissions, terminals and the
+//! exact locally paired prompt; the judge never reads private domain state.
+//! Contract: domain/run.md, sections 5.2 and 13; domain/client.md, sections 3–5;
+//! testing-strategy.md, section 7.
 
 use skein_lib::{Time, Token};
 use smith_domain::{llm, run};
@@ -36,8 +41,17 @@ pub struct History {
     answered: Option<run::HostAnswer>,
     uncertain: bool,
     feedback: bool,
-    provider_call: Option<Box<[u8]>>,
+    provider_call: Option<ProviderCall>,
     shutdown: Option<Time>,
+}
+
+#[derive(Debug)]
+struct ProviderCall {
+    message: u32,
+    position: u32,
+    id: Box<[u8]>,
+    name: Box<[u8]>,
+    input: Box<[u8]>,
 }
 
 impl History {
@@ -46,7 +60,8 @@ impl History {
     ///
     /// # Errors
     /// Rejects duplicate live relays, recovery after answer/feedback/shutdown,
-    /// expired deadlines, mutated input or nonsequential callbacks and chronology.
+    /// expired deadlines, a relay differing from observed provider name/input,
+    /// mutated recovery input or nonsequential callbacks and chronology.
     pub fn submit(&mut self, submission: Submission) -> Result<(), &'static str> {
         if self.live.is_some() {
             return Err("duplicate live relay");
@@ -62,6 +77,11 @@ impl History {
         }
         if submission.at >= submission.deadline {
             return Err("unbounded or expired relay");
+        }
+        if let Some(call) = &self.provider_call
+            && (submission.tool != call.name || submission.input.bytes() != call.input.as_ref())
+        {
+            return Err("relay differs from observed provider call");
         }
         if let Some(first) = self.submissions.first() {
             if (first.worker, first.name, &first.tool, first.effect, &first.input)
@@ -161,46 +181,95 @@ impl History {
         Ok(())
     }
 
-    /// Bind the provider's public tool-call ID before the domain relays it.
-    /// Contract: domain/run.md, section 5.2; domain/session.md, section 3.
+    /// The world binds one actual `ToolUse` call decoded as a served Host ask,
+    /// before the domain relays it. `message` is the next assistant index from
+    /// the owning actual Complete prompt; `position` is the actual Said index.
+    /// Complete original ID/name/input bytes retain that bounded call's identity
+    /// until its exact local feedback, or observed shutdown and relay settlement.
+    /// Other historical turns may reuse the same provider ID. This single-call
+    /// story retains one origin and three caller-bounded byte fields.
+    /// Contract: domain/run.md, sections 5.2 and 13; domain/session.md, section 3;
+    /// domain/client.md, sections 3–5.
     ///
     /// # Errors
     /// Rejects a second provider host-tool call in this single-operation story.
-    pub fn called(&mut self, provider_id: Box<[u8]>) -> Result<(), &'static str> {
-        if self.provider_call.replace(provider_id).is_some() {
+    pub fn called(
+        &mut self,
+        message: u32,
+        position: u32,
+        provider_id: Box<[u8]>,
+        name: Box<[u8]>,
+        input: Box<[u8]>,
+    ) -> Result<(), &'static str> {
+        if self.provider_call.is_some() {
             return Err("second provider host call");
         }
+        self.provider_call = Some(ProviderCall { message, position, id: provider_id, name, input });
         Ok(())
     }
 
-    /// Observe next provider prompt and require exact paired host feedback.
-    /// Contract: domain/run.md, section 5.2; domain/session.md, section 3.
+    fn paired_result<'a>(&self, prompt: &'a llm::Prompt) -> Result<Option<&'a llm::Returned>, &'static str> {
+        let call = self.provider_call.as_ref().expect("caller has an observed provider call");
+        let message = usize::try_from(call.message).expect("u32 fits usize");
+        let assistant = prompt.messages.get(message).ok_or("continuation omitted host call origin")?;
+        if assistant.role != llm::Role::Assistant {
+            return Err("host call origin is not assistant");
+        }
+        let position = usize::try_from(call.position).expect("u32 fits usize");
+        match assistant.content.get(position) {
+            Some(llm::Block::ToolCall { id, name, input, .. })
+                if *id == call.id && *name == call.name && *input == call.input => {}
+            Some(_) | None => return Err("host call origin was rewritten"),
+        }
+        let calls = assistant
+            .content
+            .iter()
+            .filter(|block| matches!(block, llm::Block::ToolCall { id, .. } if *id == call.id))
+            .count();
+        if calls != 1 {
+            return Err("duplicate host call ID at origin");
+        }
+        let user = prompt
+            .messages
+            .get(message.checked_add(1).expect("bounded message origin"))
+            .ok_or("continuation omitted host feedback")?;
+        if user.role != llm::Role::User {
+            return Err("host feedback is not paired user");
+        }
+        let mut result = None;
+        for block in &user.content {
+            match block {
+                llm::Block::ToolResult { id, result: returned } if *id == call.id => {
+                    if result.replace(returned).is_some() {
+                        return Err("duplicate host feedback ID");
+                    }
+                }
+                llm::Block::Text { .. }
+                | llm::Block::Refusal { .. }
+                | llm::Block::Opaque { .. }
+                | llm::Block::ToolCall { .. }
+                | llm::Block::ToolResult { .. } => {}
+            }
+        }
+        Ok(result)
+    }
+
+    /// The world observes the next actual provider prompt and requires the
+    /// retained original assistant call at its message/block origin, followed
+    /// by exactly one matching result in its paired User message. Older turns
+    /// with the same provider ID do not count. No feedback closes a live relay.
+    /// Contract: domain/run.md, sections 5.2 and 13; domain/session.md, section 3;
+    /// domain/client.md, sections 3–5.
     ///
     /// # Errors
-    /// Rejects missing/duplicate paired feedback, wrong result variants,
+    /// Rejects changed/missing call origins, duplicate local call IDs,
+    /// missing/duplicate paired feedback, wrong result variants,
     /// changed text/error classification or feedback before the actual terminal.
     pub fn prompt(&mut self, prompt: &llm::Prompt) -> Result<(), &'static str> {
         if self.feedback || self.provider_call.is_none() {
             return Ok(());
         }
-        let mut result = None;
-        for message in &prompt.messages {
-            for block in &message.content {
-                match block {
-                    llm::Block::ToolResult { id, result: returned } if self.provider_call.as_ref() == Some(id) => {
-                        if result.is_some() {
-                            return Err("duplicate host feedback ID");
-                        }
-                        result = Some(returned);
-                    }
-                    llm::Block::Text { .. }
-                    | llm::Block::Refusal { .. }
-                    | llm::Block::Opaque { .. }
-                    | llm::Block::ToolCall { .. }
-                    | llm::Block::ToolResult { .. } => {}
-                }
-            }
-        }
+        let result = self.paired_result(prompt)?;
         match result {
             Some(llm::Returned::Text { text, error, replay }) => {
                 if self.live.is_some() || replay.is_some() {

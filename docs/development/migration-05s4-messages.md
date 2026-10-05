@@ -3,14 +3,15 @@
 This is the implementation ledger for the approved messages increment. Source
 is in progress; the early compiler checkpoint is
 `49d15601c4346251eb3c514a4ba68058b9da6f83`, rebased onto Smith `45a2eea`.
-The original author base was `51fdd24`. The current temporary draft is memory
-checkpoint `8c51dff` plus frozen message-sweep test blob
-`11b55999b84f6877d6950a8dae2ac27cc6d52bb8`. It passes formatting, full
-workspace/all-target clippy, 499 focused tests and eleven fuzzy tests, with idle
+The original author base was `51fdd24`. The current temporary draft is
+checkpoint `a54edcb3ea96a301c77f360aae1970db5fe24ef1` plus the frozen native
+adapter continuation and host-origin oracle increment. It passes formatting, full
+workspace/all-target clippy, 504 focused tests and eleven fuzzy tests, with idle
 serial measurements recorded below. Its root/Wire source, host-delivery
 composition, adapter boundary controls, public documentation and root-entry/caller-copy
 memory control and observed message sweep have independent scoped approval.
-Combined native Client/peer allocation peaks and further adapter evidence remain pending. These
+The continuation increment adds actual native replay, usage and selected failure
+evidence. Combined native Client/peer allocation peaks remain pending. These
 results do not claim full replacement acceptance, a main merge, migration
 completion or legacy adapter removal.
 
@@ -35,6 +36,8 @@ copy baseline and named Temper stories remain in
 remain in their 05s4 ledgers. The real host baseline is Smith `eb46ecc`, extracted
 from Temper `19735a06`/05d `e2a6a719`, with its full source-story mapping in
 [migration-05s6-host.md](migration-05s6-host.md).
+Shared ownership and temporary consumer pin evidence are recorded in
+[migration-05s2a.md](migration-05s2a.md).
 
 The port reference is parked Temper `c33941c3`, specifically
 `crates/temper-agent-domain-run/src/v2.rs` and
@@ -189,9 +192,41 @@ come from the same iteration, including independently moved wall time, and
 immediate wire progress prevents a jump to the root deadline. Outside records
 have a finite 256-call ceiling and four lifecycle observations per binding;
 this binding story is not an attained allocation measurement. Arbitrary application Finish
-decoding, remaining receiving continuation controls, combined native Client/peer
+decoding and combined native Client/peer
 transient allocation peaks remain pending. The passing gates cover the scoped increment; final replacement
 acceptance remains outstanding.
+
+Four passing controls in `tests/agent/tests/adapter_continuation.rs` adopt the
+adapter's actual prepared Client through the shared raw-byte world, using
+handwritten native HTTP/SSE and replay-envelope expectations. Codex preserves
+encrypted reasoning and a nested extension, commentary message ID/phase,
+refusal text/ID and Refusal stop, then sends their exact continued native
+history. Anthropic preserves signed and redacted thinking, its nested extension
+and all four usage counters: input/output/cache-read/cache-write are 7/9/11/13;
+the Codex fixture reports 8/3/4/0. Thinking's literal expectation follows the
+documented assembled head order while retaining every field. These histories
+prove the native adapter/caller handoff, without a new root-restore claim.
+
+The malformed Codex control starts original root discovery. Its exact raw
+`host_action` call yields Invalid feedback and no host effect; the next actual
+query retains the full raw call/ID/name and paired error. Only the corrected
+call submits one actual host write, whose real result reaches the third query.
+Concrete Turns retain original call replay, and real parent cancellation settles
+all three physical Clients. Another control observes RateLimited/Response with
+literal detail, Unavailable/Unknown after an actual send and transport loss,
+and Unavailable/Unsent after actual lower closure before Start. Each retained
+context consumes its actual terminal; all physical rights settle. These are
+three selected failure cases, not full failure-enum coverage.
+
+The host-history oracle now binds only actual ToolUse calls decoded as served
+Host asks. The existing flight retains the actual prompt's assistant-message
+index; exact block position, ID, name and input select the locally paired User
+result. Older turns may reuse the provider ID. The focused positive-first
+regression accepts an older malformed same-ID call before the corrected host
+receipt, then rejects 13 missing/duplicate/rewritten call or receipt corruptions,
+wrong origin fields and relay name/input changes. All prior relay/recovery,
+terminal chronology and exact feedback assertions remain. The combined
+continuation and host controls pass 13 tests in 0.075 seconds.
 
 These groups use actual root/session/tool entrances and shared fake observations:
 
@@ -356,8 +391,9 @@ Detailed actual counts and seed bounds are recorded in
 The current checkpoint retains the approved actual wire/root binding composition,
 submitted-delivery extension of live host composition, adapter boundary controls,
 public documentation and attained root-entry/caller-copy memory evidence.
-Combined native Client/peer transient memory and further adapter continuation
-evidence remain outstanding; the bounded message sweep now has actual counts
+Combined native Client/peer transient memory remains outstanding. Native
+adapter continuation now has actual terminal/history evidence for its selected
+cases; the bounded message sweep has actual counts
 and independent source approval. All named
 source distinctions and existing tests remain in scope; no passing subset
 replaces these requirements. New public items continue
@@ -381,9 +417,10 @@ Cancelled owners, including wrong-owner refusal at all three entrances; missing,
 duplicate or unoffered schema inventory; missing, duplicate, unused or mispaired
 result renderings; and ResolvedCall position/name/literal-input/kind, uniqueness
 and consumption. The real failed fixture retains Overloaded, Response evidence
-and exact `overloaded_error` detail under the matching context. Remaining continuation evidence includes
-broader failure-class/evidence/detail cases, replay, refusal/reasoning, all four
-usage counters and malformed-call no-effect behavior.
+and exact `overloaded_error` detail under the matching context. The four native
+continuation controls above add replay, refusal/reasoning, all four usage
+counters, real malformed-call correction and three failure/evidence cases.
+Broader failure-class/evidence/detail coverage remains outside this narrow slice.
 The compact literal schema-extension observation now supplements parsed schema
 equality; it does not discharge these other boundary requirements.
 
@@ -411,15 +448,19 @@ The frozen temporary draft has the following parent-run evidence on 2026-10-05:
 | --- | --- |
 | `cargo fmt --check` | Passed. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed. |
-| `cargo nextest run --workspace` | 499 passed, zero skipped, 2.141 seconds. |
-| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.478 seconds. |
-| Idle serial focused measurement | 499 passed, zero skipped, 7.104 seconds. |
-| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.541 seconds. |
+| `cargo nextest run --workspace` | 504 passed, zero skipped, 2.103 seconds. |
+| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.403 seconds. |
+| Idle serial focused measurement | 504 passed, zero skipped, 7.010 seconds. |
+| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.370 seconds. |
 
 Latest logs are `/tmp/temper-next-migration/`'s
-`smith-message-sweep-clippy-final.log`, `smith-message-sweep-focused-1.log`,
-`smith-message-sweep-default.log`, `smith-message-sweep-fuzzy.log`,
-`smith-message-sweep-serial-default.log` and `smith-message-sweep-serial-fuzzy.log`.
+`smith-adapter-continuation-clippy-5.log`, `smith-adapter-continuation-focused-2.log`,
+`smith-adapter-continuation-default.log`, `smith-adapter-continuation-fuzzy.log`,
+`smith-adapter-continuation-serial-default.log` and `smith-adapter-continuation-serial-fuzzy.log`.
+The preceding message-sweep draft passed 499 focused / 2.141 seconds and eleven
+fuzzy / 4.478 seconds; idle serial runs passed 499 / 7.104 seconds and eleven /
+8.541 seconds. Those logs remain in
+`smith-message-sweep-{default,fuzzy,serial-default,serial-fuzzy}.log`.
 The earlier memory draft passed 499 focused / 2.047 seconds and ten fuzzy /
 4.305 seconds; idle serial runs passed 499 / 6.900 seconds and ten / 7.935
 seconds. Those logs remain in `smith-root-memory-{default,fuzzy,serial-default,serial-fuzzy}.log`.
@@ -436,15 +477,16 @@ review approved final formatted driver blob
 `f08c9c0650ea6d9fcb23484182b47947b56b64fc`; that is scoped driver approval,
 not approval of all source or the remaining integration stories.
 
-Smith's canonical Skein dependency is pinned to temporary shared-clock revision
-`e86a7d69fcee41028337ed1288e5758015921faa`, including reviewed raw-history work.
-The shared `Exchange::at(now, wall)` entrance synchronizes the actual
-root/Wire composition. Separately reviewed shared fake mechanics are at
-temporary SDK revision `3bdc669bf512e2f566cb432b52cd55f1f834e28c`: its expanded
-shared-client scope passed 132 tests in 0.838 seconds and its full SDK fuzzy
-diagnostic passed 64 tests in 18.997 seconds. Those mechanics changes are
-tests/docs only; Smith remains pinned to the clock revision. The full SDK
-default gate remains blocked by sandbox `io_uring` permission (`EPERM`). No
+All 13 canonical Skein packages are pinned coherently to temporary revision
+`bea15062f84ee361ac10e28c3da094b33f52074b`, incorporating reviewed raw history,
+`Exchange::at(now, wall)`, shared fake mechanics and raw `World::prepared`
+adoption. The latter adopts one actual Client without a second preparation or
+new scheduling/codec authority. Its two native controls pass in 0.005 seconds,
+the shared-client scope passes 134 / 0.855 seconds and the full SDK fuzzy
+diagnostic passes 64 / 15.773 seconds. The mandatory SDK default gate remains
+blocked by sandbox `io_uring` permission (`EPERM`): eight tests failed at setup,
+and 1,055 of 1,063 were not run. These diagnostics are in
+`shared-raw-adoption-{focused,scope,default,fuzzy-diagnostic}.log`. No
 full SDK gate or main merge is claimed. Original repository metadata remains
 read-only; no original main has moved for this temporary checkpoint.
 

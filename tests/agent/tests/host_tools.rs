@@ -7,7 +7,7 @@ use smith_agent_world::{
     HostSchedule, Job, Settings, World,
     host_referee::{History, Submission},
 };
-use smith_domain::run;
+use smith_domain::{llm, run};
 
 fn story(schedule: HostSchedule, seed: u64) -> World {
     let mut world = World::new(Settings { job: Job::HostTools, host: schedule, ..Settings::calm(seed) });
@@ -78,7 +78,15 @@ fn submission(at: u64, attempt: u32, owner: u64) -> Submission {
 
 fn positive_prefix() -> History {
     let mut history = History::default();
-    history.called(b"host_call".as_slice().into()).expect("public provider ID");
+    history
+        .called(
+            0,
+            0,
+            b"host_call".as_slice().into(),
+            b"opaque".as_slice().into(),
+            b" {\"unchanged\":true} ".as_slice().into(),
+        )
+        .expect("public provider call origin and original bytes");
     let first = submission(0, 1, 11);
     history.submit(first.clone()).expect("positive initial relay");
     history.withdraw(first.relay).expect("positive request retains relay");
@@ -147,7 +155,18 @@ fn prompt_feedback(returned: Option<run::Returned>) -> smith_domain::llm::Prompt
         system: Box::new([]),
         tools: smith_domain::tools::Grants { inspect: false, modify: false, shell: false },
         served: Box::new([]),
-        messages: Box::new([llm::Message { role: llm::Role::User, content }]),
+        messages: Box::new([
+            llm::Message {
+                role: llm::Role::Assistant,
+                content: Box::new([llm::Block::ToolCall {
+                    id: b"host_call".as_slice().into(),
+                    name: b"opaque".as_slice().into(),
+                    input: b" {\"unchanged\":true} ".as_slice().into(),
+                    replay: None,
+                }]),
+            },
+            llm::Message { role: llm::Role::User, content },
+        ]),
         max_tokens: 100,
     }
 }
@@ -209,4 +228,162 @@ fn outside_shutdown_control_requires_actual_stop_and_original_terminal() {
         .expect("actual original terminal");
     assert_eq!(history.submit(submission(4, 3, 100)), Err("recovery after observed shutdown"));
     history.finish(false).expect("closed actual shutdown control needs no continuation");
+}
+
+fn origin_call(input: &[u8]) -> llm::Block {
+    llm::Block::ToolCall {
+        id: b"host_call".as_slice().into(),
+        name: b"host_action".as_slice().into(),
+        input: input.into(),
+        replay: None,
+    }
+}
+
+fn origin_submission() -> Submission {
+    let mut actual = submission(0, 1, 11);
+    actual.tool = b"host_action".as_slice().into();
+    actual
+}
+
+fn origin_history(message: u32, position: u32) -> History {
+    let mut history = History::default();
+    history
+        .called(
+            message,
+            position,
+            b"host_call".as_slice().into(),
+            b"host_action".as_slice().into(),
+            b" {\"unchanged\":true} ".as_slice().into(),
+        )
+        .expect("outside observed executable call and exact origin");
+    let actual = origin_submission();
+    history.submit(actual.clone()).expect("actual relay matches observed call bytes");
+    history
+        .terminal(
+            Time::ZERO.saturating_add(Duration::from_secs(1)),
+            actual.relay,
+            &run::HostReply::Answered(
+                run::HostAnswer::new(b"first record".as_slice().into(), false).expect("bounded exact answer"),
+            ),
+        )
+        .expect("actual answer before continued prompt");
+    history
+}
+
+fn origin_prompt() -> llm::Prompt {
+    let mut prompt = prompt_feedback(None);
+    prompt.messages = Box::new([
+        llm::Message { role: llm::Role::Assistant, content: Box::new([origin_call(b"{broken")]) },
+        llm::Message {
+            role: llm::Role::User,
+            content: Box::new([llm::Block::ToolResult {
+                id: b"host_call".as_slice().into(),
+                result: llm::Returned::Invalid { problem: llm::Problem::NotAnObject },
+            }]),
+        },
+        llm::Message { role: llm::Role::Assistant, content: Box::new([origin_call(b" {\"unchanged\":true} ")]) },
+        llm::Message {
+            role: llm::Role::User,
+            content: Box::new([llm::Block::ToolResult {
+                id: b"host_call".as_slice().into(),
+                result: llm::Returned::Text { text: b"first record".as_slice().into(), error: false, replay: None },
+            }]),
+        },
+    ]);
+    prompt
+}
+
+fn corrupt_origin(prompt: &mut llm::Prompt, field: u32) {
+    match field {
+        0 => prompt.messages[3].content = Box::new([]),
+        1 => {
+            prompt.messages[3].content = Box::new([
+                llm::Block::ToolResult {
+                    id: b"host_call".as_slice().into(),
+                    result: llm::Returned::Text { text: b"first record".as_slice().into(), error: false, replay: None },
+                },
+                llm::Block::ToolResult {
+                    id: b"host_call".as_slice().into(),
+                    result: llm::Returned::Text { text: b"first record".as_slice().into(), error: false, replay: None },
+                },
+            ]);
+        }
+        2..=5 => {
+            let llm::Block::ToolResult { id, result: llm::Returned::Text { text, error, replay } } =
+                &mut prompt.messages[3].content[0]
+            else {
+                panic!("positive actual receipt shape")
+            };
+            match field {
+                2 => *text = b"rewritten".as_slice().into(),
+                3 => *error = true,
+                4 => *id = b"different".as_slice().into(),
+                5 => *replay = Some(llm::Replay { bytes: b"invented".as_slice().into() }),
+                _ => panic!("bounded receipt field"),
+            }
+        }
+        6 => prompt.messages[2].role = llm::Role::User,
+        7 => prompt.messages[3].role = llm::Role::Assistant,
+        8..=10 => {
+            let llm::Block::ToolCall { id, name, input, .. } = &mut prompt.messages[2].content[0] else {
+                panic!("positive actual call shape")
+            };
+            match field {
+                8 => *id = b"different".as_slice().into(),
+                9 => *name = b"different".as_slice().into(),
+                10 => *input = b"{}".as_slice().into(),
+                _ => panic!("bounded call field"),
+            }
+        }
+        11 => {
+            prompt.messages[2].content =
+                Box::new([origin_call(b" {\"unchanged\":true} "), origin_call(b" {\"unchanged\":true} ")]);
+        }
+        12 => {
+            prompt.messages[2].content = Box::new([
+                llm::Block::Text { text: b"inserted".as_slice().into(), replay: None },
+                origin_call(b" {\"unchanged\":true} "),
+            ]);
+        }
+        _ => panic!("bounded origin corruption"),
+    }
+}
+
+#[test]
+fn outside_host_feedback_uses_actual_origin_when_older_invalid_call_reuses_id() {
+    let mut positive = origin_history(2, 0);
+    positive.prompt(&origin_prompt()).expect("older same-ID Invalid feedback is not the corrected host receipt");
+    positive.finish(true).expect("complete positive local pair");
+    for field in 0..13 {
+        let mut prompt = origin_prompt();
+        corrupt_origin(&mut prompt, field);
+        assert!(origin_history(2, 0).prompt(&prompt).is_err(), "changed local origin/receipt field {field}");
+    }
+    assert!(
+        origin_history(0, 0).prompt(&origin_prompt()).is_err(),
+        "old malformed call is not the observed executable origin"
+    );
+    assert!(
+        origin_history(2, 1).prompt(&origin_prompt()).is_err(),
+        "wrong completion block position is not the origin"
+    );
+    for field in 0..2 {
+        let mut history = History::default();
+        history
+            .called(
+                2,
+                0,
+                b"host_call".as_slice().into(),
+                b"host_action".as_slice().into(),
+                b" {\"unchanged\":true} ".as_slice().into(),
+            )
+            .expect("positive call binding");
+        let mut submission = origin_submission();
+        if field == 0 {
+            submission.tool = b"different".as_slice().into();
+        } else {
+            submission.input = run::HostInput::attested(b"{}".as_slice().into()).expect("bounded changed input");
+        }
+        assert_eq!(history.submit(submission), Err("relay differs from observed provider call"));
+    }
 }
