@@ -5,9 +5,13 @@ it. A host supplies a charter, tools, messages, result contracts and a
 budget; smith supplies the conversation and run mechanics. Its design
 starts at [domain/README.md](docs/design/domain/README.md).
 
-The repository currently contains the 05s1 workspace foundation. The
-agent, providers, channel, protocols, host domains and executable remain
-later increments of temper's `05s-smith.md` migration plan.
+The repository contains the 05s1 workspace foundation and the 05s2 copy
+baseline: agent, run, session and tools domains, provider and OAuth codecs,
+fake LLM peers, component worlds and the composed agent on a scripted typed
+host. The [copy ledger](docs/development/migration-05s2.md) records the named
+source and the preserved stories. Generic host changes, live channel and
+protocol integration, host domains and the executable remain later
+increments of temper's `05s-smith.md` migration plan.
 
 ## Layout
 
@@ -49,7 +53,7 @@ smith and temper must resolve the same
 skein revision when composed. Changes to shared mechanisms land in skein
 first; smith and temper then take that revision through their own gates.
 
-For this initial increment, the shared-harness dependency revision is
+The shared-harness and fake-checkout dependency revision is
 unpublished. Local validation supplies the exact locked commit through
 Cargo's git cache and runs offline. A fresh machine cannot fetch that
 revision from the canonical URL until its upstream publication is

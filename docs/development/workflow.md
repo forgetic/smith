@@ -75,8 +75,12 @@ test replays until it is fixed.
 05s1 establishes the workspace conventions and reuses
 `skein_world::domain` directly. The `smith-world-tests` package checks that
 dependency's public boundary without copying its machinery.
-Agent domains, providers, protocols and binaries are added by later
-increments; their world stories and limits belong to their design documents.
+05s2 adds the copied agent domains and provider/OAuth codecs, their
+component worlds and a composed typed scripted host world. Its named-source
+mapping and preserved coverage are recorded in
+[migration-05s2.md](migration-05s2.md). Protocol integration and binaries
+remain later increments; their stories and limits belong to their design
+documents.
 
 Before adding a world, record its focused and fuzzy serial measurements
 here, on an idle machine, and keep the workspace suites within their

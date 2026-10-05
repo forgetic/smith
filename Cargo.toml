@@ -2,7 +2,7 @@
 
 [workspace]
 resolver = "3"
-members = ["tests/world"]
+members = ["crates/*", "testing/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/fake-llm"]
 
 [workspace.package]
 version = "0.0.0"
@@ -13,6 +13,24 @@ publish = false
 [workspace.dependencies]
 skein-lib = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-io = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-http = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-json = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-fake-checkout = { git = "https://git.ekanayaka.io/ai/skein.git" }
+smith-agent-world = { path = "tests/agent" }
+smith-domain = { path = "crates/smith-domain" }
+smith-domain-run = { path = "crates/smith-domain-run" }
+smith-domain-session = { path = "crates/smith-domain-session" }
+smith-domain-tools = { path = "crates/smith-domain-tools" }
+smith-llm-anthropic = { path = "crates/smith-llm-anthropic" }
+smith-llm-openai = { path = "crates/smith-llm-openai" }
+smith-oauth = { path = "crates/smith-oauth" }
+smith-fake-llm-domain = { path = "testing/smith-fake-llm-domain" }
+smith-fake-llm-protocol = { path = "testing/smith-fake-llm-protocol" }
+smith-fake-llm-tests = { path = "tests/fake-llm" }
+smith-run-world = { path = "tests/run" }
+smith-session-world = { path = "tests/session" }
+smith-tools-world = { path = "tests/tools" }
 
 # Panics are fail-stop and overflow traps, in every profile. (The test harness
 # needs unwinding, so cargo ignores `panic` for test targets.)
@@ -50,7 +68,7 @@ missing_panics_doc = "allow"          # panics are assertions, named by expect("
 needless_pass_by_value = "allow"      # cell handlers take the source state by value
 single_match_else = "allow"           # a two-armed match on Option is as clear as if let
 
-# What is out of step code (programming-model.md, 10.3).
+# What is out of step code (programming-model.md, section 10.3).
 wildcard_enum_match_arm = "deny"
 indexing_slicing = "deny"
 arithmetic_side_effects = "deny"
