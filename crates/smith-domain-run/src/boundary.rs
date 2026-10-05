@@ -84,29 +84,36 @@ pub enum Event {
         /// Contract: domain/run.md, sections 3 and 13.
         transcript: Option<Token>,
     },
+
     /// Parent-labelled live message; names, including zero, are opaque and
     /// unique for the active run. Admission yields a bounce only on refusal.
     /// Contract: domain/run.md, section 6.
     Message {
         /// Admitted live run handle. Contract: domain/run.md, section 6.
         run: Token,
+
         /// Parent-issued active-run unique name. Contract: domain/run.md, section 6.
         name: Token,
+
         /// Attested UTF-8, including the sender label, bounded before retention.
         /// Contract: domain/run.md, section 6.
         text: Box<[u8]>,
     },
+
     /// Actual concrete session turn; the root owns the body behind record.
     /// Contract: domain/run.md, sections 6 and 13.
     Turn {
         /// Run-issued conversation binding. Contract: domain/run.md, section 13.
         conversation: Token,
+
         /// Single-use root handoff name. Contract: domain/run.md, section 13.
         record: Token,
+
         /// Historical transcript sequence, independent of activation numbering.
         /// Contract: domain/run.md, section 13.
         sequence: u32,
     },
+
     /// From the worker: end the run `run` as cancelled. A run that has already
     /// answered, or decided how it ends, ignores it.
     ///
@@ -301,30 +308,39 @@ pub enum Request {
     MessageBounced {
         /// Supplied live run name. Contract: domain/run.md, section 6.
         run: Token,
+
         /// Unchanged parent message name. Contract: domain/run.md, section 6.
         name: Token,
+
         /// Entrance refusal, before bytes are retained. Contract: domain/run.md, section 6.
         reason: MessageRefusal,
     },
+
     /// Main yielded after a settled wait with an empty inbox. No terminal is owed.
     /// Contract: domain/run.md, sections 6 and 10.
     Waiting {
         /// Stable parent logical run scope. Contract: domain/run.md, section 6.
         worker: Token,
+
         /// Latest message consumed by an actual told turn. Contract: domain/run.md, section 6.
         read: Option<Token>,
     },
+
     /// One settled main turn, emitted before the final answer; root moves its body.
     /// Contract: domain/run.md, sections 6 and 13.
     Turn {
         /// Stable parent logical run scope. Contract: domain/run.md, section 13.
         worker: Token,
+
         /// Single-use root-owned concrete body binding. Contract: domain/run.md, section 13.
         record: Token,
+
         /// One-based activation-local output number. Contract: domain/run.md, section 13.
         number: u32,
+
         /// Latest message actually consumed by this turn. Contract: domain/run.md, section 6.
         read: Option<Token>,
+
         /// Actual cumulative run token usage. Contract: domain/run.md, sections 9 and 13.
         spent: Spend,
     },
@@ -1344,10 +1360,13 @@ pub enum Policy {
 pub enum MessageRefusal {
     /// FIFO capacity is exhausted. Contract: domain/run.md, section 6.
     Busy,
+
     /// Attested bytes exceed the configured cap. Contract: domain/run.md, section 6.
     TooLarge,
+
     /// Run has stopped or the live name is stale. Contract: domain/run.md, section 6.
     Inactive,
+
     /// Name equals a queued, offered or current-read name. Older names rely on
     /// the parent's active-run uniqueness promise. Contract: domain/run.md, section 6.
     ReusedName,
@@ -1359,14 +1378,19 @@ pub enum MessageRefusal {
 pub enum TranscriptRefusal {
     /// Unsupported record version. Contract: domain/run.md, section 13.
     Version,
+
     /// Configured endpoint differs. Contract: domain/run.md, section 13.
     Endpoint,
+
     /// Configured replay dialect differs. Contract: domain/run.md, section 13.
     Dialect,
+
     /// Invalid concrete record structure. Contract: domain/run.md, section 13.
     Malformed,
+
     /// History retains a live ticket. Contract: domain/run.md, section 13.
     Unresolved,
+
     /// Receiving ownership/count cap is incompatible. Contract: domain/run.md, section 13.
     TooLarge,
 }

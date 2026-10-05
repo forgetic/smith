@@ -118,16 +118,23 @@ pub enum Event {
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         grants: Box<[Grant]>,
     },
-    /// Parent-labelled live message, FIFO and bounded before retention.
+
+    /// Parent-labelled live message, FIFO and bounded before retention by
+    /// `Limits.run.messages` and `Limits.run.message_bytes`. Accepted messages
+    /// emit no separate admission terminal; refusal emits `MessageBounced`.
     /// Contract: domain/run.md, section 6.
     Message {
         /// Admitted live run handle. Contract: domain/run.md, section 6.
         run: Token,
+
         /// Active-run unique opaque name, including zero. Contract: domain/run.md, section 6.
         name: Token,
-        /// Attested UTF-8 including sender label. Contract: domain/run.md, section 6.
+
+        /// Attested UTF-8 including sender label, at most `Limits.run.message_bytes`.
+        /// Contract: domain/run.md, section 6.
         text: Box<[u8]>,
     },
+
     /// A refreshed credential, pushed by the engine through the worker.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -283,32 +290,43 @@ pub enum Request {
     MessageBounced {
         /// Supplied live run name. Contract: domain/run.md, section 6.
         run: Token,
+
         /// Unchanged parent name. Contract: domain/run.md, section 6.
         name: Token,
+
         /// Refusal before retention. Contract: domain/run.md, section 6.
         reason: run::MessageRefusal,
     },
+
     /// Settled main wait and yield with empty inbox; wall time keeps running.
+    /// This observation to the parent owes no terminal; Start's reply right
+    /// remains pending until the run's actual final Answer.
     /// Contract: domain/run.md, sections 6 and 10.
     Waiting {
         /// Stable parent run scope. Contract: domain/run.md, section 6.
         worker: Token,
+
         /// Latest name consumed by an actual turn. Contract: domain/run.md, section 6.
         read: Option<Token>,
     },
+
     /// Actual main turn; caller owns durable payload and host ACK metadata has
     /// its separate existing owner. Emitted before the final Answer.
     /// Contract: domain/run.md, section 13; domain/host.md, section 6.
     Turn {
         /// Stable parent run scope. Contract: domain/run.md, section 13.
         worker: Token,
+
         /// One-based output number within this activation. Contract: domain/run.md, section 13.
         number: u32,
+
         /// Latest message consumed by this actual turn. Contract: domain/run.md, section 6.
         read: Option<Token>,
+
         /// Cumulative actual token usage, independently enforced from record prices.
         /// Contract: domain/run.md, sections 9 and 13.
         spent: run::Spend,
+
         /// Full concrete record including replay and actual terminal results.
         /// Contract: domain/session.md, section 3.
         turn: smith_domain_session::record::Turn,

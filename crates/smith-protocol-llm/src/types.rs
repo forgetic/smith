@@ -31,7 +31,7 @@ pub enum ToolKind {
     Deliver,
 
     /// The run's offered child-conversation descriptor.
-    /// Contract: domain/client.md, section 2; domain/run.md, section 9.
+    /// Contract: domain/client.md, section 2; domain/run.md, section 5.3.
     SubAgent,
 
     /// The main conversation's offered wait descriptor.

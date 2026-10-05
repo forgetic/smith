@@ -31,6 +31,7 @@ pub struct Limits {
     /// including classifications with no payload after a refusal.
     /// Contract: domain/run.md, sections 3 and 14.
     pub decoded_call_bytes: u64,
+
     /// Safety margin subtracted from credential validity before use.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.

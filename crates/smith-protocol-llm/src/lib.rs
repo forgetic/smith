@@ -8,6 +8,12 @@
 //! There is no provider grammar, credential exchange, application scheduling
 //! or retry policy here. Non-host schemas and decoded values come from the
 //! caller's explicit application codec, without callbacks or application traits.
+//!
+//! [`prepare`] constructs the Client and Context; [`prompt()`] translates only
+//! the prompt. [`completion()`], [`failed`] and [`cancelled`] consume the Context
+//! once for an actual terminal, while [`refusal`] reports preparation refusal
+//! before wire work. The caller separately keeps and drives the Client through
+//! Reusable or Close/Closed settlement.
 //! Contract: domain/client.md, sections 1–7; programming-model.md, sections 4.4 and 6.3.
 
 #![cfg_attr(not(test), no_std)]

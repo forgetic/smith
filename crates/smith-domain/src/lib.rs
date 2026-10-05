@@ -2,6 +2,9 @@
 //! programming-model.md, sections 4.4 and 4.5). It owns the run and session
 //! children, opaque credential names and validity, conversation bindings,
 //! tool tickets, deferred handoffs and bounded observation queues.
+//! Bounded Start contexts retain the original reply rights and optional history;
+//! single-use concrete Turn handoffs own records crossing the sibling seam
+//! (domain/run.md, section 13).
 //!
 //! [`step`], [`fire`] and [`resume`] accept typed host, provider and IO events
 //! with injected clocks and seed. They emit owned [`Request`] values within

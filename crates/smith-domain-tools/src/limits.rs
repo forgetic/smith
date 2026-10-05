@@ -61,6 +61,7 @@ pub struct Limits {
     /// preserving the count of omitted entries. This also bounds actual late results.
     /// Contract: domain/tools.md, sections 4, 5 and 9; domain/session.md, section 3.
     pub list_bytes: u64,
+
     /// The most line numbers an ambiguous edit answers with.
     ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.

@@ -29,6 +29,9 @@
 //!
 //! The retained state is each admitted charter, conversation binding, shared
 //! usage, preparation/check/delivery phase and its pending terminal rights.
+//! It also keeps the bounded labelled-message FIFO, current/offered read fence,
+//! settled wait/park state and activation-local turn numbering
+//! (domain/run.md, sections 6 and 13).
 //! The copied worker wording names a typed host; it does not require a process
 //! or channel. The run never knows authentication, provider dialect bytes,
 //! credential secrets, forge state, CI or the host's delivery policy. Entrances

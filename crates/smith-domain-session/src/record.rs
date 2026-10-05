@@ -202,6 +202,8 @@ impl Transcript {
     /// envelopes separately from block/payload storage. The protocol bounds
     /// input counts; the root checks this count before retaining Start context,
     /// while session performs the semantic admission before any effects.
+    /// `None` means checked ownership arithmetic overflow; the caller refuses
+    /// before retaining the history or starting effects.
     /// Contract: domain/session.md, sections 3 and 12; programming-model.md, section 6.3.
     #[must_use]
     pub fn owned_bytes(&self) -> Option<u64> {

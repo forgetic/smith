@@ -65,6 +65,7 @@ pub struct Limits {
     /// actual terminal owns its reservation through close and turn emission.
     /// Contract: domain/session.md, sections 3, 5 and 12.
     pub delegated_result_bytes: u64,
+
     /// The largest budget a spec may ask for, dimension by dimension. Its time
     /// is the longest a session may live.
     ///

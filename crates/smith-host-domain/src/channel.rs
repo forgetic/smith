@@ -312,7 +312,12 @@ pub enum TranscriptRefusal {
 pub enum RunFailure {
     /// Exact transient history refusal before unsupported work starts.
     /// Contract: domain/host.md, sections 2 and 9; domain/run.md, section 6.
-    Transcript(TranscriptRefusal),
+    Transcript(
+        /// Exact content-free history-admission classification sent by the agent
+        /// to the host; no fresh-start fallback or provider effect is implied.
+        /// Contract: domain/host.md, sections 2 and 9; domain/run.md, section 6.
+        TranscriptRefusal,
+    ),
 
     /// The LLM could not do the work.
     ///
