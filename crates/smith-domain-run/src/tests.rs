@@ -145,21 +145,22 @@ pub(crate) fn rule(name: &[u8], min: u32, max: u32) -> VerdictRule {
         items: crate::outcome::ItemSpec {
             min,
             max,
-            kinds: {
-                let required: Box<[Box<[u8]>]> = Box::new([bytes(b"path"), bytes(b"body")]);
-                let kinds: Box<[Box<[u8]>]> = Box::new([bytes(b"blocking"), bytes(b"nit")]);
-                kinds
-                    .into_vec()
-                    .into_iter()
-                    .map(|kind| crate::outcome::ItemRule {
-                        kind,
-                        fields: required
-                            .iter()
-                            .map(|name| crate::outcome::FieldRule { name: name.clone(), max: 1024 })
-                            .collect(),
-                    })
-                    .collect()
-            },
+            kinds: Box::new([
+                crate::outcome::ItemRule {
+                    kind: bytes(b"blocking"),
+                    fields: Box::new([
+                        crate::outcome::FieldRule { name: bytes(b"path"), max: 1024 },
+                        crate::outcome::FieldRule { name: bytes(b"body"), max: 1024 },
+                    ]),
+                },
+                crate::outcome::ItemRule {
+                    kind: bytes(b"nit"),
+                    fields: Box::new([
+                        crate::outcome::FieldRule { name: bytes(b"path"), max: 1024 },
+                        crate::outcome::FieldRule { name: bytes(b"body"), max: 1024 },
+                    ]),
+                },
+            ]),
         },
     }
 }
@@ -1478,14 +1479,15 @@ fn impossible_result_contracts_refuse_before_any_preparation_or_session() {
 fn unknown_extra_field_ownership_is_checked_before_shape_judgement() {
     let mut h = Harness::new(LIMITS);
     let (_, conversation) = h.running_on(1, 100, text_charter(false));
+    let mut oversized = List::with_capacity(u32::try_from(LIMITS.outcome_bytes).expect("the fixture cap is small"));
+    for _ in 0..LIMITS.outcome_bytes {
+        oversized.push(b'x').expect("room for exactly the declared cap");
+    }
     let value = Declared::Report(crate::outcome::Report {
         text: Box::new([]),
         fields: Box::new([
             Field { name: bytes(b"source"), value: bytes(b"ref") },
-            Field {
-                name: bytes(b"opaque"),
-                value: alloc::vec![b'x'; usize::try_from(LIMITS.outcome_bytes).unwrap()].into(),
-            },
+            Field { name: bytes(b"opaque"), value: oversized.into_boxed() },
         ]),
     });
     let emitted = h.step(finish(conversation, 7, value));

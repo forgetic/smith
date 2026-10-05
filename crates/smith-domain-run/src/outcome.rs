@@ -744,11 +744,11 @@ fn past(length: usize, max: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        Change, ChangeSpec, Declared, DeclaredFailure, Field, FieldRule, Form, Item, ItemRule, ItemSpec, Limits,
+        Change, ChangeSpec, Declared, DeclaredFailure, Field, FieldRule, Form, Item, ItemRule, ItemSpec, Limits, List,
         OutcomeSpec, Problem, Report, TextSpec, Verdict, VerdictRule, is_valid, judge, owned_bytes,
     };
     use crate::tests::LIMITS;
-    use alloc::{boxed::Box, vec};
+    use alloc::boxed::Box;
     use core::mem::size_of;
 
     fn rules(name: &[u8], max: u32) -> Box<[FieldRule]> {
@@ -933,11 +933,12 @@ mod tests {
 
     #[test]
     fn feedback_is_bounded_even_with_many_missing_fields() {
-        let rules = (0..20)
-            .map(|index| FieldRule { name: alloc::format!("field-{index}").into_bytes().into(), max: 1 })
-            .collect();
+        let mut rules = List::with_capacity(20);
+        for index in 1..=20_u8 {
+            rules.push(FieldRule { name: Box::new([index]), max: 1 }).expect("room for twenty distinct rules");
+        }
         let spec = OutcomeSpec {
-            change: Some(ChangeSpec { checks: false, fields: rules }),
+            change: Some(ChangeSpec { checks: false, fields: rules.into_boxed() }),
             verdicts: Box::new([]),
             report: None,
             failure: None,
@@ -969,7 +970,8 @@ mod tests {
             &[Problem::UnknownVerdict]
         );
         let mut value = verdict();
-        value.items = vec![value.items[0].clone(); 3].into();
+        let item = value.items[0].clone();
+        value.items = Box::new([item.clone(), item.clone(), item]);
         assert_eq!(
             judge(&specification(), &Declared::Verdict(value)).unwrap_err().listed.as_ref(),
             &[Problem::TooManyItems { max: 2 }]
