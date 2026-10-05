@@ -51,7 +51,8 @@ How smith is built from temper's code is temper's migration plan
   is the host's: smith asks for a delivery and tells the LLM how it
   went.
 - **Any model, any provider.** The conversation vocabulary is
-  provider-neutral; each provider's API is the protocol layer's business.
+  provider-neutral. The protocol layer uses `skein-llm`'s shared client;
+  provider APIs, HTTP/SSE and replay metadata belong to skein.
   A run starts on the model its charter names and may give its sub-agents
   others.
 - **Failures are visible.** The LLM sees what went wrong, bounded in size:
@@ -133,15 +134,29 @@ the `smith` binary runs.
 |---|---|---|
 | domain | `smith-domain` and its children | the agent in its worlds, or in its own process (host.md, section 9) |
 | domain | `smith-host-domain` | supervising agent processes, as its host's child |
-| protocol | `smith-protocol` | the agent process's protocol layer: the channel's agent half, providers, tools' schemas and decoding, rendering |
+| protocol | `smith-protocol` | the agent process's protocol layer: the channel's agent half, application tools and routing |
+| protocol | `smith-protocol-llm` | translating the agent's conversation and application tools to the shared `skein-llm::client::Client` |
 | protocol | `smith-channel` | the channel's frames and payloads, both halves, versioned |
 | protocol | `smith-transcript` | encoding and decoding turns, for a host that keeps or shows them |
-| protocol | `smith-llm-anthropic`, `smith-llm-openai`, `smith-oauth` | providers' APIs and sign-in |
+| shared protocol | `skein-llm` | provider-neutral calls, native provider codecs and opaque replay envelopes |
 | protocol | `smith-mcp`, later | MCP servers as a tool source |
-| testing | `smith-fake-llm-domain`, `smith-fake-llm-protocol`, a scripted agent, a scripted host | fakes for its own worlds |
+| shared testing | `skein-fake-llm-domain`, `skein-fake-llm-protocol` | generic scripted LLM and byte peers; smith supplies application scripts and expectations |
+| testing | a scripted agent, a scripted host | smith's own neighbours and application worlds |
 | binary | `smith` | the agent process a host spawns, and the local host with an agent |
 
 io is skein's: contained process trees, files, HTTP, pipes.
+
+The LLM adapter owns smith's tool declarations, application argument decoding
+and result translation. It owns no provider selection branches, provider wire
+fields, HTTP/SSE machine or sign-in client. Endpoint configuration and credential
+bytes arrive from the caller. Acquiring and refreshing those credentials belongs
+to the host or a shared credential client; smith receives grants and reports
+credential failures (host.md, section 7).
+
+The generic client and peer interfaces may change together with their consumers.
+An application translates at the boundary once; it does not copy a shared
+machine or add a callback to compensate for a missing shared entrance. Bounds
+cover both the shared values and smith's retained application data.
 
 **What goes to skein.** smith and temper share skein; what both would
 otherwise each keep goes there, as generic kit, when it is extracted:
@@ -149,15 +164,15 @@ otherwise each keep goes there, as generic kit, when it is extracted:
 - **framed channels:** frames, a hello with versions, bounds sealed by
   constructors, a channel's state machine; smith's and temper's channels
   keep only their payloads;
-- **an OAuth client:** sign-in, refresh, tokens kept as secrets; smith's
-  providers and temper's forge sign-in add their endpoints;
+- **an OAuth client:** sign-in, refresh, tokens kept as secrets; the
+  caller supplies endpoint configuration and lends credentials to smith;
 - **supervised processes:** spawning within a deadline, cancel then
   terminate then kill, proof that a tree is empty; `smith-host-domain`
   adds the channel's rules and the watchdog;
 - **worlds' common fakes,** such as a scripted peer on a channel.
 
-What is about LLMs, conversations, tools or runs stays in smith; what is
-about tasks, authority or connectors stays in temper.
+Conversation, tool and run policy stays in smith; generic LLM clients, codecs
+and wire peers belong to skein. Tasks, authority and connectors stay in temper.
 
 ## 5. How smith stays generic
 

@@ -24,6 +24,12 @@ and retains actual call/delivery rights through shutdown. Further generic host
 changes, live channel and provider protocol integration, the local host and the
 executable remain later increments of temper's `05s-smith.md` migration plan.
 
+The design now assigns provider clients and generic LLM peers to skein's
+`skein-llm` and shared fake crates. The copied provider/OAuth crates remain
+temporary source until the [05s2a replacement](docs/development/migration-05s2a.md)
+passes its implementation review and gates. Smith's adapter owns application
+tools and conversation translation; the caller owns credential acquisition.
+
 ## Layout
 
 - `crates/`: domain and protocol crates, added with their implementations.

@@ -19,7 +19,8 @@ What is still open is listed in section 11.
 - **Opened from a transcript,** a session goes on where an earlier one
   stopped, on the same provider and endpoint.
 - **Provider-neutral.** Nothing in a session depends on which provider
-  answers; each provider's API is the protocol layer's.
+  answers. Its protocol adapter uses the shared `skein-llm` client;
+  each provider's API belongs to skein.
 - **Bounded:** turns, tokens, spend, time and bytes held, each a budget
   its opener gives it.
 
@@ -83,16 +84,20 @@ What is still open is listed in section 11.
 ## 4. Providers and retries
 
 - **Any provider.** A session talks to the endpoint and model it was
-  opened with; the protocol layer speaks each provider's API (HTTP,
-  server-sent events, JSON), its tool schemas and its errors.
+  opened with. `skein-llm` speaks the configured provider's API (HTTP,
+  server-sent events, JSON) and classifies its errors. Smith translates
+  conversation values and application tool schemas at that boundary.
 - **Retries are policy.** A session classifies a failed call
   (overloaded, rate limited, unavailable, timed out, context too long,
   invalid, unauthorised, an account exhausted), retries the transient ones
   after a jittered exponential backoff, and gives up when its retries run
   out. The protocol layer runs the attempt and its connect and idle
   deadlines.
-- **Credentials** are the protocol layer's. A rejected credential or an
-  exhausted account is a notice the session raises, which the agent sends
+- **Credential bytes** are lent by the caller and bound to the configured
+  shared client by the protocol layer. Sign-in and refresh are the caller's
+  or a shared credential client's; smith owns no OAuth implementation.
+  A rejected credential or an exhausted account is a notice the session
+  raises, which the agent sends
   to its host (host.md, section 7); an unauthorised failure is transient,
   so a refreshed credential may answer the retry.
 
@@ -145,18 +150,26 @@ reaches the host's resume limit.
 
 ## 9. Below the domain
 
-- **LLM providers:** HTTP, server-sent events and JSON for each
-  provider's API (`smith-llm-anthropic`, `smith-llm-openai`); tool
-  schemas and decoding; classifying failures; refreshing credentials
-  (`smith-oauth`).
+- **LLM calls:** `smith-protocol-llm` translates to the actual
+  `skein-llm::client::Client`. The shared client owns provider codecs,
+  HTTP/SSE, wire failures and bounded replay envelopes. Smith owns application
+  schemas, typed tool decoding and result text; it never inspects provider
+  metadata. Whole tool schemas and raw argument bodies cross this boundary.
+- **Replay:** completed text, refusals and tool calls retain optional opaque
+  metadata; reasoning retains its complete opaque envelope. Smith preserves
+  these bytes and their order through turns, prompt copies and restore.
+  Skein checks their format and configured provider compatibility before use.
+- **Credentials:** caller-supplied endpoint and bearer/account data, lent
+  under the host grant contract (host.md, section 7). Smith neither signs
+  in nor refreshes credentials itself.
 - **Turns' encoding** (`smith-transcript`): a turn's bytes, with a
   version, and every provider's opaque blocks kept verbatim with the
   dialect and endpoint they came from.
 
 ## 10. The world
 
-A fake LLM provider whose completions a script draws (tool calls,
-malformed input, every class of failure, streaming), the tools domain
+A shared `skein-fake-llm-domain` whose completions a smith-supplied script
+draws (tool calls, malformed input, every class of failure, streaming), the tools domain
 with the machine's faces, and a scripted opener that continues, closes,
 aborts and answers delegated calls. Its stories: a conversation that
 yields and is continued; reads in parallel and a write alone; every
@@ -165,6 +178,11 @@ opened from a transcript, and each refusal of one; a sub-agent's spend
 counted once. Its referee: every call answered once, in call order;
 turns told in order, each after its calls settled; budgets exceeded by at
 most one completion.
+
+Protocol worlds join the real shared Client to `skein-fake-llm-protocol`.
+Smith owns the application scripts and outside effect expectations. Generic
+codec fixtures, wire faults and peer mechanics are tested in skein rather
+than copied into smith.
 
 ## 11. Open questions
 
@@ -180,3 +198,8 @@ names resolved, transcripts versioned, prices and spend in a unit,
 history checked before a completion. temper's first version, which
 tickets made meaningful only inside its session, stays with temper's
 legacy run until temper's cutover; smith starts at the second.
+
+Migration 05s2 copied provider and OAuth crates to preserve the source baseline.
+05s2a replaces that temporary ownership with the existing shared `skein-llm`
+client and shared peers. The copy ledger remains historical evidence; the
+replacement audits its codec fixtures and stories before deleting the copies.
