@@ -12,6 +12,7 @@ use crate::limits::Limits;
 /// cancels each call it is running, up to `limits.calls`, and any other event
 /// emits at most two. The parent reserves this much room in `out` before
 /// calling it.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[must_use]
 pub const fn max_out(limits: &Limits) -> u32 {
@@ -19,6 +20,7 @@ pub const fn max_out(limits: &Limits) -> u32 {
 }
 
 /// The tools child domain's state.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Debug)]
 pub struct Domain {
@@ -29,6 +31,7 @@ pub struct Domain {
 
 impl Domain {
     /// A domain with room for `limits`.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     #[must_use]
     pub fn new(limits: &Limits) -> Domain {
@@ -41,6 +44,7 @@ impl Domain {
     }
 
     /// Kits present, closed ones included until they are reclaimed.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     #[must_use]
     pub fn kits(&self) -> u32 {
@@ -48,6 +52,7 @@ impl Domain {
     }
 
     /// Calls running, answered ones included until they are reclaimed.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     #[must_use]
     pub fn jobs(&self) -> u32 {
@@ -56,6 +61,7 @@ impl Domain {
 
     /// The oldest fact not yet drained. The parent drains them at its own
     /// pace; what does not fit meanwhile is dropped and counted.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub fn pop_fact(&mut self) -> Option<Fact> {
         self.facts.pop()
@@ -63,6 +69,7 @@ impl Domain {
 
     /// How many facts were dropped for want of room, since the domain was
     /// made.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     #[must_use]
     pub fn facts_lost(&self) -> u64 {
@@ -70,6 +77,7 @@ impl Domain {
     }
 
     /// The reclaim point: frees what closed in this iteration.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub fn reclaim(&mut self) {
         self.jobs.reclaim();
@@ -78,6 +86,7 @@ impl Domain {
 }
 
 /// Handles one event, emitting at most [`max_out`] requests.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     match event {

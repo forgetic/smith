@@ -7,66 +7,82 @@
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
 
 /// Named subject archive from which these fixed provider identity bytes were copied.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const PROVENANCE: &[u8] = b"tongs subject capture 2026-06-13 f4e0a2b";
 
 /// Provider API version header preserved from the named subject capture.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const VERSION: &[u8] = b"2023-06-01";
 
 /// Subject-captured user-agent identity bytes; this codec does not derive a runtime identity.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const USER_AGENT: &[u8] = b"claude-cli/2.1.139 (external, sdk-cli)";
 
 /// Subject-captured provider beta feature headers, emitted unchanged.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const BETAS: &[u8] = b"claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,advanced-tool-use-2025-11-20,context-1m-2025-08-07,effort-2025-11-24,extended-cache-ttl-2025-04-11";
 
 /// Subject-captured system identity text, preserved as provider vocabulary.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const SYSTEM: &[u8] = b"You are Claude Code, Anthropic's official CLI for Claude.";
 
 /// Subject-captured prompt-cache lifetime label.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const CACHE_TTL: &[u8] = b"1h";
 
 /// Provider header name for the caller-supplied session identity.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const SESSION_HEADER: &[u8] = b"X-Claude-Code-Session-Id";
 
 /// Provider header name for the caller-supplied request identity.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const REQUEST_HEADER: &[u8] = b"x-client-request-id";
 
 /// Subject-captured provider tool name for reading; the protocol supplies its schema.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const READ_TOOL: &[u8] = b"Read";
 
 /// Subject-captured provider tool name for listing; the protocol supplies its schema.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const LIST_TOOL: &[u8] = b"Glob";
 
 /// Subject-captured provider tool name for search; the protocol supplies its schema.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const SEARCH_TOOL: &[u8] = b"Grep";
 
 /// Subject-captured provider tool name for writing; the protocol supplies its schema.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const WRITE_TOOL: &[u8] = b"Write";
 
 /// Subject-captured provider tool name for editing; the protocol supplies its schema.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const EDIT_TOOL: &[u8] = b"Edit";
 
 /// Subject-captured provider tool name for shell execution; the protocol supplies its schema.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const SHELL_TOOL: &[u8] = b"Bash";
 
 /// Subject-captured provider tool name for sub-agent; the protocol supplies its schema.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const SUBAGENT_TOOL: &[u8] = b"Task";
 
 /// Subject-captured provider tool name for finish; the protocol supplies its schema.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const FINISH_TOOL: &[u8] = b"Finish";
 
@@ -75,18 +91,22 @@ use skein_lib::bytes;
 
 /// Owned fixed identity headers. Credentials and per-call/session ids are
 /// added by the connection's owner, never kept in this module.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Header {
     /// Boundary name, compared byte for byte; it carries no authority by itself.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub name: Box<[u8]>,
     /// Fixed subject-capture HTTP header bytes, copied without credentials.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub value: Box<[u8]>,
 }
 
 /// Fixed subject-capture identity headers for this dialect, without credentials or generated session IDs.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[must_use]
 pub fn headers() -> Box<[Header]> {

@@ -13,6 +13,7 @@ use crate::call::Outcome;
 
 /// The lines a read asks for: those after the first `skip`, at most `lines`
 /// of them if given.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Span {
@@ -22,6 +23,7 @@ pub(crate) struct Span {
 
 /// The read of `span` of `content`, at most `max` bytes of it. It is whole
 /// lines, but for a first line longer than `max`, which is cut there.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn window(content: Box<[u8]>, span: Span, max: u32) -> Outcome {
     let Span { skip, lines } = span;
@@ -58,6 +60,7 @@ pub(crate) fn window(content: Box<[u8]>, span: Span, max: u32) -> Outcome {
 }
 
 /// How many lines `content` has.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn count(content: &[u8]) -> u32 {
     let ended = bytes::count(content, b"\n", u32::MAX);
@@ -69,6 +72,7 @@ fn count(content: &[u8]) -> u32 {
 
 /// How many lines come before the `skip`th, at most the `total` of
 /// `content`, and where it starts: the end of `content` past its last line.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn line_start(content: &[u8], skip: u32, total: u32) -> (u32, usize) {
     let skipped = skip.min(total);
@@ -81,6 +85,7 @@ fn line_start(content: &[u8], skip: u32, total: u32) -> (u32, usize) {
 
 /// Where the line that starts at `start` of `content` ends: past its `\n`, or
 /// at the end of `content`.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn next_line(content: &[u8], start: usize) -> usize {
     match bytes::find_from(content, b"\n", start) {

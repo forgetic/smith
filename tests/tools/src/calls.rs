@@ -6,6 +6,7 @@ use smith_domain_tools::Call;
 use crate::translate::path;
 
 /// Reads the file at `at` whole, as far as a read goes.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn read(at: &[u8]) -> Call {
@@ -13,6 +14,7 @@ pub fn read(at: &[u8]) -> Call {
 }
 
 /// Reads `lines` lines of the file at `at`, after the first `skip`.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn read_lines(at: &[u8], skip: u32, lines: u32) -> Call {
@@ -20,6 +22,7 @@ pub fn read_lines(at: &[u8], skip: u32, lines: u32) -> Call {
 }
 
 /// Lists the directory at `at`.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn list(at: &[u8]) -> Call {
@@ -27,6 +30,7 @@ pub fn list(at: &[u8]) -> Call {
 }
 
 /// Makes the file at `at` hold `content`.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn write(at: &[u8], content: &[u8]) -> Call {
@@ -35,6 +39,7 @@ pub fn write(at: &[u8], content: &[u8]) -> Call {
 
 /// Replaces `old` with `new` in the file at `at`: its one occurrence, or every
 /// one if `all`.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn edit(at: &[u8], old: &[u8], new: &[u8], all: bool) -> Call {
@@ -42,6 +47,7 @@ pub fn edit(at: &[u8], old: &[u8], new: &[u8], all: bool) -> Call {
 }
 
 /// Runs `command` with the shell, for at most `timeout` if given.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn shell(command: &[u8], timeout: Option<Duration>) -> Call {
@@ -50,6 +56,7 @@ pub fn shell(command: &[u8], timeout: Option<Duration>) -> Call {
 
 /// Searches the files at and beneath `at` for `pattern`, in those whose names
 /// match `glob` if given.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn search(at: &[u8], pattern: &[u8], glob: Option<&[u8]>) -> Call {

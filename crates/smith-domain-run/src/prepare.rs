@@ -23,15 +23,18 @@ use crate::limits::Limits;
 use crate::outcome::ChangeSpec;
 
 /// Where a repository's guide for LLMs is, beneath its root.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) const GUIDE: &[u8] = b"AGENTS.md";
 
 /// Where a repository's checks are, beneath its root.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) const CHECKS: &[u8] = b".temper/pre-pr";
 
 /// One thing a run looks for: in the repository at `repository` in its
 /// checkout, its guide or its checks.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Step {
@@ -46,33 +49,40 @@ pub(crate) enum Look {
 }
 
 /// What a run found in its checkout.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) struct Found {
     /// The guides found, in the checkout's order.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) guides: List<Guide>,
     /// The repositories that have checks, by their place in the checkout, in
     /// its order.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) checks: List<u32>,
 }
 
 /// The start of a repository's `AGENTS.md`.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) struct Guide {
     /// The repository's place in the checkout.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) repository: u32,
     pub(crate) text: Box<[u8]>,
     /// Whether `text` is all of the file.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) whole: bool,
 }
 
 impl Found {
     /// Room for what a checkout of `repositories` may hold.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn with_capacity(repositories: u32) -> Found {
         Found { guides: List::with_capacity(repositories), checks: List::with_capacity(repositories) }
@@ -81,6 +91,7 @@ impl Found {
 
 /// The first step, or the step after `after`, or `None` once there is
 /// nothing left to look for.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn next(charter: &Charter, after: Option<Step>) -> Option<Step> {
     let repositories = count(charter.checkout.repositories.len());
@@ -100,6 +111,7 @@ pub(crate) fn next(charter: &Charter, after: Option<Step>) -> Option<Step> {
 }
 
 /// The request that takes `step`, for the run `owner`.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn request(charter: &Charter, step: Step, owner: Token, now: Time, limits: &Limits) -> Request {
     let root = repository(charter, step.repository).root;
@@ -114,6 +126,7 @@ pub(crate) fn request(charter: &Charter, step: Step, owner: Token, now: Time, li
 }
 
 /// Keeps what reading the guide of `step` found.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn guide(found: &mut Found, step: Step, read: Read, limits: &Limits) {
     assert!(step.look == Look::Guide, "a read answers a guide's step");
@@ -128,6 +141,7 @@ pub(crate) fn guide(found: &mut Found, step: Step, read: Read, limits: &Limits) 
 }
 
 /// Keeps what looking for the checks of `step` found.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn checks(found: &mut Found, step: Step, executable: bool) {
     assert!(step.look == Look::Checks, "a probe answers a checks' step");
@@ -138,6 +152,7 @@ pub(crate) fn checks(found: &mut Found, step: Step, executable: bool) {
 
 /// Whether the run looks for the checks of the repository at `index`: it is
 /// writable, and a change must pass its checks.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn wants_checks(charter: &Charter, index: u32) -> bool {
     match charter.outcome.change {

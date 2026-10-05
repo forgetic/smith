@@ -12,6 +12,7 @@ use crate::{BUDGET, Count, Settings, Span, World, spec};
 
 /// Settings drawn from `seed`: small limits, faults, latencies that race the
 /// deadlines, and an opener that nudges, dawdles and abandons.
+///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn noisy(seed: u64) -> Settings {
@@ -85,6 +86,7 @@ pub fn noisy(seed: u64) -> Settings {
 /// a budget of its own, small enough to run out in any dimension, now and then
 /// empty in one, and now and then more than the limits allow; and room for
 /// short answers only.
+///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub fn submit_noisily(world: &mut World, settings: &Settings, seed: u64) {
     let mut rng = Rng::new(seed.wrapping_add(2));

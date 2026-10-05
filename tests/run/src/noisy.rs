@@ -9,6 +9,7 @@ use crate::{Checkouts, Settings, Span, host};
 
 /// Settings drawn from `seed`: small limits, charters that sometimes do not fit
 /// them, faults, cancels, and latencies that race the deadlines.
+///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn noisy(seed: u64) -> Settings {

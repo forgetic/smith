@@ -7,23 +7,28 @@ use alloc::boxed::Box;
 use skein_lib::{Duration, Wall, Writer, bytes};
 
 /// Unverified token claims used only as provider metadata; parsing does not authenticate a token.
+///
 /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash)]
 #[expect(missing_debug_implementations, reason = "credential values must never occur in traces")]
 pub struct Claims {
     /// Provider account identity extracted from claims; it conveys no verified authentication.
+    ///
     /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub account_id: Box<[u8]>,
     /// Provider expiry timestamp, supplied or decoded without reading a clock.
+    ///
     /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub expires_at: Option<Wall>,
     /// Remaining monotonic validity of the granted credential.
+    ///
     /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub valid: Option<Duration>,
 }
 
 /// Reads `ChatGPT` metadata once, at refresh, against an injected wall clock.
 /// `valid` is only metadata; the refresh's `expires_in` remains an independent cap.
+///
 /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub fn read_claims(token: &[u8], wall: Wall, limits: &Limits) -> Result<Claims, DecodeError> {
     common::bearer(token, limits)?;

@@ -12,178 +12,227 @@ use skein_json::{Token, writer::Encoder};
 use skein_lib::{List, Queue, Wall, bytes};
 
 /// One provider stream fragment, accumulated only in the matching open block.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Delta {
     /// Owned bounded text in its original provider position.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Text {
         /// Owned UTF-8 text, bounded by the enclosing message or output cap.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         text: Box<[u8]>,
     },
     /// Provider reasoning text fragment, retained as part of its opaque block.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Thinking {
         /// Owned UTF-8 text, bounded by the enclosing message or output cap.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         text: Box<[u8]>,
     },
     /// Provider reasoning signature fragment, retained verbatim.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Signature {
         /// Owned UTF-8 text, bounded by the enclosing message or output cap.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         text: Box<[u8]>,
     },
     /// Provider tool-input fragment for the open tool block.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Input {
         /// Owned UTF-8 text, bounded by the enclosing message or output cap.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         text: Box<[u8]>,
     },
 }
 
 /// Decoded provider or peer event; the enclosing entry point checks order and correlation.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Event {
     /// The provider begins one assistant message with its initial usage.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     MessageStart {
         /// Provider-reported token usage, charged exactly once when its completion ends.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         usage: Usage,
     },
     /// The next provider block opens at its declared index.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     BlockStart {
         /// Provider block or item index used to correlate stream events.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         index: u32,
         /// Index of the delegated tool-call block in its completion.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         block: Block,
     },
     /// Fragment for the currently open indexed provider block.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     BlockDelta {
         /// Provider block or item index used to correlate stream events.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         index: u32,
         /// The next bounded provider stream fragment for the named block.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         delta: Delta,
     },
     /// The currently open provider block ends.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     BlockStop {
         /// Provider block or item index used to correlate stream events.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         index: u32,
     },
     /// Provider terminal metadata and usage update.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     MessageDelta {
         /// Why the provider stopped this completion, independently of its content.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         stop: Stop,
         /// Provider-reported token usage, charged exactly once when its completion ends.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         usage: Usage,
     },
     /// The provider message terminates; later events cannot emit a second terminal.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     MessageStop,
     /// Provider keepalive; it conveys progress but no content or usage.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Ping,
     /// Provider or scripted peer error body.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Error {
         /// Whether the returned tool result represents a failure.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         error: ProviderError,
     },
     /// Unrecognized provider metadata, retained or ignored according to this decoder.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Unknown,
 }
 
 /// One bounded block accepted from the provider stream or neutral fake API.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Part {
     /// Owned bounded text in its original provider position.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Text {
         /// Owned UTF-8 text, bounded by the enclosing message or output cap.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         text: Box<[u8]>,
     },
     /// Provider-owned replay data, preserved verbatim and never interpreted by the domain.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Opaque {
         /// Owned payload bytes charged against the enclosing session limit.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         bytes: Box<[u8]>,
     },
     /// Provider tool call with its original identity, name and input retained.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     ToolCall {
         /// Provider-issued tool-call identifier, preserved verbatim in its result.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         id: Box<[u8]>,
         /// Boundary name, compared byte for byte; it carries no authority by itself.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         name: Box<[u8]>,
         /// Provider-written tool-argument bytes, retained exactly for replay.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         input: Box<[u8]>,
         /// The provider call arguments exceeded their configured cap; they cannot be executed.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         too_large: bool,
     },
 }
 
 /// Stream-decoder observation: bounded content, progress, or exactly one terminal.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Output {
     /// A bounded accepted content block; it is not a terminal by itself.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Part(Part),
     /// One successful completion terminal with stop reason and accepted usage.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Completed {
         /// Why the provider stopped this completion, independently of its content.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         stop: Stop,
         /// Provider-reported token usage, charged exactly once when its completion ends.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         usage: Usage,
     },
     /// One failed terminal with bounded diagnostics.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Failed {
         /// Typed reason why the pending operation produced no successful value.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         failure: Failure,
         /// Bounded diagnostic text retained for this failure.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         detail: Box<[u8]>,
     },
     /// Provider transport progress with no new accepted result.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Progress,
 }
 
 /// A block plus a terminal when a configured answer limit cuts the stream.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const MAX_OUT: u32 = 2;
 
 /// Bounded provider-stream state; events are injected and no transport or domain policy is owned here.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Debug)]
 pub struct StreamDecoder {
@@ -215,6 +264,7 @@ enum Open {
 
 impl StreamDecoder {
     /// Constructs empty bounded state under the supplied immutable limits; no IO or clocks are consulted.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub const fn new(_limits: &Limits) -> StreamDecoder {
@@ -230,6 +280,7 @@ impl StreamDecoder {
     }
 
     /// Accepts one typed stream event, emitting bounded blocks, progress or one terminal; reserve `MAX_OUT` slots first.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub fn event(&mut self, event: Event, limits: &Limits, wall: Wall, out: &mut Queue<Output>) {
         if self.phase == Phase::Over {
@@ -246,6 +297,7 @@ impl StreamDecoder {
     }
 
     /// Reports end of stream; an incomplete stream emits one failure and a completed stream emits no second terminal.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub fn end(&mut self, out: &mut Queue<Output>) {
         if self.phase != Phase::Over {
@@ -254,6 +306,7 @@ impl StreamDecoder {
     }
 
     /// Whether this stream has already emitted its single terminal, successfully or with a failure.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub fn is_complete(&self) -> bool {
@@ -450,6 +503,7 @@ fn write_thinking(out: &mut Encoder, head: &Json, text: &[u8], signature: &[u8])
 }
 
 /// Decodes one provider stream event within document limits; stream-order validation belongs to `StreamDecoder`.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn decode_event(value: &Json, limits: &Limits) -> Result<Event, DecodeError> {
     let tokens = value.as_tokens();
@@ -547,6 +601,7 @@ fn write_usage(out: &mut Encoder, usage: Usage) {
 }
 
 /// Decodes bounded peer-error metadata; syntax, type and byte-cap failures remain typed.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn decode_error(value: &Json, limits: &Limits) -> Result<ProviderError, DecodeError> {
     let tokens = json::value_at(value.as_tokens(), json::required(value.as_tokens(), b"error")?)?;
@@ -562,12 +617,14 @@ pub fn decode_error(value: &Json, limits: &Limits) -> Result<ProviderError, Deco
 }
 
 /// Encodes a bounded typed peer-error body; no network or retry policy is executed.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn encode_error(error: &ProviderError, limits: &Limits) -> Result<Box<[u8]>, DecodeError> {
     encode_event(&Event::Error { error: error.clone() }, limits)
 }
 
 /// Encodes one typed fake-provider stream event within document limits.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn encode_event(event: &Event, limits: &Limits) -> Result<Box<[u8]>, DecodeError> {
     let bounded = limits.writer_limits();

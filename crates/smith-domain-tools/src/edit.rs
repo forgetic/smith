@@ -15,6 +15,7 @@ use crate::limits::Limits;
 
 /// What an edit asks for: `old` replaced with `new`, at its one occurrence, or
 /// at every one if `all`.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Edit {
@@ -27,6 +28,7 @@ pub(crate) struct Edit {
 /// outcome that refuses it: `NoMatch`, `Ambiguous` with the lines of the
 /// first matches, or `TooLarge` if the file would outgrow what the tools
 /// store.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn apply(content: &[u8], edit: &Edit, limits: &Limits) -> Result<(Box<[u8]>, u32), Outcome> {
     let matches = count(content, &edit.old, u32::MAX);
@@ -54,6 +56,7 @@ pub(crate) fn apply(content: &[u8], edit: &Edit, limits: &Limits) -> Result<(Box
 
 /// The size of a file of `len` bytes with `matches` occurrences of `old`
 /// bytes replaced by `new` bytes, or `None` past a `u64`.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn size(len: usize, matches: u32, old: usize, new: usize) -> Option<u64> {
     let matches = u64::from(matches);
@@ -64,6 +67,7 @@ fn size(len: usize, matches: u32, old: usize, new: usize) -> Option<u64> {
 
 /// The numbers of the lines, counting from 1, where the first `max`
 /// occurrences of `old` in `content` start.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn lines(content: &[u8], old: &[u8], max: u32) -> Box<[u32]> {
     let mut lines = List::with_capacity(max);

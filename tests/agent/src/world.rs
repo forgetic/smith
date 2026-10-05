@@ -21,49 +21,63 @@ use crate::{
 
 /// Immutable host and fake settings. All time and randomness enter through
 /// these values; the copied agent's production behavior is unchanged.
+///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
     /// Replay seed for the host, agent and provider, independently derived.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub seed: u64,
     /// Script selected by the charter's brief.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub job: Job,
     /// The agent's immutable admission and ownership limits.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub limits: Limits,
     /// The run's token and wall-time allowance, shared across conversations.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub budget: run::Budget,
     /// Whether the scripted host grants checkout modification.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub writable: bool,
     /// The fake provider's latency, failures and ownership limits.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub provider: provider::Config,
     /// Latency of host and IO terminals; zero is permitted.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub network: Span,
     /// Time spent by the fixture's checks, capped by their request deadline.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub check: Span,
     /// The host's reply to each push; refusal feedback remains typed and bounded.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub push: run::Push,
     /// Explicit host cancellation time; `None` sends no cancel.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub cancel_at: Option<Duration>,
     /// A cancel loses to its existing terminal with this chance per mille.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub races: u32,
     /// Whether the shell drains facts; disabling this exercises lossy telemetry.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub drain_facts: bool,
 }
 
 impl Settings {
     /// A coding charter, ample bounds and a successful typed host, from `seed`.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn calm(seed: u64) -> Settings {
@@ -116,6 +130,7 @@ struct Flight {
 
 /// The real agent on a typed scripted host. [`World::run`] drives every
 /// boundary to settlement, then checks its ledgers, referee and facts.
+///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[derive(Debug)]
 pub struct World {
@@ -149,6 +164,7 @@ pub struct World {
 impl World {
     /// Creates one host request and a fresh real agent tree. Fixed queue slack
     /// exercises output pressure; finite trace and delivery caps fail fast.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn new(settings: Settings) -> World {
@@ -213,6 +229,7 @@ impl World {
 
     /// Runs at most `iterations` deterministic shell rounds. Success means the
     /// one start answered, every boundary settled, and every expectation passed.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub fn run(&mut self, iterations: u32) {
         for _ in 0..iterations {
@@ -601,6 +618,7 @@ impl World {
     }
 
     /// The host's terminal answer, available after [`World::run`] settles.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn answer(&self) -> &run::Answer {
@@ -608,6 +626,7 @@ impl World {
     }
 
     /// Check outcomes actually delivered to the agent, in request order.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn checked(&self) -> &[bool] {
@@ -615,6 +634,7 @@ impl World {
     }
 
     /// Typed push replies actually delivered by the scripted host.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn pushes(&self) -> &[run::Push] {
@@ -622,6 +642,7 @@ impl World {
     }
 
     /// Bytes of the fixture code in the shared checkout, independent of the agent.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn code(&self) -> Vec<u8> {
@@ -629,6 +650,7 @@ impl World {
     }
 
     /// Bytes retained by a successful host push; empty when nothing landed.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn landed(&self) -> &[u8] {
@@ -636,6 +658,7 @@ impl World {
     }
 
     /// Content-free facts drained by the shell, never used to choose stimuli.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn facts(&self) -> &[Fact] {
@@ -643,6 +666,7 @@ impl World {
     }
 
     /// How many facts or content observations the copied agent dropped.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn lost(&self) -> u64 {
@@ -650,6 +674,7 @@ impl World {
     }
 
     /// Provider queries observed at its boundary, including returned tool IDs.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn prompts(&self) -> &[provider::api::Query] {
@@ -657,6 +682,7 @@ impl World {
     }
 
     /// Ordered boundary trace for same-seed replay comparisons.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn trace(&self) -> &[String] {
@@ -664,6 +690,7 @@ impl World {
     }
 
     /// Injected monotonic time when the host received the answer.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn answered_at(&self) -> Time {
@@ -671,6 +698,7 @@ impl World {
     }
 
     /// Actual safety checks and met liveness obligations from the shared referee.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn judged(&self) -> (u64, u64) {

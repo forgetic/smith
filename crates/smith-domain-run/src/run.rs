@@ -117,24 +117,31 @@ use crate::prompt;
 pub(crate) struct Run {
     pub(crate) charter: Charter,
     /// What it found in its checkout as it prepared.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) found: Found,
     /// The worker's name for it.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) worker: Token,
     /// What its conversations have spent.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     spent: Spend,
     /// Nudges given.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     nudges: u32,
     /// Outcomes `finish` refused: rejected, or not landed.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     rejected: u32,
     /// Its conversations, main included, opened and not ended.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     conversations: u32,
     /// When its budget's time runs out.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     deadline: Time,
     state: State,
@@ -144,27 +151,34 @@ pub(crate) struct Run {
 enum State {
     /// Looking in its checkout: the look `step` is in flight. Its main
     /// conversation has its slot, and is not opened yet.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Preparing { reply_to: ReplyTo, main: Id<Conversation>, step: Step },
     /// It fails with `failure` once the look in flight has ended.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Stopping { reply_to: ReplyTo, main: Id<Conversation>, failure: Failure },
     /// Its main conversation is at work.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Working { reply_to: ReplyTo, main: Id<Conversation> },
     /// It has spent past its budget's `exhausted` part, and main keeps the
     /// turn in flight.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Over { reply_to: ReplyTo, main: Id<Conversation>, exhausted: Exhausted },
     /// It ends with `ending` once its main conversation has ended.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Winding { reply_to: ReplyTo, ending: Ending },
     /// Terminal: holds nothing.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Closed,
 }
 
 /// How a winding run ends.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 enum Ending {
@@ -173,22 +187,27 @@ enum Ending {
 }
 
 /// A conversation a run opened: main, or a sub-agent.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) struct Conversation {
     run: Id<Run>,
     /// The sub-agent call it serves, if it is a sub-agent.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     asker: Option<Id<Call>>,
     /// Its families of tools, and how deep it is: main is at zero, a sub-agent
     /// one deeper than its asker.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     families: Families,
     depth: u32,
     /// What it has spent, by its `Used` so far.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     spent: Spend,
     /// Its calls to the run in flight.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     calls: u32,
     phase: Phase,
@@ -197,33 +216,42 @@ pub(crate) struct Conversation {
 #[derive(Debug)]
 enum Phase {
     /// Not opened yet: its run is preparing.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Pending,
     /// Opened, and not started yet.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Opening,
     /// Opened, not started yet, and no longer wanted: closed once it starts.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Unwanted,
     /// Started, and addressed as `peer`.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Running { peer: Token },
     /// Closed by its run, and not ended yet.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Closing,
     /// Terminal: holds nothing.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Closed,
 }
 
 /// The timers of runs and their calls, named by what they are for.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Alarm {
     /// The budget's time of the run `run` runs out.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Deadline { run: Id<Run> },
     /// The deadline of the call `call` passes.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Call { call: Id<Call> },
 }
@@ -533,6 +561,7 @@ pub(crate) fn withdraw(domain: &mut Domain, conversation: Token, call: Token, ou
 
 /// The deadline of the call `id` passed before it returned: stop what it is
 /// doing.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn expired(domain: &mut Domain, id: Id<Call>, out: &mut Queue<Request>) {
     stop_call(domain, id, Withdrawal::Expired, out);
@@ -664,6 +693,7 @@ pub(crate) fn deadline(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request
 /// How deep the conversation `conversation` is, and for main what its run
 /// found in its checkout (its guides, and its repositories with checks), for
 /// their facts.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn opened(
     runs: &Slab<Run>,
@@ -680,6 +710,7 @@ pub(crate) fn opened(
 
 /// What a run's state implies, applied after every transition: whether its
 /// deadline alarm runs, and whether it is retired.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn follow(runs: &mut Slab<Run>, alarms: &mut Deadlines<Alarm>, id: Id<Run>) {
     let run = runs.get(id).expect("a run lives until it is retired");
@@ -701,6 +732,7 @@ fn follow(runs: &mut Slab<Run>, alarms: &mut Deadlines<Alarm>, id: Id<Run>) {
 
 /// Whether a run in `state` may still finish: it works, or is over its budget
 /// with main's turn in flight.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn may_finish(state: &State) -> bool {
     match state {
@@ -711,6 +743,7 @@ fn may_finish(state: &State) -> bool {
 
 /// The landing of the call `id` has settled, as `settled` says: the run goes
 /// on, or finishes.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<Request>) {
     let Domain { runs, conversations, calls, alarms, facts: _ } = domain;
@@ -764,6 +797,7 @@ fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<R
 // target state.
 
 /// Asks for the look `step`, preparing.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn look(
     run: &Run,
@@ -779,6 +813,7 @@ fn look(
 }
 
 /// Preparing, the look `step` ended: the next one, or open main.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[expect(clippy::too_many_arguments, reason = "a cell handler takes the fields it touches")]
 fn prepared(
@@ -798,6 +833,7 @@ fn prepared(
 }
 
 /// Prepared: open main with what the run found, and the whole budget.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn open(
     run: &Run,
@@ -822,6 +858,7 @@ fn open(
 
 /// Stopping, the look in flight ended: main was never opened, and the run
 /// answers.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn stop(
     run: &Run,
@@ -846,6 +883,7 @@ fn stop(
 /// Working, or over the budget's `over` part: main called `finish` as
 /// `made`. A refused outcome is returned at once; an accepted verdict ends the
 /// run; a change lands, by the call's deadline, and the run goes on meanwhile.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[expect(clippy::too_many_arguments, reason = "a cell handler takes the fields it touches")]
 fn finish(
@@ -910,6 +948,7 @@ fn finish(
 }
 
 /// A call a conversation made: its token for it, and its deadline.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 struct Asking {
     call: Token,
@@ -917,6 +956,7 @@ struct Asking {
 }
 
 /// What a conversation asks for when it asks for a sub-agent.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 struct Wanted {
     brief: Box<[u8]>,
@@ -927,6 +967,7 @@ struct Wanted {
 
 /// Working: the conversation `asker` asked for a sub-agent as `made`. Open
 /// it, with no more time than to the call's deadline, or return why not.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[expect(clippy::too_many_arguments, reason = "a cell handler takes the fields it touches")]
 fn sub_agent(
@@ -998,6 +1039,7 @@ fn sub_agent(
 }
 
 /// Stores `call`, there being room, and arms its deadline.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn begin_call(calls: &mut Calls, alarms: &mut Deadlines<Alarm>, call: Call, deadline: Time) -> Id<Call> {
     let id = calls.insert(call);
@@ -1007,6 +1049,7 @@ fn begin_call(calls: &mut Calls, alarms: &mut Deadlines<Alarm>, call: Call, dead
 
 /// Stops what the call `id` is doing, for `why`; it returns once that has
 /// settled.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn stop_call(domain: &mut Domain, id: Id<Call>, why: Withdrawal, out: &mut Queue<Request>) {
     let call = domain.calls.get_mut(id).expect("a call lives until it returns, and its alarm with it");
@@ -1023,6 +1066,7 @@ fn stop_call(domain: &mut Domain, id: Id<Call>, why: Withdrawal, out: &mut Queue
 
 /// Retires the call `id`, which has returned: its alarm is cancelled, and its
 /// conversation has a call fewer in flight. The run it is of.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn retire_call(
     calls: &mut Calls,
@@ -1040,6 +1084,7 @@ fn retire_call(
 }
 
 /// Working, an ending decided: close main, and wait for it to end.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn wind_down(
     conversations: &mut Slab<Conversation>,
@@ -1054,6 +1099,7 @@ fn wind_down(
 
 /// Closes the conversation `id`, which its owner closes once: at once, or
 /// once it starts. A closing conversation withdraws its own calls.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn close(conversations: &mut Slab<Conversation>, id: Id<Conversation>, out: &mut Queue<Request>) {
     let conversation = conversations.get_mut(id).expect("a conversation lives until it has ended");
@@ -1069,6 +1115,7 @@ fn close(conversations: &mut Slab<Conversation>, id: Id<Conversation>, out: &mut
 }
 
 /// Working, main yielded and may be nudged: tell it to carry on.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn say(reply_to: ReplyTo, main: Id<Conversation>, peer: Token, text: Box<[u8]>, out: &mut Queue<Request>) -> State {
     out.push(Request::Say { peer, text });
@@ -1081,6 +1128,7 @@ fn closing(peer: Token, out: &mut Queue<Request>) -> Phase {
 }
 
 /// Answers the worker: the run is done.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn answer(reply_to: ReplyTo, answer: Answer, out: &mut Queue<Request>) -> State {
     out.push(Request::Answer { to: reply_to, answer });
@@ -1093,6 +1141,7 @@ fn answer(reply_to: ReplyTo, answer: Answer, out: &mut Queue<Request>) -> State 
 /// checkout, what it has spent and the time it has left. What it holds is
 /// rendered from the charter or copied: the run keeps the charter (copy at
 /// emission).
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn opening(charter: &Charter, found: &Found, spent: Spend, left: Duration) -> Opening {
     Opening {
@@ -1109,6 +1158,7 @@ fn opening(charter: &Charter, found: &Found, spent: Spend, left: Duration) -> Op
 
 /// The answer of a run whose main conversation ended on its own, the run
 /// having spent `spent`.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn ending(end: End, spent: Spend) -> Answer {
     match end {
@@ -1121,6 +1171,7 @@ fn ending(end: End, spent: Spend) -> Answer {
 }
 
 /// The answer of a run that wound down to `ending`, having spent `spent`.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn finished(ending: Ending, spent: Spend) -> Answer {
     match ending {
@@ -1132,6 +1183,7 @@ fn finished(ending: Ending, spent: Spend) -> Answer {
 /// Counts a nudge for a run whose LLM stopped without finishing for `stop`,
 /// or says how the run fails instead: when its nudges are used up, or no turn
 /// is left in its budget for the LLM to carry on with.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn nudge(run: &mut Run, stop: Stop, limits: &Limits) -> Result<(), Failure> {
     if run.nudges >= limits.nudges {
@@ -1157,6 +1209,7 @@ fn nudge(run: &mut Run, stop: Stop, limits: &Limits) -> Result<(), Failure> {
 /// How a run fails when its LLM stops without finishing, through `nudges`
 /// nudges and `rejected` refused outcomes: as unfinished, or with the fault
 /// its last stop shows.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn unfinished(stop: Stop, nudges: u32, rejected: u32) -> Failure {
     match stop {

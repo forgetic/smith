@@ -79,15 +79,18 @@ use crate::window::{self, Span};
 #[derive(Debug)]
 pub(crate) struct Job {
     /// The kit whose call it runs.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     kit: Id<Kit>,
     /// The tool the call is for, to tell of it.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     tool: Tool,
     state: State,
 }
 
 /// What a cell does: go on in another state, or answer the call.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 enum Next {
     Wait(State),
@@ -97,55 +100,69 @@ enum Next {
 #[derive(Debug)]
 enum State {
     /// Loading the file at `place`, to answer with a window of it.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Reading { reply_to: ReplyTo, place: Place, span: Span },
     /// Scanning a directory.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Listing { reply_to: ReplyTo },
     /// Loading the file to edit.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Editing { reply_to: ReplyTo, editing: Editing },
     /// Storing the file at `place`, for `change`.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Storing { reply_to: ReplyTo, place: Place, change: Change },
     /// Running a command.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Running { reply_to: ReplyTo },
     /// Searching files.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Searching { reply_to: ReplyTo },
     /// Terminal: answered, holds nothing.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Done,
 }
 
 /// An edit while it loads the file.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Debug)]
 pub(crate) struct Editing {
     place: Place,
     edit: Edit,
     /// The call's, which its store keeps too.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     deadline: Time,
 }
 
 /// What a store does to the file, and so what it answers.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Change {
     /// Writes a file the kit knows nothing of.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Create,
     /// Writes over the file at the version the kit knows.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Replace,
     /// Writes the file edited, having `replaced` that many occurrences.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Edit { replaced: u32 },
 }
 
 /// What a call that passed its kit's entrance does.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Debug)]
 pub(crate) enum Work {
@@ -167,6 +184,7 @@ pub(crate) enum Work {
     },
     /// Runs `command` in `cwd` for at most `timeout`, with the kit's `env`,
     /// seeing its `roots`: copies of the kit's, made for the request.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Shell {
         cwd: Place,
@@ -185,6 +203,7 @@ pub(crate) enum Work {
 /// Starts a job for `work` in the kit `kit`, which has room for one, asking
 /// io for its operation by `deadline`, or sooner if the tools' own limit on
 /// file operations, or on commands, falls first.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn start(
     jobs: &mut Slab<Job>,
@@ -246,6 +265,7 @@ pub(crate) fn start(
 
 /// Cancels the job `id`'s operation, for its kit is closing. The job answers
 /// with whichever terminal comes.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn cancel(id: Id<Job>, out: &mut Queue<Request>) {
     out.push(Request::CancelIo { owner: id.token() });
@@ -277,6 +297,7 @@ pub(crate) fn done(domain: &mut Domain, env: &Env<Limits>, owner: Token, done: D
 
 /// The state a cell leads to: the one it moves to, or Done once it has
 /// answered the call, which is told as a fact.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn settle(next: Next, session: Token, tool: Tool, facts: &mut Facts, out: &mut Queue<Request>) -> State {
     match next {
@@ -291,6 +312,7 @@ fn settle(next: Next, session: Token, tool: Tool, facts: &mut Facts, out: &mut Q
 
 /// What a job's state implies, applied after every transition: a job that is
 /// Done is retired, and leaves its kit.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn follow(kits: &mut Slab<Kit>, jobs: &mut Slab<Job>, facts: &mut Facts, id: Id<Job>, out: &mut Queue<Request>) {
     let job = jobs.get(id).expect("a job lives until it is retired");
@@ -312,6 +334,7 @@ fn follow(kits: &mut Slab<Kit>, jobs: &mut Slab<Job>, facts: &mut Facts, id: Id<
 // comes next.
 
 /// Reading, ended: answer with the window, and know the version read.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn loaded(knowledge: &mut Knowledge, reply_to: ReplyTo, place: Place, span: Span, done: Done, limits: &Limits) -> Next {
     let outcome = match done {
@@ -341,6 +364,7 @@ fn loaded(knowledge: &mut Knowledge, reply_to: ReplyTo, place: Place, span: Span
 }
 
 /// Listing, ended: answer with the entries.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn scanned(reply_to: ReplyTo, done: Done) -> Next {
     let outcome = match done {
@@ -364,6 +388,7 @@ fn scanned(reply_to: ReplyTo, done: Done) -> Next {
 }
 
 /// Searching, ended: answer with the lines found, or how rg failed.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn found(reply_to: ReplyTo, done: Done) -> Next {
     let outcome = match done {
@@ -388,6 +413,7 @@ fn found(reply_to: ReplyTo, done: Done) -> Next {
 
 /// Editing, loaded: make the edit and store it, if the file is as its LLM
 /// read it and the kit is not closing.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn to_edit(
     kit: &mut Kit,
@@ -442,6 +468,7 @@ fn to_edit(
 }
 
 /// Storing, ended: answer, and know the version written.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn stored(knowledge: &mut Knowledge, reply_to: ReplyTo, place: Place, change: Change, done: Done) -> Next {
     let creating = change == Change::Create;
@@ -480,6 +507,7 @@ fn stored(knowledge: &mut Knowledge, reply_to: ReplyTo, place: Place, change: Ch
 }
 
 /// Running, ended: answer with how the command ended and what it wrote.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn exited(reply_to: ReplyTo, done: Done) -> Next {
     let outcome = match done {
@@ -504,6 +532,7 @@ fn exited(reply_to: ReplyTo, done: Done) -> Next {
 }
 
 /// The slots the job slab needs under `limits`, or `None` past a `u32`.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn slots(limits: &Limits) -> Option<u32> {
     limits.kits.checked_mul(limits.calls)?.checked_mul(2)
@@ -511,6 +540,7 @@ pub(crate) fn slots(limits: &Limits) -> Option<u32> {
 
 /// What a running job holds beyond its slot, or `None` past a `u64`: at most
 /// a place, and an edit's snippets.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn held(limits: &Limits) -> Option<u64> {
     u64::from(limits.file_bytes).checked_mul(2)?.checked_add(u64::from(limits.path_bytes))

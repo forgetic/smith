@@ -11,6 +11,7 @@ use skein_world::domain::{Expectations, Judge};
 use smith_domain::run::{Answer, Exit, Push, Spend, outcome::Declared};
 
 /// A host or provider observation, independent of the agent's private state.
+///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[derive(Debug)]
 #[expect(
@@ -19,83 +20,107 @@ use smith_domain::run::{Answer, Exit, Push, Spend, outcome::Declared};
 )]
 pub enum Seen {
     /// The scripted host starts its one request; an answer is due within `within`.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Started {
         /// Whether the charter permits a change.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         change: bool,
         /// Whether a change must pass the fixture's checks.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         checks: bool,
         /// The host's liveness allowance, including cancellation settlement.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         within: Duration,
     },
     /// The agent asks the provider for a completion; its owner may be reused
     /// only after the previous terminal has been observed.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Completing {
         /// The agent's name for the pending provider request.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         owner: Token,
     },
     /// One accepted provider terminal, counted once in the final spend.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Completed {
         /// The agent's completion owner, unique until that completion ends.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         owner: Token,
         /// The provider's independently reported usage for that completion.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         spent: Spend,
     },
     /// A provider request ended without usage, by failure or cancellation.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     CompletionEnded {
         /// The agent's name for the provider request being ended.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         owner: Token,
     },
     /// The checks' terminal as IO sends it to the agent.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Checked {
         /// The finishing call that asked for the check.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         owner: Token,
         /// Zero is the only passing code; timeout and cancellation never pass.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         exit: Exit,
     },
     /// The host sees a push request and snapshots exactly the checkout bytes.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Pushing {
         /// The finishing call that asked for the push.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         owner: Token,
         /// The independently observed checkout snapshot at the request.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         tree: Vec<u8>,
     },
     /// The host's terminal for a push, and what it actually retained as landed.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Pushed {
         /// The finishing call that asked for the push.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         owner: Token,
         /// Scripted host outcome; a successful push retains the snapshot.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         push: Push,
         /// Landed bytes for `Done`; empty for a refusal or stale branch.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         tree: Vec<u8>,
     },
     /// The host receives the one answer to its start.
+    ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Answered {
         /// The answer received at the boundary, never read from domain state.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         answer: Answer,
         /// Number of agent requests still awaiting terminals at that boundary.
+        ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
         pending: usize,
     },
@@ -109,6 +134,7 @@ enum Phase {
 }
 
 /// Scenario policy; its state is populated only by [`Seen`] observations.
+///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[derive(Debug)]
 pub struct Meeting {

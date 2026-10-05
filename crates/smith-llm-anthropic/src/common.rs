@@ -9,43 +9,55 @@ use skein_json::{Token, tokenizer, writer};
 use skein_lib::{Duration, List, Wall, bytes};
 
 /// Immutable ownership and document caps supplied by the caller to every entry point.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
     /// Maximum encoded request-body bytes.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub request_bytes: u32,
     /// Maximum complete JSON document bytes admitted by the codec.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub document_bytes: u32,
     /// Maximum decoded JSON string bytes.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub string_bytes: u32,
     /// Nesting or JSON depth, bounded by the enclosing immutable limits.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub depth: u32,
     /// Maximum tokenizer records retained from one bounded JSON document.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub tokens: u32,
     /// Maximum message parts, tool definitions or retained output parts.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub parts: u32,
     /// Maximum retained tool-call argument bytes.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub input_bytes: u32,
     /// Maximum retained provider-owned opaque-block bytes.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub opaque_bytes: u32,
     /// Maximum aggregate owned completion bytes.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub answer_bytes: u32,
     /// Maximum retained provider-error detail bytes.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub detail_bytes: u32,
 }
 
 impl Limits {
     /// Projects the caller's depth and document-byte caps into the bounded JSON writer.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub const fn writer_limits(&self) -> writer::Limits {
@@ -53,6 +65,7 @@ impl Limits {
     }
 
     /// Projects the caller's token, string and nesting caps into the JSON tokenizer.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub const fn tokenizer_limits(&self) -> tokenizer::Limits {
@@ -68,6 +81,7 @@ impl Limits {
 
 /// A conservative per-exchange bound including one event's tokens, temporary
 /// tokenizer/writer storage and a completion being handed to its owner.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
@@ -88,139 +102,176 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
 }
 
 /// Document admission failure; the codec returns no partial accepted document.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum DecodeError {
     /// Input has invalid syntax or violates the codec's structural contract.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Malformed,
     /// A required member is absent.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Missing,
     /// A member has a JSON type the contract does not permit.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     WrongType,
     /// A configured ownership, count or encoded-byte cap would be exceeded.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     TooLarge,
 }
 
 /// Provider stop reason translated without interpreting the assistant's content.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Stop {
     /// The provider ended its assistant turn.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     EndTurn,
     /// The provider asks for tool execution.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     ToolUse,
     /// The provider stopped at its requested output-token cap.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     MaxTokens,
     /// The provider declined to answer.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Refusal,
 }
 
 /// Accepted provider token counts, passed to the session for checked budget charging.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Usage {
     /// Fresh input tokens reported by the provider.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub input_tokens: u64,
     /// Output tokens reported by the provider.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub output_tokens: u64,
     /// Input tokens served from the provider's prompt cache.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub cache_read_tokens: u64,
     /// Input tokens written to the provider's prompt cache.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub cache_write_tokens: u64,
 }
 
 impl Usage {
     /// No accepted completions or token usage yet.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub const ZERO: Usage = Usage { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
 }
 
 /// Typed terminal classification produced from the provider's status, headers or stream failure.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Failure {
     /// The provider refused the credential.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Unauthorized,
     /// The provider reports its account allowance spent.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Exhausted {
         /// Optional provider cooldown, retained in the representation of this boundary.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         retry_after: Duration,
     },
     /// The provider asks the client to wait before retrying.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     RateLimited {
         /// Optional provider cooldown, retained in the representation of this boundary.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         retry_after: Duration,
     },
     /// The provider is temporarily overloaded.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Overloaded,
     /// The provider could not be reached or returned an unusable terminal.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Unavailable,
     /// The conversation no longer fits the provider's context window.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     ContextTooLong,
     /// The provider refused the request as unsupported or malformed.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Invalid,
 }
 
 /// Bounded decoded provider-error metadata; it contains no local clock or retry policy.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ProviderError {
     /// Typed entry classification or byte label required by the enclosing contract.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub kind: Box<[u8]>,
     /// Bounded provider error description, not a control decision.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub message: Box<[u8]>,
     /// Optional provider reset interval in seconds.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub resets_in_seconds: Option<u64>,
     /// Optional absolute provider reset timestamp.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub resets_at: Option<u64>,
 }
 
 /// Rate-limit header metadata collected for one response; absent hints retain conservative defaults.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct RateLimit {
     /// Optional provider cooldown, retained in the representation of this boundary.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub retry_after: Option<Duration>,
     /// Optional absolute rate-limit reset timestamp.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub reset: Option<u64>,
     /// Whether headers report a spent provider allowance.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub exhausted: bool,
 }
 
 impl RateLimit {
     /// No rate-limit headers have been observed for this response.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub const NONE: RateLimit = RateLimit { retry_after: None, reset: None, exhausted: false };
 
     /// Collects one response-header value as rate-limit metadata; unknown headers change nothing.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub fn observe(&mut self, name: &[u8], value: &[u8]) {
         if name.eq_ignore_ascii_case(b"retry-after") {
@@ -238,6 +289,7 @@ impl RateLimit {
     }
 
     /// Computes the provider's requested cooldown from headers and error metadata using the supplied wall time.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub fn delay(self, error: Option<&ProviderError>, wall: Wall) -> Duration {
@@ -260,6 +312,7 @@ impl RateLimit {
 }
 
 /// Classifies one provider status and bounded error body; retry timing uses only injected metadata and wall time.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[must_use]
 pub fn classify(status: u16, error: Option<&ProviderError>, rate: RateLimit, wall: Wall) -> Failure {

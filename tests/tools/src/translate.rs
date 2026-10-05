@@ -10,6 +10,7 @@ use smith_domain_tools::{
 };
 
 /// The path the LLM wrote, split at its slashes, as the protocol layer does.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn path(text: &[u8]) -> Path {
@@ -26,6 +27,7 @@ pub fn path(text: &[u8]) -> Path {
 }
 
 /// The names of the absolute path `text`.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn names(text: &[u8]) -> Box<[Name]> {
@@ -44,6 +46,7 @@ fn name_of(bytes: &[u8]) -> Name {
 }
 
 /// The token io gives the fake's root `root`, and back.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn token(root: u64) -> Token {
@@ -55,6 +58,7 @@ fn root(token: Token) -> u64 {
 }
 
 /// io's version for the fake's, and back.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn version(version: u64) -> Version {
@@ -68,21 +72,26 @@ fn fake_version(version: Version) -> u64 {
 
 /// A command io starts for a spawn, with how much of its output to keep:
 /// what runs, its first bytes and its last.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub struct Started {
     /// Contained fake process handle, consumed only by its one terminal.
+    ///
     /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub process: fake::Process,
     /// First output bytes retained under the caller's cap.
+    ///
     /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub head: u32,
     /// Last output bytes retained under the caller's cap.
+    ///
     /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub tail: u32,
 }
 
 /// Starts the command of a spawn on the checkout, as io would, or the
 /// terminal that says why it did not start.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub fn spawn(
     checkout: &fake::Checkout,
@@ -102,6 +111,7 @@ pub fn spawn(
 
 /// How io ends a command that ran: with `exit`, or timed out if `None`, having
 /// written `output`, of which it keeps the head and the tail.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn exited(exit: Option<fake::Exit>, output: &[u8], head: u32, tail: u32) -> Done {
@@ -119,6 +129,7 @@ pub fn exited(exit: Option<fake::Exit>, output: &[u8], head: u32, tail: u32) -> 
 
 /// Runs `op` on the checkout, as io would, and returns its terminal. A spawn
 /// is started instead ([`spawn`]).
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub fn perform(checkout: &mut fake::Checkout, op: Op) -> Done {
     match op {
@@ -166,6 +177,7 @@ pub fn perform(checkout: &mut fake::Checkout, op: Op) -> Done {
 /// What a search that would have ended in `done` had found when it was
 /// killed, `ran` nanoseconds into the `whole` it would have taken: the share
 /// of its hits found by then, and no count of more.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn cut(done: Done, ran: u128, whole: u128) -> Done {

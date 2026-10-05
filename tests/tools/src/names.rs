@@ -3,6 +3,7 @@
 use smith_domain_tools::Outcome;
 
 /// The name of the kind of `outcome`.
+///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn kind(outcome: &Outcome) -> &'static str {

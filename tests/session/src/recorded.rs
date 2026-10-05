@@ -7,19 +7,23 @@ use smith_domain_session::{self as session, llm, record};
 use smith_domain_tools::{Authority, Effect, Grants};
 
 /// Integer prices used by the concrete transcript scenarios; pricing performs no live account lookup.
+///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub const PRICES: record::Prices = record::Prices { input: 7, cached: 3, output: 11, unit: 10 };
 
 /// Fixed provider usage supplied by concrete transcript scenarios.
+///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub const USAGE: llm::Usage =
     llm::Usage { input_tokens: 11, output_tokens: 4, cache_read_tokens: 5, cache_write_tokens: 3 };
 
 /// Fixed opaque provider bytes whose exact replay preservation is asserted.
+///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub const OPAQUE: &[u8] = b"\0provider reasoning\xffsignature";
 
 /// Builds the concrete version-two opening with the supplied transcript and integer spend cap.
+///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn opening(transcript: Option<record::Transcript>, budget: u64) -> record::Opening {
@@ -47,55 +51,71 @@ pub fn opening(transcript: Option<record::Transcript>, budget: u64) -> record::O
 }
 
 /// Real domain plus scripted typed peers, pending terminals and external observations for this component story.
+///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub struct World {
     /// Real session state under test, advanced only through its declared boundary.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub domain: session::Domain,
     /// Injected monotonic and wall times together with immutable session limits.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub env: Env<session::Limits>,
     /// Bounded queue of owned session requests awaiting scripted delivery.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub out: Queue<session::Request>,
     /// Current admitted session identity, or none before admission or after its terminal.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub session: Option<Token>,
     /// Pending provider completion identity; its single terminal consumes it.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completing: Option<Token>,
     /// Pending opener-served call identities, each requiring one terminal.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub delegated: Vec<Token>,
     /// Pending checkout-operation identities and their owned typed requests.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub operations: Vec<(Token, smith_domain_tools::Op)>,
     /// Identities for which the domain requested cancellation; their terminals remain owed.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub cancelled_operations: Vec<Token>,
     /// Complete deterministic state snapshots at loop boundaries, separate
     /// from the referee's external observations.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub snapshots: Vec<String>,
     /// Concrete provider prompts in their observed request order.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub prompts: Vec<llm::Prompt>,
     /// Concrete transcript turns emitted by the session, in order.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub turns: Vec<record::Turn>,
     /// Accepted cumulative integer charges and their overflow flags, in request order.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub spend: Vec<(u64, bool)>,
     /// The single settled session terminal, or none while work remains.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub end: Option<session::End>,
     /// Ordered deterministic boundary record renderings used for replay comparisons.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub trace: Vec<String>,
 }
 
 impl World {
     /// Constructs empty bounded state under the supplied immutable limits; no IO or clocks are consulted.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn new(seed: u64, facts: u32) -> World {
@@ -123,6 +143,7 @@ impl World {
     }
 
     /// Delivers one typed terminal or entrance, drains the emitted requests and checks terminal ownership.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub fn step(&mut self, event: session::Event) {
         match &event {
@@ -201,12 +222,14 @@ impl World {
     }
 
     /// Delivers a new typed opening to the scripted peer or real session and retains its pending terminal obligations.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub fn open(&mut self, opening: record::Opening) {
         self.step(session::Event::OpenV2 { opener: Token::new(31), spec: opening });
     }
 
     /// Answers the pending provider completion with the supplied blocks and fixed usage.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub fn complete(&mut self, content: Box<[llm::Block]>, stop: llm::Stop, usage: llm::Usage) {
         self.step(session::Event::Completed {
@@ -216,6 +239,7 @@ impl World {
     }
 
     /// Requests session closure; lower terminals must still be delivered before settlement.
+    ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub fn close(&mut self) {
         self.step(session::Event::Close { session: self.session.expect("admitted") });
@@ -232,6 +256,7 @@ impl World {
 }
 
 /// Builds a concrete provider call block naming the opener-served fixture tool.
+///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn called() -> Box<[llm::Block]> {
@@ -247,6 +272,7 @@ pub fn called() -> Box<[llm::Block]> {
 }
 
 /// Runs the fixed concrete transcript story and returns its external observations.
+///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn scenario(seed: u64, facts: u32) -> World {
@@ -283,6 +309,7 @@ pub fn scenario(seed: u64, facts: u32) -> World {
 }
 
 /// Copies the settled concrete turns into a replayable version-two transcript.
+///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn transcript(world: &World) -> record::Transcript {

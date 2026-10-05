@@ -15,6 +15,7 @@ use crate::session::{self, Alarm, Calls, Ready, Session};
 /// and cancels closing sends for a batch; and what one step of the tools
 /// emits besides (an operation's next one, or the cancels of a kit's close).
 /// The parent reserves this much room in `out` before calling it.
+///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[must_use]
 pub const fn max_out(limits: &Limits) -> u32 {
@@ -26,6 +27,7 @@ pub const fn max_out(limits: &Limits) -> u32 {
 /// own four, and a batch of delegated calls, a request each, or the withdraws
 /// closing sends for one (a step starts a batch or cancels one, never both).
 /// The tools' operations and their cancels never reach the opener.
+///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[must_use]
 pub const fn max_to_opener(limits: &Limits) -> u32 {
@@ -33,15 +35,18 @@ pub const fn max_to_opener(limits: &Limits) -> u32 {
 }
 
 /// The session child domain's state.
+///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Debug)]
 pub struct Domain {
     pub(crate) sessions: Slab<Session>,
     /// What runs the sessions' tool calls: the tools, which the session owns.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub(crate) calls: Calls,
     pub(crate) alarms: Deadlines<Alarm>,
     /// Sessions resting after a batch answered at once.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub(crate) ready: Ready,
     pub(crate) rng: Rng,
@@ -50,6 +55,7 @@ pub struct Domain {
 
 impl Domain {
     /// A domain with room for `limits`, drawing randomness from `seed`.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     #[must_use]
     pub fn new(limits: &Limits, seed: u64) -> Domain {
@@ -71,6 +77,7 @@ impl Domain {
     }
 
     /// Sessions present, closed ones included until they are reclaimed.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     #[must_use]
     pub fn sessions(&self) -> u32 {
@@ -79,6 +86,7 @@ impl Domain {
 
     /// Tool runs present, the tools' and the opener's, ended ones included
     /// until they are reclaimed.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     #[must_use]
     pub fn runs(&self) -> u32 {
@@ -86,6 +94,7 @@ impl Domain {
     }
 
     /// Kits present, closed ones included until they are reclaimed.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     #[must_use]
     pub fn kits(&self) -> u32 {
@@ -94,6 +103,7 @@ impl Domain {
 
     /// Calls the tools are running, answered ones included until they are
     /// reclaimed.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     #[must_use]
     pub fn jobs(&self) -> u32 {
@@ -101,6 +111,7 @@ impl Domain {
     }
 
     /// When the earliest alarm falls due.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     #[must_use]
     pub fn next_deadline(&self) -> Option<Time> {
@@ -109,6 +120,7 @@ impl Domain {
 
     /// Whether an alarm is due at `now`. While one is, the loop fires the
     /// root domain, which calls [`fire`].
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     #[must_use]
     pub fn is_due(&self, now: Time) -> bool {
@@ -121,6 +133,7 @@ impl Domain {
     /// Whether a session is ready to go on. While one is, the loop resumes the
     /// root domain, which calls [`resume`], at the start of the domain's
     /// stage, before its input events.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     #[must_use]
     pub fn is_ready(&self) -> bool {
@@ -130,6 +143,7 @@ impl Domain {
     /// The oldest fact not yet drained, the tools' among them. The parent
     /// drains them at its own pace; what does not fit meanwhile is dropped and
     /// counted.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub fn pop_fact(&mut self) -> Option<Fact> {
         self.facts.pop()
@@ -137,6 +151,7 @@ impl Domain {
 
     /// How many facts were dropped for want of room, the tools' included,
     /// since the domain was made.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     #[must_use]
     pub fn facts_lost(&self) -> u64 {
@@ -144,6 +159,7 @@ impl Domain {
     }
 
     /// The reclaim point: frees what closed in this iteration.
+    ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub fn reclaim(&mut self) {
         self.sessions.reclaim();
@@ -154,6 +170,7 @@ impl Domain {
 }
 
 /// Handles one event, emitting at most [`max_out`] requests.
+///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     match event {
@@ -181,6 +198,7 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
 /// [`max_out`] requests. A stage fires its alarms after its input events, so
 /// progress that arrived in the same iteration wins over a deadline that passed
 /// while the loop waited.
+///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     let Some(alarm) = domain.alarms.expire(env.now) else {
@@ -196,6 +214,7 @@ pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
 /// Starts a session on the ready list again, if one is, emitting at most
 /// [`max_out`] requests: one that rested in an earlier iteration, after a
 /// batch the tools answered within the step that started it.
+///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub fn resume(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     let Some(id) = domain.ready.pop() else {

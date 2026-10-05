@@ -9,112 +9,143 @@ use skein_json::{Token, writer::Encoder};
 use skein_lib::{List, bytes};
 
 /// Sender of one provider conversation message.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Role {
     /// User or tool-result side of the conversation.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     User,
     /// Provider-produced assistant side of the conversation.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Assistant,
 }
 
 /// One ordered provider input item; call IDs and opaque items are preserved on replay.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Input {
     /// One ordered provider message item, optionally naming its replay identity and phase.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Message {
         /// Sender of this message in the provider-neutral conversation.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         role: Role,
         /// Owned UTF-8 text, bounded by the enclosing message or output cap.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         text: Box<[u8]>,
         /// Provider-issued tool-call identifier, preserved verbatim in its result.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         id: Option<Box<[u8]>>,
         /// Optional provider phase label, preserved on replay.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         phase: Option<Box<[u8]>>,
     },
     /// Provider function call, retaining call and item identities with its arguments.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     FunctionCall {
         /// Provider-issued tool-call identity, echoed on its output.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         call_id: Box<[u8]>,
         /// Optional provider response-item identity, preserved verbatim.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         item_id: Option<Box<[u8]>>,
         /// Boundary name, compared byte for byte; it carries no authority by itself.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         name: Box<[u8]>,
         /// Provider-written JSON tool arguments, retained within the enclosing byte cap.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         arguments: Box<[u8]>,
     },
     /// Client output for the function-call identity.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     FunctionOutput {
         /// Provider-issued tool-call identity, echoed on its output.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         call_id: Box<[u8]>,
         /// Owned output bytes retained within the enclosing output cap.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         output: Box<[u8]>,
     },
     /// Provider-owned replay data, preserved verbatim and never interpreted by the domain.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Opaque {
         /// Provider-owned JSON replay value, bounded by document limits and preserved without interpretation.
+        ///
         /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         value: Json,
     },
 }
 
 /// One offered provider tool with its bounded name, description and validated schema.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Tool {
     /// Boundary name, compared byte for byte; it carries no authority by itself.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub name: Box<[u8]>,
     /// Owned display text for the offered tool; the model alone interprets it.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub description: Box<[u8]>,
     /// Validated bounded JSON schema supplied for the offered tool.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub schema: Json,
 }
 
 /// Complete typed provider request; the encoder validates it before allocating a bounded body.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Request {
     /// Provider model name, treated as bytes by the domain.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub model: Box<[u8]>,
     /// Provider system instructions, encoded without domain interpretation.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub instructions: Box<[u8]>,
     /// Tools offered or granted by this record; their names confer no additional authority.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub tools: Box<[Tool]>,
     /// Ordered provider input items, bounded by request and document limits.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub input: Box<[Input]>,
     /// Optional provider reasoning-effort label.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub effort: Option<Box<[u8]>>,
     /// Optional provider cache key, preserved on the wire.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub prompt_cache_key: Option<Box<[u8]>>,
 }
 
 /// Validates the typed request before allocating its bounded encoded body; errors return no partial request.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn encode_request(request: &Request, limits: &Limits) -> Result<Box<[u8]>, DecodeError> {
     let len = measure_request(request, limits)?;
@@ -125,6 +156,7 @@ pub fn encode_request(request: &Request, limits: &Limits) -> Result<Box<[u8]>, D
 }
 
 /// Validates and measures without allocating the request's body.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn measure_request(request: &Request, limits: &Limits) -> Result<u32, DecodeError> {
     validate(request, limits)?;
@@ -292,6 +324,7 @@ fn write_input(out: &mut Encoder, input: &Input) {
 }
 
 /// Decodes one complete bounded request document for the fake peer; rejects malformed or oversized members.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn decode_request(value: &Json, limits: &Limits) -> Result<Request, DecodeError> {
     let mut admission =

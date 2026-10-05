@@ -20,11 +20,13 @@ use crate::outcome::{ChangeSpec, Children, OutcomeSpec, VerdictRule};
 use crate::prepare::{self, Found, Guide};
 
 /// The first user message of a main conversation.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) const BEGIN: &[u8] = b"Begin the work your brief describes.";
 
 /// The system text of a run's main conversation, given what the run found in
 /// its checkout.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn system(charter: &Charter, found: &Found) -> Box<[u8]> {
     let families = Families::of(&charter.grants);
@@ -36,6 +38,7 @@ pub(crate) fn system(charter: &Charter, found: &Found) -> Box<[u8]> {
 }
 
 /// The system text of a sub-agent asked for with `brief` and `families`.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn child(charter: &Charter, found: &Found, brief: &[u8], families: Families) -> Box<[u8]> {
     let mut measured = Text::measuring();
@@ -47,6 +50,7 @@ pub(crate) fn child(charter: &Charter, found: &Found, brief: &[u8], families: Fa
 
 /// What a run says to an LLM that stopped for `stop` without finishing, in its
 /// nudge numbered `nudge` of `nudges`.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn nudge(stop: Stop, nudge: u32, nudges: u32) -> Box<[u8]> {
     let mut measured = Text::measuring();
@@ -57,6 +61,7 @@ pub(crate) fn nudge(stop: Stop, nudge: u32, nudges: u32) -> Box<[u8]> {
 }
 
 /// The system text of main, or of a sub-agent: on `brief`, with `families`.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn render_system(text: &mut Text, charter: &Charter, found: &Found, brief: &[u8], families: Families, main: bool) {
     if !brief.is_empty() {
@@ -111,6 +116,7 @@ fn render_agents(text: &mut Text, models: &[Llm]) {
 
 /// One blank line after a text that came as it is, whether or not it ends
 /// its last line.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn end_paragraph(text: &mut Text, came: &[u8]) {
     if !came.ends_with(b"\n") {
@@ -201,6 +207,7 @@ fn name(repositories: &[Repository], index: u32) -> &Repository {
 }
 
 /// A verdict and its contract, as one item of a list.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn render_verdict(text: &mut Text, rule: &VerdictRule) {
     text.put(b"- `");
@@ -233,6 +240,7 @@ fn render_verdict(text: &mut Text, rule: &VerdictRule) {
 }
 
 /// Labels in backticks, as a list in prose: `a`, `b` and `c`.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn render_labels(text: &mut Text, labels: &[Box<[u8]>], last: &[u8]) {
     let mut rest = labels.len();
@@ -265,12 +273,15 @@ fn render_nudge(text: &mut Text, stop: Stop, nudge: u32, nudges: u32) {
 
 /// A text being rendered: measured first, then written into a box of exactly
 /// the length measured.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 struct Text {
     /// The bytes put so far.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     len: usize,
     /// Where they go, once the text has been measured.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     writer: Option<Writer>,
 }
@@ -281,6 +292,7 @@ impl Text {
     }
 
     /// A text to write what this one measured.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     fn writing(self) -> Text {
         Text { len: 0, writer: Some(Writer::new(self.len)) }
@@ -294,6 +306,7 @@ impl Text {
     }
 
     /// `n` in decimal digits.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     fn put_decimal(&mut self, n: u32) {
         let mut digits = [b'0'; 10];
@@ -330,6 +343,7 @@ mod tests {
     use crate::tests::{bytes, charter, rule};
 
     /// A rendered text, to compare and print.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[expect(clippy::disallowed_methods, reason = "a test reads the text it checks")]
     fn text(bytes: &[u8]) -> &str {
@@ -338,6 +352,7 @@ mod tests {
 
     /// What a run of the test charter found: a guide for `temper`, cut, and
     /// checks in `docs`.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     fn found() -> Found {
         let mut found = Found::with_capacity(2);

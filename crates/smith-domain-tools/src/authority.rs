@@ -16,74 +16,91 @@ use crate::limits::Limits;
 use crate::path::{self, Name, Path, Place};
 
 /// What a kit is given when it opens.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Authority {
     /// Where relative paths start: an absolute path, as names.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub cwd: Box<[Name]>,
     /// The repositories of the checkout. Paths outside them all are refused.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub repos: Box<[Repo]>,
     /// Explicit authority supplied by the opener, never inferred from role or text.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub grants: Grants,
     /// The environment commands run with, whole: io gives a process this and
     /// nothing it would inherit, so no credential reaches a command unless it
     /// is put here.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub env: Box<[Var]>,
 }
 
 /// A variable of a command's environment. Its name is not empty and has no
 /// `=` or NUL in it, and its value has no NUL.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Var {
     /// Boundary name, compared byte for byte; it carries no authority by itself.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub name: Box<[u8]>,
     /// Explicit environment value bytes; name and value count against `Limits.env_bytes`.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub value: Box<[u8]>,
 }
 
 /// A repository of the checkout.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Repo {
     /// Where it is: the absolute path of its root, as names. A repository
     /// mounted inside another holds what is beneath its own mount.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub mount: Box<[Name]>,
     /// io's name for its root directory, beneath which io resolves every
     /// place in it.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub root: Token,
     /// Whether this mount permits modification; protected git paths remain unwritable.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub writable: bool,
 }
 
 /// The families of tools a kit may use.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Grants {
     /// Read, list and search.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub inspect: bool,
     /// Write and edit, in the writable repositories. Without it, nothing the
     /// kit does writes a file: its commands see every repository read-only.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub modify: bool,
     /// Run commands. A command may write only where the kit may write, which
     /// needs modify too, and never in a repository's git directory.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub shell: bool,
 }
 
 /// An authority as a kit keeps it, with its mounts joined for choosing among
 /// them.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Checkout {
@@ -92,6 +109,7 @@ pub(crate) struct Checkout {
     pub(crate) grants: Grants,
     pub(crate) env: Box<[Var]>,
     /// The repositories' roots, and which a command may write.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub(crate) roots: Box<[Root]>,
 }
@@ -99,6 +117,7 @@ pub(crate) struct Checkout {
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Mount {
     /// The repository's mount, its names joined by `/`.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub(crate) at: Box<[u8]>,
     pub(crate) root: Token,
@@ -106,6 +125,7 @@ pub(crate) struct Mount {
 }
 
 /// Where a path is, and whether the kit may write there.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(PartialEq, Eq, Debug)]
 pub(crate) struct Located {
@@ -118,6 +138,7 @@ pub(crate) struct Located {
 /// writability depend on their order) or with one root, a path longer than
 /// the tools take, an environment larger than they take, or a variable that
 /// cannot be one.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn admit(authority: Authority, limits: &Limits) -> Option<Checkout> {
     let repos = u32::try_from(authority.repos.len()).ok()?;
@@ -167,6 +188,7 @@ pub(crate) fn admit(authority: Authority, limits: &Limits) -> Option<Checkout> {
 
 /// What `env` costs against `Limits::env_bytes`: its names and values, and a
 /// byte for each `=` between them; or `None` if a variable cannot be one.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn env_cost(env: &[Var]) -> Option<u64> {
     let mut cost: u64 = 0;
@@ -191,6 +213,7 @@ pub(crate) fn env_cost(env: &[Var]) -> Option<u64> {
 }
 
 /// Whether `grants` cover `call`.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) const fn granted(grants: Grants, call: &Call) -> bool {
     match call {
@@ -202,6 +225,7 @@ pub(crate) const fn granted(grants: Grants, call: &Call) -> bool {
 
 /// Where `path` is in `checkout`, or the outcome that refuses it: `TooLong`
 /// past `max` bytes, `Outside` beyond every repository.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn locate(checkout: &Checkout, path: &Path, max: u32) -> Result<Located, Outcome> {
     let Some(at) = path::normalise(&checkout.cwd, path, max) else {
@@ -219,6 +243,7 @@ pub(crate) fn locate(checkout: &Checkout, path: &Path, max: u32) -> Result<Locat
 /// The repository that holds `at`, an absolute path's names joined: the one
 /// with the longest mount that is `at` or a directory above it, and the first
 /// of those mounted there; `None` if `at` is outside them all.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn choose(mounts: &[Mount], at: &[u8]) -> Option<usize> {
     let mut chosen: Option<(usize, usize)> = None;
@@ -240,6 +265,7 @@ pub(crate) fn choose(mounts: &[Mount], at: &[u8]) -> Option<usize> {
 
 /// Where the path beneath `mount` starts in `at`, or `None` if `mount` does not
 /// hold `at`.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn beneath(mount: &[u8], at: &[u8]) -> Option<usize> {
     // The root holds everything.

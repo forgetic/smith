@@ -15,70 +15,90 @@ use crate::path::{Name, Place};
 
 /// The tools child domain's limits (programming-model.md, sections 4.5 and 6.3), handed by its parent to every
 /// step read-only.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
     /// Kits at once, one per session. An open beyond them is refused as busy.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub kits: u32,
     /// Calls a kit runs at once. A call beyond them is answered `Busy`.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub calls: u32,
     /// Repositories an authority may name.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub repos: u32,
     /// The longest path the tools take, in bytes, as an absolute path's names
     /// joined by `/`: a path a call names, a mount, the working directory.
     /// A call's spelling before normalisation must also fit, including dots.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub path_bytes: u32,
     /// Files a kit remembers the LLM read. Past them, the one read longest
     /// ago is forgotten, and must be read again before it is changed.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub known_files: u32,
     /// The largest file the tools load or store.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub file_bytes: u32,
     /// The most content a read answers with.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub read_bytes: u32,
     /// The most entries a listing answers with.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub list_entries: u32,
     /// The most line numbers an ambiguous edit answers with.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub match_lines: u32,
     /// How long a file operation may take, within its call's deadline.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub file_timeout: Duration,
     /// The most an authority's environment may hold: its names and values,
     /// with a byte for each `=`.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub env_bytes: u32,
     /// How long a command may run if its call does not say, and the longest
     /// it may ask for; both within the call's deadline.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub shell_timeout: Duration,
     /// Maximum accepted explicit shell timeout; larger requests are refused.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub shell_timeout_max: Duration,
     /// How much of a command's output is kept: its first bytes, and its last.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub shell_head: u32,
     /// Last output bytes retained from a contained shell process.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub shell_tail: u32,
     /// The most lines a search answers with, and the most text in them.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub search_hits: u32,
     /// Maximum aggregate retained search-path and text bytes.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub search_bytes: u32,
     /// How long a search may take, within its call's deadline.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub search_timeout: Duration,
     /// Facts kept until the parent drains them. Beyond them, facts are
     /// dropped and counted.
+    ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub facts: u32,
 }
@@ -90,6 +110,7 @@ pub struct Limits {
 /// allocator overhead. What travels in events and requests is counted by the
 /// layer that holds it: the content of a file loaded or to be stored, and the
 /// outcomes answered.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
@@ -113,6 +134,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
 /// What one kit holds beyond its slot: its authority, each path in it at most
 /// `path_bytes` joined; what its LLM knows, a place for each file; and its
 /// jobs' names.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn kit(limits: &Limits) -> Option<u64> {
     let known = u64::from(limits.known_files).checked_mul(u64::from(limits.path_bytes))?;
@@ -122,6 +144,7 @@ fn kit(limits: &Limits) -> Option<u64> {
 }
 
 /// What a kit's authority holds, each path in it at most `path_bytes` joined.
+///
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn authority(limits: &Limits) -> Option<u64> {
     let path_bytes = u64::from(limits.path_bytes);

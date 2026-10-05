@@ -12,46 +12,57 @@ use smith_llm_anthropic as anthropic;
 use smith_llm_openai as openai;
 
 /// Selected provider dialect for the fake's request and answer document codecs.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Provider {
     /// Anthropic document and stream dialect.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Anthropic,
     /// `OpenAI` Responses document and stream dialect.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     OpenAi,
 }
 
 /// Immutable ownership and document caps supplied by the caller to every entry point.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Limits {
     /// Bounds for the Anthropic dialect's documents and stream.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub anthropic: anthropic::Limits,
     /// Bounds for the `OpenAI` dialect's documents and stream.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub openai: openai::Limits,
     /// Responses subscription requests have no wire token limit. The fake
     /// uses an explicit configured model ceiling, never invents a wire field.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub model_ceiling: u32,
 }
 
 /// Typed refusal or terminal failure of the fake peer, independent of the agent's policy.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Error {
     /// Input has invalid syntax or violates the codec's structural contract.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Malformed,
     /// A configured ownership, count or encoded-byte cap would be exceeded.
+    ///
     /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     TooLarge,
 }
 
 /// Decodes the selected provider's bounded request body into the neutral fake query, without interpreting agent policy.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn request(provider: Provider, data: &[u8], limits: &Limits) -> Result<api::Query, Error> {
     match provider {
@@ -195,6 +206,7 @@ fn openai_request(data: &[u8], limits: &Limits) -> Result<api::Query, Error> {
 
 /// Measures one next event, rather than retaining an encoded response tape.
 /// The server keeps its neutral Answer and one writer event at a time.
+///
 /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn event(
     provider: Provider,

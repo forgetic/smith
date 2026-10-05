@@ -187,6 +187,7 @@ fn finish(arguments: &[u8]) -> Option<run::outcome::Declared> {
 
 /// The copied scripts use unescaped string fields. This recognizes that finite
 /// fixture language, never arbitrary JSON or production provider documents.
+///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 fn field(arguments: &[u8], name: &[u8]) -> Option<Box<[u8]>> {
     let prefix = [b"\"", name, b"\":\""].concat();

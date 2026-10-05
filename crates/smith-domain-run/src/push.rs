@@ -4,6 +4,7 @@
 
 /// The last bytes of a failed git invocation's diagnostic output. The fixed
 /// protocol cap bounds every terminal, landing and reply without allocation.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PushDiagnostic {
@@ -14,10 +15,12 @@ pub struct PushDiagnostic {
 
 impl PushDiagnostic {
     /// The maximum diagnostic tail carried across the protocol boundary.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub const CAPACITY: usize = 512;
 
     /// Keep the latest diagnostic bytes, counting bytes already dropped by io.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub fn new(output: &[u8], cut: u64) -> Self {
@@ -35,6 +38,7 @@ impl PushDiagnostic {
     }
 
     /// An invocation for which io has no diagnostic output.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub const fn empty() -> Self {
@@ -42,6 +46,7 @@ impl PushDiagnostic {
     }
 
     /// The retained diagnostic tail.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub fn output(&self) -> &[u8] {
@@ -49,6 +54,7 @@ impl PushDiagnostic {
     }
 
     /// Bytes preceding the tail, dropped by io or by this value's constructor.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub const fn cut(&self) -> u64 {
@@ -57,68 +63,87 @@ impl PushDiagnostic {
 }
 
 /// Why a declared change did not land.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PushReason {
     /// The host could not find the requested repository.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     MissingRepository,
     /// The host could not find the requested branch.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     MissingBranch,
     /// The host could not find the requested commit.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     MissingCommit,
     /// The entrance or operation was refused with the enclosing typed reason.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Refused,
     /// The host could not reach its remote.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Unreachable,
     /// The lower layer classified a broken operation.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Broken,
     /// The injected operation deadline won the race.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     TimedOut,
     /// The caller cancelled and the terminal settled.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Cancelled,
     /// The provider could not be reached or returned an unusable terminal.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Unavailable,
     /// No capacity is currently available; a later call may fit.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Busy,
     /// A configured ownership, count or encoded-byte cap would be exceeded.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     TooLarge,
     /// No writable repository contained a change.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Nothing,
     /// A boundary supplied no more specific reason.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Unknown,
 }
 
 /// Feedback from a push: the first failed repository in workspace order, its
 /// typed reason and bounded git output. Branch movement takes precedence.
+///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PushFailure {
     /// First failed repository in workspace order, or none for a workspace-wide failure.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub repository: Option<u32>,
     /// Typed terminal reason supplied by the lower layer.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub reason: PushReason,
     /// Fixed diagnostic tail, at most 512 bytes with the dropped-byte count retained.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub diagnostic: PushDiagnostic,
 }
 
 impl PushFailure {
     /// A failure not associated with a repository or diagnostic output.
+    ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub const fn new(reason: PushReason) -> Self {

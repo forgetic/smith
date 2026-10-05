@@ -9,6 +9,7 @@ use skein_lib::stream::{Down, Read, Up};
 use skein_lib::{Env, List, Queue, Stack, Time, Wall, bytes};
 
 /// Validated bounded JSON token document, owned by the dialect codec without a generic value tree.
+///
 /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Json {
@@ -25,6 +26,7 @@ enum Frame {
 impl Json {
     /// Parses a whole bounded document. The connection may instead collect
     /// tokenizer tokens with `Collector` to keep tokenization incremental.
+    ///
     /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub fn from_bytes(input: &[u8], limits: &Limits) -> Result<Json, DecodeError> {
         if input.len() > usize::try_from(limits.document_bytes).expect("u32 fits usize") {
@@ -84,6 +86,7 @@ impl Json {
     }
 
     /// Validates one complete token document under limits; returns no accepted value on malformed or oversized input.
+    ///
     /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub fn from_tokens(tokens: &[Token], limits: &Limits) -> Result<Json, DecodeError> {
         let mut collector = Collector::new(limits);
@@ -95,6 +98,7 @@ impl Json {
     }
 
     /// Borrows the validated token document in its original order without allocating.
+    ///
     /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     #[must_use]
     pub fn as_tokens(&self) -> &[Token] {
@@ -102,6 +106,7 @@ impl Json {
     }
 
     /// Encodes the validated document within the caller's request-byte and nesting caps, or returns a typed refusal.
+    ///
     /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub fn to_bytes(&self, limits: &Limits) -> Result<Box<[u8]>, DecodeError> {
         let bounded = limits.writer_limits();
@@ -154,6 +159,7 @@ impl Json {
 
 /// Incremental ownership of tokens from skein-json, under explicit count and
 /// byte bounds. Finish checks grammar before the writer can see them.
+///
 /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Debug)]
 pub struct Collector {
@@ -165,6 +171,7 @@ pub struct Collector {
 
 impl Collector {
     /// Constructs empty bounded state under the supplied immutable limits; no IO or clocks are consulted.
+    ///
     /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     #[must_use]
     pub fn new(limits: &Limits) -> Collector {
@@ -199,6 +206,7 @@ impl Collector {
     }
 
     /// Accepts one bounded JSON token into the collector; malformed or oversized input ends acceptance with an error.
+    ///
     /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub fn push(&mut self, token: Token) -> Result<(), DecodeError> {
         let bytes = self.check(&token)?;
@@ -212,6 +220,7 @@ impl Collector {
     }
 
     /// Validates and freezes the collected document under limits; incomplete or malformed input yields no accepted value.
+    ///
     /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub fn finish(self, limits: &Limits) -> Result<Json, DecodeError> {
         validate(self.tokens.as_slice(), limits.depth)?;
