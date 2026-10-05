@@ -1,8 +1,8 @@
 //! The provider-neutral vocabulary of a conversation with an LLM.
 //!
-//! The domain speaks this to every provider. The protocol layer turns it into
-//! each provider's wire format (the Anthropic and `OpenAI` APIs, ...) and back,
-//! and classifies whatever goes wrong as a [`Failure`]. It owns the schemas of
+//! The domain speaks this to the provider-neutral shared Client. Smith's
+//! protocol translates this vocabulary and actual terminals; Skein owns wire
+//! formats and failure classification. Smith owns the application schemas of
 //! the tools a prompt offers, decodes the JSON the LLM writes as a tool's input
 //! into a typed call, or into the [`Problem`] that keeps it from being one, and
 //! renders what comes of a call as the text the LLM reads. The domain never
@@ -29,8 +29,8 @@ pub struct Endpoint(
 );
 
 /// A complete shared-client replay envelope, preserved opaquely by the domain.
-/// The protocol owns its format and attests its size before delivering a block;
-/// this wrapper and all bytes count against completion and transcript ownership.
+/// Skein owns its format; Smith's protocol attests its size before delivering a block.
+/// This wrapper and all bytes count against completion and transcript ownership.
 /// Contract: domain/session.md, sections 3 and 12.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Replay {

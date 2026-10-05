@@ -62,7 +62,7 @@ removal remain open. Their earlier evidence updates changed Markdown only.
 
 ## Reviewed temporary consumer checkpoints
 
-The current session cannot write original repository metadata or Smith/Skein
+The current session cannot write original repository metadata or original Smith/Skein
 source. These reviewed checkpoints live under `/tmp/temper-smith-resume/`;
 original main branches have not moved. The current temporary consumer pins
 all 13 canonical Skein packages coherently to temporary
@@ -82,7 +82,8 @@ until required shared and consumer acceptance permits their coherent removal.
 | Attained root-entry and caller-copy memory | Smith 8c51dff | Reviewed; fmt/clippy pass; 499 focused / 2.047 s; 10 fuzzy / 4.305 s. |
 | Observed bounded message sweep | Smith a54edcb | Reviewed; fmt/clippy pass; 499 focused / 2.141 s; 11 fuzzy / 4.478 s. |
 | Native continuation and host-origin oracle | Smith 8010bf4 | Reviewed; fmt/clippy pass; 504 focused / 2.103 s; 11 fuzzy / 4.403 s; 13 scoped controls / 0.075 s. |
-| Single-lifecycle combined native memory | Smith base 8010bf4 plus frozen Rust blob 739c102e0a05575d2810b1f718b3480c0be4f33d | Exact source/lock reviewed; fmt/clippy pass; one scoped control / 0.672 s; 504 focused / 2.097 s; 11 fuzzy / 4.445 s. |
+| Single-lifecycle combined native memory | Smith 1a0bdfee5c64fe3377033bf976f1f5a70dd3c72e | Exact source/lock reviewed; fmt/clippy pass; one scoped control / 0.672 s; 504 focused / 2.097 s; 11 fuzzy / 4.445 s. |
+| Exclusive World backend ownership and session LLM documentation | Smith base 1a0bdfe plus frozen World blob 9e8979dcca2063b5ee20cc263437137573400282 | Exact source reviewed; fmt/clippy pass; 504 focused / 2.094 s; 11 fuzzy / 4.410 s; temporary checkpoint pending. |
 
 The adapter boundary increment adds six positive-first controls over actual native Clients
 in both configured wire formats. It preserves matching owners at Completed,
@@ -142,7 +143,7 @@ preserving prior chronology, recovery and exact feedback assertions. Idle serial
 suites pass 504 focused / 7.010 s and eleven fuzzy / 8.370 s, with zero skips
 and unchanged budgets. Named controls and logs are in the messages ledger.
 
-The current memory extension keeps root/session state and all retained caller
+The committed memory extension at `1a0bdfe` keeps root/session state and all retained caller
 history, prompt/Turn copies and configuration live under the same persistent
 Meter across one actual Anthropic Wire's prepare, Start, native progress,
 translation, Close, actual Closed, drainage and drop. Independent public-field
@@ -156,6 +157,18 @@ remain asserted. Idle serial suites pass 504 / 7.355 s and eleven / 8.509 s,
 with zero skips. This measures single lifecycles; simultaneous physical bindings,
 Composition maps/traces and the full World outside envelope remain open. It
 does not establish full failure-enum or opaque native root Restore coverage.
+
+The current backend cleanup selects one private Typed or Wire backend before
+World construction. Native worlds retain no unused typed fake Domain, Stage or
+provider-call Ledger. It adds no Box or Client and preserves original discovery,
+typed configuration/seeds/queues, clock routing, actual host-call origins and
+cancellation/settlement semantics. The session LLM module documentation now
+correctly assigns native wire/replay formats and classification to Skein and
+application vocabulary/translation to Smith. Both source changes have independent
+scoped approval. Idle serial suites pass 504 / 7.054 s and eleven / 8.358 s,
+with zero skips. Removing this unused owner supplies no
+new combined-binding or full World memory claim. Logs are in
+`smith-wire-backend-{fmt-final,clippy-final,default,fuzzy,serial-default,serial-fuzzy}.log`.
 
 Skein's reviewed temporary fake mechanics restore query-cap, checked-overflow
 and random/scripted generation-scratch coverage. Raw adoption adds two native

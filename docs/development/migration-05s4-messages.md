@@ -4,17 +4,20 @@ This is the implementation ledger for the approved messages increment. Source
 is in progress; the early compiler checkpoint is
 `49d15601c4346251eb3c514a4ba68058b9da6f83`, rebased onto Smith `45a2eea`.
 The original author base was `51fdd24`. The current temporary draft is
-checkpoint `8010bf4` plus frozen root-memory Rust blob
-`739c102e0a05575d2810b1f718b3480c0be4f33d`. It passes formatting, full
+checkpoint `1a0bdfee5c64fe3377033bf976f1f5a70dd3c72e` plus frozen backend Rust
+blob `9e8979dcca2063b5ee20cc263437137573400282`, pending its temporary checkpoint.
+It passes formatting, full
 workspace/all-target clippy, 504 focused tests and eleven fuzzy tests, with idle
 serial measurements recorded below. Its root/Wire source, host-delivery
 composition, adapter boundary controls, public documentation, memory controls
 and observed message sweep have independent scoped approval. The continuation
 checkpoint adds actual native replay, usage and selected failure evidence. The
-current increment meters a single actual Anthropic Wire lifecycle while root
+committed memory increment meters a single actual Anthropic Wire lifecycle while root
 and caller owners remain live; simultaneous retained bindings and the full
 World memory envelope remain open. These results do not claim full replacement
 acceptance, a main merge, migration completion or legacy adapter removal.
+The current increment selects one backend before World construction, removing
+unused typed-provider ownership from the wire path without changing typed stories.
 
 The narrow root/Wire increment follows temporary checkpoint
 `9b7990a79953ca8e662c9731522b6de9528eb64c`. It adds an opt-in actual-wire backend
@@ -430,6 +433,16 @@ replaces these requirements. New public items continue
 to require full module/type/variant/field/entry documentation and independent
 subset review alongside later integration work.
 
+The reviewed backend cleanup selects a closed private Typed or Wire backend
+before construction. Native worlds construct only Composition, retaining no
+unused typed fake Domain, Stage or provider-call Ledger; no new Box or Client is
+introduced. Original Start/discovery, typed configuration/seeds/queues, clocks,
+host-call origins, cancellation and settlement contracts remain unchanged.
+The corrected session LLM module documentation assigns native wire/replay formats
+and classification to Skein and application vocabulary/translation to Smith.
+Both exact source changes have independent scoped approval. This cleanup removes
+one passive owner; it does not establish a full World ownership price.
+
 The approved wire composition consumes the receiving fields of the actual root
 `Complete`. Its active logical-owner lookup is distinct from its retained physical bindings: one
 Client terminal ends the root request, while that physical binding remains
@@ -479,12 +492,16 @@ The frozen temporary draft has the following parent-run evidence on 2026-10-05:
 | --- | --- |
 | `cargo fmt --check` | Passed. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed. |
-| `cargo nextest run --workspace` | 504 passed, zero skipped, 2.097 seconds. |
-| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.445 seconds. |
-| Idle serial focused measurement | 504 passed, zero skipped, 7.355 seconds. |
-| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.509 seconds. |
+| `cargo nextest run --workspace` | 504 passed, zero skipped, 2.094 seconds. |
+| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.410 seconds. |
+| Idle serial focused measurement | 504 passed, zero skipped, 7.054 seconds. |
+| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.358 seconds. |
 
 Latest logs are `/tmp/temper-next-migration/`'s
+`smith-wire-backend-{fmt-final,clippy-final,default,fuzzy,serial-default,serial-fuzzy}.log`.
+The preceding combined-memory checkpoint `1a0bdfe` passed 504 focused / 2.097
+seconds and eleven fuzzy / 4.445 seconds; idle serial runs passed 504 / 7.355
+seconds and eleven / 8.509 seconds. Its logs remain in
 `smith-combined-native-memory-clippy-1.log`, `smith-combined-native-memory-focused-1.log`,
 `smith-combined-native-memory-default.log`, `smith-combined-native-memory-fuzzy.log`,
 `smith-combined-native-memory-serial-default.log` and `smith-combined-native-memory-serial-fuzzy.log`.
