@@ -3,14 +3,14 @@
 This is the implementation ledger for the approved messages increment. Source
 is in progress; the early compiler checkpoint is
 `49d15601c4346251eb3c514a4ba68058b9da6f83`, rebased onto Smith `45a2eea`.
-The original author base was `51fdd24`. The current temporary draft is host
-checkpoint `9d2ec84` plus frozen root-memory test blob
-`634e3d7b6e71f53a40c180766e3bada709066ed5`. It passes formatting, full
-workspace/all-target clippy, 499 focused tests and ten fuzzy tests, with idle
+The original author base was `51fdd24`. The current temporary draft is memory
+checkpoint `8c51dff` plus frozen message-sweep test blob
+`11b55999b84f6877d6950a8dae2ac27cc6d52bb8`. It passes formatting, full
+workspace/all-target clippy, 499 focused tests and eleven fuzzy tests, with idle
 serial measurements recorded below. Its root/Wire source, host-delivery
 composition, adapter boundary controls, public documentation and root-entry/caller-copy
-memory control have independent scoped approval. Combined native Client/peer
-allocation peaks, observed message sweep and further adapter evidence remain pending. These
+memory control and observed message sweep have independent scoped approval.
+Combined native Client/peer allocation peaks and further adapter evidence remain pending. These
 results do not claim full replacement acceptance, a main merge, migration
 completion or legacy adapter removal.
 
@@ -190,8 +190,7 @@ immediate wire progress prevents a jump to the root deadline. Outside records
 have a finite 256-call ceiling and four lifecycle observations per binding;
 this binding story is not an attained allocation measurement. Arbitrary application Finish
 decoding, remaining receiving continuation controls, combined native Client/peer
-transient allocation peaks and a bounded actual message schedule sweep
-remain pending. The passing gates cover the scoped increment; final replacement
+transient allocation peaks remain pending. The passing gates cover the scoped increment; final replacement
 acceptance remains outstanding.
 
 These groups use actual root/session/tool entrances and shared fake observations:
@@ -304,7 +303,7 @@ delivered/stale/failed delivery, refusal feedback and cancellation races all
 occurred. A selected terminal submitted for an observed pending right is not
 by itself proof of a particular accepted downstream outcome; that requires
 separate actual Turn, prompt, answer or receipt observations. The focused
-root-memory evidence below supplements this driver; the message sweep remains open.
+root-memory and bounded message-sweep evidence below supplement this driver.
 
 The passing `restored_root_arrays_payload_rewrites_and_turn_copies_stay_within_the_attained_bound`
 generates concrete records through original root entrances and actual native
@@ -336,13 +335,30 @@ and has independent source approval. Native Client/peer allocation transients
 between root entries remain unmeasured, so full combined memory acceptance is
 still open.
 
+The passing `bounded_message_schedules_replay_with_every_required_actual_class`
+runs 16 pinned seeds across four bounded input/cancellation fixtures, through
+shared replay and the unchanged message oracle. Every scheduled input arrives
+with its exact name, bytes and time before the actual final Answer. The sweep
+observes all 19 required classes: actual Parked, Time-budget and Cancelled
+endings; Busy, ReusedName and TooLarge bounces; zero and descending opaque read
+fences; inputs during a real call and after Waiting; and both late Completed
+and actual Cancelled terminals after the original root's Cancel entrance.
+Cancel times come from actual baseline request/terminal observations. Two
+accepted names per world produce observed 0→99 or 99→7 pairs across seeds;
+there is no claimed three-name conversation. The focused sweep passes in
+0.512 seconds. This is the existing typed shared-fake root world; it does not
+claim native Client cancellation coverage or independent Env.wall jumps.
+Detailed actual counts and seed bounds are recorded in
+`/tmp/temper-next-migration/smith-message-sweep-focused-1.log`.
+
 ## Remaining checkpoint work and validation
 
 The current checkpoint retains the approved actual wire/root binding composition,
 submitted-delivery extension of live host composition, adapter boundary controls,
 public documentation and attained root-entry/caller-copy memory evidence.
-Combined native Client/peer transient memory and a bounded randomized message
-race sweep with observed classification counts remain outstanding. All named
+Combined native Client/peer transient memory and further adapter continuation
+evidence remain outstanding; the bounded message sweep now has actual counts
+and independent source approval. All named
 source distinctions and existing tests remain in scope; no passing subset
 replaces these requirements. New public items continue
 to require full module/type/variant/field/entry documentation and independent
@@ -383,10 +399,10 @@ The remaining memory acceptance must measure combined native Client/peer
 transient allocation peaks alongside the attained root-entry and caller-copy
 ownership. Actual physical settlement and retained input/terminal ownership
 do not by themselves price those native allocation transients.
-The bounded message sweep must count actual observed endings, read fences,
-bounces and terminal races, assert that its required classes occurred, and
-replay each seed through the shared kit. A seed's chosen scenario is not
-evidence that its requested outcome occurred.
+The bounded message sweep counts actual endings, read fences, bounces and
+terminal races and requires every class to occur. Shared replay preserves its
+full boundary trace and actual outcome digest; fixture selection supplies no
+success evidence.
 
 Parent owns Cargo, index, commits, checkpoint rebase, measurements and merge.
 The frozen temporary draft has the following parent-run evidence on 2026-10-05:
@@ -395,15 +411,18 @@ The frozen temporary draft has the following parent-run evidence on 2026-10-05:
 | --- | --- |
 | `cargo fmt --check` | Passed. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed. |
-| `cargo nextest run --workspace` | 499 passed, zero skipped, 2.047 seconds. |
-| `cargo nextest run --workspace --profile fuzzy` | Ten passed, zero skipped, 4.305 seconds. |
-| Idle serial focused measurement | 499 passed, zero skipped, 6.900 seconds. |
-| Idle serial fuzzy measurement | Ten passed, zero skipped, 7.935 seconds. |
+| `cargo nextest run --workspace` | 499 passed, zero skipped, 2.141 seconds. |
+| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.478 seconds. |
+| Idle serial focused measurement | 499 passed, zero skipped, 7.104 seconds. |
+| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.541 seconds. |
 
 Latest logs are `/tmp/temper-next-migration/`'s
-`smith-root-memory-clippy-3.log`, `smith-root-memory-focused-2.log`,
-`smith-root-memory-default.log`, `smith-root-memory-fuzzy.log`,
-`smith-root-memory-serial-default.log` and `smith-root-memory-serial-fuzzy.log`.
+`smith-message-sweep-clippy-final.log`, `smith-message-sweep-focused-1.log`,
+`smith-message-sweep-default.log`, `smith-message-sweep-fuzzy.log`,
+`smith-message-sweep-serial-default.log` and `smith-message-sweep-serial-fuzzy.log`.
+The earlier memory draft passed 499 focused / 2.047 seconds and ten fuzzy /
+4.305 seconds; idle serial runs passed 499 / 6.900 seconds and ten / 7.935
+seconds. Those logs remain in `smith-root-memory-{default,fuzzy,serial-default,serial-fuzzy}.log`.
 The earlier host-delivery draft passed 498 focused / 1.930 seconds and ten
 fuzzy / 4.321 seconds; its idle serial results were 498 focused / 6.509 seconds
 and ten fuzzy / 8.016 seconds. That historical evidence remains in

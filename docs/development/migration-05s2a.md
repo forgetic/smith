@@ -76,7 +76,8 @@ until required shared and consumer acceptance permits their coherent removal.
 | Original root through actual shared Client | Smith 240838d | Reviewed; fmt/clippy pass; 490 focused / 1.983 s; 10 fuzzy / 4.310 s. |
 | Adapter owner, inventory and attestation controls | Smith 9b8630e | Reviewed; fmt/clippy pass; 496 focused / 1.968 s; 10 fuzzy / 4.219 s. |
 | Actual submitted delivery through the host | Smith 9d2ec84 | Reviewed; fmt/clippy pass; 498 focused / 1.930 s; 10 fuzzy / 4.321 s. |
-| Attained root-entry and caller-copy memory | Smith 9d2ec84 plus test blob 634e3d7 | Reviewed; fmt/clippy pass; 499 focused / 2.047 s; 10 fuzzy / 4.305 s. |
+| Attained root-entry and caller-copy memory | Smith 8c51dff | Reviewed; fmt/clippy pass; 499 focused / 2.047 s; 10 fuzzy / 4.305 s. |
+| Observed bounded message sweep | Smith 8c51dff plus test blob 11b5599 | Reviewed; fmt/clippy pass; 499 focused / 2.141 s; 11 fuzzy / 4.478 s. |
 
 The adapter boundary increment adds six positive-first controls over actual native Clients
 in both configured wire formats. It preserves matching owners at Completed,
@@ -108,6 +109,11 @@ allocation transients between root entries remain unmeasured; this is scoped
 memory evidence, not full combined memory acceptance. Exact source, observations
 and logs are recorded in the messages ledger.
 
+The bounded message sweep observes all 19 required actual classes through
+16 pinned seeds/four fixtures and shared replay with the unchanged oracle.
+It passes in 0.512 s; idle serial suites pass 499 focused / 7.104 s and eleven
+fuzzy / 8.541 s, with zero skips. Scope is the typed shared-fake root world;
+native Client cancellation and independent wall-clock jumps are not claimed.
 
 Skein's reviewed temporary fake mechanics restore query-cap, checked-overflow
 and random/scripted generation-scratch coverage. Its focused shared-client
@@ -120,7 +126,6 @@ Remaining replacement acceptance:
 
 - Retain explicit full usage/replay, refusal/reasoning and malformed-call
   no-effect feedback controls, alongside remaining failure classifications.
-- Finish combined native Client/peer transient memory acceptance and an
-  observed bounded message schedule sweep.
+- Finish combined native Client/peer transient memory acceptance.
 - Pass final shared/consumer gates and exact independent cleanup review before
   removing copied packages or advancing original main branches.
