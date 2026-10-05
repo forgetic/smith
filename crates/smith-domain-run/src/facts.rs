@@ -17,7 +17,7 @@
 
 use skein_lib::{Queue, Slab, Time, Token};
 
-use crate::boundary::{Answer, End, Exit, Failure, Push, Refusal, Request, Returned};
+use crate::boundary::{Answer, End, Exit, Failure, Refusal, Request, Returned};
 use crate::run::{self, Conversation, Run};
 
 /// Something that happened in the run `run` (the run's token for it, as
@@ -155,7 +155,7 @@ pub enum Fact {
     /// A push ended.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Pushed {
+    Delivered {
         /// Admitted run token, retained and echoed within this child's boundary.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -163,7 +163,7 @@ pub enum Fact {
         /// Typed terminal for the host's change-delivery request.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        push: Push,
+        push: crate::DeliveryStatus,
     },
     /// The run answered.
     ///
@@ -185,6 +185,8 @@ pub enum Fact {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Asked {
+    /// Main requested separately granted delivery. Contract: domain/run.md, sections 8.4 and 12.
+    Deliver,
     /// The LLM declared a run result.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -200,6 +202,12 @@ pub enum Asked {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Return {
+    /// Actual host delivery evidence. Contract: domain/run.md, sections 8.2 and 12.
+    Delivered,
+    /// No changed directory. Contract: domain/run.md, sections 8.2 and 12.
+    Nothing,
+    /// Named correctable host refusal. Contract: domain/run.md, sections 8.2 and 12.
+    DeliveryRefused,
     /// The run accepted its declared result.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -215,11 +223,11 @@ pub enum Return {
     /// The host found the target branch stale.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Moved,
+    Stale,
     /// The host refused or failed the push and returned bounded feedback.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Unpushed,
+    DeliveryFailed,
     /// The caller cancelled and the terminal settled.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -251,6 +259,12 @@ pub enum Return {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Answered {
+    /// Mid-run delivery landed while shutdown was pending. Contract: domain/run.md, sections 8.4, 10 and 12.
+    Delivered(
+        /// Already-decided shutdown reason retained with the actual landing;
+        /// no receipt bytes enter facts. Contract: domain/run.md, sections 10 and 12.
+        Failure,
+    ),
     /// The entrance or operation was refused with the enclosing typed reason.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -352,8 +366,7 @@ pub(crate) fn tell(
             | Request::Probe { .. }
             | Request::Abort { .. }
             | Request::Checking { .. }
-            | Request::Push { .. }
-            | Request::CancelHost { .. } => continue,
+            | Request::Deliver { .. } => continue,
         };
         facts.push(fact);
     }
@@ -361,11 +374,14 @@ pub(crate) fn tell(
 
 fn result_of(result: &Returned) -> Return {
     match result {
+        Returned::Delivered(_) => Return::Delivered,
+        Returned::Nothing => Return::Nothing,
+        Returned::DeliveryRefused(_) => Return::DeliveryRefused,
         Returned::Accepted => Return::Accepted,
         Returned::Rejected { .. } => Return::Rejected,
         Returned::ChecksFailed { .. } => Return::ChecksFailed,
-        Returned::Moved => Return::Moved,
-        Returned::Unpushed { .. } => Return::Unpushed,
+        Returned::Stale => Return::Stale,
+        Returned::DeliveryFailed { .. } => Return::DeliveryFailed,
         Returned::Cancelled => Return::Cancelled,
         Returned::TimedOut => Return::TimedOut,
         Returned::Busy => Return::Busy,
@@ -377,6 +393,7 @@ fn result_of(result: &Returned) -> Return {
 
 fn answered(answer: &Answer) -> Answered {
     match answer {
+        Answer::Delivered { stopped, .. } => Answered::Delivered(*stopped),
         Answer::Refused(refusal) => Answered::Refused(*refusal),
         Answer::Accepted { .. } => Answered::Accepted,
         Answer::Failed { failure, spent: _ } => Answered::Failed(*failure),

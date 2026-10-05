@@ -380,3 +380,27 @@ fn owned_io_cancellation_keeps_actual_terminal_results_in_the_turn() {
         world.close();
     }
 }
+
+#[test]
+fn repeated_provider_ids_keep_distinct_origins_and_restore_includes_history_prefix() {
+    let mut first = World::new(61, 256);
+    first.open(opening(None, 1000));
+    first.complete(recorded::called(), llm::Stop::ToolUse, llm::Usage::ZERO);
+    let owner = first.delegated[0];
+    first.step(session::Event::AnsweredV2 { owner, text: b"first".as_slice().into(), error: false, spent: 0 });
+    first.complete(recorded::called(), llm::Stop::ToolUse, llm::Usage::ZERO);
+    let owner = first.delegated[0];
+    first.step(session::Event::AnsweredV2 { owner, text: b"second".as_slice().into(), error: false, spent: 0 });
+    assert_eq!(
+        first.origins,
+        [record::Origin { sequence: 1, position: 1 }, record::Origin { sequence: 2, position: 1 }]
+    );
+    first.close();
+    let mut resumed = World::new(62, 256);
+    resumed.open(opening(Some(transcript(&first)), 1000));
+    resumed.complete(recorded::called(), llm::Stop::ToolUse, llm::Usage::ZERO);
+    assert_eq!(resumed.origins, [record::Origin { sequence: 3, position: 1 }]);
+    let owner = resumed.delegated[0];
+    resumed.step(session::Event::AnsweredV2 { owner, text: b"third".as_slice().into(), error: false, spent: 0 });
+    resumed.close();
+}

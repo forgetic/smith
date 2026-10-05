@@ -6,9 +6,10 @@
 //! - The worker, the run child domain's face. A [`Event::Start`] is a call,
 //!   answered by exactly one [`Request::Answer`], after a
 //!   [`Request::Admitted`] that names the run if it was admitted, so that a
-//!   [`Event::Cancel`] can name it. A run's host call, [`Request::Push`], is
-//!   ended by exactly one [`Event::Pushed`], or after a
-//!   [`Request::CancelHost`] by [`Event::HostCancelled`] if the cancel won.
+//!   [`Event::Cancel`] can name it. A run's host call, [`Request::Deliver`], is
+//!   ended by exactly one actual [`Event::Delivered`]. After submission the
+//!   host operation is never abandoned; its deadline bounds the real terminal.
+//!   Duplicate or stale callback owners are inert (domain/run.md, sections 8 and 10).
 //!   [`Request::Checking`] is a notice, with no terminal.
 //! - LLM providers, for the sessions: a [`Request::Complete`] is ended by one
 //!   of [`Event::Completed`], [`Event::Failed`] or, after a
@@ -125,10 +126,13 @@ pub enum Event {
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         run: Token,
     },
-    /// Terminal for `Push`.
+    /// Actual host terminal for `Deliver`, including while shutdown settles.
+    /// Constructor-sealed owned evidence is revalidated against admitted writable
+    /// mounts; stale callback generations are inert.
+    /// Contract: domain/run.md, sections 8.2 and 10.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-    Pushed {
+    Delivered {
         /// Requester-issued opaque name, echoed on the one terminal for this request.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -136,17 +140,9 @@ pub enum Event {
         /// Typed terminal for the host's change-delivery request.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-        push: run::Push,
+        push: run::Delivery,
     },
-    /// Terminal for `Push`, after `CancelHost`: it was abandoned.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-    HostCancelled {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        ///
-        /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-        owner: Token,
-    },
+
     /// Terminal for `Complete`: the LLM produced its next message.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -293,13 +289,22 @@ pub enum Request {
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         deadline: Time,
     },
-    /// To the worker, a host call: commit what the checkout of the run it
-    /// names `worker` holds, exactly as it is, and push it. `Change` carries
-    /// the validated generic fields unchanged; their meaning belongs to the
-    /// host. This retains the copied Push lifecycle until generic delivery.
+    /// To the host, deliver the exact checked writable-directory state under
+    /// the logical run named `worker`. The host interprets the unchanged
+    /// generic fields and returns its real bounded terminal. Final Change
+    /// and separately granted main delivery share the same exclusive checks;
+    /// the terminal remains owed through shutdown.
     ///
     /// Contract: domain/run.md, sections 7.1, 8 and 14; domain/host.md, section 2.
-    Push {
+    Deliver {
+        /// Durable transcript-derived host call name, scoped by the logical host run.
+        /// Callback `owner` is separate; retries of this operation reuse this name.
+        /// Contract: domain/run.md, section 8.2; domain/host.md, section 7.
+        name: run::CallName,
+        /// Bounded actual host-operation deadline; the host supplies exactly one
+        /// terminal even during shutdown. The run never abandons submission.
+        /// Contract: domain/run.md, sections 8.2 and 10.
+        deadline: Time,
         /// Scripted host or worker's opaque run name, echoed without interpretation.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -313,16 +318,7 @@ pub enum Request {
         /// Contract: domain/run.md, sections 7.1, 8 and 14; domain/host.md, section 2.
         change: run::outcome::Change,
     },
-    /// Abandon the host call in flight for `owner`. Its terminal still comes:
-    /// `HostCancelled`, or whichever outcome won the race.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-    CancelHost {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        ///
-        /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-        owner: Token,
-    },
+
     /// Ask an LLM for the next assistant message, giving up after `timeout`.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.

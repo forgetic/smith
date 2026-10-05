@@ -82,6 +82,11 @@ fn render_system(text: &mut Text, charter: &Charter, found: &Found, brief: &[u8]
     }
     if main {
         render_finishing(text, &charter.outcome, !found.checks.is_empty());
+        if let Some(spec) = &charter.grants.deliver {
+            text.put(b"\n## Delivery\n\nYou may call `deliver` during the run, then continue. Its opaque fields are: ");
+            render_fields(text, &spec.fields);
+            text.put(b". Every discovered writable check must pass the exclusive snapshot. The host supplies receipts, nothing, named refusal, bounded failure or stale.\n");
+        }
     } else {
         text.put(b"## Answering\n\nWhen you are done, end your turn with your answer: your last message goes, as it ");
         text.put(b"is, to the LLM that asked for you, and you are done.\n");
@@ -184,7 +189,7 @@ fn render_finishing(text: &mut Text, spec: &OutcomeSpec, checks: bool) {
     if let Some(rule) = &spec.change {
         text.put(b"\nChange: the workspace changes, with these host-required result fields:\n");
         render_fields(text, &rule.fields);
-        if rule.checks && checks {
+        if checks {
             text.put(b"Checks run before the host receives the change. A failed check returns its output so you can fix it.\n");
         }
         text.put(b"The host pushes the checked state. A moved target ends this run; other refusals are feedback.\n");
@@ -361,7 +366,7 @@ mod tests {
     fn host_names_and_individual_caps_are_rendered_without_builtin_change_fields() {
         let charter = Charter {
             outcome: OutcomeSpec {
-                change: Some(ChangeSpec { checks: true, fields: fields(b"ticket", 17) }),
+                change: Some(ChangeSpec { fields: fields(b"ticket", 17) }),
                 report: Some(TextSpec { min: 0, max: 32, fields: fields(b"source", 9) }),
                 failure: Some(TextSpec { min: 0, max: 24, fields: Box::new([]) }),
                 verdicts: Box::new([VerdictRule {
@@ -409,7 +414,11 @@ mod tests {
     fn absent_workspace_and_empty_field_rules_are_said_plainly() {
         let charter = Charter {
             checkout: Checkout { repositories: Box::new([]) },
-            grants: Grants { tools: Tools { inspect: false, modify: false, shell: false }, ..charter().grants },
+            grants: Grants {
+                deliver: None,
+                tools: Tools { inspect: false, modify: false, shell: false },
+                ..charter().grants
+            },
             outcome: OutcomeSpec {
                 change: None,
                 verdicts: Box::new([]),

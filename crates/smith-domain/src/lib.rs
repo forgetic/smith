@@ -20,7 +20,7 @@
 //!
 //! Copy baseline: temper `25ac2ad`, migration 05s2 (domain/run.md, section 14;
 //! domain/session.md, section 12). Generic results implement domain/run.md,
-//! section 7 in 05s4. Copied charter, Push delivery and split token-budget
+//! section 7 in 05s4. Copied charter, Delivery delivery and split token-budget
 //! vocabulary remain pending subsequent 05s4 increments (domain/run.md, section 14).
 
 #![cfg_attr(not(test), no_std)]

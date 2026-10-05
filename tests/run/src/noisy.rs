@@ -82,6 +82,7 @@ pub fn noisy(seed: u64) -> Settings {
     let run = Limits { guide_bytes: small(pick(1, 2000)), io_timeout: Duration::from_secs(pick(1, 5)), ..run };
     let run = Limits {
         outcome_bytes: pick(10, 400),
+        delivery_timeout: Duration::from_millis(pick(1_000, 30_000)),
         check_timeout: Duration::from_millis(pick(1_000, 30_000)),
         check_tail: small(pick(0, 300)),
         ..run

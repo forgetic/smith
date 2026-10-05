@@ -5,7 +5,7 @@ use skein_lib::{Duration, Time, Token};
 use skein_world::domain::{Referee, Verdict};
 use smith_agent_world::referee::{Meeting, Seen};
 use smith_domain::run::{
-    Answer, Exit, Push, Refusal, Spend,
+    Answer, Delivery, Exit, Refusal, Spend,
     outcome::{Change, ChangeSpec, Declared, DeclaredFailure, Field, FieldRule, OutcomeSpec, Report, TextSpec},
 };
 
@@ -14,8 +14,9 @@ fn started() -> Referee<Meeting> {
     referee.observe(
         Time::ZERO,
         Seen::Started {
+            delivery: false,
             contract: OutcomeSpec {
-                change: Some(ChangeSpec { checks: true, fields: Box::new([]) }),
+                change: Some(ChangeSpec { fields: Box::new([]) }),
                 verdicts: Box::new([]),
                 report: None,
                 failure: None,
@@ -37,17 +38,34 @@ fn broken(mut referee: Referee<Meeting>, seen: Seen, reason: &str) {
 
 #[test]
 fn a_push_without_passing_checks_is_rejected() {
-    broken(started(), Seen::Pushing { owner: Token::new(2), tree: b"code".to_vec() }, "checks pass before each push");
+    broken(
+        started(),
+        Seen::Pushing {
+            name: smith_domain::run::CallName { completion: 1, position: 0 },
+            owner: Token::new(2),
+            tree: b"code".to_vec(),
+        },
+        "delivery is the exclusive checked snapshot",
+    );
 }
 
 #[test]
 fn a_host_that_lands_different_bytes_is_rejected() {
     let mut referee = started();
+    referee.observe(Time::ZERO, Seen::Checking { owner: Token::new(2), tree: b"asked".to_vec() }, &mut Vec::new());
     referee.observe(Time::ZERO, Seen::Checked { owner: Token::new(2), exit: Exit::Code { code: 0 } }, &mut Vec::new());
-    referee.observe(Time::ZERO, Seen::Pushing { owner: Token::new(2), tree: b"asked".to_vec() }, &mut Vec::new());
+    referee.observe(
+        Time::ZERO,
+        Seen::Pushing {
+            name: smith_domain::run::CallName { completion: 1, position: 0 },
+            owner: Token::new(2),
+            tree: b"asked".to_vec(),
+        },
+        &mut Vec::new(),
+    );
     broken(
         referee,
-        Seen::Pushed { owner: Token::new(2), push: Push::Done, tree: b"other".to_vec() },
+        Seen::Delivered { owner: Token::new(2), push: smith_agent_world::delivered(), tree: b"other".to_vec() },
         "the host lands exactly the tree the agent left",
     );
 }
@@ -122,6 +140,7 @@ fn text_started(failure: bool, cap: u64) -> Referee<Meeting> {
     referee.observe(
         Time::ZERO,
         Seen::Started {
+            delivery: false,
             contract: OutcomeSpec {
                 change: None,
                 verdicts: Box::new([]),
@@ -188,5 +207,156 @@ fn extra_field_storage_cannot_be_omitted_from_the_referees_byte_charge() {
             pending: 0,
         },
         "an accepted result meets the host contract and byte cap",
+    );
+}
+
+fn mid_history(stopped: bool) -> Referee<Meeting> {
+    let mut referee = Referee::new(Meeting::default());
+    let owner = Token::new(70);
+    let name = smith_domain::run::CallName { completion: 2, position: 1 };
+    let observations = [
+        Seen::Started {
+            delivery: true,
+            checks: true,
+            within: Duration::from_secs(5),
+            outcome_bytes: 1024,
+            contract: OutcomeSpec {
+                change: None,
+                verdicts: Box::new([]),
+                failure: None,
+                report: Some(TextSpec { min: 0, max: 32, fields: Box::new([]) }),
+            },
+        },
+        Seen::Checking { owner, tree: b"checked".to_vec() },
+        Seen::Checked { owner, exit: Exit::Code { code: 0 } },
+        Seen::Pushing { owner, name, tree: b"checked".to_vec() },
+    ];
+    for observation in observations {
+        referee.observe(Time::ZERO, observation, &mut Vec::new());
+    }
+    if stopped {
+        referee.observe(Time::ZERO, Seen::Stopped { failure: smith_domain::run::Failure::Cancelled }, &mut Vec::new());
+    }
+    referee.observe(
+        Time::ZERO,
+        Seen::Delivered { owner, push: smith_agent_world::delivered(), tree: b"checked".to_vec() },
+        &mut Vec::new(),
+    );
+    assert_eq!(referee.verdict(), Verdict::Passed, "positive pending history precedes corruption");
+    referee
+}
+
+fn interrupted_answer() -> Answer {
+    let Delivery::Delivered(receipts) = smith_agent_world::delivered() else { unreachable!("fixture delivered") };
+    Answer::Delivered {
+        name: smith_domain::run::CallName { completion: 2, position: 1 },
+        receipts,
+        stopped: smith_domain::run::Failure::Cancelled,
+        spent: Spend::ZERO,
+    }
+}
+
+#[test]
+fn both_ordinary_and_interrupted_mid_delivery_histories_are_valid() {
+    for interrupted in [false, true] {
+        let mut referee = mid_history(interrupted);
+        let answer = if interrupted {
+            interrupted_answer()
+        } else {
+            Answer::Accepted {
+                outcome: Declared::Report(Report { text: b"continued".as_slice().into(), fields: Box::new([]) }),
+                spent: Spend::ZERO,
+            }
+        };
+        referee.observe(Time::ZERO, Seen::Answered { answer, pending: 0 }, &mut Vec::new());
+        assert_eq!(referee.verdict(), Verdict::Passed);
+        assert_eq!(referee.judged().1, 1, "one final answer obligation is actually met");
+    }
+}
+
+#[test]
+fn an_interrupted_mid_answer_cannot_invent_receipts_names_or_a_stop() {
+    for corruption in 0..3 {
+        let mut answer = interrupted_answer();
+        let Answer::Delivered { name, receipts, stopped, .. } = &mut answer else { unreachable!("typed fixture") };
+        match corruption {
+            0 => name.position = 9,
+            1 => {
+                *receipts = smith_domain::run::Delivered::new(Box::new([smith_domain::run::Receipt::new(
+                    0,
+                    b"invented".as_slice().into(),
+                )
+                .expect("bounded")]))
+                .expect("one directory")
+            }
+            2 => *stopped = smith_domain::run::Failure::Stale,
+            _ => unreachable!("three corruptions"),
+        }
+        broken(
+            mid_history(true),
+            Seen::Answered { answer, pending: 0 },
+            if corruption == 2 {
+                "interrupted delivery preserves the already observed stop"
+            } else {
+                "interrupted mid delivery preserves its actual name and receipts"
+            },
+        );
+    }
+    broken(
+        mid_history(false),
+        Seen::Answered { answer: interrupted_answer(), pending: 0 },
+        "interrupted delivery preserves the already observed stop",
+    );
+}
+
+#[test]
+fn an_ordinary_mid_report_cannot_invent_a_forbidden_final_change() {
+    broken(
+        mid_history(false),
+        Seen::Answered {
+            pending: 0,
+            answer: Answer::Accepted { outcome: Declared::Change(Change { fields: Box::new([]) }), spent: Spend::ZERO },
+        },
+        "an accepted result meets the host contract and byte cap",
+    );
+}
+
+#[test]
+fn duplicate_actual_terminal_and_reused_durable_name_are_rejected_after_positive_prefix() {
+    broken(
+        mid_history(false),
+        Seen::Delivered { owner: Token::new(70), push: smith_agent_world::delivered(), tree: b"checked".to_vec() },
+        "a host push terminal names a pending push",
+    );
+    let mut referee = mid_history(false);
+    let owner = Token::new(71);
+    referee.observe(Time::ZERO, Seen::Checking { owner, tree: b"checked".to_vec() }, &mut Vec::new());
+    referee.observe(Time::ZERO, Seen::Checked { owner, exit: Exit::Code { code: 0 } }, &mut Vec::new());
+    broken(
+        referee,
+        Seen::Pushing {
+            owner,
+            name: smith_domain::run::CallName { completion: 2, position: 1 },
+            tree: b"checked".to_vec(),
+        },
+        "durable names are nonzero and distinct across actual submissions",
+    );
+}
+
+#[test]
+fn changed_bytes_between_check_and_submission_are_rejected_after_positive_check() {
+    let mut referee = started();
+    let owner = Token::new(72);
+    referee.observe(Time::ZERO, Seen::Checking { owner, tree: b"checked".to_vec() }, &mut Vec::new());
+    referee.observe(Time::ZERO, Seen::Checked { owner, exit: Exit::Code { code: 0 } }, &mut Vec::new());
+    assert_eq!(referee.verdict(), Verdict::Passed);
+    broken(
+        referee,
+        Seen::Pushing {
+            owner,
+            name: smith_domain::run::CallName { completion: 4, position: 0 },
+            tree: b"later write".to_vec(),
+        },
+        "delivery is the exclusive checked snapshot",
     );
 }

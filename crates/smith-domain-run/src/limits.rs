@@ -17,6 +17,11 @@ use crate::run::{Alarm, Conversation, Run};
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
+    /// Maximum actual host operation duration after checked submission. It must
+    /// be positive for a delivery-capable charter; caller expiry may be earlier.
+    /// The host supplies the bounded real terminal even after run shutdown.
+    /// Contract: domain/run.md, sections 8.2 and 10.
+    pub delivery_timeout: Duration,
     /// Runs at once. A start beyond them is refused as busy.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -90,7 +95,7 @@ pub struct Limits {
     /// Largest aggregate result ownership beyond its inline declaration,
     /// counting every field/item container, name and value as
     /// `outcome::owned_bytes` does. A larger finish is feedback, before
-    /// shape judgement or any checks/Push.
+    /// shape judgement or any checks/Delivery.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub outcome_bytes: u64,
@@ -129,7 +134,11 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(u64::from(limits.repositories).checked_mul(u64::from(limits.guide_bytes))?)?;
     let checks = List::<u32>::worst_case(limits.repositories)?;
     // A winding run holds the outcome it accepted.
-    let run = limits.run_bytes.checked_add(guides)?.checked_add(checks)?.checked_add(limits.outcome_bytes)?;
+    let run = limits
+        .run_bytes
+        .checked_add(guides)?
+        .checked_add(checks)?
+        .checked_add(limits.outcome_bytes.max(crate::Delivered::worst_case()))?;
     let held = u64::from(limits.runs).checked_mul(run)?;
     // A call landing a change holds it; a sub-agent's call, its answer.
     let call = limits.outcome_bytes.max(u64::from(limits.answer_bytes));

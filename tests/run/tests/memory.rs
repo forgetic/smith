@@ -9,8 +9,8 @@ use skein_world::domain::heap::{self, Meter};
 use smith_domain_run::charter::{Checkout, Endpoint, Families, Grants, Llm, Outlet, Repository, Tools};
 use smith_domain_run::outcome::{Change, ChangeSpec, Declared, Field, FieldRule, ItemRule, OutcomeSpec, VerdictRule};
 use smith_domain_run::{
-    Answer, Ask, Budget, Charter, Domain, End, Event, Exit, Invalid, Limits, MAX_OUT, Push, Ran, Read, Refusal,
-    Request, Spend, Stop, worst_case,
+    Answer, Ask, Budget, Charter, Domain, End, Event, Exit, Invalid, Limits, MAX_OUT, Ran, Read, Refusal, Request,
+    Spend, Stop, worst_case,
 };
 
 #[global_allocator]
@@ -51,6 +51,7 @@ const LIMITS: Limits = Limits {
     guide_bytes: 512,
     io_timeout: Duration::from_secs(5),
     outcome_bytes: 256,
+    delivery_timeout: Duration::from_secs(60),
     check_timeout: Duration::from_secs(60),
     check_tail: 1024,
     facts: 16,
@@ -70,6 +71,7 @@ fn charter(held: u64) -> Charter {
             repositories: Box::new([Repository { name: bytes(1), root: Token::new(1), writable: true }]),
         },
         grants: Grants {
+            deliver: None,
             tools: Tools { inspect: true, modify: true, shell: true },
             forge: true,
             agents: true,
@@ -77,7 +79,6 @@ fn charter(held: u64) -> Charter {
         },
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
-                checks: true,
                 fields: Box::new([
                     smith_domain_run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
                     smith_domain_run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
@@ -163,8 +164,7 @@ fn fill(limits: Limits) {
                 | Request::Close { .. }
                 | Request::Abort { .. }
                 | Request::Checking { .. }
-                | Request::Push { .. }
-                | Request::CancelHost { .. }
+                | Request::Deliver { .. }
                 | Request::Return { .. } => Asked::Other,
             });
         }
@@ -193,7 +193,13 @@ fn fill(limits: Limits) {
         let families =
             Families { tools: Tools { inspect: true, modify: false, shell: false }, forge: false, agents: false };
         let ask = Ask::SubAgent { brief: bytes(10), families, llm: Some(bytes(1)), share: None };
-        let delegated = Event::Delegated { conversation, call: worker, ask, deadline: expiry };
+        let delegated = Event::Delegated {
+            name: smith_domain_run::CallName { completion: 1, position: 0 },
+            conversation,
+            call: worker,
+            ask,
+            deadline: expiry,
+        };
         let [Asked::Open { conversation: child }] = step(delegated)[..] else {
             panic!("the sub-agent opens");
         };
@@ -215,13 +221,19 @@ fn fill(limits: Limits) {
         };
         let ask = Ask::Finish { outcome: Declared::Change(change) };
         let call = Token::new(u64::from(run) + 1_000_000);
-        let finish = Event::Delegated { conversation, call, ask, deadline: expiry };
+        let finish = Event::Delegated {
+            conversation,
+            call,
+            ask,
+            deadline: expiry,
+            name: smith_domain_run::CallName { completion: 1, position: 0 },
+        };
         let [Asked::Check { owner }, Asked::Other] = step(finish)[..] else {
             panic!("the change is being checked");
         };
         let ran = Ran { exit: Exit::Code { code: 0 }, output: bytes(0), cut: 0 };
         assert_eq!(step(Event::Checked { owner, ran }), [Asked::Other], "checked, it is pushed");
-        assert_eq!(step(Event::Pushed { owner, push: Push::Done }), [Asked::Other, Asked::Other], "accepted");
+        assert_eq!(step(Event::Delivered { owner, push: delivered() }), [Asked::Other, Asked::Other], "accepted");
     }
     let held = meter.held();
     let charters = limits.run_bytes + u64::from(limits.guide_bytes);
@@ -243,4 +255,196 @@ fn a_domain_with_every_run_full_stays_within_its_worst_case() {
     fill(LIMITS);
     fill(Limits { runs: 64, conversations: 128, calls: 128, run_bytes: 65_536, guide_bytes: 32_768, ..LIMITS });
     fill(Limits { runs: 1000, conversations: 2000, calls: 2000, run_bytes: 2048, guide_bytes: 16, ..LIMITS });
+}
+
+fn delivered() -> smith_domain_run::Delivery {
+    smith_domain_run::Delivery::Delivered(
+        smith_domain_run::Delivered::new(Box::new([smith_domain_run::Receipt::new(
+            0,
+            b"host receipt".as_slice().into(),
+        )
+        .expect("sealed receipt")]))
+        .expect("one directory"),
+    )
+}
+
+#[test]
+fn full_receipt_and_marker_terminals_price_each_owned_copy() {
+    let meter = Meter::new();
+    meter.start();
+    let receipts: Box<[smith_domain_run::Receipt]> = (0..smith_domain_run::MAX_DIRECTORIES)
+        .map(|directory| smith_domain_run::Receipt::new(directory, bytes(512)).expect("exact cap"))
+        .collect();
+    let original = smith_domain_run::Delivered::new(receipts).expect("full unique terminal");
+    let output_copy = original.clone();
+    let final_answer_copy = original.clone();
+    let measured = meter.end();
+    let bound = smith_domain_run::Delivered::worst_case().checked_mul(3).expect("three bounded copies");
+    assert_eq!(original.owned_bytes(), smith_domain_run::Delivered::worst_case());
+    assert_eq!(meter.check(measured, bound, &"three full delivery evidence copies"), bound);
+    assert_eq!(output_copy, final_answer_copy);
+    meter.start();
+    drop((original, output_copy, final_answer_copy));
+    let measured = meter.end();
+    meter.check(measured, bound, &"delivery copies released");
+    assert_eq!(meter.held(), 0);
+
+    meter.start();
+    let marker = smith_domain_run::Marker::new(63, bytes(4096)).expect("exact relative path cap");
+    let refusal = smith_domain_run::DeliveryRefusal::new(Some(marker), bytes(512)).expect("exact explanation cap");
+    let another = refusal.clone();
+    let measured = meter.end();
+    meter.check(measured, 2 * 4608, &"two full marker refusals");
+    assert_eq!(refusal.owned_bytes(), 4608);
+    meter.start();
+    drop((refusal, another));
+    let measured = meter.end();
+    meter.check(measured, 2 * 4608, &"marker copies released");
+    assert_eq!(meter.held(), 0);
+}
+
+// Outputs are dropped before the measurement check: they are owned and priced
+// by the receiver. Tokens are the only observations this driver retains.
+fn delivery_memory_step(
+    domain: &mut Domain,
+    env: &Env<Limits>,
+    out: &mut Queue<Request>,
+    meter: &Meter,
+    event: Event,
+) -> (Option<Token>, bool) {
+    meter.start();
+    smith_domain_run::step(domain, env, event, out);
+    let measured = meter.end();
+    let mut token = None;
+    let mut answered = false;
+    while let Some(request) = out.pop() {
+        match request {
+            Request::Read { owner, .. }
+            | Request::Probe { owner, .. }
+            | Request::Check { owner, .. }
+            | Request::Deliver { owner, .. } => token = Some(owner),
+            Request::Open { conversation, .. } => token = Some(conversation),
+            Request::Return { result: smith_domain_run::Returned::Delivered(receipts), .. } => {
+                assert_eq!(receipts.owned_bytes(), smith_domain_run::Delivered::worst_case());
+            }
+            Request::Answer {
+                answer: Answer::Delivered { receipts, stopped: smith_domain_run::Failure::Cancelled, .. },
+                ..
+            } => {
+                assert_eq!(receipts.owned_bytes(), smith_domain_run::Delivered::worst_case());
+                answered = true;
+            }
+            Request::Admitted { .. } | Request::Checking { .. } | Request::Close { .. } => {}
+            unexpected @ (Request::Answer { .. }
+            | Request::Return { .. }
+            | Request::Say { .. }
+            | Request::Abort { .. }) => panic!("unexpected delivery fixture output {unexpected:?}"),
+        }
+    }
+    meter.check(measured, worst_case(&env.limits).expect("bounded limits"), &"full real delivery path");
+    (token, answered)
+}
+
+#[test]
+fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
+    let limits = Limits { repositories: smith_domain_run::MAX_DIRECTORIES, run_bytes: 65_536, ..LIMITS };
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut out = Queue::with_capacity(MAX_OUT);
+    let meter = Meter::new();
+    let mut domain = Domain::new(&limits);
+    let repositories: Box<[Repository]> = (0..smith_domain_run::MAX_DIRECTORIES)
+        .map(|directory| Repository {
+            name: Box::new([u8::try_from(directory + 1).expect("64 distinct names")]),
+            root: Token::new(u64::from(directory)),
+            writable: true,
+        })
+        .collect();
+    let parts = u64::from(smith_domain_run::MAX_DIRECTORIES) * (size(size_of::<Repository>()) + 1) + 1;
+    let charter = Charter {
+        brief: bytes(limits.run_bytes - parts),
+        checkout: Checkout { repositories },
+        grants: Grants {
+            deliver: Some(ChangeSpec { fields: Box::new([]) }),
+            tools: Tools { inspect: true, modify: true, shell: true },
+            forge: false,
+            agents: false,
+            outlets: Box::new([]),
+        },
+        outcome: OutcomeSpec {
+            change: None,
+            verdicts: Box::new([]),
+            report: Some(smith_domain_run::outcome::TextSpec { min: 0, max: 1, fields: Box::new([]) }),
+            failure: None,
+        },
+        budget: BUDGET,
+        llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1 },
+        models: Box::new([]),
+    };
+    let worker = Token::new(10);
+    let (owner, _) = delivery_memory_step(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Event::Start { reply_to: ReplyTo::new(worker), worker, charter },
+    );
+    let run = owner.expect("preparation read");
+    let mut owner = run;
+    for _ in 0..smith_domain_run::MAX_DIRECTORIES {
+        let (next, _) =
+            delivery_memory_step(&mut domain, &env, &mut out, &meter, Event::Read { owner, read: Read::Missing });
+        owner = next.expect("preparation probe");
+        let (next, _) =
+            delivery_memory_step(&mut domain, &env, &mut out, &meter, Event::Probed { owner, executable: true });
+        owner = next.expect("next read or main opening");
+    }
+    let conversation = owner;
+    delivery_memory_step(&mut domain, &env, &mut out, &meter, Event::Started { conversation, peer: worker });
+    let (owner, _) = delivery_memory_step(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Event::Delegated {
+            conversation,
+            call: worker,
+            name: smith_domain_run::CallName { completion: 1, position: 0 },
+            ask: Ask::Deliver { change: Change { fields: Box::new([]) } },
+            deadline: Time::ZERO.saturating_add(BUDGET.time),
+        },
+    );
+    let owner = owner.expect("first actual writable check");
+    for _ in 0..smith_domain_run::MAX_DIRECTORIES {
+        delivery_memory_step(
+            &mut domain,
+            &env,
+            &mut out,
+            &meter,
+            Event::Checked { owner, ran: Ran { exit: Exit::Code { code: 0 }, output: bytes(0), cut: 0 } },
+        );
+    }
+    delivery_memory_step(&mut domain, &env, &mut out, &meter, Event::Cancel { run });
+    let receipts = (0..smith_domain_run::MAX_DIRECTORIES)
+        .map(|directory| smith_domain_run::Receipt::new(directory, bytes(512)).expect("exact receipt cap"))
+        .collect();
+    let terminal = smith_domain_run::Delivered::new(receipts).expect("64 unique receipts");
+    delivery_memory_step(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Event::Delivered { owner, push: smith_domain_run::Delivery::Delivered(terminal) },
+    );
+    assert!(
+        meter.held() >= limits.run_bytes + smith_domain_run::Delivered::worst_case(),
+        "actual run retains a full charter and all actual receipts"
+    );
+    let (_, answered) = delivery_memory_step(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO },
+    );
+    assert!(answered, "one typed interrupted-landing answer carries every receipt");
 }

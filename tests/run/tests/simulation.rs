@@ -194,7 +194,7 @@ fn a_main_conversation_refused_at_its_entrance_refuses_its_run() {
 fn finishing(seed: u64) -> Settings {
     let calm = Settings::calm(seed);
     Settings {
-        host: host::Script { writable: 1000, changes: 1000, checks: 1000, verdicts: 1000, ..calm.host },
+        host: host::Script { writable: 1000, changes: 1000, verdicts: 1000, ..calm.host },
         partner: Script { finishes: 300, yields: 0, ..calm.partner },
         checkout: Checkouts { checks: 1000, check_failures: 2, ..calm.checkout },
         ..calm

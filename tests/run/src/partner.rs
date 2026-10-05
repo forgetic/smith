@@ -486,11 +486,12 @@ impl Partner {
     pub fn returned(&mut self, now: Time, call: Token, result: &Returned, out: &mut Vec<Out>) {
         let peer = self.calls.remove(&call).expect("a return names a call in flight");
         match result {
-            Returned::Accepted => self.tally.accepted += 1,
+            Returned::Accepted | Returned::Delivered(_) => self.tally.accepted += 1,
+            Returned::Nothing | Returned::DeliveryRefused(_) => self.tally.unpushed += 1,
             Returned::Rejected { .. } => self.tally.rejected += 1,
             Returned::ChecksFailed { .. } => self.tally.checks_failed += 1,
-            Returned::Moved => self.tally.moved += 1,
-            Returned::Unpushed { .. } => self.tally.unpushed += 1,
+            Returned::Stale => self.tally.moved += 1,
+            Returned::DeliveryFailed { .. } => self.tally.unpushed += 1,
             Returned::Cancelled => self.tally.cancelled += 1,
             Returned::TimedOut => self.tally.timed_out += 1,
             Returned::Busy => self.tally.busy += 1,
@@ -670,7 +671,13 @@ impl Partner {
             let talk = &self.talks[&peer];
             let (conversation, deadline) = (talk.conversation, talk.expires);
             self.calls.insert(call, peer);
-            out.push(Out::Event(Event::Delegated { conversation, call, ask, deadline }));
+            out.push(Out::Event(Event::Delegated {
+                conversation,
+                call,
+                ask,
+                deadline,
+                name: smith_domain_run::CallName { completion: talk.spent.turns, position: pending },
+            }));
             pending += 1;
         }
         let talk = self.talks.get_mut(&peer).expect("a live conversation calls");

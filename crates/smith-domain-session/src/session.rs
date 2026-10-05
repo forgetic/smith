@@ -1018,7 +1018,7 @@ fn tell(facts: &mut Facts, runs: &Slab<Run>, session: &Session, out: &Queue<Requ
                 let (messages, max_tokens) = (count(prompt.messages.len()), prompt.max_tokens);
                 Fact::CompletionStarted { opener, attempt: attempt(&session.state), messages, max_tokens }
             }
-            Request::Delegate { owner, opener: _, call: _, deadline: _ } => {
+            Request::Delegate { owner, opener: _, call: _, deadline: _, origin: _ } => {
                 let run = runs.get(Id::from_token(*owner)).expect("a run lives while its call is asked for");
                 Fact::DelegateStarted { opener, block: run.block }
             }
@@ -1094,7 +1094,15 @@ fn answered(
     env: &Env<Limits>,
     out: &mut Queue<Request>,
 ) -> State {
+    let origin_fits = match conversation.recording {
+        Recording::V1 => conversation.turns.checked_add(1).is_some(),
+        Recording::V2 { sequence, .. } => sequence.checked_add(1).is_some(),
+    } && u32::try_from(completion.content.len()).is_ok();
     used(conversation, completion.usage, out);
+    if !origin_fits {
+        clear_pending(conversation);
+        return finish(End::TranscriptFull);
+    }
     for block in &completion.content {
         match block {
             Block::ToolCall { call: Decoded::Historical, .. } => {
@@ -1254,7 +1262,12 @@ fn advance(
                 // The opener runs the race, and the session waits for it as
                 // long as it lives.
                 let (opener, call, deadline) = (conversation.opener, *ticket, conversation.expires);
-                out.push(Request::Delegate { owner: run.token(), opener, call, deadline });
+                let sequence = match conversation.recording {
+                    Recording::V1 => conversation.turns,
+                    Recording::V2 { sequence, .. } => sequence.checked_add(1).expect("checked before tool effects"),
+                };
+                let origin = crate::record::Origin { sequence, position: index };
+                out.push(Request::Delegate { owner: run.token(), opener, call, deadline, origin });
                 tools.slots.push(Slot::Running { run }).expect("a slot for every call");
                 tools.running = tools.running.saturating_add(1);
                 started = started.saturating_add(1);
@@ -2466,5 +2479,28 @@ fn recorded_shape(message: &Message, limits: &Limits) -> Result<(), crate::recor
     match fixed {
         Some(fixed) if fixed <= limits.session_bytes => Ok(()),
         Some(_) | None => Err(crate::record::Refusal::TooLarge),
+    }
+}
+
+/// Fault injection for the unit test of the integer naming fence. A real
+/// bounded transcript cannot hold this many turns; this tests the fence before
+/// delegated or owned effects, while retaining the received provider usage.
+/// Contract: domain/session.md, sections 3 and 5; testing-strategy.md, section 2.2.
+#[cfg(test)]
+pub(crate) fn exhaust_origin_for_test(domain: &mut Domain, owner: Token, recorded: bool) {
+    let session = domain.sessions.get_mut(Id::from_token(owner)).expect("live test session");
+    if recorded {
+        session.conversation.recording = Recording::V2 {
+            dialect: 1,
+            prices: crate::record::Prices { input: 0, cached: 0, output: 0, unit: 1 },
+            budget: u64::MAX,
+            spent: 0,
+            overflow: false,
+            sequence: u32::MAX,
+            told: u32::MAX,
+            pending: None,
+        };
+    } else {
+        session.conversation.turns = u32::MAX;
     }
 }

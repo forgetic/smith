@@ -6,9 +6,10 @@
 //! - The worker's, which the parent routes to and from the protocol layer. A
 //!   [`Event::Start`] is a call, answered by exactly one [`Request::Answer`].
 //!   An admitted run is named by [`Request::Admitted`] first, so that a
-//!   [`Event::Cancel`] can name it. A run's host call, [`Request::Push`], is
-//!   ended by exactly one [`Event::Pushed`], or after a
-//!   [`Request::CancelHost`] by [`Event::HostCancelled`] if the cancel won.
+//!   [`Event::Cancel`] can name it. A run's host call, [`Request::Deliver`], is
+//!   ended by exactly one actual [`Event::Delivered`]. After submission the
+//!   host operation is never abandoned; its deadline bounds the real terminal.
+//!   Duplicate or stale callback owners are inert (domain/run.md, sections 8 and 10).
 //! - io's, for what the run itself does in its checkout, which the parent
 //!   routes to and from the protocol layer. A [`Request::Read`] is ended by
 //!   exactly one [`Event::Read`], a [`Request::Probe`] by one
@@ -33,7 +34,7 @@
 
 use alloc::boxed::Box;
 
-use crate::push::PushFailure;
+use crate::delivery::{CallName, Delivered, Delivery, DeliveryFailure, DeliveryRefusal};
 
 use skein_lib::{ReplyTo, Time, Token};
 
@@ -167,17 +168,21 @@ pub enum Event {
     },
     /// A call the conversation's LLM made of the run, which the run answers
     /// with one `Return`. `deadline` is the conversation's own expiry: past
-    /// it, the run stops what the call is doing, and returns `TimedOut` once
-    /// that has settled. The conversation waits for the return, past its
+    /// it, pre-submission checks may stop and return `TimedOut`. A submitted
+    /// delivery remains owed until its bounded actual host terminal settles. The conversation waits for the return, past its
     /// expiry too, unless it closes.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Delegated {
+        /// Parent-translated concrete transcript origin, fixed-size and distinct
+        /// from `call`'s live callback. Zero completion is refused before effects.
+        /// Contract: domain/run.md, section 8.2; domain/session.md, sections 3 and 5.
+        name: CallName,
         /// Run-issued opaque conversation name, echoed on every conversation event.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         conversation: Token,
-        /// Run-issued call token, echoed on the single returned finish or sub-agent terminal.
+        /// Root-issued live call token, echoed on the one finish, delivery or sub-agent terminal.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         call: Token,
@@ -199,7 +204,7 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         conversation: Token,
-        /// Run-issued call token, echoed on the single returned finish or sub-agent terminal.
+        /// Root-issued live call token, echoed on the one finish, delivery or sub-agent terminal.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         call: Token,
@@ -226,10 +231,13 @@ pub enum Event {
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         owner: Token,
     },
-    /// Terminal for `Push`.
+    /// Actual host terminal for `Deliver`, including while shutdown settles.
+    /// Constructor-sealed owned evidence is revalidated against admitted writable
+    /// mounts; stale callback generations are inert.
+    /// Contract: domain/run.md, sections 8.2 and 10.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Pushed {
+    Delivered {
         /// Requester-issued opaque name, echoed on the one terminal for this request.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -237,16 +245,7 @@ pub enum Event {
         /// Typed terminal for the host's change-delivery request.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        push: Push,
-    },
-    /// Terminal for a host call, after `CancelHost`: it was abandoned.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    HostCancelled {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        owner: Token,
+        push: Delivery,
     },
 }
 
@@ -409,13 +408,22 @@ pub enum Request {
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         deadline: Time,
     },
-    /// To the worker, a host call: commit what the checkout of the run it
-    /// names `worker` holds, exactly as it is, and push it. `Change` carries
-    /// the validated generic fields unchanged; their meaning belongs to the
-    /// host. This retains the copied Push lifecycle until generic delivery.
+    /// To the host, deliver the exact checked writable-directory state under
+    /// the logical run named `worker`. The host interprets the unchanged
+    /// generic fields and returns its real bounded terminal. Final Change
+    /// and separately granted main delivery share the same exclusive checks;
+    /// the terminal remains owed through shutdown.
     ///
     /// Contract: domain/run.md, sections 7.1, 8 and 14.
-    Push {
+    Deliver {
+        /// Durable transcript-derived host call name, scoped by the logical host run.
+        /// Callback `owner` is separate; retries of this operation reuse this name.
+        /// Contract: domain/run.md, section 8.2; domain/host.md, section 7.
+        name: CallName,
+        /// Bounded actual host-operation deadline; the host supplies exactly one
+        /// terminal even during shutdown. The run never abandons submission.
+        /// Contract: domain/run.md, sections 8.2 and 10.
+        deadline: Time,
         /// Scripted host or worker's opaque run name, echoed without interpretation.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -429,21 +437,12 @@ pub enum Request {
         /// Contract: domain/run.md, sections 7.1, 8 and 14.
         change: Change,
     },
-    /// Abandon the host call in flight for `owner`. Its terminal still comes:
-    /// `HostCancelled`, or whichever outcome won the race.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    CancelHost {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        owner: Token,
-    },
+
     /// The one terminal for the conversation's call `call`.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Return {
-        /// Run-issued call token, echoed on the single returned finish or sub-agent terminal.
+        /// Root-issued live call token, echoed on the one finish, delivery or sub-agent terminal.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         call: Token,
@@ -459,6 +458,17 @@ pub enum Request {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum Ask {
+    /// Main-only, separately granted mid-run delivery. Fields use that grant's
+    /// required-name caps; every extra value counts toward `Limits::outcome_bytes`.
+    /// It takes the same exclusive checked snapshot as finishing Change, then
+    /// returns the actual terminal and continues unless shutdown was pending.
+    /// Contract: domain/run.md, sections 7.1, 8.1 and 8.4.
+    Deliver {
+        /// Opaque host-named metadata, passed unchanged after checked aggregate
+        /// ownership and required field validation. No title/body interpretation.
+        /// Contract: domain/run.md, sections 7.1 and 8.4.
+        change: Change,
+    },
     /// Finish the run with `outcome`.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -501,7 +511,26 @@ pub enum Ask {
 #[derive(PartialEq, Eq, Hash, Debug)]
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Returned {
-    /// The outcome is accepted: the run finishes with it.
+    /// Actual host landing evidence. A mid-run call continues normally; a finish
+    /// call ends with its admitted Change. Receipt constructors cap each copy.
+    /// Contract: domain/run.md, sections 8.2 and 8.4.
+    Delivered(
+        /// Constructor-bounded actual host receipts, at most 64 unique writable mounts.
+        /// Contract: domain/run.md, sections 8.2 and 8.4.
+        Delivered,
+    ),
+    /// Host found no changed writable directory; correctable LLM feedback.
+    /// Contract: domain/run.md, section 8.2.
+    Nothing,
+    /// Host named correctable feedback, bounded by `DeliveryRefusal`. Any marker
+    /// ordinal is revalidated against admitted writable mounts before forwarding.
+    /// Contract: domain/run.md, sections 8.1 and 8.2.
+    DeliveryRefused(
+        /// Named bounded explanation and optional relative marker location.
+        /// Contract: domain/run.md, sections 8.1 and 8.2.
+        DeliveryRefusal,
+    ),
+    /// A non-Change outcome is accepted: the run finishes with it.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Accepted,
@@ -527,30 +556,30 @@ pub enum Returned {
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         ran: Ran,
     },
-    /// The change was not pushed: its branch moved since the run started, and
+    /// Delivery cannot land later because the host context moved, and
     /// the run ends.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Moved,
-    /// The change was not pushed: the push failed.
+    Stale,
+    /// The actual host operation failed. Its fixed generic reason and sealed
+    /// 512-byte diagnostic/drop count return as feedback; no landing is claimed.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Unpushed {
+    /// Contract: domain/run.md, sections 8.2 and 10.
+    DeliveryFailed {
         /// Typed reason why the pending operation produced no successful value.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        failure: PushFailure,
+        failure: DeliveryFailure,
     },
     /// Nothing was decided: the call was withdrawn, or the run is ending
     /// otherwise.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Cancelled,
-    /// Nothing was decided: the call's deadline passed first, and what it was
-    /// doing was stopped (its sub-agent closed, its checks or its push
-    /// abandoned).
+    /// Before submission, the call's deadline passed and its sub-agent or
+    /// checks settled. A submitted delivery instead owes its real host terminal.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Contract: domain/run.md, sections 8.2 and 10.
     TimedOut,
     /// The run has no room for another call now; it may have later.
     ///
@@ -584,7 +613,7 @@ pub enum Returned {
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         end: End,
     },
-    /// The run would not open the sub-agent.
+    /// The run refuses the requested authority or origin before an effect.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Refused {
@@ -595,12 +624,16 @@ pub enum Returned {
     },
 }
 
-/// Why a run would not open a sub-agent.
+/// Why a delegated run ask is refused before an effect.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum AskRefusal {
-    /// The asker may not ask for sub-agents, or asked for families of tools
+    /// Parent supplied a zero transcript completion. No check or host effect
+    /// begins; a valid session origin is one-based and bounded before dispatch.
+    /// Contract: domain/run.md, section 8.2; domain/session.md, sections 3 and 5.
+    Name,
+    /// The asker lacks this mid-run delivery or sub-agent grant, or asked for families of tools
     /// it does not have itself.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -676,35 +709,6 @@ pub enum Exit {
     Unstarted,
 }
 
-/// How a push ended.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-#[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
-pub enum Push {
-    /// The change is pushed.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Done,
-    /// The branch moved since the run started: nothing was pushed.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Moved,
-    /// The push failed.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Failed {
-        /// Typed reason why the pending operation produced no successful value.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        failure: PushFailure,
-    },
-    /// No repository contained a change.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Nothing,
-}
-
 /// Where a file is, for the run's own io: a repository's root, as io names
 /// it, and the path beneath it, names joined by `/`. io resolves it beneath
 /// the root.
@@ -762,6 +766,10 @@ pub enum Read {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Opening {
+    /// Whether the parent offers main the separately granted delivery tool.
+    /// It is false for every child; this descriptor grants no final outcome form.
+    /// Contract: domain/run.md, section 8.4.
+    pub deliver: bool,
     /// The LLM it talks to.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -889,6 +897,25 @@ pub enum Fault {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum Answer {
+    /// A mid-run delivery actually landed after shutdown was already decided.
+    /// This is host evidence, not an LLM-declared Accepted result: even a
+    /// Report-only charter preserves the real operation without inventing a Report.
+    /// Contract: domain/run.md, sections 8.2, 8.4 and 10; domain/host.md, section 7.
+    Delivered {
+        /// Stable transcript origin of the landed host operation, scoped by the logical run.
+        /// Contract: domain/run.md, section 8.2.
+        name: CallName,
+        /// Real bounded per-directory host receipts; this retained copy is priced.
+        /// Contract: domain/run.md, sections 8.2 and 11.
+        receipts: Delivered,
+        /// Typed stop already decided when the mid-run operation landed.
+        /// It does not erase the actual delivery evidence.
+        /// Contract: domain/run.md, sections 8.4 and 10.
+        stopped: Failure,
+        /// Accepted cumulative usage, including late completions while settling.
+        /// Contract: domain/run.md, sections 9 and 10.
+        spent: Spend,
+    },
     /// Refused at the entrance: nothing was done.
     ///
     /// A run is refused at its own entrance, before `Admitted`; or after

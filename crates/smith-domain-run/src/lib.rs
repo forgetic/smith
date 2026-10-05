@@ -22,8 +22,8 @@
 //!
 //! Copy baseline: temper `25ac2ad`, migration 05s2 (domain/run.md, section 14).
 //! Generic result contracts implement domain/run.md, section 7 in 05s4.
-//! The copied charter, Push delivery and split token-budget vocabulary remain
-//! pending subsequent 05s4 increments (domain/run.md, section 14).
+//! Generic delivery implements domain/run.md, section 8. The copied charter,
+//! fixed check convention and split token budget remain for subsequent increments (domain/run.md, section 14).
 
 //!
 //! The retained state is each admitted charter, conversation binding, shared
@@ -45,6 +45,7 @@ mod boundary;
 mod budget;
 mod call;
 pub mod charter;
+mod delivery;
 mod domain;
 pub mod facts;
 mod land;
@@ -52,18 +53,20 @@ mod limits;
 pub mod outcome;
 mod prepare;
 mod prompt;
-mod push;
 mod run;
 #[cfg(test)]
 mod tests;
 
 pub use boundary::{
-    Answer, Ask, AskRefusal, End, Event, Exit, Failure, Fault, Invalid, Opening, Place, Policy, Push, Ran, Read,
-    Refusal, Request, Returned, Stop,
+    Answer, Ask, AskRefusal, End, Event, Exit, Failure, Fault, Invalid, Opening, Place, Policy, Ran, Read, Refusal,
+    Request, Returned, Stop,
 };
 pub use budget::{Budget, Exhausted, Spend};
 pub use charter::Charter;
 pub use domain::{Domain, MAX_OUT, fire, step};
 pub use limits::{Limits, worst_case};
 
-pub use push::{PushDiagnostic, PushFailure, PushReason};
+pub use delivery::{
+    CallName, Delivered, Delivery, DeliveryFailure, DeliveryReason, DeliveryRefusal, DeliveryStatus, Diagnostic,
+    MAX_DIRECTORIES, Marker, Receipt,
+};

@@ -15,6 +15,14 @@ use smith_fake_llm_domain::api::{Finish, Line, Script, Turn};
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Job {
+    /// Fixes code, delivers opaque ticket metadata under a separate grant, then
+    /// continues and finishes Report. No final Change is allowed.
+    /// Contract: domain/run.md, sections 8.4 and 13.
+    MidReport,
+    /// Leaves conflict markers in a named file, receives the host's marker
+    /// refusal, corrects that file, redelivers and ends Report.
+    /// Contract: domain/run.md, sections 8.1, 8.2, 8.4 and 13.
+    MarkerReport,
     /// Reads, edits, runs a command, finishes with a change whose checks
     /// fail, fixes it, and finishes again; and once more if the push fails.
     ///
@@ -54,8 +62,17 @@ pub enum Job {
 /// Every job, for worlds that draw them.
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
-pub const JOBS: [Job; 7] =
-    [Job::Coding, Job::Review, Job::Reporting, Job::Failing, Job::Delegating, Job::Spending, Job::Wandering];
+pub const JOBS: [Job; 9] = [
+    Job::MidReport,
+    Job::MarkerReport,
+    Job::Coding,
+    Job::Review,
+    Job::Reporting,
+    Job::Failing,
+    Job::Delegating,
+    Job::Spending,
+    Job::Wandering,
+];
 
 /// The word that cues the script of `job`'s main conversation, if it has one.
 ///
@@ -63,6 +80,8 @@ pub const JOBS: [Job; 7] =
 #[must_use]
 pub const fn cue(job: Job) -> Option<&'static [u8]> {
     match job {
+        Job::MidReport => Some(b"@midreport"),
+        Job::MarkerReport => Some(b"@markerreport"),
         Job::Coding => Some(b"@coding"),
         Job::Review => Some(b"@review"),
         Job::Reporting => Some(b"@report"),
@@ -79,6 +98,8 @@ pub const fn cue(job: Job) -> Option<&'static [u8]> {
 #[must_use]
 pub fn all() -> Box<[Script]> {
     Box::new([
+        script(b"@midreport", mid_report()),
+        script(b"@markerreport", marker_report()),
         script(b"@coding", coding()),
         script(b"@review", review()),
         script(b"@report", reporting()),
@@ -225,4 +246,28 @@ fn spending() -> Vec<Turn> {
 
 fn burning() -> Vec<Turn> {
     (0..64).map(|_| calls(vec![read("src/lib.rs")])).collect()
+}
+
+fn mid_report() -> Vec<Turn> {
+    vec![
+        calls(vec![edit("42", "43")]),
+        calls(vec![call("deliver", r#"{"ticket":"opaque-host-value"}"#)]),
+        calls(vec![call(
+            "finish",
+            r#"{"report":"Delivery completed; continuing produced this report.","source":"checkout"}"#,
+        )]),
+    ]
+}
+
+fn marker_report() -> Vec<Turn> {
+    vec![
+        calls(vec![
+            edit("42", "43"),
+            call("write", r#"{"path":"conflict.txt","content":"<<<<<<< ours\n=======\n>>>>>>> theirs\n"}"#),
+        ]),
+        calls(vec![call("deliver", r#"{"ticket":"first"}"#)]),
+        calls(vec![call("write", r#"{"path":"conflict.txt","content":"resolved\n"}"#)]),
+        calls(vec![call("deliver", r#"{"ticket":"corrected"}"#)]),
+        calls(vec![call("finish", r#"{"report":"Marker corrected and delivered.","source":"checkout"}"#)]),
+    ]
 }

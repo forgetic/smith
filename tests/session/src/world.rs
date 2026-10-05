@@ -1028,7 +1028,7 @@ impl World {
             }
             agent::Request::Io { owner, op, deadline } => self.start_op(owner, op, deadline),
             agent::Request::CancelIo { owner } => self.cancel_op(owner),
-            agent::Request::Delegate { owner, opener, call, deadline } => {
+            agent::Request::Delegate { owner, opener, call, deadline, origin: _ } => {
                 let session = self.sessions.get(&opener.raw()).and_then(|session| session.session);
                 let session = session.expect("a session delegates once it has opened");
                 assert!(self.runs.insert(owner, session).is_none(), "each delegated call has a token of its own");
@@ -1746,7 +1746,7 @@ fn describe_agent_request(request: &agent::Request) -> String {
         agent::Request::Cancel { owner } => format!("cancel {}", owner.raw()),
         agent::Request::Io { owner, op, deadline } => format!("io {} {op:?} by {}", owner.raw(), deadline.as_nanos()),
         agent::Request::CancelIo { owner } => format!("cancel io {}", owner.raw()),
-        agent::Request::Delegate { owner, opener, call, deadline } => {
+        agent::Request::Delegate { owner, opener, call, deadline, origin: _ } => {
             format!("delegate {} for {} {call:?} by {}", owner.raw(), opener.raw(), deadline.as_nanos())
         }
         agent::Request::Withdraw { owner } => format!("withdraw {}", owner.raw()),

@@ -355,6 +355,11 @@ pub enum Request {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Delegate {
+        /// Concrete transcript origin supplied by the session, preserved by the opener.
+        /// It is fixed-size; its sequence is checked before any delegated effect.
+        ///
+        /// Contract: domain/session.md, sections 3 and 5; domain/run.md, section 8.2.
+        origin: crate::record::Origin,
         /// Requester-issued opaque name, echoed on the one terminal for this request.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.

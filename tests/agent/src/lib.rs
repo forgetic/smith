@@ -23,4 +23,4 @@ mod world;
 
 pub use limits::{BUDGET, LIMITS, TIGHT};
 pub use script::{JOBS, Job};
-pub use world::{Settings, World};
+pub use world::{HostReply, Settings, World, delivered};

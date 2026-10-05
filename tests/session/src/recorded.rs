@@ -78,6 +78,9 @@ pub struct World {
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub delegated: Vec<Token>,
+    /// Actual delegated transcript origins in emitted order, independent of live callbacks.
+    /// Contract: domain/session.md, sections 3, 5 and 12; testing-strategy.md, section 7.
+    pub origins: Vec<record::Origin>,
     /// Pending checkout-operation identities and their owned typed requests.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
@@ -131,6 +134,7 @@ impl World {
             session: None,
             completing: None,
             delegated: vec![],
+            origins: vec![],
             operations: vec![],
             cancelled_operations: vec![],
             snapshots: vec![],
@@ -187,9 +191,10 @@ impl World {
                     assert!(self.completing.replace(owner).is_none());
                     self.prompts.push(prompt);
                 }
-                session::Request::Delegate { owner, .. } => {
+                session::Request::Delegate { owner, origin, .. } => {
                     assert!(!self.delegated.contains(&owner));
                     self.delegated.push(owner);
+                    self.origins.push(origin);
                 }
                 session::Request::Turn { opener, turn } => {
                     assert_eq!(opener, Token::new(31));

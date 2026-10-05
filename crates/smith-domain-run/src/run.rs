@@ -1,95 +1,14 @@
-//! Runs: one agent instance, from its admission to its one answer.
-//!
-//! A `Start` admits a run, or refuses it at the entrance. An admitted run
-//! first looks in its checkout for what it tells the LLM and what it checks
-//! (the `prepare` module), then opens its main conversation and drives it:
-//! when the LLM stops without finishing, the run nudges it, within its nudges
-//! and its budget; when it calls `finish`, the run judges the outcome, and
-//! lands a change (the `land` module). It works until how it ends is decided;
-//! then it closes main, waits for main to end, and answers. The first ending
-//! decided wins, but for a change that lands: once it is pushed, it is on the
-//! forge, and the run finishes with it whatever it was winding down for. The
-//! run answers only once nothing it started is still in flight.
-//!
-//! A run that spends past its budget does not cut main off mid-turn: main
-//! keeps the turn in flight (Over), and is closed at its next turn or yield,
-//! or when a finish it called in that turn is refused, unless that finish is
-//! accepted first.
-//!
-//! A run's transition table:
-//!
-//! ```text
-//! state      event or alarm                next       emits
-//! -          start, beyond the limits      -          answer: invalid
-//!            start, no room                -          answer: busy
-//!            start                         Preparing  admitted, the first look
-//!            start, nothing to look for    Working    admitted, open main
-//! Preparing  read, probed                  Preparing  the next look
-//!            read, probed, the last        Working    open main
-//!            deadline                      Stopping   (out of time)
-//!            cancel                        Stopping   (cancelled)
-//! Stopping   read, probed                  Closed     answer: the ending decided
-//!            cancel                        Stopping
-//! Working    main yielded                  Working    say: a nudge
-//!            main yielded, no nudge left   Winding    close main: unfinished
-//!            main yielded, no turn left    Winding    close main: out of budget
-//!            used, past the budget         Over
-//!            finish, refused               Working    return: rejected
-//!            finish, a verdict             Winding    return: accepted, close main
-//!            finish, a change              Working    (landing)
-//!            landed: pushed                Winding    close main: accepted
-//!            landed: refused               Working
-//!            landed: moved                 Winding    close main: stale
-//!            deadline                      Winding    close main: out of time
-//!            cancel                        Winding    close main: cancelled
-//!            main ended                    Closed     answer: how main ended
-//! Over       used, main yielded            Winding    close main: out of budget
-//!            finish, refused               Winding    return: rejected, close main
-//!            finish, a verdict             Winding    return: accepted, close main
-//!            finish, a change              Over       (landing)
-//!            landed: pushed                Winding    close main: accepted
-//!            landed: refused               Winding    close main: out of budget
-//!            landed: moved                 Winding    close main: stale
-//!            deadline                      Winding    close main: out of budget
-//!            cancel                        Winding    close main: cancelled
-//!            main ended                    Closed     answer: how main ended
-//! Winding    landed: pushed                Winding    (accepted)
-//!            used, cancel, landed          Winding
-//!            finish                        Winding    return: cancelled
-//!            main ended                    Closed     answer: the ending decided
-//! Closed     cancel                        Closed
-//! ```
-//!
-//! and a conversation's, as the run keeps it:
-//!
-//! ```text
-//! state     event or call                next
-//! Pending   opened by its run            Opening   open it
-//!           the run stops                Closed
-//! Opening   started                      Running
-//!           closed by its run            Unwanted
-//!           ended (refused)              Closed
-//! Unwanted  started                      Closing   close it
-//!           ended (refused)              Closed
-//! Running   yielded, used, delegated     Running
-//!           closed by its run            Closing   close it
-//!           ended                        Closed
-//! Closing   yielded, used, delegated     Closing
-//!           ended                        Closed
-//! ```
-//!
-//! Every other cell is unreachable by the contracts: a conversation's
-//! (`Started` first unless refused, then events, then one `Ended` once its
-//! calls have returned and what was in flight has settled), io's and the
-//! worker's (one terminal per request, one look at a time while a run
-//! prepares). A yield is decided in the step it arrives, so a conversation
-//! never rests yielded; a finish is a write, which a conversation runs alone,
-//! so it has at most one landing at a time. The deadline alarm runs while a
-//! run prepares, works or is over its budget; it follows from the state, in
-//! one place ([`follow`]), which also retires a run once it is Closed. A
-//! call's alarm runs from the call's start until it returns or is withdrawn.
-//!
-//! Contract: domain/run.md, section 14; programming-model.md, sections 4.4 and 6.3.
+//! Run admission, main and child lifetimes, shared spend and terminal rights
+//! (domain/run.md, sections 3, 7, 8 and 10). State retains the charter, prepared
+//! guides/checks, conversation bindings, call ownership and one pending ending.
+//! Entrances below act only through bounded queues, slabs and injected time.
+//! The run knows no host policy, forge, receipt encoding, authentication or
+//! provider syntax. Generic final forms are judged before effects; delivery is
+//! one exclusive checked snapshot. Before submission checks may abort; after
+//! submission the actual bounded host terminal remains owed. Final Change
+//! landing wins shutdown; interrupted mid delivery preserves actual evidence
+//! in its distinct terminal answer. The copied token budget and V1 session
+//! opening remain pending later increments (domain/run.md, section 14).
 
 use alloc::boxed::Box;
 use core::mem;
@@ -99,12 +18,12 @@ use skein_lib::{Deadlines, Duration, Env, Id, Queue, ReplyTo, Slab, Time, Token}
 
 use crate::agent::{self, Child, Means};
 use crate::boundary::{
-    Answer, Ask, AskRefusal, End, Failure, Fault, Invalid, Opening, Policy, Push, Ran, Read, Refusal, Request,
-    Returned, Stop,
+    Answer, Ask, AskRefusal, End, Failure, Fault, Invalid, Opening, Policy, Ran, Read, Refusal, Request, Returned, Stop,
 };
 use crate::budget::{Exhausted, Spend};
 use crate::call::{Call, Calls, Withdrawal, Work};
 use crate::charter::{self, Charter, Families, count};
+use crate::delivery::{CallName, Delivered, Delivery};
 use crate::domain::Domain;
 use crate::facts::{Asked, Fact};
 use crate::land::{self, Settled};
@@ -182,6 +101,7 @@ enum State {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 enum Ending {
+    Delivered { name: CallName, receipts: Delivered, stopped: Failure },
     Accepted(Declared),
     Failed(Failure),
 }
@@ -476,11 +396,16 @@ pub(crate) fn used(domain: &mut Domain, conversation: Token, spend: Spend, out: 
     follow(runs, alarms, run_id);
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the cell receives concrete origin independently of live callback identity"
+)]
 pub(crate) fn delegated(
     domain: &mut Domain,
     env: &Env<Limits>,
     conversation: Token,
     call: Token,
+    name: CallName,
     ask: Ask,
     deadline: Time,
     out: &mut Queue<Request>,
@@ -498,6 +423,7 @@ pub(crate) fn delegated(
     let run_id = conversation.run;
     facts.about(run_id.token());
     let asked = match &ask {
+        Ask::Deliver { .. } => Asked::Deliver,
         Ask::Finish { .. } => Asked::Finish,
         Ask::SubAgent { .. } => Asked::SubAgent,
     };
@@ -516,14 +442,20 @@ pub(crate) fn delegated(
             State::Winding { reply_to, ending }
         }
         State::Working { reply_to, main } => match ask {
+            Ask::Deliver { change } => {
+                assert!(main == id, "only main is offered delivery");
+                let made = Asking { call, deadline, name };
+                deliver(run, run_id, conversations, calls, alarms, main, made, change, env, out);
+                State::Working { reply_to, main }
+            }
             Ask::Finish { outcome } => {
                 assert!(main == id, "only main is offered finish");
-                let made = Asking { call, deadline };
+                let made = Asking { call, deadline, name };
                 finish(run, run_id, conversations, calls, alarms, reply_to, main, None, made, outcome, env, out)
             }
             Ask::SubAgent { brief, families, llm, share } => {
                 let wanted = Wanted { brief, families, llm, share };
-                let made = Asking { call, deadline };
+                let made = Asking { call, deadline, name };
                 sub_agent(run, run_id, conversations, calls, alarms, id, made, wanted, env, out);
                 State::Working { reply_to, main }
             }
@@ -531,12 +463,12 @@ pub(crate) fn delegated(
         State::Over { reply_to, main, exhausted } => match ask {
             Ask::Finish { outcome } => {
                 assert!(main == id, "only main is offered finish");
-                let made = Asking { call, deadline };
+                let made = Asking { call, deadline, name };
                 let over = Some(exhausted);
                 finish(run, run_id, conversations, calls, alarms, reply_to, main, over, made, outcome, env, out)
             }
             // Past the budget, nothing new is opened.
-            Ask::SubAgent { .. } => {
+            Ask::Deliver { .. } | Ask::SubAgent { .. } => {
                 out.push(Request::Return { call, result: Returned::Refused { refusal: AskRefusal::Over } });
                 State::Over { reply_to, main, exhausted }
             }
@@ -591,36 +523,22 @@ pub(crate) fn aborted(domain: &mut Domain, owner: Token, out: &mut Queue<Request
     settle(domain, id, settled, out);
 }
 
-#[expect(
-    clippy::large_types_passed_by_value,
-    reason = "owned terminal diagnostics pass through the step without allocation"
-)]
-pub(crate) fn pushed(domain: &mut Domain, owner: Token, push: Push, out: &mut Queue<Request>) {
+#[expect(clippy::large_types_passed_by_value, reason = "bounded host terminal passes ownership")]
+pub(crate) fn delivered(domain: &mut Domain, owner: Token, delivery: Delivery, out: &mut Queue<Request>) {
     let id = Id::<Call>::from_token(owner);
-    let call = domain.calls.get_mut(id).expect("a call lives until it returns");
-    domain.facts.about(call.run.token());
-    let told = match push {
-        Push::Failed { mut failure } => {
-            failure.diagnostic = crate::PushDiagnostic::empty();
-            Push::Failed { failure }
-        }
-        other @ (Push::Done | Push::Moved | Push::Nothing) => other,
+    let Some(call) = domain.calls.get(id) else {
+        return;
     };
-    domain.facts.push(Fact::Pushed { run: call.run.token(), push: told });
-    let settled = match &mut call.work {
-        Work::Landing(landing) => land::pushed(landing, call.owner, push, out),
-        Work::Child(_) => unreachable!("io and the worker answer only a landing's requests"),
-    };
-    settle(domain, id, settled, out);
-}
-
-pub(crate) fn host_cancelled(domain: &mut Domain, owner: Token, out: &mut Queue<Request>) {
-    let id = Id::<Call>::from_token(owner);
-    let call = domain.calls.get_mut(id).expect("a call lives until it returns");
+    if domain.calls.find(call.conversation, call.owner) != Some(id) {
+        return;
+    }
+    let call = domain.calls.get_mut(id).expect("the named call is live");
+    let run = domain.runs.get(call.run).expect("run waits for the terminal");
     domain.facts.about(call.run.token());
+    domain.facts.push(Fact::Delivered { run: call.run.token(), push: delivery.status() });
     let settled = match &mut call.work {
-        Work::Landing(landing) => land::host_cancelled(landing, call.owner, out),
-        Work::Child(_) => unreachable!("io and the worker answer only a landing's requests"),
+        Work::Landing(landing) => land::delivered(landing, call.owner, delivery, run, out),
+        Work::Child(_) => unreachable!("host answers a delivery call"),
     };
     settle(domain, id, settled, out);
 }
@@ -754,11 +672,38 @@ fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<R
     let run = runs.get_mut(run_id).expect("a run lives until its calls have returned");
     let state = mem::replace(&mut run.state, State::Closed);
     run.state = match settled {
-        Settled::Pushed(change) => match state {
+        Settled::Delivered { name, receipts, stopped } => match state {
+            State::Working { reply_to, main } => match stopped {
+                Some(stopped) => {
+                    wind_down(conversations, reply_to, main, Ending::Delivered { name, receipts, stopped }, out)
+                }
+                None => State::Working { reply_to, main },
+            },
+            State::Over { reply_to, main, exhausted } => wind_down(
+                conversations,
+                reply_to,
+                main,
+                Ending::Delivered { name, receipts, stopped: Failure::Budget(exhausted) },
+                out,
+            ),
+            State::Winding { reply_to, ending } => {
+                let stopped = match ending {
+                    Ending::Failed(stopped) => stopped,
+                    Ending::Accepted(_) | Ending::Delivered { .. } => {
+                        unreachable!("one exclusive mid delivery precedes shutdown")
+                    }
+                };
+                State::Winding { reply_to, ending: Ending::Delivered { name, receipts, stopped } }
+            }
+            State::Preparing { .. } | State::Stopping { .. } | State::Closed => {
+                unreachable!("delivery starts after main")
+            }
+        },
+        Settled::Finished(change) => match state {
             State::Working { reply_to, main } | State::Over { reply_to, main, exhausted: _ } => {
                 wind_down(conversations, reply_to, main, Ending::Accepted(Declared::Change(change)), out)
             }
-            // The change is on the forge, whatever the run was winding down
+            // The host landed the checked state, whatever the run was winding down
             // for: main is closing already.
             State::Winding { reply_to, ending: _ } => {
                 State::Winding { reply_to, ending: Ending::Accepted(Declared::Change(change)) }
@@ -900,7 +845,7 @@ fn finish(
     env: &Env<Limits>,
     out: &mut Queue<Request>,
 ) -> State {
-    let Asking { call, deadline } = made;
+    let Asking { call, deadline, name } = made;
     let conversation = conversations.get(main).expect("main lives while its run works");
     assert!(conversation.calls == 0, "a finish is a write, which a conversation runs alone");
     let max = env.limits.outcome_bytes;
@@ -924,6 +869,20 @@ fn finish(
             wind_down(conversations, reply_to, main, Ending::Accepted(completed), out)
         }
         Declared::Change(change) => {
+            if name.completion == 0 {
+                out.push(Request::Return { call, result: Returned::Refused { refusal: AskRefusal::Name } });
+                return match over {
+                    None => State::Working { reply_to, main },
+                    Some(exhausted) => State::Over { reply_to, main, exhausted },
+                };
+            }
+            if deadline <= env.now {
+                out.push(Request::Return { call, result: Returned::TimedOut });
+                return match over {
+                    None => State::Working { reply_to, main },
+                    Some(exhausted) => State::Over { reply_to, main, exhausted },
+                };
+            }
             if calls.is_full() {
                 out.push(Request::Return { call, result: Returned::Busy });
                 return match over {
@@ -931,7 +890,7 @@ fn finish(
                     Some(exhausted) => State::Over { reply_to, main, exhausted },
                 };
             }
-            let work = Work::Landing(land::landing(change));
+            let work = Work::Landing(land::landing(change, name, deadline, true));
             let id = begin_call(calls, alarms, Call { run: run_id, conversation: main, owner: call, work }, deadline);
             match &mut calls.get_mut(id).expect("inserted above").work {
                 Work::Landing(landing) => land::begin(landing, id, run, env, out),
@@ -947,10 +906,61 @@ fn finish(
     }
 }
 
+#[expect(clippy::too_many_arguments, reason = "exclusive main delivery handler takes its owned bindings")]
+fn deliver(
+    run: &mut Run,
+    run_id: Id<Run>,
+    conversations: &mut Slab<Conversation>,
+    calls: &mut Calls,
+    alarms: &mut Deadlines<Alarm>,
+    main: Id<Conversation>,
+    made: Asking,
+    change: Change,
+    env: &Env<Limits>,
+    out: &mut Queue<Request>,
+) {
+    let Asking { call, deadline, name } = made;
+    assert!(conversations.get(main).expect("main lives").calls == 0, "delivery is an exclusive write");
+    let Some(spec) = &run.charter.grants.deliver else {
+        out.push(Request::Return { call, result: Returned::Refused { refusal: AskRefusal::NotGranted } });
+        return;
+    };
+    let judged = match outcome::change_bytes(&change) {
+        Some(bytes) if bytes <= env.limits.outcome_bytes => outcome::judge_change(spec, &change),
+        Some(_) | None => Err(outcome::too_large(env.limits.outcome_bytes)),
+    };
+    if let Err(problems) = judged {
+        run.rejected = run.rejected.saturating_add(1);
+        out.push(Request::Return { call, result: Returned::Rejected { problems } });
+        return;
+    }
+    if name.completion == 0 {
+        out.push(Request::Return { call, result: Returned::Refused { refusal: AskRefusal::Name } });
+        return;
+    }
+    if deadline <= env.now {
+        out.push(Request::Return { call, result: Returned::TimedOut });
+        return;
+    }
+    if calls.is_full() {
+        out.push(Request::Return { call, result: Returned::Busy });
+        return;
+    }
+    let work = Work::Landing(land::landing(change, name, deadline, false));
+    let id = begin_call(calls, alarms, Call { run: run_id, conversation: main, owner: call, work }, deadline);
+    match &mut calls.get_mut(id).expect("inserted above").work {
+        Work::Landing(landing) => land::begin(landing, id, run, env, out),
+        Work::Child(_) => unreachable!("inserted as delivery"),
+    }
+    let main = conversations.get_mut(main).expect("main lives");
+    main.calls = main.calls.checked_add(1).expect("bounded exclusive call");
+}
+
 /// A call a conversation made: its token for it, and its deadline.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 struct Asking {
+    name: CallName,
     call: Token,
     deadline: Time,
 }
@@ -982,7 +992,7 @@ fn sub_agent(
     env: &Env<Limits>,
     out: &mut Queue<Request>,
 ) {
-    let Asking { call, deadline } = made;
+    let Asking { call, deadline, name: _ } = made;
     let asking = conversations.get(asker).expect("a conversation lives until it has ended");
     let left = run.deadline.min(deadline).saturating_since(env.now);
     let means = Means { spent: run.spent, conversations: run.conversations, left };
@@ -1026,6 +1036,7 @@ fn sub_agent(
     asking.calls = asking.calls.saturating_add(1);
     run.conversations = run.conversations.saturating_add(1);
     let opening = Opening {
+        deliver: false,
         system: prompt::child(&run.charter, &run.found, &wanted.brief, plan.families),
         prompt: copy_of(prompt::BEGIN),
         tools: plan.families.tools,
@@ -1145,6 +1156,7 @@ fn answer(reply_to: ReplyTo, answer: Answer, out: &mut Queue<Request>) -> State 
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn opening(charter: &Charter, found: &Found, spent: Spend, left: Duration) -> Opening {
     Opening {
+        deliver: charter.grants.deliver.is_some(),
         llm: charter.llm.clone(),
         system: prompt::system(charter, found),
         prompt: copy_of(prompt::BEGIN),
@@ -1175,6 +1187,7 @@ fn ending(end: End, spent: Spend) -> Answer {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn finished(ending: Ending, spent: Spend) -> Answer {
     match ending {
+        Ending::Delivered { name, receipts, stopped } => Answer::Delivered { name, receipts, stopped, spent },
         Ending::Accepted(outcome) => Answer::Accepted { outcome, spent },
         Ending::Failed(failure) => Answer::Failed { failure, spent },
     }

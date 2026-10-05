@@ -50,6 +50,16 @@ What is still open is listed in section 11.
   the completion used and cost. A withdrawn call has a result of its own
   kind. A historical call holds no ticket that means something only
   inside the session that made it.
+- **Delegated origin.** Every opener-served call carries its concrete accepted
+  completion sequence and zero-based assistant block position, in addition to
+  its live callback and temporary opener ticket. V2 includes restored transcript
+  history in the sequence; V1 counts only the current activation. Provider ids
+  may repeat in different turns. The composing root preserves this fixed origin
+  as the durable host call name, scoped by the same logical run across restart
+  (run.md, section 8.2). Checked sequence overflow refuses the next completion's
+  effects before any tool or host submission. Resolving tickets changes neither
+  sequence nor position; later answered-after-transcript integration uses this
+  seam and remains separate from root restart implementation.
 - **Told as it ends.** Closing waits for actual terminal answers before
   telling the last turn, including answers that win a cancellation.
 - **Versioned.** Turns and transcripts are domain values with a version;

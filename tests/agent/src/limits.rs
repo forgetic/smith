@@ -52,6 +52,7 @@ pub const LIMITS: Limits = Limits {
         guide_bytes: 1024,
         io_timeout: Duration::from_secs(5),
         outcome_bytes: 4096,
+        delivery_timeout: Duration::from_secs(60),
         check_timeout: Duration::from_secs(60),
         check_tail: 512,
         facts: 1024,

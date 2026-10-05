@@ -248,7 +248,8 @@ A contract allows any of four forms:
   many (a least and a most) and of which kinds, each kind with the fields
   it requires.
 - **A change:** the workspace's changes, delivered (section 8), with the
-  fields the contract requires, and whether the checks must pass.
+  fields the contract requires. Every discovered writable check must pass
+  before either final or mid-run delivery (section 8).
 - **A failure:** the LLM declares it cannot do the work, with a reason.
 
 A result is its form, its label for a verdict, its text, its fields (a
@@ -342,9 +343,54 @@ The host answers in smith's terms:
   later delivery of this run would find the same. It ends the run as
   stale, and the host decides afresh.
 
-Every answer but delivered and stale goes back to the LLM. A delivery
-that lands is the result, even if the run was winding down meanwhile; a
-delivery in flight is never abandoned (host.md, section 2).
+Every answer but delivered and stale goes back to the LLM as correctable
+feedback. Refusal carries a nonempty opaque named explanation, at most 512
+bytes, optionally locating a remaining marker by directory and relative path
+(at most 4096 bytes). Marker paths are nonempty, relative, have no zero byte,
+empty component, `.` or `..` component. Other host-policy refusals need not
+claim a conflicted file. Failure carries the generic reason and its sealed
+512-byte tail; dropped-byte accounting saturates at the largest integer.
+
+Successful receipts are constructor-sealed: one to 64 distinct directory
+ordinals, each with one to 512 opaque bytes. A delivery-capable charter admits
+at most 64 mounted directories, also within the receiving repository limit,
+so every changed mount is representable. A Report-only charter without the
+separate delivery grant does not acquire this cap. The run revalidates every
+receipt or marker ordinal against its admitted writable mounts; malformed
+host evidence becomes broken feedback and never successful delivery. The host
+alone knows which writable directories changed and supplies the complete set.
+Each retained receipt copy, including outputs and interrupted final answers,
+is charged at container storage plus payload bytes.
+
+A submission carries two different names. The callback owner is a live slab
+name, used only for its actual terminal. Its durable host name is the accepted
+main completion sequence and the assistant block position (including non-call
+blocks before it), scoped by the host's logical run. The host must preserve that
+logical run identity across restart. Provider ids may repeat in different turns;
+neither those ids, callback tokens nor translation tickets are durable names.
+Version-two sessions include the restored contiguous transcript prefix in the
+sequence; the retained V1 run currently names only its activation. Checked
+sequence or block-position exhaustion refuses the completion's effects before a host request.
+Zero completion is refused before checks. Calls retain their origin through
+ticket translation and repeated provider names. This is the naming seam for
+later answered-after-transcript integration, not a claim that root run restart
+is implemented by this increment.
+
+Before submission a withdrawal or expiry may abort checks, and no delivery
+begins once the caller deadline has passed. After submission no host cancellation
+exists: the actual operation runs to its deadline, the earlier of caller expiry
+and the receiving delivery timeout. The host returns exactly one actual terminal
+by that deadline (delivery, failure or another typed outcome); it must report a
+landing that won the deadline race. Transport may deliver that terminal later.
+The run waits for it even while winding down. Duplicate or stale callback
+generations are inert, never another semantic delivery.
+
+A final Change that lands is the accepted result even during shutdown. A
+mid-run landing normally returns receipts and continues. If shutdown was already
+decided while a mid-run delivery was pending, its final answer is **delivered**:
+the real durable name and receipts, the already-decided typed stop and accepted
+spend. This is host evidence distinct from an LLM-declared accepted result; a
+Report-only charter produces neither an invented Report nor an undeclared Change.
 
 ### 8.3 Merges in progress
 
@@ -358,9 +404,20 @@ in conflict still holds a marker, naming it.
 ### 8.4 Delivering mid-run
 
 A run whose charter grants `deliver` may deliver before it finishes, as
-a chat does with a small fix before handing it on: checked, then
-delivered, the same way, and the run goes on. A finish with a change
-delivers what is there at finish.
+a chat does with a small fix before handing it on. The grant carries its own
+required named-field caps, checked minimum storage and aggregate ownership
+bound; it is independent of the final result contract and is offered only to
+main. Final Change permission alone does not grant `deliver`. Preparation looks
+for writable checks when either route is allowed, and every such executable runs
+for every delivery. Report, Verdict and declared Failure finishes run no checks.
+
+Main's delivery is an exclusive write batch: no other write or sub-agent can
+intervene between the first check and host submission. Delivered receipts
+normally return as tool feedback and the run continues to an allowed final
+result. A concurrent stop preserves the typed delivered answer described in
+8.2; a later independent stop after continuation follows the ordinary stop
+path, since the host already observed the earlier landing. A finish with a
+Change delivers the state at that finish.
 
 ## 9. Budget and spend
 
@@ -384,6 +441,9 @@ delivers what is there at finish.
 A run answers once, after every turn it counts:
 
 - **accepted,** with its result, its turn count and what it spent;
+- **delivered,** only when an actual mid-run delivery lands during an already
+  decided shutdown: its durable name, per-directory receipts, typed stop and
+  cumulative spend. It is not an LLM-declared accepted result;
 - **parked,** with its turn count and what it spent;
 - **failed,** typed so the host can act without reading prose: the model
   (a provider's failure past its retries, an account exhausted), the
@@ -392,8 +452,8 @@ A run answers once, after every turn it counts:
 
 Refused at the entrance, it answers refused: busy, or invalid, saying
 what is beyond the limits. A cancel from the host winds the run down
-along the same path; what a delivery landed meanwhile is still its
-result.
+along the same path; a final Change landing remains accepted, and a mid-run landing during that
+shutdown preserves its distinct delivered answer (8.2 and 8.4).
 
 ## 11. Facts
 
@@ -459,8 +519,17 @@ name.
 - **Budgets** move from temper's token split to the host's unit with
   prices.
 - **New, as temper's agent.md planned them:** messages, `wait`, parking,
-  resuming from a transcript, calls asked again, delivering mid-run, and
+  resuming from a transcript, calls asked again, and
   merges in progress.
+
+The first 05s4 RESULTS and DELIVERY increments implement generic final forms,
+separately granted main delivery, all discovered writable checks, sealed actual
+host terminals and stable transcript-derived naming. The copied token-split
+budget, fixed `.temper/pre-pr` discovery convention, charter and outlets remain
+until subsequent increments. Optional workspaces/conventions, conflict files in
+Start, open host tools, messages and root transcript restart are still pending;
+the marker-refusal correction world exercises an actual host route without
+claiming those later admission or restart features.
 
 ## 15. Open questions
 

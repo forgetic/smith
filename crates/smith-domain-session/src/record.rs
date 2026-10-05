@@ -12,6 +12,26 @@ use alloc::boxed::Box;
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub const VERSION: u16 = 2;
 
+/// Session-issued position of an opener call in its concrete logical transcript.
+/// This fixed name survives ticket translation; provider ids and callback tokens
+/// are not its identity. The host scopes it by the logical run, never a live slab.
+///
+/// Contract: domain/session.md, sections 3 and 5; domain/run.md, section 8.2.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Origin {
+    /// One-based accepted completion sequence, including a restored V2 prefix.
+    /// V1 counts accepted completions in this activation and does not resume history.
+    /// Checked exhaustion refuses the next completion's effects.
+    ///
+    /// Contract: domain/session.md, sections 3 and 5.
+    pub sequence: u32,
+    /// Zero-based assistant block position, including preceding non-call blocks.
+    /// The receiving session bounds message storage and refuses unrepresentable block counts before effects.
+    ///
+    /// Contract: domain/session.md, sections 3 and 5.
+    pub position: u32,
+}
+
 /// Charter prices per `unit` tokens. Cache writes are new input, cache reads
 /// use `cached`. Each completion rounds its exact combined charge upwards.
 ///

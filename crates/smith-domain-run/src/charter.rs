@@ -89,6 +89,11 @@ pub struct Repository {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Grants {
+    /// Separately granted main-only delivery with required host field caps.
+    /// Final Change permission does not grant this tool; children never inherit it.
+    /// Admission checks minimum container/name/value fit before session or IO.
+    /// Contract: domain/run.md, sections 7.1, 8.1 and 8.4.
+    pub deliver: Option<crate::outcome::ChangeSpec>,
     /// The tools that act on the checkout, which conversations run themselves.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -245,6 +250,17 @@ pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
     if !outcome::is_valid(outcome, limits) {
         return Err(Invalid::Outcome);
     }
+    if let Some(spec) = &grants.deliver
+        && !outcome::valid_change(spec, limits)
+    {
+        return Err(Invalid::Grants);
+    }
+    if (outcome.change.is_some() || grants.deliver.is_some())
+        && (count(checkout.repositories.len()) > crate::MAX_DIRECTORIES
+            || limits.delivery_timeout == skein_lib::Duration::ZERO)
+    {
+        return Err(Invalid::Checkout);
+    }
     Ok(())
 }
 
@@ -265,6 +281,9 @@ pub(crate) fn cost(charter: &Charter) -> Option<u64> {
     let outlet = u64::try_from(size_of::<Outlet>()).ok()?;
     for Outlet { name } in &charter.grants.outlets {
         cost = cost.checked_add(outlet)?.checked_add(len(name)?)?;
+    }
+    if let Some(spec) = &charter.grants.deliver {
+        cost = cost.checked_add(outcome::change_cost(spec)?)?;
     }
     cost.checked_add(outcome::cost(&charter.outcome)?)
 }

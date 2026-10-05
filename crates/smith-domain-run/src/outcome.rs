@@ -4,7 +4,7 @@
 //! no checkout or host effect. The run admits a satisfiable bounded contract,
 //! bounds a declaration with `owned_bytes`, then calls `judge` for shape.
 //! `Report`, verdict and declared failure finish without delivery; a change
-//! still follows the copied check/`Push` lifecycle until the delivery increment.
+//! follows exclusive writable checks and the actual generic host terminal.
 
 use alloc::boxed::Box;
 use core::mem::size_of;
@@ -19,7 +19,7 @@ use crate::limits::Limits;
 /// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct OutcomeSpec {
-    /// `Change` contract, or none. A validated change requires the existing host `Push` terminal before acceptance.
+    /// `Change` contract, or none. A validated change requires the existing host `Delivery` terminal before acceptance.
     ///
     /// Contract: domain/run.md, section 7.1.
     pub change: Option<ChangeSpec>,
@@ -27,7 +27,7 @@ pub struct OutcomeSpec {
     ///
     /// Contract: domain/run.md, section 7.1.
     pub verdicts: Box<[VerdictRule]>,
-    /// `Report` contract, or none. A validated report ends after all sessions settle, without checks or `Push`.
+    /// `Report` contract, or none. A validated report ends after all sessions settle, without checks or `Delivery`.
     ///
     /// Contract: domain/run.md, section 7.1.
     pub report: Option<TextSpec>,
@@ -52,15 +52,13 @@ pub struct FieldRule {
     pub max: u32,
 }
 
-/// The host's change result contract; it imposes field requirements and the existing check-before-`Push` policy.
+/// Host field contract for a final Change or separately granted mid-run delivery.
+/// It grants no optional check policy: every discovered writable check must pass.
+/// Minimum field/container storage is checked at charter admission.
 ///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3, 8.1, 8.4 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ChangeSpec {
-    /// Whether the prepared checks must pass before the host `Push`. No checks or `Push` is started until finish validates the result.
-    ///
-    /// Contract: domain/run.md, section 7.1.
-    pub checks: bool,
     /// Required result fields with host-chosen byte names and individual value bounds; no title/body vocabulary is interpreted by smith.
     ///
     /// Contract: domain/run.md, section 7.1.
@@ -143,7 +141,7 @@ pub struct ItemRule {
     pub fields: Box<[FieldRule]>,
 }
 
-/// Protocol-decoded LLM change result. The run validates fields and aggregate ownership before checks/`Push`; the host receives these fields unchanged.
+/// Protocol-decoded LLM change result. The run validates fields and aggregate ownership before checks/`Delivery`; the host receives these fields unchanged.
 ///
 /// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -152,6 +150,16 @@ pub struct Change {
     ///
     /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[Field]>,
+}
+
+impl Change {
+    /// Count every owned field container, name and value, including unknown extra
+    /// fields. The run/root check this aggregate before retaining a delivery ask.
+    /// Contract: domain/run.md, sections 7.1 and 8.4; programming-model.md, section 6.3.
+    #[must_use]
+    pub fn owned_bytes(&self) -> Option<u64> {
+        fields_cost(&self.fields)
+    }
 }
 
 /// Protocol-decoded LLM report. Accepted after contract judgement and settlement, without checking or pushing the workspace.
@@ -253,7 +261,7 @@ pub struct Problems {
 }
 
 /// Protocol-decoded finish form. All payloads share `Limits.outcome_bytes`
-/// checked by the run before shape judgement. Only `Change` requires `Push`;
+/// checked by the run before shape judgement. Only `Change` requires `Delivery`;
 /// every other valid form winds down the sessions and becomes the accepted answer.
 ///
 /// Contract: domain/run.md, sections 7.1, 7.2 and 10.
@@ -262,7 +270,7 @@ pub enum Declared {
     /// Workspace change with generic host fields; accepts only after host delivery.
     /// Contract: domain/run.md, sections 7.1, 7.2 and 8.
     Change(
-        /// Protocol-decoded fields validated before any check or `Push`.
+        /// Protocol-decoded fields validated before any check or `Delivery`.
         /// Contract: domain/run.md, sections 7.1 and 7.2.
         Change,
     ),
@@ -276,7 +284,7 @@ pub enum Declared {
     /// Text report satisfying the host's own report fields.
     /// Contract: domain/run.md, sections 7.1 and 7.2.
     Report(
-        /// Protocol-decoded text and fields, accepted without `Push`.
+        /// Protocol-decoded text and fields, accepted without `Delivery`.
         /// Contract: domain/run.md, sections 7.1 and 7.2.
         Report,
     ),
@@ -470,6 +478,24 @@ enum FieldProblem {
     Empty,
     Repeated,
     TooLarge { max: u32 },
+}
+
+pub(crate) fn judge_change(spec: &ChangeSpec, change: &Change) -> Result<(), Problems> {
+    let mut found = Found { listed: List::with_capacity(Problems::LISTED), more: 0 };
+    judge_fields(&spec.fields, &change.fields, None, &mut found);
+    if found.listed.is_empty() { Ok(()) } else { Err(Problems { listed: found.listed.into_boxed(), more: found.more }) }
+}
+
+pub(crate) fn valid_change(spec: &ChangeSpec, limits: &Limits) -> bool {
+    valid_fields(&spec.fields) && fits(min_fields(&spec.fields), limits.outcome_bytes)
+}
+
+pub(crate) fn change_cost(spec: &ChangeSpec) -> Option<u64> {
+    rule_fields_cost(&spec.fields)
+}
+
+pub(crate) fn change_bytes(change: &Change) -> Option<u64> {
+    fields_cost(&change.fields)
 }
 
 fn judge_fields(rules: &[FieldRule], fields: &[Field], item: Option<u32>, found: &mut Found) {
@@ -761,7 +787,7 @@ mod tests {
 
     fn specification() -> OutcomeSpec {
         OutcomeSpec {
-            change: Some(ChangeSpec { checks: false, fields: rules(b"summary", 4) }),
+            change: Some(ChangeSpec { fields: rules(b"summary", 4) }),
             report: Some(TextSpec { min: 0, max: 3, fields: rules(b"source", 3) }),
             failure: Some(TextSpec { min: 1, max: 3, fields: rules(b"cause", 3) }),
             verdicts: Box::new([VerdictRule {
@@ -938,7 +964,7 @@ mod tests {
             rules.push(FieldRule { name: Box::new([index]), max: 1 }).expect("room for twenty distinct rules");
         }
         let spec = OutcomeSpec {
-            change: Some(ChangeSpec { checks: false, fields: rules.into_boxed() }),
+            change: Some(ChangeSpec { fields: rules.into_boxed() }),
             verdicts: Box::new([]),
             report: None,
             failure: None,

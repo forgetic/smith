@@ -16,8 +16,8 @@
 //!   every push of a job that drew so when it started (a push is a
 //!   fast-forward from where the run started, so a moved branch stays
 //!   moved); else, with the configured chance, the push fails; otherwise it
-//!   is done. A push withdrawn before then (`CancelHost`) is answered as
-//!   cancelled, and changes nothing; one withdrawn after is not in flight,
+//!   is done. Submitted delivery is never abandoned and its actual deadline
+//!   terminal remains owed even while a job is cancelling;
 //!   and the withdraw changes nothing.
 //! - It counts the check notices it hears.
 //!
@@ -47,7 +47,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use skein_lib::{Duration, ReplyTo, Rng, Time, Token};
 use smith_domain_run::charter::{Checkout, Endpoint, Grants, Llm, Outlet, Repository, Tools};
 use smith_domain_run::outcome::{ChangeSpec, FieldRule, OutcomeSpec, TextSpec, VerdictRule};
-use smith_domain_run::{Budget, Charter, Event, Push};
+use smith_domain_run::{Budget, Charter, Delivery, Event};
 
 use skein_world::domain::Span;
 
@@ -140,10 +140,6 @@ pub struct Script {
     ///
     /// Scripted-world contract: domain/run.md, sections 7.1 and 13; testing-strategy.md, section 2.2.
     pub failures: u32,
-    /// Chance per mille that the generated charter requires checks.
-    ///
-    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    pub checks: u32,
     /// Chance per mille that a generated charter admits a verdict.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -172,7 +168,7 @@ pub struct Script {
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Tally {
-    /// Answers it took, pushes it served, pushes withdrawn while in flight,
+    /// Answers it took and actual bounded deliveries it served,
     /// and check notices it heard.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -181,10 +177,6 @@ pub struct Tally {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub pushes: u32,
-    /// Count of withdrawn observed at this scripted boundary.
-    ///
-    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    pub withdrawn: u32,
     /// Count of notices observed at this scripted boundary.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -206,7 +198,7 @@ pub struct Host {
     /// is of.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    pushes: BTreeMap<Token, Token>,
+    pushes: BTreeMap<Token, (Token, bool)>,
     /// When each job starts or its run is cancelled, and when each push is
     /// answered: in order, and by what they are for.
     ///
@@ -225,6 +217,7 @@ struct Job {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     moved: bool,
+    writable: Vec<u32>,
     state: State,
 }
 
@@ -259,7 +252,7 @@ enum State {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum Alarm {
     Job(Token),
-    Push(Token),
+    Delivery(Token),
 }
 
 impl Host {
@@ -281,7 +274,7 @@ impl Host {
         for _ in 0..script.jobs {
             let moved = host.rng.chance(script.moved);
             let job = host.name();
-            host.jobs.insert(job, Job { moved, state: State::Waiting });
+            host.jobs.insert(job, Job { moved, writable: Vec::new(), state: State::Waiting });
             let at = Time::ZERO.saturating_add(Duration::from_nanos(host.rng.below(script.window.as_nanos())));
             host.arm(Alarm::Job(job), at);
         }
@@ -323,7 +316,7 @@ impl Host {
             self.disarm(alarm);
             match alarm {
                 Alarm::Job(job) => self.job_alarm(now, job, out),
-                Alarm::Push(owner) => self.answer_push(owner, out),
+                Alarm::Delivery(owner) => self.answer_push(owner, out),
             }
         }
     }
@@ -378,25 +371,13 @@ impl Host {
     /// A push from the run of `job`, which names it `owner`: answered later.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    pub fn push(&mut self, now: Time, job: Token, owner: Token) {
+    pub fn push(&mut self, now: Time, job: Token, owner: Token, deadline: Time) {
         self.assert_running(job, "a run pushes once admitted, before it answers");
         self.tally.pushes += 1;
-        assert!(self.pushes.insert(owner, job).is_none(), "a run names its pushes apart");
-        let at = now.saturating_add(self.script.push.draw(&mut self.rng));
-        self.arm(Alarm::Push(owner), at);
-    }
-
-    /// The run withdraws its push `owner`: if it is in flight, it is answered
-    /// as cancelled, and its outcome is never decided.
-    ///
-    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    pub fn cancel_host(&mut self, owner: Token, out: &mut Vec<Event>) {
-        if self.pushes.remove(&owner).is_none() {
-            return;
-        }
-        self.disarm(Alarm::Push(owner));
-        self.tally.withdrawn += 1;
-        out.push(Event::HostCancelled { owner });
+        let complete = now.saturating_add(self.script.push.draw(&mut self.rng));
+        assert!(self.pushes.insert(owner, (job, complete > deadline)).is_none(), "live callbacks are distinct");
+        let at = complete.min(deadline);
+        self.arm(Alarm::Delivery(owner), at);
     }
 
     /// The host's side of a settled world: every job started and answered,
@@ -415,6 +396,15 @@ impl Host {
         match state {
             State::Waiting => {
                 let charter = self.charter();
+                self.jobs.get_mut(&job).expect("waiting job").writable = charter
+                    .checkout
+                    .repositories
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(position, mount)| {
+                        mount.writable.then_some(u32::try_from(position).expect("bounded mounts"))
+                    })
+                    .collect();
                 out.push(Event::Start { reply_to: ReplyTo::new(job), worker: job, charter });
                 self.set(job, State::Starting);
             }
@@ -438,16 +428,18 @@ impl Host {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn answer_push(&mut self, owner: Token, out: &mut Vec<Event>) {
-        let job = self.pushes.remove(&owner).expect("a push is in flight until its alarm fires");
+        let (job, timed_out) = self.pushes.remove(&owner).expect("a push is in flight until its alarm fires");
         let moved = self.jobs.get(&job).expect("a job lives until its run, which waits on its push, answers").moved;
-        let push = if moved {
-            Push::Moved
+        let push = if timed_out {
+            Delivery::Failed(smith_domain_run::DeliveryFailure::new(smith_domain_run::DeliveryReason::TimedOut))
+        } else if moved {
+            Delivery::Stale
         } else if self.rng.chance(self.script.push_failures) {
-            Push::Failed { failure: smith_domain_run::PushFailure::new(smith_domain_run::PushReason::Unknown) }
+            Delivery::Failed(smith_domain_run::DeliveryFailure::new(smith_domain_run::DeliveryReason::Unknown))
         } else {
-            Push::Done
+            delivered(&self.jobs[&job].writable)
         };
-        out.push(Event::Pushed { owner, push });
+        out.push(Event::Delivered { owner, push });
     }
 
     fn assert_running(&self, job: Token, contract: &str) {
@@ -519,7 +511,6 @@ impl Host {
         let report = script.reports > 0 && self.rng.chance(script.reports);
         let failure = script.failures > 0 && self.rng.chance(script.failures);
         let change = self.rng.chance(script.changes) || (verdicts.is_empty() && !report && !failure);
-        let checks = change && self.rng.chance(script.checks);
         let tokens = |rng: &mut Rng| rng.between(script.tokens_min, script.tokens_max);
         let budget = Budget {
             turns: u32::try_from(self.rng.between(u64::from(script.turns_min), u64::from(script.turns_max)))
@@ -540,10 +531,9 @@ impl Host {
         Charter {
             brief,
             checkout: Checkout { repositories: repositories.into() },
-            grants: Grants { tools, forge, agents, outlets: outlets.into() },
+            grants: Grants { deliver: None, tools, forge, agents, outlets: outlets.into() },
             outcome: OutcomeSpec {
                 change: change.then_some(ChangeSpec {
-                    checks,
                     fields: Box::new([
                         smith_domain_run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
                         smith_domain_run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
@@ -600,4 +590,17 @@ fn verdicts() -> Vec<VerdictRule> {
         },
     };
     vec![approve, request]
+}
+
+fn delivered(writable: &[u32]) -> Delivery {
+    if writable.is_empty() {
+        return Delivery::Nothing;
+    }
+    let receipts = writable
+        .iter()
+        .map(|directory| {
+            smith_domain_run::Receipt::new(*directory, b"host receipt".as_slice().into()).expect("bounded receipt")
+        })
+        .collect();
+    Delivery::Delivered(smith_domain_run::Delivered::new(receipts).expect("unique admitted directories"))
 }

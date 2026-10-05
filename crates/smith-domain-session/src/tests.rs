@@ -717,7 +717,7 @@ fn a_delegated_call_goes_to_the_opener_and_its_answer_goes_back_to_the_llm() {
     let content = Box::new([delegated(b"c1", 9, Effect::Write)]);
     step(&mut h.domain, &h.env, Event::Completed { owner, completion: completion(content, Stop::ToolUse) }, &mut h.out);
     drop(h.out.pop());
-    let Some(Request::Delegate { owner: run, opener, call, deadline }) = h.one() else {
+    let Some(Request::Delegate { owner: run, opener, call, deadline, origin: _ }) = h.one() else {
         panic!("expected the call delegated");
     };
     assert_eq!((opener, call), (Token::new(1), Token::new(9)));
@@ -1353,4 +1353,51 @@ fn the_worst_case_is_bounded_or_refused() {
     let fact = u64::try_from(size_of::<Fact>()).expect("a size fits");
     assert_eq!(told - bytes, fact, "the facts' queue is counted, and nothing else of theirs");
     assert_eq!(worst_case(&Limits { sessions: u32::MAX, session_bytes: u64::MAX, ..LIMITS }), None);
+}
+
+#[test]
+fn completion_name_exhaustion_ends_before_any_owned_or_delegated_effect() {
+    for recorded in [false, true] {
+        let mut harness = Harness::new(LIMITS);
+        let (session, _) = harness.open_with(1, spec());
+        crate::session::exhaust_origin_for_test(&mut harness.domain, session, recorded);
+        let answer = completion(
+            Box::new([
+                delegated(b"repeated-provider-id", 7, Effect::Write),
+                tool_call(b"repeated-provider-id", cat(b"main.rs")),
+            ]),
+            Stop::ToolUse,
+        );
+        step(
+            &mut harness.domain,
+            &harness.env,
+            Event::Completed { owner: session, completion: answer },
+            &mut harness.out,
+        );
+        let mut used = false;
+        let mut ended = false;
+        while let Some(request) = harness.out.pop() {
+            match request {
+                Request::Used { usage, .. } => {
+                    assert_eq!(usage, USAGE);
+                    used = true;
+                }
+                Request::Priced { .. } => assert!(recorded),
+                Request::Ended { end, .. } => {
+                    assert_eq!(end, End::TranscriptFull);
+                    ended = true;
+                }
+                Request::Opened { .. }
+                | Request::Yielded { .. }
+                | Request::Complete { .. }
+                | Request::Cancel { .. }
+                | Request::Io { .. }
+                | Request::CancelIo { .. }
+                | Request::Delegate { .. }
+                | Request::Withdraw { .. }
+                | Request::Turn { .. } => panic!("exhaustion emits no effect or new turn"),
+            }
+        }
+        assert!(used && ended);
+    }
 }

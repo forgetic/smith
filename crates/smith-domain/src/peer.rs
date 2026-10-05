@@ -32,7 +32,7 @@ use smith_domain_run::{self as run, Ask};
 use smith_domain_session::{self as session, llm as sllm};
 
 use crate::llm::{self, Block, Decoded, Message, Prompt, Returned, Said, Served};
-use crate::translate::{self, FINISH, FIRST, Offered, SUB_AGENT};
+use crate::translate::{self, DELIVER, FINISH, FIRST, Offered, SUB_AGENT};
 
 /// A conversation the run opened, and its session's tickets.
 ///
@@ -115,6 +115,7 @@ impl Peer {
         };
         let offered = match &ask {
             Ask::Finish { .. } => self.offered.finish,
+            Ask::Deliver { .. } => self.offered.deliver,
             Ask::SubAgent { .. } => self.offered.agents,
         };
         if !offered {
@@ -175,6 +176,7 @@ impl Peer {
         let mut served = List::with_capacity(u32::try_from(delegated.len()).expect("two at most"));
         for descriptor in &delegated {
             let tool = match descriptor.ticket {
+                DELIVER => Served::Deliver,
                 FINISH => Served::Finish,
                 SUB_AGENT => Served::SubAgent,
                 _ => unreachable!("a session's descriptors are the ones it was given"),
@@ -258,6 +260,7 @@ fn per(bytes: u64, size: usize) -> u32 {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn ask_cost(ask: &Ask) -> Option<u64> {
     let payload = match ask {
+        Ask::Deliver { change } => change.owned_bytes()?,
         Ask::Finish { outcome } => run::outcome::owned_bytes(outcome)?,
         Ask::SubAgent { brief, families: _, llm, share: _ } => {
             let llm = match llm {
@@ -282,7 +285,9 @@ pub(crate) fn payload(limits: &run::Limits) -> Option<u64> {
     let failed = u64::from(limits.check_tail).checked_add(limits.run_bytes)?;
     let problem = size(size_of::<run::outcome::Problem>())?.checked_add(limits.run_bytes.max(limits.outcome_bytes))?;
     let rejected = u64::from(run::outcome::Problems::LISTED).checked_mul(problem)?;
-    Some(answered.max(failed).max(rejected))
+    let refused =
+        u64::try_from(run::Marker::CAPACITY).ok()?.checked_add(u64::try_from(run::DeliveryRefusal::CAPACITY).ok()?)?;
+    Some(answered.max(failed).max(rejected).max(run::Delivered::worst_case()).max(refused))
 }
 
 /// What an answer holds, as the session is charged for it: its fixed size,
@@ -291,9 +296,12 @@ pub(crate) fn payload(limits: &run::Limits) -> Option<u64> {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn returned_cost(returned: &run::Returned) -> Option<u64> {
     let payload = match returned {
-        run::Returned::Accepted
-        | run::Returned::Moved
-        | run::Returned::Unpushed { .. }
+        run::Returned::Delivered(receipts) => receipts.owned_bytes(),
+        run::Returned::DeliveryRefused(refusal) => refusal.owned_bytes(),
+        run::Returned::Nothing
+        | run::Returned::Accepted
+        | run::Returned::Stale
+        | run::Returned::DeliveryFailed { .. }
         | run::Returned::Cancelled
         | run::Returned::TimedOut
         | run::Returned::Busy

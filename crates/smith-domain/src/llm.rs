@@ -62,6 +62,10 @@ pub struct Prompt {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Served {
+    /// Main-only mid-run delivery descriptor, offered only by a separate grant.
+    /// This fixed descriptor names a tool; operation names come from transcript origin.
+    /// Contract: domain/run.md, sections 8.2 and 8.4; domain/host.md, section 7.
+    Deliver,
     /// Finish the run with an outcome.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.

@@ -62,6 +62,7 @@ const LIMITS: Limits = Limits {
         guide_bytes: 64,
         io_timeout: Duration::from_secs(10),
         outcome_bytes: 1024,
+        delivery_timeout: Duration::from_secs(300),
         check_timeout: Duration::from_secs(300),
         check_tail: 256,
         facts: 64,
@@ -211,7 +212,7 @@ fn charter() -> Charter {
         checkout: Checkout {
             repositories: Box::new([Repository { name: bytes(b"temper"), root: Token::new(900), writable: true }]),
         },
-        grants: Grants { tools: TOOLS, forge: false, agents: true, outlets: Box::new([]) },
+        grants: Grants { deliver: None, tools: TOOLS, forge: false, agents: true, outlets: Box::new([]) },
         outcome: OutcomeSpec { change: None, verdicts: Box::new([rule(b"approve")]), report: None, failure: None },
         budget: BUDGET,
         llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 512 },
@@ -523,10 +524,13 @@ fn a_finish_the_run_rejects_at_once_comes_back_from_the_ready_list_as_the_sessio
 fn matches_rejected(returned: &run::Returned) -> bool {
     match returned {
         run::Returned::Rejected { problems } => !problems.listed.is_empty(),
-        run::Returned::Accepted
+        run::Returned::Delivered(_)
+        | run::Returned::Nothing
+        | run::Returned::DeliveryRefused(_)
+        | run::Returned::Accepted
         | run::Returned::ChecksFailed { .. }
-        | run::Returned::Moved
-        | run::Returned::Unpushed { .. }
+        | run::Returned::Stale
+        | run::Returned::DeliveryFailed { .. }
         | run::Returned::Cancelled
         | run::Returned::TimedOut
         | run::Returned::Busy
@@ -558,7 +562,6 @@ fn a_change_lands_through_the_worker_and_the_run_answers_with_it() {
     let mut h = Harness::new();
     let outcome = OutcomeSpec {
         change: Some(ChangeSpec {
-            checks: false,
             fields: Box::new([
                 smith_domain_run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
                 smith_domain_run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
@@ -577,11 +580,11 @@ fn a_change_lands_through_the_worker_and_the_run_answers_with_it() {
     };
     let finish = Ask::Finish { outcome: Declared::Change(change.clone()) };
     let emitted = h.answer(main, Box::new([served(b"f1", finish)]));
-    let [Request::Push { worker, owner, change: pushed }] = &*emitted else {
+    let [Request::Deliver { worker, owner, change: pushed, name: _, deadline: _ }] = &*emitted else {
         panic!("expected the change pushed, got {emitted:?}");
     };
     assert_eq!((worker, pushed), (&Token::new(7), &change));
-    assert!(h.step(Event::Pushed { owner: *owner, push: run::Push::Done }).is_empty(), "the answer and the close wait");
+    assert!(h.step(Event::Delivered { owner: *owner, push: delivered() }).is_empty(), "the answer and the close wait");
     let emitted = h.next();
     let [Request::Answer { to: _, answer: run::Answer::Accepted { outcome, spent: _ } }] = &*emitted else {
         panic!("expected the run accepted, got {emitted:?}");
@@ -818,4 +821,13 @@ fn the_facts_of_both_child_domains_are_gathered() {
     }
     assert!(run > 0 && sessions > 0, "{run} of the run's, {sessions} of the sessions'");
     assert_eq!(h.domain.facts_lost(), 0);
+}
+
+fn delivered() -> run::Delivery {
+    run::Delivery::Delivered(
+        run::Delivered::new(Box::new([
+            run::Receipt::new(0, b"host receipt".as_slice().into()).expect("bounded receipt")
+        ]))
+        .expect("one writable mount"),
+    )
 }

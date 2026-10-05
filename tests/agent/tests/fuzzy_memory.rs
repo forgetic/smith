@@ -110,10 +110,9 @@ fn charter(brief: u64) -> Charter {
     Charter {
         brief: bytes(brief),
         checkout: Checkout { repositories: Box::new([repository]) },
-        grants: Grants { tools: all, forge: false, agents: true, outlets: Box::new([]) },
+        grants: Grants { deliver: None, tools: all, forge: false, agents: true, outlets: Box::new([]) },
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
-                checks: true,
                 fields: Box::new([
                     smith_domain::run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
                     smith_domain::run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
@@ -156,7 +155,7 @@ enum Asked {
         owner: Token,
         aborted: bool,
     },
-    Push {
+    Delivery {
         owner: Token,
         cancelled: bool,
     },
@@ -168,7 +167,7 @@ enum Family {
     Llm,
     Io,
     Check,
-    Push,
+    Delivery,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -201,11 +200,10 @@ impl Driver {
                 Request::Admitted { worker: _, run } => self.runs.push(run),
                 Request::Answer { .. } => self.seen[5] += 1,
                 Request::Checking { .. } | Request::Rejected { .. } | Request::Exhausted { .. } => {}
-                Request::Push { owner, .. } => {
+                Request::Deliver { owner, .. } => {
                     self.seen[4] += 1;
-                    self.ask(Asked::Push { owner, cancelled: false });
+                    self.ask(Asked::Delivery { owner, cancelled: false });
                 }
-                Request::CancelHost { owner } => self.cancel(Family::Push, owner),
                 Request::Complete { owner, prompt, timeout: _, grant: _ } => {
                     self.seen[0] += 1;
                     let (finish, agents) = served(&prompt);
@@ -254,7 +252,7 @@ impl Driver {
                 Asked::Complete { owner, cancelled, .. } => (Family::Llm, (owner, cancelled)),
                 Asked::Io { owner, cancelled, .. } => (Family::Io, (owner, cancelled)),
                 Asked::Check { owner, aborted } => (Family::Check, (owner, aborted)),
-                Asked::Push { owner, cancelled } => (Family::Push, (owner, cancelled)),
+                Asked::Delivery { owner, cancelled } => (Family::Delivery, (owner, cancelled)),
                 Asked::Read { .. } | Asked::Probe { .. } => continue,
             };
             if of == family && *cancelled.0 == owner {
@@ -312,14 +310,14 @@ impl Driver {
                 let ran = run::Ran { exit, output: bytes(u64::from(limits.run.check_tail)), cut: 1000 };
                 Event::Checked { owner, ran }
             }
-            Asked::Push { owner, cancelled: true } if self.rng.chance(700) => Event::HostCancelled { owner },
-            Asked::Push { owner, .. } => {
+            Asked::Delivery { owner, .. } => {
                 let push = [
-                    run::Push::Done,
-                    run::Push::Moved,
-                    run::Push::Failed { failure: run::PushFailure::new(run::PushReason::Unknown) },
-                ][index(&mut self.rng, 3)];
-                Event::Pushed { owner, push }
+                    smith_agent_world::delivered(),
+                    run::Delivery::Stale,
+                    run::Delivery::Failed(run::DeliveryFailure::new(run::DeliveryReason::Unknown)),
+                ][index(&mut self.rng, 3)]
+                .clone();
+                Event::Delivered { owner, push }
             }
         })
     }
@@ -447,6 +445,7 @@ fn served(prompt: &Prompt) -> (bool, bool) {
     let mut offered = (false, false);
     for tool in &prompt.served {
         match tool {
+            Served::Deliver => {}
             Served::Finish => offered.0 = true,
             Served::SubAgent => offered.1 = true,
         }

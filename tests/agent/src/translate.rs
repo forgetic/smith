@@ -21,6 +21,7 @@ pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
     }
     for served in prompt.served {
         names.push(match served {
+            agent::Served::Deliver => b"deliver",
             agent::Served::Finish => b"finish",
             agent::Served::SubAgent => b"subagent",
         });
@@ -67,7 +68,7 @@ fn part(block: agent::Block) -> provider::Part {
                 ),
             };
             let output = match &result {
-                agent::Returned::Served { returned: run::Returned::Unpushed { failure }, .. } => {
+                agent::Returned::Served { returned: run::Returned::DeliveryFailed { failure }, .. } => {
                     failure.diagnostic.output().into()
                 }
                 agent::Returned::Served { returned: run::Returned::Answered { text, .. }, .. } => text.clone(),
@@ -116,6 +117,18 @@ pub(crate) fn completion(
 
 fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent::Served]) -> agent::Decoded {
     let invalid = || agent::Decoded::Invalid { problem: agent::Problem::UnknownTool };
+    if name == b"deliver" && served.contains(&agent::Served::Deliver) {
+        let Some(value) = field(arguments, b"ticket") else {
+            return invalid();
+        };
+        return agent::Decoded::Served {
+            ask: run::Ask::Deliver {
+                change: run::outcome::Change {
+                    fields: Box::new([run::outcome::Field { name: b"ticket".as_slice().into(), value }]),
+                },
+            },
+        };
+    }
     if name == b"finish" && served.contains(&agent::Served::Finish) {
         return finish(arguments)
             .map_or_else(invalid, |outcome| agent::Decoded::Served { ask: run::Ask::Finish { outcome } });

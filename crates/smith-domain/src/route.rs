@@ -49,8 +49,7 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
         }
         Event::Grant { grant } => return granted(domain, env, grant),
         Event::Cancel { run } => run::Event::Cancel { run },
-        Event::Pushed { owner, push } => run::Event::Pushed { owner, push },
-        Event::HostCancelled { owner } => run::Event::HostCancelled { owner },
+        Event::Delivered { owner, push } => run::Event::Delivered { owner, push },
         Event::Read { owner, read } => run::Event::Read { owner, read },
         Event::Probed { owner, executable } => run::Event::Probed { owner, executable },
         Event::Checked { owner, ran } => run::Event::Checked { owner, ran },
@@ -217,7 +216,7 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
             free(domain, id);
             run::Event::Ended { conversation: opener, end: translate::end(end), spend: translate::spend(turns, usage) }
         }
-        session::Request::Delegate { owner, opener, call, deadline } => {
+        session::Request::Delegate { owner, opener, call, deadline, origin } => {
             // The deadline is the session's expiry: the run runs the race, and
             // returns the call once what it started has settled.
             let id = peer(domain, opener);
@@ -226,7 +225,13 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
             let flight = Flight { peer: id, withdrawn: false, answer: Due::Waiting };
             let fresh = domain.flights.insert(owner, flight).expect("room for a batch of each session");
             assert!(fresh.is_none(), "a session names its calls in flight apart");
-            run::Event::Delegated { conversation: opener, call: owner, ask, deadline }
+            run::Event::Delegated {
+                conversation: opener,
+                call: owner,
+                ask,
+                deadline,
+                name: run::CallName { completion: origin.sequence, position: origin.position },
+            }
         }
         session::Request::Withdraw { owner } => {
             let flight = domain.flights.get_mut(&owner).expect("a call is withdrawn while it is in flight");
@@ -251,8 +256,9 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
         run::Request::Admitted { worker, run } => return out.push(Request::Admitted { worker, run }),
         run::Request::Answer { to, answer } => return out.push(Request::Answer { to, answer }),
         run::Request::Checking { worker, deadline } => return out.push(Request::Checking { worker, deadline }),
-        run::Request::Push { worker, owner, change } => return out.push(Request::Push { worker, owner, change }),
-        run::Request::CancelHost { owner } => return out.push(Request::CancelHost { owner }),
+        run::Request::Deliver { worker, owner, change, name, deadline } => {
+            return out.push(Request::Deliver { worker, owner, change, name, deadline });
+        }
         run::Request::Read { owner, at, max, deadline } => return out.push(Request::Read { owner, at, max, deadline }),
         run::Request::Probe { owner, at, deadline } => return out.push(Request::Probe { owner, at, deadline }),
         run::Request::Check { owner, program, deadline, tail } => {

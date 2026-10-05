@@ -53,13 +53,18 @@ Up, from the run:
 - **waiting,** with the last message read;
 - **notices** that a credential was rejected or an account exhausted;
 - **the answer,** its last word, with its turn count and its spend
-  (run.md, section 10).
+  (run.md, section 10). An interrupted mid-run landing answers delivered with
+  its real stable name and receipts, the already-decided stop and spend; it is
+  distinct from an LLM-declared accepted result, including for Report-only runs.
 
 What a host owes:
 
 - **Each call name is decided once.** A call asked again with the same
   name gets the answer the first had, from the host's record, never a
-  second decision (run.md, 5.2). A host that cannot keep that promise
+  second decision (run.md, section 5.2). Delivery's concrete name is the main
+  accepted completion sequence and assistant block position, scoped by the same
+  host logical run across restart. Callback slabs, temporary tickets and raw
+  provider ids are not this identity (run.md, section 8.2). A host that cannot keep that promise
   (one without a durable record) must offer no host tool that writes.
 - **A delivery is never abandoned.** One in flight runs to its end, which
   its deadline bounds, and is answered with what it did, so one that

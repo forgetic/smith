@@ -90,7 +90,12 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(Map::<Token, GrantName>::worst_case(run_limits.conversations)?)?
         .checked_add(Queue::<crate::Request>::worst_case(1)?)?;
     let ready = Set::<Handoff>::worst_case(handoffs(limits)?)?.checked_mul(2)?;
-    let run_out = Queue::<run::Request>::worst_case(run_out(limits))?;
+    // Each queued run output can independently own a receipt copy, fields,
+    // returned feedback or the final interrupted-delivery evidence. Inline
+    // request storage is counted by Queue; this is its owned payload.
+    let payload = peer::payload(run_limits)?.max(run_limits.outcome_bytes).max(run::Delivered::worst_case());
+    let run_out = Queue::<run::Request>::worst_case(run_out(limits))?
+        .checked_add(u64::from(run_out(limits)).checked_mul(payload)?)?;
     let session_out = Queue::<session::Request>::worst_case(session_out(limits))?;
     let facts = Queue::<Fact>::worst_case(facts(limits)?)?;
     let content = Queue::<crate::Content>::worst_case(limits.session.facts)?

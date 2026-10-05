@@ -19,10 +19,61 @@ use crate::{
     translate,
 };
 
-/// Immutable host and fake settings. All time and randomness enter through
-/// these values; the copied agent's production behavior is unchanged.
-///
-/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
+/// Scripted host choice; materialized as a sealed actual terminal at submission.
+/// It is scenario data, not a second protocol or delivery implementation.
+/// Contract: domain/run.md, sections 8.2 and 13; testing-strategy.md, section 2.2.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HostReply {
+    /// Real changed-directory receipt. Contract: domain/run.md, section 8.2.
+    Delivered,
+    /// No changed directory. Contract: domain/run.md, section 8.2.
+    Nothing,
+    /// Named conflict marker. Contract: domain/run.md, sections 8.1 and 8.2.
+    Refused,
+    /// Fixed generic failed operation. Contract: domain/run.md, section 8.2.
+    Failed(
+        /// Sealed fixed-size reason and diagnostic emitted at the actual host
+        /// deadline. Contract: domain/run.md, section 8.2.
+        run::DeliveryFailure,
+    ),
+    /// Moved host context. Contract: domain/run.md, section 8.2.
+    Stale,
+}
+
+/// One sealed scripted-host receipt, used only by boundary fixtures.
+/// Its opaque text has no domain interpretation; mount zero is writable.
+/// Contract: domain/run.md, sections 8.2 and 13; testing-strategy.md, section 2.2.
+#[must_use]
+pub fn delivered() -> run::Delivery {
+    run::Delivery::Delivered(
+        run::Delivered::new(Box::new([
+            run::Receipt::new(0, b"scripted receipt".as_slice().into()).expect("bounded receipt")
+        ]))
+        .expect("one unique receipt"),
+    )
+}
+
+impl HostReply {
+    fn terminal(self) -> run::Delivery {
+        match self {
+            Self::Delivered => delivered(),
+            Self::Nothing => run::Delivery::Nothing,
+            Self::Refused => run::Delivery::Refused(
+                run::DeliveryRefusal::new(
+                    Some(run::Marker::new(0, b"src/answer.rs".as_slice().into()).expect("relative marker")),
+                    b"conflict markers remain".as_slice().into(),
+                )
+                .expect("bounded named refusal"),
+            ),
+            Self::Failed(failure) => run::Delivery::Failed(failure),
+            Self::Stale => run::Delivery::Stale,
+        }
+    }
+}
+
+/// Immutable deterministic scenario inputs for the real composed agent on a
+/// scripted typed host; terminal choices are sealed only at actual submission.
+/// Contract: domain/run.md, sections 8 and 13; testing-strategy.md, section 7.
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
     /// Replay seed for the host, agent and provider, independently derived.
@@ -60,7 +111,7 @@ pub struct Settings {
     /// The host's reply to each push; refusal feedback remains typed and bounded.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
-    pub push: run::Push,
+    pub push: HostReply,
     /// Explicit host cancellation time; `None` sends no cancel.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
@@ -91,7 +142,7 @@ impl Settings {
             provider,
             network: Span::millis(1, 20),
             check: Span::millis(100, 500),
-            push: run::Push::Done,
+            push: HostReply::Delivered,
             cancel_at: None,
             races: 0,
             drain_facts: true,
@@ -106,7 +157,7 @@ enum Family {
     Read,
     Probe,
     Check,
-    Push,
+    Delivery,
 }
 
 #[derive(Debug)]
@@ -150,7 +201,8 @@ pub struct World {
     answer: Option<run::Answer>,
     answered: Option<Time>,
     checked: Vec<bool>,
-    pushes: Vec<run::Push>,
+    pushes: Vec<run::Delivery>,
+    delivery_names: Vec<(run::CallName, Time)>,
     snapshots: BTreeMap<Token, Vec<u8>>,
     landed: Vec<u8>,
     prompts: Vec<provider::api::Query>,
@@ -188,7 +240,8 @@ impl World {
             schedule.send(Time::ZERO.saturating_add(after), Delivery::Cancel);
         }
         let mut referee = Referee::new(Meeting::default());
-        let change = matches!(settings.job, Job::Coding | Job::Delegating | Job::Wandering);
+        let change =
+            matches!(settings.job, Job::Coding | Job::Delegating | Job::Wandering | Job::MidReport | Job::MarkerReport);
         let mut stimuli = Vec::new();
         referee.observe(
             Time::ZERO,
@@ -196,6 +249,7 @@ impl World {
                 contract: observed_contract,
                 outcome_bytes: settings.limits.run.outcome_bytes,
                 checks: change,
+                delivery: matches!(settings.job, Job::MidReport | Job::MarkerReport),
                 within: settings.budget.time.saturating_add(Duration::from_secs(120)),
             },
             &mut stimuli,
@@ -218,6 +272,7 @@ impl World {
             answered: None,
             checked: Vec::new(),
             pushes: Vec::new(),
+            delivery_names: Vec::new(),
             snapshots: BTreeMap::new(),
             landed: Vec::new(),
             prompts: Vec::new(),
@@ -429,6 +484,7 @@ impl World {
                 self.flights.open((Family::Probe, owner), Flight { key: Some(key), cancelled: false });
             }
             Request::Check { owner, program, deadline, tail } => {
+                self.observe(Seen::Checking { owner, tree: self.code() });
                 assert_eq!(&*program.path, fixture::CHECKS, "the copied run checks its baseline convention");
                 let (passed, output) = fixture::check(&self.disk, program.root.raw());
                 self.flights.open((Family::Check, owner), Flight { key: None, cancelled: false });
@@ -441,8 +497,15 @@ impl World {
                 self.flights.get_mut((Family::Check, owner)).expect("the check is pending").key = Some(key);
             }
             Request::Abort { owner } => self.cancel(Family::Check, owner, Event::Aborted { owner }),
-            Request::Push { worker, owner, change } => {
-                for name in [b"title".as_slice(), b"body"] {
+            Request::Deliver { worker, owner, change, name, deadline } => {
+                // Title/body are this fixture host's final-Change policy only.
+                // The Report-only mid-run fixture instead requires opaque ticket.
+                let required: &[&[u8]] = if matches!(self.settings.job, Job::MidReport | Job::MarkerReport) {
+                    &[b"ticket"]
+                } else {
+                    &[b"title", b"body"]
+                };
+                for &name in required {
                     let value = change
                         .fields
                         .iter()
@@ -451,13 +514,39 @@ impl World {
                     assert!(!value.value.is_empty(), "the host receives the metadata its own contract required");
                 }
                 assert_eq!(worker, Token::new(1), "the push names the scripted host's request");
+                self.delivery_names.push((name, self.now));
                 let tree = self.code();
-                self.observe(Seen::Pushing { owner, tree: tree.clone() });
+                self.observe(Seen::Pushing { owner, name, tree: tree.clone() });
                 self.snapshots.insert(owner, tree);
-                self.flights.open((Family::Push, owner), Flight { key: None, cancelled: false });
-                self.send(Family::Push, owner, Event::Pushed { owner, push: self.settings.push });
+                self.flights.open((Family::Delivery, owner), Flight { key: None, cancelled: false });
+                let after = self.settings.network.draw(&mut self.rng);
+                let complete = self.now.saturating_add(after);
+                let push = if complete > deadline {
+                    run::Delivery::Failed(run::DeliveryFailure::new(run::DeliveryReason::TimedOut))
+                } else if self.settings.job == Job::MarkerReport
+                    && self
+                        .disk
+                        .load(self.root, b"conflict.txt", u64::MAX)
+                        .is_ok_and(|(bytes, _)| bytes.windows(7).any(|part| part == b"<<<<<<<"))
+                {
+                    run::Delivery::Refused(
+                        run::DeliveryRefusal::new(
+                            Some(
+                                run::Marker::new(0, b"conflict.txt".as_slice().into()).expect("relative fixture path"),
+                            ),
+                            b"conflict markers remain".as_slice().into(),
+                        )
+                        .expect("bounded feedback"),
+                    )
+                } else {
+                    self.settings.push.terminal()
+                };
+                let key = self.schedule.send(
+                    complete.min(deadline),
+                    Delivery::Terminal { family: Family::Delivery, owner, event: Event::Delivered { owner, push } },
+                );
+                self.flights.get_mut((Family::Delivery, owner)).expect("submitted delivery").key = Some(key);
             }
-            Request::CancelHost { owner } => self.cancel(Family::Push, owner, Event::HostCancelled { owner }),
             Request::Rejected { .. } | Request::Exhausted { .. } => {}
         }
     }
@@ -490,6 +579,7 @@ impl World {
     fn deliver(&mut self, delivery: Delivery) {
         match delivery {
             Delivery::Cancel => {
+                self.observe(Seen::Stopped { failure: run::Failure::Cancelled });
                 if let Some(run) = self.admitted {
                     self.stage.push(Event::Cancel { run });
                 }
@@ -540,30 +630,22 @@ impl World {
                 self.checked.push(ran.exit == (run::Exit::Code { code: 0 }));
                 self.observe(Seen::Checked { owner, exit: ran.exit });
             }
-            Event::Pushed { push, .. } => {
-                self.pushes.push(*push);
+            Event::Delivered { push, .. } => {
+                self.pushes.push(push.clone());
                 let tree = self.snapshots.remove(&owner).expect("a push snapshots its checkout");
-                let landed = if *push == run::Push::Done { tree } else { Vec::new() };
+                let landed = if matches!(push, run::Delivery::Delivered(_)) { tree } else { Vec::new() };
                 if !landed.is_empty() {
                     self.landed.clone_from(&landed);
                 }
-                self.observe(Seen::Pushed { owner, push: *push, tree: landed });
+                self.observe(Seen::Delivered { owner, push: push.clone(), tree: landed });
             }
-            Event::HostCancelled { .. } => {
-                self.snapshots.remove(&owner).expect("a cancelled push held a snapshot");
-                self.observe(Seen::Pushed {
-                    owner,
-                    push: run::Push::Failed { failure: run::PushFailure::new(run::PushReason::Cancelled) },
-                    tree: Vec::new(),
-                });
-            }
+            Event::Aborted { .. } => self.observe(Seen::Checked { owner, exit: run::Exit::Signalled }),
             Event::Start { .. }
             | Event::Grant { .. }
             | Event::Cancel { .. }
             | Event::Done { .. }
             | Event::Read { .. }
-            | Event::Probed { .. }
-            | Event::Aborted { .. } => {}
+            | Event::Probed { .. } => {}
         }
         self.stage.push(event);
     }
@@ -620,7 +702,9 @@ impl World {
         }
         let spent = match self.answer() {
             run::Answer::Refused(_) => run::Spend::ZERO,
-            run::Answer::Accepted { spent, .. } | run::Answer::Failed { spent, .. } => *spent,
+            run::Answer::Delivered { spent, .. }
+            | run::Answer::Accepted { spent, .. }
+            | run::Answer::Failed { spent, .. } => *spent,
         };
         assert_eq!(used, spent, "facts match independently accepted provider usage and the host answer");
         assert_eq!(opened, ended, "every conversation fact has one terminal");
@@ -647,7 +731,7 @@ impl World {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
-    pub fn pushes(&self) -> &[run::Push] {
+    pub fn pushes(&self) -> &[run::Delivery] {
         &self.pushes
     }
 
@@ -689,6 +773,14 @@ impl World {
     #[must_use]
     pub fn prompts(&self) -> &[provider::api::Query] {
         &self.prompts
+    }
+
+    /// Stable host names and submission times observed from actual delivery
+    /// requests, separate from callbacks; used to choose public cancellation cuts.
+    /// Contract: domain/run.md, sections 8.2 and 13; testing-strategy.md, section 7.
+    #[must_use]
+    pub fn delivery_names(&self) -> &[(run::CallName, Time)] {
+        &self.delivery_names
     }
 
     /// Ordered boundary trace for same-seed replay comparisons.
@@ -748,6 +840,11 @@ fn charter(settings: &Settings, root: u64) -> run::Charter {
             }]),
         },
         grants: Grants {
+            deliver: if matches!(settings.job, Job::MidReport | Job::MarkerReport) {
+                Some(ChangeSpec { fields: Box::new([FieldRule { name: b"ticket".as_slice().into(), max: 128 }]) })
+            } else {
+                None
+            },
             tools: Tools { inspect: true, modify: settings.writable, shell: settings.writable },
             forge: false,
             agents: true,
@@ -756,7 +853,6 @@ fn charter(settings: &Settings, root: u64) -> run::Charter {
         outcome: OutcomeSpec {
             change: if change {
                 Some(ChangeSpec {
-                    checks: true,
                     fields: Box::new([
                         smith_domain::run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
                         smith_domain::run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },

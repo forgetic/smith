@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use skein_lib::{Duration, Token};
 use skein_world::domain::{Expectations, Judge};
 use smith_domain::run::{
-    Answer, Exit, Push, Spend,
+    Answer, Delivery, Exit, Spend,
     outcome::{Declared, Field, FieldRule, Item, OutcomeSpec, TextSpec},
 };
 
@@ -22,10 +22,28 @@ use smith_domain::run::{
     reason = "observed push terminals retain the copied fixed diagnostic tail without changing their boundary value"
 )]
 pub enum Seen {
+    /// Public host shutdown observation, independent of private run state.
+    /// Contract: domain/run.md, sections 10 and 13; testing-strategy.md, section 7.
+    Stopped {
+        /// The already-decided typed stop whose evidence interrupted delivery preserves.
+        /// Contract: domain/run.md, sections 8.4 and 10.
+        failure: smith_domain::run::Failure,
+    },
+    /// IO snapshots checkout bytes at the check request, before its terminal.
+    /// Contract: domain/run.md, sections 8.1 and 13; testing-strategy.md, section 7.
+    Checking {
+        /// Live callback owner, not the durable host name. Contract: domain/run.md, section 8.2.
+        owner: Token,
+        /// Public IO snapshot to compare with actual delivery submission. Contract: domain/run.md, section 8.1.
+        tree: Vec<u8>,
+    },
     /// The scripted host starts its one request; an answer is due within `within`.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Started {
+        /// Independently observed separate main delivery grant, not inferred from final Change permission.
+        /// Contract: domain/run.md, sections 8.4 and 13; testing-strategy.md, section 7.
+        delivery: bool,
         /// Host-supplied rules observed at the typed Start boundary, retained by this independent referee.
         ///
         /// Contract: domain/run.md, sections 7.1 and 13; testing-strategy.md, section 7.
@@ -92,6 +110,9 @@ pub enum Seen {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Pushing {
+        /// Public durable transcript origin, separate from the live callback owner.
+        /// Contract: domain/run.md, sections 8.2 and 13; testing-strategy.md, section 7.
+        name: smith_domain::run::CallName,
         /// The finishing call that asked for the push.
         ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
@@ -104,7 +125,7 @@ pub enum Seen {
     /// The host's terminal for a push, and what it actually retained as landed.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
-    Pushed {
+    Delivered {
         /// The finishing call that asked for the push.
         ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
@@ -112,7 +133,7 @@ pub enum Seen {
         /// Scripted host outcome; a successful push retains the snapshot.
         ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
-        push: Push,
+        push: Delivery,
         /// Landed bytes for `Done`; empty for a refusal or stale branch.
         ///
         /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
@@ -149,10 +170,15 @@ pub struct Meeting {
     contract: Option<OutcomeSpec>,
     outcome_bytes: u64,
     checks: bool,
+    delivery: bool,
+    stopped: Option<smith_domain::run::Failure>,
+    checking: std::collections::BTreeMap<Token, Vec<u8>>,
+    names: std::collections::HashSet<smith_domain::run::CallName>,
+    last_landed: Option<(smith_domain::run::CallName, smith_domain::run::Delivered)>,
     completing: BTreeSet<Token>,
     spent: Spend,
-    passed: BTreeSet<Token>,
-    pushing: std::collections::BTreeMap<Token, Vec<u8>>,
+    passed: std::collections::BTreeMap<Token, Vec<u8>>,
+    pushing: std::collections::BTreeMap<Token, (smith_domain::run::CallName, Vec<u8>)>,
     landed: u32,
 }
 
@@ -163,9 +189,14 @@ impl Default for Meeting {
             contract: None,
             outcome_bytes: 0,
             checks: false,
+            delivery: false,
+            stopped: None,
+            checking: std::collections::BTreeMap::new(),
+            names: std::collections::HashSet::new(),
+            last_landed: None,
             completing: BTreeSet::new(),
             spent: Spend::ZERO,
-            passed: BTreeSet::new(),
+            passed: std::collections::BTreeMap::new(),
             pushing: std::collections::BTreeMap::new(),
             landed: 0,
         }
@@ -181,7 +212,15 @@ impl Expectations for Meeting {
 
     fn observe(&mut self, seen: Seen, judge: &mut Judge<Self::Name, Self::Stimulus>) {
         match seen {
-            Seen::Started { contract, outcome_bytes, checks, within } => {
+            Seen::Stopped { failure } => {
+                if self.stopped.is_none() {
+                    self.stopped = Some(failure);
+                }
+            }
+            Seen::Checking { owner, tree } => {
+                judge.check(self.checking.insert(owner, tree).is_none(), "one check request per pending owner");
+            }
+            Seen::Started { contract, outcome_bytes, checks, within, delivery } => {
                 judge.check(self.phase == Phase::Waiting, "one host start per scenario");
                 if self.phase == Phase::Waiting {
                     judge.expect("host answer", within);
@@ -192,6 +231,7 @@ impl Expectations for Meeting {
                 self.contract = Some(contract);
                 self.outcome_bytes = outcome_bytes;
                 self.checks = checks;
+                self.delivery = delivery;
             }
             Seen::Completing { owner } => {
                 judge.check(self.phase == Phase::Running, "a completion belongs to a live host request");
@@ -207,28 +247,43 @@ impl Expectations for Meeting {
             }
             Seen::Checked { owner, exit } => {
                 judge.check(self.phase == Phase::Running, "checks precede the host answer");
+                let tree = self.checking.remove(&owner);
+                judge.check(tree.is_some(), "check terminal names pending IO");
                 if exit == (Exit::Code { code: 0 }) {
-                    self.passed.insert(owner);
+                    self.passed.insert(owner, tree.unwrap_or_default());
                 }
             }
-            Seen::Pushing { owner, tree } => {
+            Seen::Pushing { owner, tree, name } => {
                 judge.check(
                     self.phase == Phase::Running
-                        && self.contract.as_ref().is_some_and(|contract| contract.change.is_some()),
+                        && (self.delivery || self.contract.as_ref().is_some_and(|contract| contract.change.is_some())),
                     "only a live change charter pushes",
                 );
-                judge.check(!self.checks || self.passed.remove(&owner), "checks pass before each push");
-                judge.check(self.pushing.insert(owner, tree).is_none(), "one push in flight per owner");
+                judge.check(
+                    !self.checks || self.passed.remove(&owner).as_ref() == Some(&tree),
+                    "delivery is the exclusive checked snapshot",
+                );
+                judge.check(
+                    name.completion > 0 && self.names.insert(name),
+                    "durable names are nonzero and distinct across actual submissions",
+                );
+                judge.check(self.pushing.insert(owner, (name, tree)).is_none(), "one push in flight per owner");
             }
-            Seen::Pushed { owner, push, tree } => {
+            Seen::Delivered { owner, push, tree } => {
                 let asked = self.pushing.remove(&owner);
                 judge.check(asked.is_some(), "a host push terminal names a pending push");
                 match push {
-                    Push::Done => {
-                        judge.check(asked.as_ref() == Some(&tree), "the host lands exactly the tree the agent left");
+                    Delivery::Delivered(receipts) => {
+                        judge.check(
+                            asked.as_ref().map(|(_, snapshot)| snapshot) == Some(&tree),
+                            "the host lands exactly the tree the agent left",
+                        );
+                        if let Some((name, _)) = &asked {
+                            self.last_landed = Some((*name, receipts));
+                        }
                         self.landed += 1;
                     }
-                    Push::Moved | Push::Failed { .. } | Push::Nothing => {
+                    Delivery::Stale | Delivery::Failed(_) | Delivery::Refused(_) | Delivery::Nothing => {
                         judge.check(tree.is_empty(), "an unsuccessful push lands nothing");
                     }
                 }
@@ -236,17 +291,31 @@ impl Expectations for Meeting {
             Seen::Answered { answer, pending } => {
                 judge.check(self.phase == Phase::Running, "exactly one answer per host start");
                 judge.check(
-                    pending == 0 && self.pushing.is_empty() && self.completing.is_empty(),
+                    pending == 0 && self.pushing.is_empty() && self.completing.is_empty() && self.checking.is_empty(),
                     "an answer waits for every request terminal",
                 );
                 let (spent, change) = match &answer {
+                    Answer::Delivered { spent, name, receipts, stopped } => {
+                        judge.check(
+                            self.delivery && self.last_landed.as_ref() == Some(&(*name, receipts.clone())),
+                            "interrupted mid delivery preserves its actual name and receipts",
+                        );
+                        judge.check(
+                            self.stopped == Some(*stopped),
+                            "interrupted delivery preserves the already observed stop",
+                        );
+                        (*spent, false)
+                    }
                     Answer::Refused(_) => (Spend::ZERO, false),
                     Answer::Accepted { spent, outcome } => (*spent, matches!(outcome, Declared::Change(_))),
                     Answer::Failed { spent, .. } => (*spent, false),
                 };
                 judge.check(spent == self.spent, "the answer accounts for every accepted provider turn exactly once");
                 judge.check(!change || self.landed == 1, "an accepted change landed exactly once");
-                judge.check(change || self.landed == 0, "a non-change result lands no change");
+                judge.check(
+                    change || self.delivery || self.landed == 0,
+                    "a non-change result only lands under a separate main grant",
+                );
                 if let Answer::Accepted { outcome, .. } = &answer {
                     judge.check(
                         self.contract.as_ref().is_some_and(|contract| accepted(contract, outcome, self.outcome_bytes)),

@@ -26,7 +26,11 @@ pub(crate) const SUB_AGENT: Token = Token::new(1);
 /// The first ticket of a session's calls and answers.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-pub(crate) const FIRST: u64 = 2;
+pub(crate) const DELIVER: Token = Token::new(2);
+
+/// First live ticket, separate from the fixed served-tool descriptors.
+/// Contract: domain/run.md, sections 8.2 and 8.4.
+pub(crate) const FIRST: u64 = 3;
 
 /// The tools the run serves a conversation.
 ///
@@ -34,6 +38,7 @@ pub(crate) const FIRST: u64 = 2;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Offered {
     pub(crate) finish: bool,
+    pub(crate) deliver: bool,
     pub(crate) agents: bool,
 }
 
@@ -51,12 +56,15 @@ pub(crate) struct Offered {
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn spec(opening: Opening) -> Option<(Spec, Offered)> {
-    let Opening { llm, system, prompt, tools, checkout, budget, finish, families } = opening;
+    let Opening { llm, system, prompt, tools, checkout, budget, finish, deliver, families } = opening;
     let authority = authority(&checkout, tools)?;
-    let offered = Offered { finish, agents: families.agents };
-    let mut delegated = List::with_capacity(2);
+    let offered = Offered { finish, deliver, agents: families.agents };
+    let mut delegated = List::with_capacity(3);
     if finish {
         delegated.push(llm::Descriptor { ticket: FINISH, effect: Effect::Write }).expect("room for both");
+    }
+    if deliver {
+        delegated.push(llm::Descriptor { ticket: DELIVER, effect: Effect::Write }).expect("room for all three");
     }
     if families.agents {
         delegated.push(llm::Descriptor { ticket: SUB_AGENT, effect: writes(families) }).expect("room for both");
@@ -114,7 +122,7 @@ fn writes(families: Families) -> Effect {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn effect(ask: &Ask) -> Effect {
     match ask {
-        Ask::Finish { .. } => Effect::Write,
+        Ask::Finish { .. } | Ask::Deliver { .. } => Effect::Write,
         Ask::SubAgent { families, .. } => writes(*families),
     }
 }
@@ -191,11 +199,13 @@ fn exhausted(spent: Dimension) -> run::Exhausted {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn failed(returned: &run::Returned) -> bool {
     match returned {
-        run::Returned::Accepted | run::Returned::Answered { .. } => false,
-        run::Returned::Rejected { .. }
+        run::Returned::Accepted | run::Returned::Delivered(_) | run::Returned::Answered { .. } => false,
+        run::Returned::Nothing
+        | run::Returned::DeliveryRefused(_)
+        | run::Returned::Rejected { .. }
         | run::Returned::ChecksFailed { .. }
-        | run::Returned::Moved
-        | run::Returned::Unpushed { .. }
+        | run::Returned::Stale
+        | run::Returned::DeliveryFailed { .. }
         | run::Returned::Cancelled
         | run::Returned::TimedOut
         | run::Returned::Busy
@@ -209,6 +219,9 @@ pub(crate) const fn failed(returned: &run::Returned) -> bool {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn copy(returned: &run::Returned) -> run::Returned {
     match returned {
+        run::Returned::Delivered(receipts) => run::Returned::Delivered(receipts.clone()),
+        run::Returned::Nothing => run::Returned::Nothing,
+        run::Returned::DeliveryRefused(refusal) => run::Returned::DeliveryRefused(refusal.clone()),
         run::Returned::Accepted => run::Returned::Accepted,
         run::Returned::Rejected { problems } => run::Returned::Rejected { problems: problems.clone() },
         run::Returned::ChecksFailed { repository, ran } => {
@@ -216,8 +229,8 @@ pub(crate) fn copy(returned: &run::Returned) -> run::Returned {
             let ran = run::Ran { exit: *exit, output: copy_of(output), cut: *cut };
             run::Returned::ChecksFailed { repository: copy_of(repository), ran }
         }
-        run::Returned::Moved => run::Returned::Moved,
-        run::Returned::Unpushed { failure } => run::Returned::Unpushed { failure: *failure },
+        run::Returned::Stale => run::Returned::Stale,
+        run::Returned::DeliveryFailed { failure } => run::Returned::DeliveryFailed { failure: *failure },
         run::Returned::Cancelled => run::Returned::Cancelled,
         run::Returned::TimedOut => run::Returned::TimedOut,
         run::Returned::Busy => run::Returned::Busy,

@@ -138,14 +138,13 @@ fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Re
         Event::Ended { conversation, end, spend } => run::ended(domain, conversation, end, spend, out),
         Event::Read { owner, read } => run::read(domain, env, owner, read, out),
         Event::Probed { owner, executable } => run::probed(domain, env, owner, executable, out),
-        Event::Delegated { conversation, call, ask, deadline } => {
-            run::delegated(domain, env, conversation, call, ask, deadline, out);
+        Event::Delegated { conversation, call, name, ask, deadline } => {
+            run::delegated(domain, env, conversation, call, name, ask, deadline, out);
         }
         Event::Withdraw { conversation, call } => run::withdraw(domain, conversation, call, out),
         Event::Checked { owner, ran } => run::checked(domain, env, owner, ran, out),
         Event::Aborted { owner } => run::aborted(domain, owner, out),
-        Event::Pushed { owner, push } => run::pushed(domain, owner, push, out),
-        Event::HostCancelled { owner } => run::host_cancelled(domain, owner, out),
+        Event::Delivered { owner, push } => run::delivered(domain, owner, push, out),
     }
 }
 

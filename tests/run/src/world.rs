@@ -49,7 +49,7 @@ pub struct Settings {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub checkout: Checkouts,
     /// The chance, per mille, that a check in flight wins the race with its
-    /// abort. A push's race with its cancel is the host's.
+    /// abort. Submitted host delivery remains owed through cancellation.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub races: u32,
@@ -137,6 +137,7 @@ impl Settings {
                 guide_bytes: 1024,
                 io_timeout: Duration::from_secs(5),
                 outcome_bytes: 4096,
+                delivery_timeout: Duration::from_secs(600),
                 check_timeout: Duration::from_secs(600),
                 check_tail: 256,
                 facts: 64,
@@ -236,14 +237,10 @@ pub struct Stats {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub aborts: u32,
-    /// Pushes the run asked the host for, and host calls it cancelled.
+    /// Actual deliveries the run submitted to its host.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub pushes: u32,
-    /// Count of host cancels observed at this scripted boundary.
-    ///
-    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    pub host_cancels: u32,
     /// Conversations the run opened, sub-agents among them, nudges it said,
     /// and closes it sent.
     ///
@@ -310,12 +307,10 @@ enum Delivery {
     Checking {
         worker: Token,
     },
-    Push {
+    Delivery {
         worker: Token,
         owner: Token,
-    },
-    CancelHost {
-        owner: Token,
+        deadline: Time,
     },
     /// The run's requests reach its conversations.
     ///
@@ -810,7 +805,7 @@ impl World {
                 self.check(owner, &program, deadline, tail);
             }
             run::Request::Checking { worker, deadline: _ } => self.send(Lane::Host, Delivery::Checking { worker }),
-            run::Request::Push { worker, owner, change: _ } => {
+            run::Request::Deliver { worker, owner, change: _, name: _, deadline } => {
                 let run = current.expect("a push is made in a step about its run");
                 self.assert_alone(run);
                 self.run_of_call.insert(owner, run);
@@ -822,15 +817,7 @@ impl World {
                 let run = &self.views[&self.run_of_call[&owner]];
                 assert!(run.checks.is_subset(&passed), "a change is pushed once every repository's checks passed it");
                 self.stats.pushes += 1;
-                self.send(Lane::Host, Delivery::Push { worker, owner });
-            }
-            run::Request::CancelHost { owner } => {
-                self.stats.host_cancels += 1;
-                // A push the host has answered already won the race; the host
-                // decides the race for one still in flight.
-                if self.pushes.contains(owner) {
-                    self.send(Lane::Host, Delivery::CancelHost { owner });
-                }
+                self.send(Lane::Host, Delivery::Delivery { worker, owner, deadline });
             }
         }
         current
@@ -896,8 +883,7 @@ impl World {
             | run::Request::Return { .. }
             | run::Request::Check { .. }
             | run::Request::Checking { .. }
-            | run::Request::Push { .. }
-            | run::Request::CancelHost { .. } => unreachable!("not one of io's requests"),
+            | run::Request::Deliver { .. } => unreachable!("not one of io's requests"),
         }
     }
 
@@ -915,10 +901,9 @@ impl World {
             | run::Event::Ended { conversation, .. }
             | run::Event::Delegated { conversation, .. }
             | run::Event::Withdraw { conversation, .. } => self.run_of_conversation.get(conversation).copied(),
-            run::Event::Checked { owner, .. }
-            | run::Event::Aborted { owner }
-            | run::Event::Pushed { owner, .. }
-            | run::Event::HostCancelled { owner } => self.run_of_call.get(owner).copied(),
+            run::Event::Checked { owner, .. } | run::Event::Aborted { owner } | run::Event::Delivered { owner, .. } => {
+                self.run_of_call.get(owner).copied()
+            }
         }
     }
 
@@ -934,10 +919,7 @@ impl World {
                 view.started = true;
             }
             run::Event::Used { spend, .. } => view.spent = view.spent.saturating_add(*spend),
-            run::Event::Checked { owner, .. }
-            | run::Event::Aborted { owner }
-            | run::Event::Pushed { owner, .. }
-            | run::Event::HostCancelled { owner } => {
+            run::Event::Checked { owner, .. } | run::Event::Aborted { owner } | run::Event::Delivered { owner, .. } => {
                 self.landing.remove(owner);
             }
             run::Event::Cancel { run } => {
@@ -1165,15 +1147,11 @@ impl World {
                     self.stats.cancels += 1;
                     self.send(Lane::Agent, Delivery::Cancel { run });
                 }
-                run::Event::Pushed { owner, push } => {
+                run::Event::Delivered { owner, push } => {
                     let Pushing { job } = self.pushes.end(owner);
-                    if push == run::Push::Done {
+                    if matches!(push, run::Delivery::Delivered(_)) {
                         self.pushed.insert(job);
                     }
-                    self.send(Lane::Agent, Delivery::Host(event));
-                }
-                run::Event::HostCancelled { owner } => {
-                    self.pushes.end(owner);
                     self.send(Lane::Agent, Delivery::Host(event));
                 }
                 run::Event::Started { .. }
@@ -1198,8 +1176,7 @@ impl World {
             match delivery {
                 Delivery::Start { reply_to, worker, charter } => {
                     self.checkout(&charter.checkout.repositories);
-                    let wants =
-                        matches!(&charter.outcome.change, Some(run::outcome::ChangeSpec { checks: true, fields: _ }));
+                    let wants = charter.outcome.change.is_some() || charter.grants.deliver.is_some();
                     let mut checks = BTreeSet::new();
                     for repository in &charter.checkout.repositories {
                         let executable = (repository.root, b".temper/pre-pr".to_vec());
@@ -1215,12 +1192,7 @@ impl World {
                 Delivery::Admitted { worker, run } => self.host.admitted(self.now, worker, run),
                 Delivery::Answered { worker } => self.host.answered(self.now, worker),
                 Delivery::Checking { worker } => self.host.checking(worker),
-                Delivery::Push { worker, owner } => self.host.push(self.now, worker, owner),
-                Delivery::CancelHost { owner } => {
-                    let mut out = Vec::new();
-                    self.host.cancel_host(owner, &mut out);
-                    self.host_out(out);
-                }
+                Delivery::Delivery { worker, owner, deadline } => self.host.push(self.now, worker, owner, deadline),
                 Delivery::Open { conversation, opening } => {
                     let mut out = Vec::new();
                     self.partner.open(self.now, conversation, &opening, &mut out);
@@ -1275,8 +1247,7 @@ impl World {
                         | run::Event::Ended { .. }
                         | run::Event::Delegated { .. }
                         | run::Event::Withdraw { .. }
-                        | run::Event::Pushed { .. }
-                        | run::Event::HostCancelled { .. } => unreachable!("io answers reads, probes and checks"),
+                        | run::Event::Delivered { .. } => unreachable!("io answers reads, probes and checks"),
                     };
                     assert!(answered, "io answers each operation once");
                     self.hand(event);
@@ -1299,7 +1270,7 @@ impl World {
         | Fact::Returned { run, .. }
         | Fact::CheckStarted { run, .. }
         | Fact::CheckFinished { run, .. }
-        | Fact::Pushed { run, .. }
+        | Fact::Delivered { run, .. }
         | Fact::Answered { run, .. }) = fact;
         assert!(self.views.contains_key(run), "a fact is of a run that was admitted");
         if let Fact::Opened { conversation, .. } | Fact::Ended { conversation, .. } = fact {
@@ -1378,8 +1349,7 @@ impl World {
             | run::Event::Probed { .. }
             | run::Event::Checked { .. }
             | run::Event::Aborted { .. }
-            | run::Event::Pushed { .. }
-            | run::Event::HostCancelled { .. } => unreachable!("not a conversation's event"),
+            | run::Event::Delivered { .. } => unreachable!("not a conversation's event"),
         };
         let open = self.opens.get_mut(conversation).expect("events are about conversations the run opened");
         assert!(!open.ended, "nothing comes after a conversation's end");
@@ -1436,7 +1406,9 @@ impl World {
         for (owner, start) in &self.starts {
             let answer = start.answer.as_ref().unwrap_or_else(|| panic!("start {owner:?} was answered"));
             match answer {
-                run::Answer::Failed { spent, .. } | run::Answer::Accepted { spent, .. } => {
+                run::Answer::Delivered { spent, .. }
+                | run::Answer::Failed { spent, .. }
+                | run::Answer::Accepted { spent, .. } => {
                     answered = answered.saturating_add(*spent);
                 }
                 run::Answer::Refused(_) => {}
@@ -1494,7 +1466,7 @@ fn kind(fact: &run::facts::Fact) -> &'static str {
         Fact::Returned { .. } => "returned",
         Fact::CheckStarted { .. } => "check started",
         Fact::CheckFinished { .. } => "check finished",
-        Fact::Pushed { .. } => "pushed",
+        Fact::Delivered { .. } => "pushed",
         Fact::Answered { .. } => "answered",
     }
 }
@@ -1543,7 +1515,12 @@ impl RunView {
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 fn assert_within(budget: &run::Budget, answer: &run::Answer, turn: run::Spend, peak: u32) {
-    let (run::Answer::Failed { spent, .. } | run::Answer::Accepted { spent, .. }) = answer else { return };
+    let (run::Answer::Delivered { spent, .. }
+    | run::Answer::Failed { spent, .. }
+    | run::Answer::Accepted { spent, .. }) = answer
+    else {
+        return;
+    };
     let turns = u64::from(peak) + 2;
     let over = |spent: u64, budget: u64, turn: u64| spent <= budget.saturating_add(turn.saturating_mul(turns));
     assert!(

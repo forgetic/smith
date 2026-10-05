@@ -20,7 +20,6 @@ use skein_lib::{List, Time, Token};
 use crate::boundary::{Place, Read, Request};
 use crate::charter::{Charter, Repository, count};
 use crate::limits::Limits;
-use crate::outcome::ChangeSpec;
 
 /// Where a repository's guide for LLMs is, beneath its root.
 ///
@@ -155,10 +154,7 @@ pub(crate) fn checks(found: &mut Found, step: Step, executable: bool) {
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn wants_checks(charter: &Charter, index: u32) -> bool {
-    match &charter.outcome.change {
-        Some(ChangeSpec { checks: true, fields: _ }) => repository(charter, index).writable,
-        Some(ChangeSpec { checks: false, fields: _ }) | None => false,
-    }
+    (charter.outcome.change.is_some() || charter.grants.deliver.is_some()) && repository(charter, index).writable
 }
 
 fn repository(charter: &Charter, index: u32) -> &Repository {
