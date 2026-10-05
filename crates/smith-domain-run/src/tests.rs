@@ -6,7 +6,9 @@ use skein_lib::{Duration, Env, List, Queue, ReplyTo, Time, Token, Wall};
 
 use crate::charter::{Checkout, Endpoint, Grants, Llm, Outlet, Repository, Tools};
 use crate::facts::{Answered, Asked, Fact, Return};
-use crate::outcome::{Change, ChangeSpec, Declared, Field, Item, OutcomeSpec, Problem, Problems, Verdict, VerdictRule};
+use crate::outcome::{
+    Change, ChangeSpec, Declared, Field, FieldRule, Item, OutcomeSpec, Problem, Problems, Verdict, VerdictRule,
+};
 use crate::prepare::{Found, Guide};
 use crate::{
     Answer, Ask, AskRefusal, Budget, Charter, Delivery, Domain, End, Event, Exhausted, Exit, Failure, Fault, Invalid,
@@ -1714,10 +1716,15 @@ fn time_and_spend_shutdown_keep_an_already_submitted_mid_landing() {
             Failure::Budget(Exhausted::Input)
         };
         let expected_spend = if timed { Spend::ZERO } else { spend(BUDGET.input + 1) };
-        assert_eq!(
-            harness.step(Event::Delivered { owner, push: delivered() }).as_ref(),
-            &[returned(50, Returned::Delivered(receipts()))]
-        );
+        let requests = harness.step(Event::Delivered { owner, push: delivered() });
+        if timed {
+            assert_eq!(requests.as_ref(), &[returned(50, Returned::Delivered(receipts()))]);
+        } else {
+            assert_eq!(
+                requests.as_ref(),
+                &[returned(50, Returned::Delivered(receipts())), Request::Close { peer: Token::new(100) },]
+            );
+        }
         // Closing the real session waits for the host terminal; its one End
         // then reports the spend it already used, without another delivery.
         let answer = answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: expected_spend })).1;
@@ -1731,4 +1738,32 @@ fn time_and_spend_shutdown_keep_an_already_submitted_mid_landing() {
             }
         );
     }
+}
+
+#[test]
+fn generic_non_marker_host_refusal_is_feedback_and_report_can_finish() {
+    let mut harness = Harness::new(LIMITS);
+    let (_, conversation) = mid_running(&mut harness);
+    let owner = submit_mid(&mut harness, conversation);
+    let refusal = crate::DeliveryRefusal::new(None, bytes(b"host asks for corrected metadata"))
+        .expect("bounded generic correctable feedback");
+    assert_eq!(
+        harness.step(Event::Delivered { owner, push: Delivery::Refused(refusal.clone()) }).as_ref(),
+        &[returned(50, Returned::DeliveryRefused(refusal))]
+    );
+    drop(harness.step(finish(conversation, 51, report())));
+    let answer = answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })).1;
+    assert_eq!(answer, Answer::Accepted { outcome: report(), spent: Spend::ZERO });
+}
+
+#[test]
+fn impossible_delivery_grant_and_zero_host_deadline_refuse_before_preparation() {
+    let mut charter = mid_report();
+    charter.grants.deliver = Some(ChangeSpec { fields: Box::new([FieldRule { name: bytes(b"ticket"), max: 0 }]) });
+    let mut harness = Harness::new(LIMITS);
+    assert_eq!(answered(harness.start(1, charter)), (1, Answer::Refused(Refusal::Invalid(Invalid::Grants))));
+    assert_eq!((harness.domain.runs(), harness.domain.conversations()), (0, 0));
+    let mut harness = Harness::new(Limits { delivery_timeout: Duration::ZERO, ..LIMITS });
+    assert_eq!(answered(harness.start(2, mid_report())), (2, Answer::Refused(Refusal::Invalid(Invalid::Checkout))));
+    assert_eq!((harness.domain.runs(), harness.domain.conversations()), (0, 0));
 }
