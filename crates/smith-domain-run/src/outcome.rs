@@ -570,16 +570,14 @@ pub(crate) fn is_valid(spec: &OutcomeSpec, limits: &Limits) -> bool {
     if count(spec.verdicts.len()) > limits.verdicts {
         return false;
     }
-    if let Some(rule) = &spec.change {
-        if !valid_fields(&rule.fields) || !fits(min_fields(&rule.fields), limits.outcome_bytes) {
-            return false;
-        }
+    if let Some(rule) = &spec.change
+        && (!valid_fields(&rule.fields) || !fits(min_fields(&rule.fields), limits.outcome_bytes))
+    {
+        return false;
     }
-    for text in [&spec.report, &spec.failure] {
-        if let Some(rule) = text {
-            if rule.min > rule.max || !valid_fields(&rule.fields) || !fits(min_text(rule), limits.outcome_bytes) {
-                return false;
-            }
+    for rule in [&spec.report, &spec.failure].into_iter().flatten() {
+        if rule.min > rule.max || !valid_fields(&rule.fields) || !fits(min_text(rule), limits.outcome_bytes) {
+            return false;
         }
     }
     for (at, rule) in spec.verdicts.iter().enumerate() {
@@ -671,10 +669,8 @@ pub(crate) fn cost(spec: &OutcomeSpec) -> Option<u64> {
     if let Some(rule) = &spec.change {
         cost = cost.checked_add(rule_fields_cost(&rule.fields)?)?;
     }
-    for text in [&spec.report, &spec.failure] {
-        if let Some(rule) = text {
-            cost = cost.checked_add(rule_fields_cost(&rule.fields)?)?;
-        }
+    for rule in [&spec.report, &spec.failure].into_iter().flatten() {
+        cost = cost.checked_add(rule_fields_cost(&rule.fields)?)?;
     }
     let verdict = u64::try_from(size_of::<VerdictRule>()).ok()?;
     let kind = u64::try_from(size_of::<ItemRule>()).ok()?;
