@@ -151,6 +151,9 @@ fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent:
         smith_domain::session::llm::Decoded::Delegated { .. } => {
             unreachable!("the component fixture decoder owns only checkout tools")
         }
+        smith_domain::session::llm::Decoded::Historical => {
+            unreachable!("the live fixture decoder never produces a concrete-history replay marker")
+        }
     }
 }
 
