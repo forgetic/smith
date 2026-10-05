@@ -109,3 +109,13 @@ The copied production crate tests contribute the remaining 217 focused
 tests. These measurements retain the copied seed sweeps and memory
 drivers; the parallel default and fuzzy gate still enforce the original
 15-second and 60-second workspace ceilings.
+
+05s4 RESULTS was measured serially on 2026-10-05 at source `e4c8d0e`,
+using the same commands on an idle machine and an isolated build directory.
+All 368 focused tests passed in 4.359 seconds and all eight fuzzy tests
+passed in 6.150 seconds, with no skips. The affected agent world has
+26 focused tests / 0.267 seconds and two fuzzy tests / 2.635 seconds;
+the run world has 30 focused tests / 0.537 seconds and one fuzzy test /
+0.273 seconds. These world shares sum the rounded individual PASS
+durations, rather than the suite elapsed time. Existing seed sweeps and
+memory drivers remain; no timeout or budget was increased.

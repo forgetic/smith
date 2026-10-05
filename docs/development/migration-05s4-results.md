@@ -61,9 +61,11 @@ The memory driver generates all four result forms and uses the shared heap
 meter directly; the full run fixture includes field containers in its exact
 byte-limit filling.
 
-Static checks and scoped rustfmt are author-owned. Serial measurements and
-all four exact-tip gates are parent-owned and pending at this source freeze;
-no new runtime measurement is claimed here. Workspace limits remain
+Independent source review is clear at `e4c8d0e`. Parent-owned serial
+measurements on that source passed: 368 focused tests / 4.359 seconds and
+eight fuzzy tests / 6.150 seconds, with no skips. The world shares are in
+[workflow.md](workflow.md). The final four checks on this branch's tip
+remain required before main moves. Workspace limits remain
 15 seconds focused and 60 seconds fuzzy. Canonical skein remains locked to
 `5e52dd9cd8793094bf49c8bf75f9cffac027814f`, matching temper. Its local-cache,
 unpublished-revision portability limitation remains as documented in
