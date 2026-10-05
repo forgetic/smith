@@ -4,11 +4,11 @@ This is the implementation ledger for the approved messages increment. Source
 is in progress; the early compiler checkpoint is
 `49d15601c4346251eb3c514a4ba68058b9da6f83`, rebased onto Smith `45a2eea`.
 The original author base was `51fdd24`. The current temporary increment follows
-reviewed checkpoint `c645669` and adds genuine native root restoration.
+reviewed checkpoint `5b4bc94` and adds overlapping physical component ownership.
 Independent source review covers actual Start/discovery, concrete root records,
 new Client continuation, parking and physical cleanup in both configured dialects.
-Root-entry/caller-copy memory and single-lifecycle native memory were reviewed
-separately; overlapping physical ownership remains a subsequent control.
+Root-entry/caller-copy memory, native restoration and overlapping physical
+Client/peer ownership have independent source approval, with final gates below.
 These results do not claim a main merge, migration completion or copied-package
 removal. The runtime path uses only the shared Skein Client.
 
@@ -415,6 +415,38 @@ claim native Client cancellation coverage or independent Env.wall jumps.
 Detailed actual counts and seed bounds are recorded in
 `/tmp/temper-next-migration/smith-message-sweep-focused-1.log`.
 
+## Overlapping physical component ownership
+
+The root-memory control retains the actual won Client after Completed/Reusable
+and explicit Close, then enters the next real Complete using the same logical
+callback. The new Client is active before the old Client's genuine Closed.
+Wire.take has consumed the old application Context; its retained price is one
+shared Client worst case plus a bounded peer extra price and four observation
+cells. The new adapter price includes one Client and its new Context, with its
+peer priced separately. No Client or old Context is counted twice.
+
+The same persistent Meter covers both constructors, preparation, actual native
+entrances, translation, old physical settlement/drain/drop and intervening root
+entries. Root/session state, full generated histories, saved records, both
+restored Prompt copies and a genuine restored Turn copy remain live at overlap.
+Each raw peak checks the independent sum; measured net changes and exact public
+Prompt/terminal handoffs attribute native ownership. Old Closed/drain/drop frees
+exactly its captured retained heap without changing root/caller owners or
+producing another logical terminal. Actual clocks and service-route reclamation
+are checked, and final root/configuration/caller/native reclamation holds zero.
+
+The original 12 Message/six Turn and 28 Message/14 Turn histories, real 8,192-byte
+person input, reservation-inclusive exact restore and independent count/byte
+one-over refusals remain unchanged. The separate overlap activation uses the
+minimum additional message slot: full prefix plus wake and Wait/result leaves
+only one slot under the original count; the second provider entrance requires
+two. Its independently chosen 17/33-message limits permit the genuine Wait/text
+pair to yield Waiting before actual cancellation. The original 16/32-message controls
+are preserved. This is attributed component ownership, not an analytical price
+for passive Composition maps, Referee or Trace storage, nor a claim about every
+native configuration. Final source SHA-256 is
+`96d2bb21933adbd0cb81faa7c29a8005f8de46d091c696e634646c7957a65b57`.
+
 ## Genuine native root restoration
 
 The new `native_root_restore` story enters the existing World through original
@@ -446,8 +478,8 @@ The current checkpoint retains the approved actual wire/root binding composition
 submitted-delivery extension of live host composition, adapter boundary controls,
 public documentation, attained root-entry/caller-copy memory evidence and the
 single-lifecycle combined native memory control and native root-restore story.
-Allocation peaks with simultaneous retained physical Client/peer owners remain
-outstanding; passive trace/referee/routing bookkeeping is outside this component
+The overlap control now measures simultaneous retained physical Client/peer
+owners; passive trace/referee/routing bookkeeping is outside this component
 contract. Native adapter continuation has actual terminal/history evidence for
 its selected cases; the bounded message sweep has actual counts
 and independent source approval. All named
@@ -498,12 +530,11 @@ proof before cleanup settles. Its separate channel-loss control retains the
 parent right through actual withdrawal, process exit, empty tree and EOF, then
 consumes the parent's actual terminal without inventing an agent response.
 
-The remaining component memory control must measure simultaneous retained
-native physical Client/peer ownership through actual Closed/drop. The earlier
-single-lifecycle span keeps root/caller owners live but drops its Wire before
-the next root entrance. An analytical full World price for passive harness
-storage is not required by the foundation. Selected failure controls retain
-their stated scope; genuine opaque root Restore is now covered below.
+The overlap control above extends component ownership through simultaneous
+retained native Clients and actual Closed/drop. The earlier single-lifecycle
+span remains historical evidence. An analytical full World price for passive
+harness storage is not required by the foundation. Selected failure controls
+retain their stated scope; genuine opaque root Restore is covered above.
 The bounded message sweep counts actual endings, read fences, bounces and
 terminal races and requires every class to occur. Shared replay preserves its
 full boundary trace and actual outcome digest; fixture selection supplies no
@@ -516,12 +547,16 @@ The frozen temporary draft has the following parent-run evidence on 2026-10-05:
 | --- | --- |
 | `cargo fmt --check` | Passed. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed. |
-| `cargo nextest run --workspace` | 505 passed, zero skipped, 2.285 seconds. |
-| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.958 seconds. |
-| Idle serial focused measurement | 505 passed, zero skipped, 7.512 seconds. |
-| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.431 seconds. |
+| `cargo nextest run --workspace` | 505 passed, zero skipped, 2.170 seconds. |
+| `cargo nextest run --workspace --profile fuzzy` | Eleven passed, zero skipped, 4.462 seconds. |
+| Idle serial focused measurement | 505 passed, zero skipped, 7.034 seconds. |
+| Idle serial fuzzy measurement | Eleven passed, zero skipped, 8.035 seconds. |
 
 Latest logs are `/tmp/temper-next-migration/`'s
+`smith-overlap-native-memory-{fmt,clippy,default,fuzzy,serial-default,serial-fuzzy}.log`.
+The preceding restore checkpoint `5b4bc94` passed fmt/clippy, 505 focused /
+2.285 seconds and eleven fuzzy / 4.958 seconds; serial measurements passed
+505 / 7.512 seconds and eleven / 8.431 seconds, zero skips. Its logs are
 `smith-native-root-restore-{fmt-final,clippy-final,default-final,fuzzy-final,serial-default,serial-fuzzy}.log`.
 Final gates ran from the stable integration worktree with a fresh isolated target;
 an earlier cross-worktree shared-target default run reused a different root-memory

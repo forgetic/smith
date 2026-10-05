@@ -2,9 +2,12 @@
 //! Records come from actual shared Client terminals, including the real Wait
 //! result; fixture ownership is counted independently from production pricing.
 //! Root entrances and caller-copy transients are measured separately. One whole
-//! actual Client/adapter/peer lifecycle is also measured while root and caller
-//! histories remain live. Retained multiple physical bindings are a separate
-//! memory scope. Contract: domain/client.md, sections 1, 4, 5 and 6;
+//! actual Client/adapter/peer lifecycle is measured while root and caller
+//! histories remain live, including two real physical Clients across one logical
+//! callback: the won closing Client and its replacement with one active context.
+//! Passive simulator, referee and composition bookkeeping are outside this
+//! component ownership contract (skein-world/src/heap.rs).
+//! Contract: domain/client.md, sections 1, 4, 5 and 6;
 //! domain/run.md, sections 3, 6, 13 and 14; domain/session.md, section 3;
 //! programming-model.md, section 6.3; testing-strategy.md, sections 2.3 and 6.
 
@@ -215,28 +218,144 @@ struct Complete {
     receiving: Receiving,
 }
 
-fn actual(complete: Complete, configuration: &Configuration, cycles: u32, now: Time, wall: Wall) -> Event {
+// Physical ownership survives the logical terminal. Its independent bound uses
+// Client pricing alone: Wire::take consumed the old Context at that terminal.
+struct Retained {
+    wire: Wire,
+    owner: Token,
+    held: u64,
+    bound: u64,
+}
+
+fn native_peak(meter: &Meter, bound: u64) -> u64 {
+    let measured = meter.end();
+    assert!(
+        measured.peak() <= bound,
+        "combined root/caller/overlapping-native entrance peak {} exceeds {bound}",
+        measured.peak()
+    );
+    measured.held()
+}
+
+fn attributed(held: u64, before: u64, after: u64, received: u64, handed: u64) -> u64 {
+    sum([held, after, received])
+        .checked_sub(sum([before, handed]))
+        .expect("native attribution includes only its measured net and exact public handoffs")
+}
+
+fn retire(retained: Retained, meter: &Meter, bound: u64, now: Time, wall: Wall) {
+    let Retained { mut wire, owner, held, .. } = retained;
+    let before = meter.held();
+    assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable, Observed::Close]);
+    assert_eq!(wire.peer.machine.waiting(), skein_llm::client::Waiting::Closing);
+    for _ in 0..2 {
+        meter.start();
+        wire.peer.at(now, wall);
+        assert!(wire.settle().is_empty(), "old physical settlement owes no second root callback");
+        native_peak(meter, bound);
+    }
+    assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable, Observed::Close, Observed::Closed]);
+    assert_eq!(wire.observed.capacity(), 4);
+    let mut closed_quiet = false;
+    for _ in 0..128 {
+        meter.start();
+        wire.peer.at(now, wall);
+        let (progress, returned) = wire.tick();
+        assert!(returned.is_empty(), "settled native binding owes no second callback");
+        drop(returned);
+        native_peak(meter, bound);
+        if !progress {
+            closed_quiet = true;
+            break;
+        }
+    }
+    assert!(closed_quiet, "genuine Closed drains remaining bounded peer work");
+    assert_eq!(wire.peer.machine.waiting(), skein_llm::client::Waiting::Nothing);
+    assert_eq!(wire.peer.service.calls(), 0, "retired native provider routes reclaimed before drop");
+    assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable, Observed::Close, Observed::Closed]);
+    meter.start();
+    drop(wire);
+    let after = native_peak(meter, bound);
+    assert_eq!(
+        before.checked_sub(after),
+        Some(held),
+        "physical Closed/drain/drop releases exactly its captured native heap without root or caller mutations"
+    );
+}
+
+fn actual(
+    complete: Complete,
+    configuration: &Configuration,
+    cycles: u32,
+    meter: &Meter,
+    bound: u64,
+    old: &mut Option<Retained>,
+    clocks: (Time, Wall),
+) -> (Event, Retained, bool) {
+    let (now, wall) = clocks;
     let owner = complete.owner;
     let messages = complete.prompt.messages.len();
+    let incoming = prompt_bytes(&complete.prompt);
     let large = complete.prompt.messages.iter().flat_map(|message| &message.content).any(|block| {
         matches!(block, llm::Block::Text { text, .. } if text.len() == LARGE && text.iter().all(|byte| *byte == b'x'))
     });
     let limits = wire_limits();
+    let observations = observation_limits(&limits);
+    let retained_bound = sum([
+        skein_llm::client::worst_case(&limits.client).expect("one retained actual Client independent bound"),
+        extra_worst_case(&limits.client, &observations, &configuration.endpoint, &configuration.credential)
+            .expect("one retained peer independent bound excludes Client"),
+        cells::<Observed>(4),
+    ]);
+    let before = meter.held();
+    meter.start();
     let mut wire = Wire::prepare(owner, complete.prompt, complete.receiving, configuration, &limits, scripts(cycles))
         .expect("actual root receiving contract admits the Client");
-    wire.peer.observe(observation_limits(&limits));
+    wire.peer.observe(observations);
     wire.observed.reserve_exact(4);
     wire.peer.at(now, wall);
     assert!(wire.start().is_empty());
+    let after = native_peak(meter, bound);
+    let mut held = attributed(0, before, after, incoming, 0);
+    let overlapping = old.is_some();
+    if let Some(previous) = old.take() {
+        assert_eq!(previous.owner, owner, "new actual Client reuses the same live logical callback");
+        assert_eq!(
+            previous.wire.observed,
+            [Observed::Completed(owner), Observed::Reusable, Observed::Close],
+            "old Completed/Reusable/Close precedes new Start and old genuine Closed"
+        );
+        assert_eq!(previous.wire.peer.machine.waiting(), skein_llm::client::Waiting::Closing);
+        assert!(wire.observed.is_empty(), "new Start has no terminal while the old won Client still closes");
+        assert!(
+            !matches!(
+                wire.peer.machine.waiting(),
+                skein_llm::client::Waiting::Start
+                    | skein_llm::client::Waiting::Idle
+                    | skein_llm::client::Waiting::Closing
+                    | skein_llm::client::Waiting::Nothing
+            ),
+            "new actual Client is active before old Closed"
+        );
+        // The new Wire and root/caller owners remain untouched throughout this
+        // separate physical retirement measurement.
+        retire(previous, meter, bound, now, wall);
+    }
     let mut terminal = None;
     let mut quiet = false;
     for _ in 0..100_000 {
+        let before = meter.held();
+        meter.start();
         wire.peer.at(now, wall);
         let (progress, returned) = wire.tick();
         assert!(returned.capacity() <= 4, "one actual terminal's public vector reservation");
+        let mut handed = 0;
         for event in returned {
+            handed = terminal_bytes(&event);
             assert!(terminal.replace(event).is_none(), "one genuine native terminal");
         }
+        let after = native_peak(meter, bound);
+        held = attributed(held, before, after, 0, handed);
         if !progress {
             quiet = true;
             break;
@@ -247,30 +366,16 @@ fn actual(complete: Complete, configuration: &Configuration, cycles: u32, now: T
     assert!(matches!(&terminal, Event::Completed { owner: got, .. } if *got == owner));
     assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable]);
     assert_native_query(&wire, messages, large);
+    let before = meter.held();
+    meter.start();
     wire.peer.at(now, wall);
     assert!(wire.close().is_empty());
-    wire.peer.at(now, wall);
-    assert!(wire.settle().is_empty());
-    wire.peer.at(now, wall);
-    assert!(wire.settle().is_empty());
-    assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable, Observed::Close, Observed::Closed]);
-    assert_eq!(wire.observed.capacity(), 4);
-    let mut closed_quiet = false;
-    for _ in 0..128 {
-        wire.peer.at(now, wall);
-        let (progress, returned) = wire.tick();
-        assert!(returned.is_empty(), "settled native binding owes no second callback");
-        if !progress {
-            closed_quiet = true;
-            break;
-        }
-    }
-    assert!(closed_quiet, "genuine Closed drains remaining bounded peer work");
-    assert_eq!(wire.peer.machine.waiting(), skein_llm::client::Waiting::Nothing);
-    assert_eq!(wire.peer.service.calls(), 0, "retired native provider routes reclaimed before drop");
-    assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable, Observed::Close, Observed::Closed]);
-    drop(wire);
-    terminal
+    let after = native_peak(meter, bound);
+    held = attributed(held, before, after, 0, 0);
+    assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable, Observed::Close]);
+    assert_eq!(wire.peer.machine.waiting(), skein_llm::client::Waiting::Closing);
+    assert!(held <= retained_bound, "won closing Client/peer fits independent pricing without an old Context");
+    (terminal, Retained { wire, owner, held, bound: retained_bound }, overlapping)
 }
 
 // These passive public observations allocate no scratch inside the measured
@@ -568,6 +673,9 @@ struct Counted {
     waiting: bool,
     answer: Option<run::Answer>,
     calls: u32,
+    retained: Option<Retained>,
+    overlaps: u32,
+    restored_overlap: bool,
 }
 
 impl Counted {
@@ -600,6 +708,9 @@ impl Counted {
             waiting: false,
             answer: None,
             calls: 0,
+            retained: None,
+            overlaps: 0,
+            restored_overlap: false,
         }
     }
 
@@ -647,6 +758,21 @@ impl Counted {
             + self.prompt_copy.as_ref().map_or(0, prompt_bytes)
             + self.turn_copy.as_ref().map_or(0, turn_bytes)
             + self.complete.as_ref().map_or(0, |complete| prompt_bytes(&complete.prompt))
+    }
+
+    fn retained_bound(&self) -> u64 {
+        self.retained.as_ref().map_or(0, |retained| retained.bound)
+    }
+
+    fn retire_native(&mut self) {
+        if let Some(retained) = self.retained.take() {
+            let bound = sum([
+                root::worst_case(&self.env.limits).expect("live root's independent bound"),
+                self.outside(),
+                retained.bound,
+            ]);
+            retire(retained, &self.meter, bound, self.env.now, self.env.wall);
+        }
     }
 
     fn drain(&mut self, measured: skein_world::domain::heap::Measured) {
@@ -716,7 +842,11 @@ impl Counted {
                 }
             }
         }
-        let bound = root::worst_case(&self.env.limits).expect("compatible root limits") + self.outside();
+        let bound = sum([
+            root::worst_case(&self.env.limits).expect("compatible root limits"),
+            self.outside(),
+            self.retained_bound(),
+        ]);
         self.meter.check(measured, bound, &self.env.limits);
     }
 
@@ -772,6 +902,9 @@ impl Counted {
                 if self.initial.is_none() {
                     self.initial = Some(copy_prompt(&complete.prompt));
                 }
+                if self.held_prompt.is_some() && self.turn_copy.is_none() {
+                    self.turn_copy = self.records.last().map(copy_turn);
+                }
                 let event = self.native(complete, configuration, cycles);
                 self.step(event);
             } else {
@@ -817,6 +950,7 @@ impl Counted {
         let bound = sum([
             root::worst_case(&self.env.limits).expect("live root's independent bound"),
             self.outside(),
+            self.retained_bound(),
             incoming,
             adapter::worst_case(&limits, &complete.receiving).expect("one actual Client/context/translation bound"),
             extra_worst_case(&limits.client, &observations, &configuration.endpoint, &configuration.credential)
@@ -825,30 +959,45 @@ impl Counted {
             complete.receiving.max_completion_bytes,
         ]);
         let terminal_cap = complete.receiving.max_completion_bytes;
+        let old_held = self.retained.as_ref().map_or(0, |retained| retained.held);
         let before = self.meter.held();
-        self.meter.start();
-        let event = actual(complete, configuration, cycles, self.env.now, self.env.wall);
-        let measured = self.meter.end();
-        assert!(
-            measured.peak() <= bound,
-            "combined root/caller/one-native-lifecycle peak {} exceeds {bound}",
-            measured.peak()
+        let (event, retained, overlapping) = actual(
+            complete,
+            configuration,
+            cycles,
+            &self.meter,
+            bound,
+            &mut self.retained,
+            (self.env.now, self.env.wall),
         );
+        if overlapping {
+            self.overlaps += 1;
+            if self.prefix.is_some()
+                && self.saved.is_some()
+                && self.held_prompt.is_some()
+                && self.prompt_copy.is_some()
+                && self.turn_copy.is_some()
+            {
+                self.restored_overlap = true;
+            }
+        }
         let terminal = terminal_bytes(&event);
         assert!(terminal <= terminal_cap, "actual transferred terminal fits the root's advertised caller reserve");
         let expected = before
-            .checked_sub(incoming)
-            .and_then(|held| held.checked_add(terminal))
+            .checked_sub(sum([incoming, old_held]))
+            .and_then(|held| held.checked_add(sum([terminal, retained.held])))
             .expect("native ownership transfer is bounded");
         assert_eq!(
-            measured.held(),
+            self.meter.held(),
             expected,
-            "closed/dropped native owners release exactly the input Prompt and retain only the actual caller terminal"
+            "native public Prompt/terminal handoffs and old physical retirement retain exactly the new closing Wire"
         );
+        assert!(self.retained.replace(retained).is_none(), "old physical ownership retired before new retention");
         event
     }
 
     fn replace_root(&mut self, limits: &Limits) {
+        self.retire_native();
         assert!(self.answer.is_some(), "previous original Start settled");
         let previous_bound = root::worst_case(&self.env.limits).expect("previous root bound") + self.outside();
         self.meter.start();
@@ -993,8 +1142,46 @@ fn generate_prefix(counted: &mut Counted, configuration: &Configuration, message
     assert!(
         matches!(counted.answer, Some(run::Answer::Failed { failure: run::Failure::Cancelled, turns, .. }) if turns == 2 * cycles)
     );
+    counted.retire_native();
 
     tight
+}
+
+fn restore_overlap(counted: &mut Counted, configuration: &Configuration, messages: u32, cycles: u32) {
+    // The full prefix owns messages - 4 slots. Restored waking, the actual Wait
+    // assistant and its result consume three more; the next provider entrance
+    // reserves two unfilled slots (assistant plus possible tool result). Thus
+    // messages + 1 is the independently chosen minimum count for this overlap.
+    // Payload/receiving limits remain the original source's bounded contract.
+    let overlapping = bounds(messages.checked_add(1).expect("second actual receiving entrance's two slots"));
+    counted.replace_root(&overlapping);
+    counted.start(counted.prefix.as_ref().map(copy_transcript), true);
+    counted.discover();
+    assert_eq!(counted.calls, 1, "full source history starts one actual restored callback");
+    let complete = counted.complete.as_ref().expect("actual restored Complete before overlapping physical bindings");
+    assert_eq!(complete.prompt.messages.len(), usize::try_from(messages - 3).expect("full restored plus waking"));
+    assert_rewritten(counted.prefix.as_ref().expect("maximum generated prefix"), &complete.prompt);
+    counted.held_prompt = Some(copy_prompt(&complete.prompt));
+    counted.prompt_copy = counted.held_prompt.as_ref().map(copy_prompt);
+    // The same whole native script adds the real next Wait/text pair. The old
+    // Wait terminal's closing Client remains live when its text Client starts.
+    counted.cycle(configuration, cycles + 1);
+    assert_eq!(counted.calls, 2, "two genuine actual Clients share the restored logical callback");
+    assert_eq!(counted.records.len(), 2, "both real restored terminals produced concrete Turns");
+    assert_eq!(counted.records[0].sequence, 2 * cycles + 1);
+    assert_eq!(counted.records[1].sequence, 2 * cycles + 2);
+    assert!(
+        counted.restored_overlap,
+        "full generated histories, both restored Prompt copies and a real Turn copy coexist with native overlap"
+    );
+    assert!(counted.waiting, "actual restored Wait/text pair parks after both native terminals");
+    let run = counted.admitted.expect("actual overlapping restore activation");
+    counted.waiting = false;
+    counted.step(Event::Cancel { run });
+    counted.cycle(configuration, cycles + 1);
+    assert!(matches!(counted.answer, Some(run::Answer::Failed { failure: run::Failure::Cancelled, turns: 2, .. })));
+    counted.resume();
+    counted.retire_native();
 }
 
 fn restore_exact(counted: &mut Counted, configuration: &Configuration, messages: u32, cycles: u32, tight: &Limits) {
@@ -1024,6 +1211,7 @@ fn restore_exact(counted: &mut Counted, configuration: &Configuration, messages:
         Some(run::Answer::Failed { failure: run::Failure::Model(run::Fault::ContextFull), turns: 1, .. })
     ));
     counted.resume();
+    counted.retire_native();
 }
 
 fn refuse_one_over(counted: &mut Counted, configuration: &Configuration, cycles: u32, tight: &Limits) {
@@ -1074,6 +1262,8 @@ fn refuse_one_over(counted: &mut Counted, configuration: &Configuration, cycles:
 }
 
 fn reclaim_every_owner(mut counted: Counted, tight: &Limits, configuration: Configuration) {
+    counted.retire_native();
+    assert!(counted.overlaps > 0, "the memory run attained overlapping actual physical Clients");
     let final_bound = root::worst_case(tight).expect("compatible final caps") + counted.outside();
     counted.meter.start();
     drop(counted.domain.take());
@@ -1101,6 +1291,7 @@ fn restored_root_arrays_payload_rewrites_and_turn_copies_stay_within_the_attaine
         let mut counted = Counted::new(&bounds(messages));
         let configuration = counted.configuration();
         let tight = generate_prefix(&mut counted, &configuration, messages, cycles);
+        restore_overlap(&mut counted, &configuration, messages, cycles);
         restore_exact(&mut counted, &configuration, messages, cycles, &tight);
         refuse_one_over(&mut counted, &configuration, cycles, &tight);
         reclaim_every_owner(counted, &tight, configuration);

@@ -83,7 +83,8 @@ until required shared and consumer acceptance permits their coherent removal.
 | Observed bounded message sweep | Smith a54edcb | Reviewed; fmt/clippy pass; 499 focused / 2.141 s; 11 fuzzy / 4.478 s. |
 | Native continuation and host-origin oracle | Smith 8010bf4 | Reviewed; fmt/clippy pass; 504 focused / 2.103 s; 11 fuzzy / 4.403 s; 13 scoped controls / 0.075 s. |
 | Single-lifecycle combined native memory | Smith 1a0bdfee5c64fe3377033bf976f1f5a70dd3c72e | Exact source/lock reviewed; fmt/clippy pass; one scoped control / 0.672 s; 504 focused / 2.097 s; 11 fuzzy / 4.445 s. |
-| Genuine native root restore | This increment on c645669 | Source reviewed; fmt/clippy pass; 505 focused / 2.285 s; 11 fuzzy / 4.958 s. |
+| Overlapping physical component ownership | This increment on 5b4bc94 | Source reviewed; fmt/clippy pass; 505 focused / 2.170 s; 11 fuzzy / 4.462 s. |
+| Genuine native root restore | Smith 5b4bc94 | Source reviewed; fmt/clippy pass; 505 focused / 2.285 s; 11 fuzzy / 4.958 s. |
 | Exclusive World backend ownership and session LLM documentation | Smith c645669 | Exact source reviewed; fmt/clippy pass; 504 focused / 2.094 s; 11 fuzzy / 4.410 s. |
 
 The adapter boundary increment adds six positive-first controls over actual native Clients
@@ -187,9 +188,6 @@ Remaining replacement acceptance:
 
 - Complete acceptance beyond the selected native continuation and failure cases;
   the four passing controls do not establish every failure classification.
-- Measure simultaneous retained physical Client/peer ownership beyond the
-  single lifecycle; preserve root/caller copies and exact handoffs. Passive
-  trace/referee/routing bookkeeping is outside the component heap contract.
 - Preserve the stated continuation/message-sweep scope; independent native
   wall-clock schedule jumps remain outside the selected controls.
 - Pass final shared/consumer gates and exact independent cleanup review before
@@ -207,3 +205,17 @@ before provider/host effects. The component memory requirement follows
 foundation testing-strategy.md, section 6, programming-model.md, section 6.3,
 and skein-world/src/heap.rs; an analytical whole test World envelope was an
 earlier self-imposed requirement and is not claimed or needed here.
+
+The overlap-memory increment retains an actual won/closing Client through the
+next same-owner Client Start, with only the new Context active. Independent
+old Client plus bounded peer pricing and new adapter plus peer pricing count
+both physical owners once. The persistent Meter checks constructors, actual
+entrances, translation, physical Closed/drain/drop and root stepping with full
+histories and all caller-copy categories live. Exact public handoffs attribute
+native ownership; each old retirement frees its measured retained heap, produces
+no duplicate logical terminal and reclaims service routes. Final held bytes are
+zero. Original maximum histories, the real 8,192-byte person input and exact/
+one-over admission controls remain. A separate minimally larger message-count
+activation makes actual full-history overlap attainable without weakening those
+controls. This proves attributed component ownership; passive test harness
+routing/trace/referee storage is outside the foundation's heap spans.
