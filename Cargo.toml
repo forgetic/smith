@@ -11,8 +11,8 @@ rust-version = "1.95"
 publish = false
 
 [workspace.dependencies]
-skein-lib = { git = "https://git.ekanayaka.io/ai/skein.git", rev = "3cbd792c6b9147b497c665d17f349352145ed9f2" }
-skein-world = { git = "https://git.ekanayaka.io/ai/skein.git", rev = "3cbd792c6b9147b497c665d17f349352145ed9f2" }
+skein-lib = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
 
 # Panics are fail-stop and overflow traps, in every profile. (The test harness
 # needs unwinding, so cargo ignores `panic` for test targets.)

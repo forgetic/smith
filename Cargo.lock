@@ -34,12 +34,12 @@ checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 [[package]]
 name = "skein-heap"
 version = "0.0.0"
-source = "git+https://git.ekanayaka.io/ai/skein.git?rev=3cbd792c6b9147b497c665d17f349352145ed9f2#3cbd792c6b9147b497c665d17f349352145ed9f2"
+source = "git+https://git.ekanayaka.io/ai/skein.git#3cbd792c6b9147b497c665d17f349352145ed9f2"
 
 [[package]]
 name = "skein-io"
 version = "0.0.0"
-source = "git+https://git.ekanayaka.io/ai/skein.git?rev=3cbd792c6b9147b497c665d17f349352145ed9f2#3cbd792c6b9147b497c665d17f349352145ed9f2"
+source = "git+https://git.ekanayaka.io/ai/skein.git#3cbd792c6b9147b497c665d17f349352145ed9f2"
 dependencies = [
  "skein-lib",
 ]
@@ -47,12 +47,12 @@ dependencies = [
 [[package]]
 name = "skein-lib"
 version = "0.0.0"
-source = "git+https://git.ekanayaka.io/ai/skein.git?rev=3cbd792c6b9147b497c665d17f349352145ed9f2#3cbd792c6b9147b497c665d17f349352145ed9f2"
+source = "git+https://git.ekanayaka.io/ai/skein.git#3cbd792c6b9147b497c665d17f349352145ed9f2"
 
 [[package]]
 name = "skein-shell"
 version = "0.0.0"
-source = "git+https://git.ekanayaka.io/ai/skein.git?rev=3cbd792c6b9147b497c665d17f349352145ed9f2#3cbd792c6b9147b497c665d17f349352145ed9f2"
+source = "git+https://git.ekanayaka.io/ai/skein.git#3cbd792c6b9147b497c665d17f349352145ed9f2"
 dependencies = [
  "io-uring",
  "libc",
@@ -63,7 +63,7 @@ dependencies = [
 [[package]]
 name = "skein-sim"
 version = "0.0.0"
-source = "git+https://git.ekanayaka.io/ai/skein.git?rev=3cbd792c6b9147b497c665d17f349352145ed9f2#3cbd792c6b9147b497c665d17f349352145ed9f2"
+source = "git+https://git.ekanayaka.io/ai/skein.git#3cbd792c6b9147b497c665d17f349352145ed9f2"
 dependencies = [
  "skein-io",
  "skein-lib",
@@ -72,7 +72,7 @@ dependencies = [
 [[package]]
 name = "skein-world"
 version = "0.0.0"
-source = "git+https://git.ekanayaka.io/ai/skein.git?rev=3cbd792c6b9147b497c665d17f349352145ed9f2#3cbd792c6b9147b497c665d17f349352145ed9f2"
+source = "git+https://git.ekanayaka.io/ai/skein.git#3cbd792c6b9147b497c665d17f349352145ed9f2"
 dependencies = [
  "skein-heap",
  "skein-io",
