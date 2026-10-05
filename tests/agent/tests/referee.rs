@@ -41,6 +41,7 @@ fn a_push_without_passing_checks_is_rejected() {
     broken(
         started(),
         Seen::Pushing {
+            finishing: true,
             name: smith_domain::run::CallName { completion: 1, position: 0 },
             owner: Token::new(2),
             tree: b"code".to_vec(),
@@ -57,6 +58,7 @@ fn a_host_that_lands_different_bytes_is_rejected() {
     referee.observe(
         Time::ZERO,
         Seen::Pushing {
+            finishing: true,
             name: smith_domain::run::CallName { completion: 1, position: 0 },
             owner: Token::new(2),
             tree: b"asked".to_vec(),
@@ -229,7 +231,7 @@ fn mid_history(stopped: bool) -> Referee<Meeting> {
         },
         Seen::Checking { owner, tree: b"checked".to_vec() },
         Seen::Checked { owner, exit: Exit::Code { code: 0 } },
-        Seen::Pushing { owner, name, tree: b"checked".to_vec() },
+        Seen::Pushing { finishing: false, owner, name, tree: b"checked".to_vec() },
     ];
     for observation in observations {
         referee.observe(Time::ZERO, observation, &mut Vec::new());
@@ -242,8 +244,16 @@ fn mid_history(stopped: bool) -> Referee<Meeting> {
         Seen::Delivered { owner, push: smith_agent_world::delivered(), tree: b"checked".to_vec() },
         &mut Vec::new(),
     );
-    assert_eq!(referee.verdict(), Verdict::Passed, "positive pending history precedes corruption");
+    pending_host_answer(&referee);
     referee
+}
+
+fn pending_host_answer(referee: &Referee<Meeting>) {
+    let Verdict::Open { pending } = referee.verdict() else {
+        panic!("the positive prefix has no failure and still owes its host answer")
+    };
+    assert_eq!(pending.len(), 1, "exactly the start's answer obligation remains");
+    assert!(pending[0].contains("host answer"));
 }
 
 fn interrupted_answer() -> Answer {
@@ -287,7 +297,7 @@ fn an_interrupted_mid_answer_cannot_invent_receipts_names_or_a_stop() {
                     b"invented".as_slice().into(),
                 )
                 .expect("bounded")]))
-                .expect("one directory")
+                .expect("one directory");
             }
             2 => *stopped = smith_domain::run::Failure::Stale,
             _ => unreachable!("three corruptions"),
@@ -305,7 +315,7 @@ fn an_interrupted_mid_answer_cannot_invent_receipts_names_or_a_stop() {
     broken(
         mid_history(false),
         Seen::Answered { answer: interrupted_answer(), pending: 0 },
-        "interrupted delivery preserves the already observed stop",
+        "interrupted mid delivery preserves its actual name and receipts",
     );
 }
 
@@ -335,6 +345,7 @@ fn duplicate_actual_terminal_and_reused_durable_name_are_rejected_after_positive
     broken(
         referee,
         Seen::Pushing {
+            finishing: false,
             owner,
             name: smith_domain::run::CallName { completion: 2, position: 1 },
             tree: b"checked".to_vec(),
@@ -349,14 +360,55 @@ fn changed_bytes_between_check_and_submission_are_rejected_after_positive_check(
     let owner = Token::new(72);
     referee.observe(Time::ZERO, Seen::Checking { owner, tree: b"checked".to_vec() }, &mut Vec::new());
     referee.observe(Time::ZERO, Seen::Checked { owner, exit: Exit::Code { code: 0 } }, &mut Vec::new());
-    assert_eq!(referee.verdict(), Verdict::Passed);
+    pending_host_answer(&referee);
     broken(
         referee,
         Seen::Pushing {
+            finishing: true,
             owner,
             name: smith_domain::run::CallName { completion: 4, position: 0 },
             tree: b"later write".to_vec(),
         },
         "delivery is the exclusive checked snapshot",
     );
+}
+
+#[test]
+fn an_interrupted_landing_cannot_be_erased_by_failed_or_report_answers() {
+    for answer in [
+        Answer::Failed { failure: smith_domain::run::Failure::Cancelled, spent: Spend::ZERO },
+        Answer::Accepted {
+            outcome: Declared::Report(Report { text: b"continued".as_slice().into(), fields: Box::new([]) }),
+            spent: Spend::ZERO,
+        },
+    ] {
+        broken(
+            mid_history(true),
+            Seen::Answered { answer, pending: 0 },
+            "an interrupted landing requires its delivered answer",
+        );
+    }
+}
+
+#[test]
+fn a_later_stop_after_ordinary_landing_cannot_reclassify_it_as_interrupted() {
+    let mut referee = mid_history(false);
+    referee.observe(Time::ZERO, Seen::Stopped { failure: smith_domain::run::Failure::Cancelled }, &mut Vec::new());
+    broken(
+        referee,
+        Seen::Answered { answer: interrupted_answer(), pending: 0 },
+        "interrupted mid delivery preserves its actual name and receipts",
+    );
+    let mut referee = mid_history(false);
+    referee.observe(Time::ZERO, Seen::Stopped { failure: smith_domain::run::Failure::Cancelled }, &mut Vec::new());
+    referee.observe(
+        Time::ZERO,
+        Seen::Answered {
+            answer: Answer::Failed { failure: smith_domain::run::Failure::Cancelled, spent: Spend::ZERO },
+            pending: 0,
+        },
+        &mut Vec::new(),
+    );
+    assert_eq!(referee.verdict(), Verdict::Passed, "ordinary later shutdown has no pending landing evidence");
+    assert_eq!(referee.judged().1, 1);
 }

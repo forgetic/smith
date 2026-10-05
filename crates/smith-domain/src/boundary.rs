@@ -299,7 +299,7 @@ pub enum Request {
     Deliver {
         /// Durable transcript-derived host call name, scoped by the logical host run.
         /// Callback `owner` is separate; retries of this operation reuse this name.
-        /// Contract: domain/run.md, section 8.2; domain/host.md, section 7.
+        /// Contract: domain/run.md, section 8.2; domain/host.md, section 2.
         name: run::CallName,
         /// Bounded actual host-operation deadline; the host supplies exactly one
         /// terminal even during shutdown. The run never abandons submission.

@@ -153,15 +153,15 @@ pub(crate) fn rule(name: &[u8], min: u32, max: u32) -> VerdictRule {
                 crate::outcome::ItemRule {
                     kind: bytes(b"blocking"),
                     fields: Box::new([
-                        crate::outcome::FieldRule { name: bytes(b"path"), max: 1024 },
-                        crate::outcome::FieldRule { name: bytes(b"body"), max: 1024 },
+                        FieldRule { name: bytes(b"path"), max: 1024 },
+                        FieldRule { name: bytes(b"body"), max: 1024 },
                     ]),
                 },
                 crate::outcome::ItemRule {
                     kind: bytes(b"nit"),
                     fields: Box::new([
-                        crate::outcome::FieldRule { name: bytes(b"path"), max: 1024 },
-                        crate::outcome::FieldRule { name: bytes(b"body"), max: 1024 },
+                        FieldRule { name: bytes(b"path"), max: 1024 },
+                        FieldRule { name: bytes(b"body"), max: 1024 },
                     ]),
                 },
             ]),
@@ -259,8 +259,8 @@ fn a_run_looks_for_checks_in_writable_repositories_when_a_change_must_pass_them(
     let outcome = OutcomeSpec {
         change: Some(ChangeSpec {
             fields: Box::new([
-                crate::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
-                crate::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                FieldRule { name: b"body".as_slice().into(), max: 1024 },
             ]),
         }),
         verdicts: Box::new([]),
@@ -369,8 +369,8 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
             outcome: OutcomeSpec {
                 change: Some(ChangeSpec {
                     fields: Box::new([
-                        crate::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
-                        crate::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                        FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                        FieldRule { name: b"body".as_slice().into(), max: 1024 },
                     ]),
                 }),
                 verdicts: Box::new([]),
@@ -589,8 +589,8 @@ fn coding() -> Charter {
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
                 fields: Box::new([
-                    crate::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
-                    crate::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                    FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                    FieldRule { name: b"body".as_slice().into(), max: 1024 },
                 ]),
             }),
             verdicts: Box::new([]),
@@ -798,8 +798,8 @@ fn a_landing_past_its_deadline_is_stopped_and_returns_timed_out_once_it_has() {
     let [Request::Check { owner, deadline, .. }, Request::Checking { .. }] = &*emitted else {
         panic!("expected the first check, got {emitted:?}");
     };
-    // The checks keep their own limit; the call's deadline is the run's.
-    assert_eq!(*deadline, Time::ZERO.saturating_add(LIMITS.check_timeout));
+    // A check may not outlive its caller's earlier deadline.
+    assert_eq!(*deadline, Time::ZERO.saturating_add(minute).min(Time::ZERO.saturating_add(LIMITS.check_timeout)));
     let owner = *owner;
     h.after(minute);
     assert_eq!(&*h.fire(), &[Request::Abort { owner }]);
@@ -932,13 +932,7 @@ fn a_cancel_while_a_change_is_checked_stops_the_checks_once_main_withdraws_its_c
     assert_eq!(&*h.step(Event::Checked { owner, ran: ran(0, b"") }), &[returned(7, Returned::Cancelled)]);
     // A finish that crossed the close is cancelled too.
     let crossed = finish(conversation, 8, verdict(b"approve", Box::new([])));
-    assert_eq!(
-        &*h.step(crossed),
-        &[returned(
-            8,
-            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(crate::DeliveryReason::TimedOut) }
-        )]
-    );
+    assert_eq!(&*h.step(crossed), &[returned(8, Returned::Cancelled)]);
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
     assert_eq!(answered(emitted), (1, cancelled()));
 }
@@ -955,7 +949,7 @@ fn a_push_that_lands_while_a_cancel_closes_main_wins_over_it() {
         h.step(Event::Withdraw { conversation, call: Token::new(7) }).is_empty(),
         "submitted delivery is never abandoned"
     );
-    // The push won the race with its cancel: the change is on the forge.
+    // The actual host terminal reports a landing while run cancellation settles.
     assert_eq!(
         &*h.step(Event::Delivered { owner, push: delivered() }),
         &[returned(7, Returned::Delivered(receipts()))]
@@ -964,7 +958,8 @@ fn a_push_that_lands_while_a_cancel_closes_main_wins_over_it() {
     let accepted = Answer::Accepted { outcome: Declared::Change(change()), spent: Spend::ZERO };
     assert_eq!(answered(emitted), (1, accepted));
 
-    // Or the cancel wins its race.
+    // Or the actual host operation times out while run cancellation settles.
+    // Cancellation does not abandon that submitted operation or invent its result.
     let (run, conversation) = h.coding(2, 101);
     let owner = h.land(conversation, 8);
     drop(h.step(Event::Checked { owner, ran: ran(0, b"") }));
@@ -1033,7 +1028,9 @@ fn checks_that_pass_once_the_run_winds_down_push_nothing() {
     let owner = h.land(conversation, 7);
     h.after(BUDGET.time);
     assert_eq!(&*h.fire(), &[Request::Close { peer: Token::new(100) }]);
-    assert_eq!(&*h.step(Event::Checked { owner, ran: ran(0, b"") }), &[returned(7, Returned::Cancelled)]);
+    // Main's caller deadline equals the run's time budget and has passed;
+    // this pre-submission check returns timeout without any host delivery.
+    assert_eq!(&*h.step(Event::Checked { owner, ran: ran(0, b"") }), &[returned(7, Returned::TimedOut)]);
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
     assert_eq!(answered(emitted), (1, failed(Failure::Budget(Exhausted::Time), Spend::ZERO)));
 }
@@ -1346,13 +1343,7 @@ fn a_cancel_closes_the_tree_one_owner_at_a_time() {
         &[Request::Close { peer: Token::new(102) }]
     );
     let emitted = h.step(Event::Ended { conversation: grandchild, end: End::Closed, spend: Spend::ZERO });
-    assert_eq!(
-        &*emitted,
-        &[returned(
-            8,
-            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(crate::DeliveryReason::TimedOut) }
-        )]
-    );
+    assert_eq!(&*emitted, &[returned(8, Returned::Cancelled)]);
     let emitted = h.step(Event::Ended { conversation: child, end: End::Closed, spend: Spend::ZERO });
     assert_eq!(&*emitted, &[returned(7, Returned::Cancelled)]);
     let emitted = h.step(Event::Ended { conversation: main, end: End::Closed, spend: Spend::ZERO });
@@ -1480,7 +1471,7 @@ fn text_charter(failure: bool) -> Charter {
     let contract = crate::outcome::TextSpec {
         min: u32::from(failure),
         max: 8,
-        fields: Box::new([crate::outcome::FieldRule { name: bytes(b"source"), max: 4 }]),
+        fields: Box::new([FieldRule { name: bytes(b"source"), max: 4 }]),
     };
     Charter {
         outcome: OutcomeSpec {
@@ -1705,7 +1696,7 @@ fn time_and_spend_shutdown_keep_an_already_submitted_mid_landing() {
         let owner = submit_mid(&mut harness, conversation);
         let expected = if timed {
             harness.env.now = EXPIRY;
-            for _ in 0..2 {
+            for _ in 0_u32..2 {
                 if harness.domain.is_due(harness.env.now) {
                     drop(harness.fire());
                 }
@@ -1766,4 +1757,54 @@ fn impossible_delivery_grant_and_zero_host_deadline_refuse_before_preparation() 
     let mut harness = Harness::new(Limits { delivery_timeout: Duration::ZERO, ..LIMITS });
     assert_eq!(answered(harness.start(2, mid_report())), (2, Answer::Refused(Refusal::Invalid(Invalid::Checkout))));
     assert_eq!((harness.domain.runs(), harness.domain.conversations()), (0, 0));
+}
+
+#[test]
+fn caller_only_stop_keeps_submitted_mid_delivery_and_ordinary_continuation() {
+    for expired in [false, true] {
+        for later_cancel in [false, true] {
+            let mut harness = Harness::new(LIMITS);
+            let (run, conversation) = mid_running(&mut harness);
+            let caller_deadline = harness.env.now.saturating_add(Duration::from_secs(1));
+            let mut ask = mid_ask(conversation, 3);
+            let Event::Delegated { deadline, .. } = &mut ask else { unreachable!("delegated fixture") };
+            *deadline = caller_deadline;
+            let requests = harness.step(ask);
+            let [Request::Check { owner, .. }, Request::Checking { .. }] = requests.as_ref() else {
+                panic!("delivery checks first")
+            };
+            let owner = *owner;
+            let requests = harness.step(Event::Checked { owner, ran: ran(0, b"passed") });
+            let [Request::Deliver { deadline, .. }] = requests.as_ref() else {
+                panic!("checks submit exactly one delivery")
+            };
+            assert_eq!(*deadline, caller_deadline);
+            if expired {
+                harness.env.now = caller_deadline;
+                assert!(harness.domain.is_due(harness.env.now));
+                assert!(harness.fire().is_empty(), "expiry retains the actual host terminal right");
+            } else {
+                assert!(harness.step(Event::Withdraw { conversation, call: Token::new(50) }).is_empty());
+            }
+            assert_eq!(
+                harness.step(Event::Delivered { owner, push: delivered() }).as_ref(),
+                &[returned(50, Returned::Delivered(receipts()))],
+                "caller-only stop neither abandons the host nor closes main"
+            );
+            if later_cancel {
+                assert_eq!(harness.step(Event::Cancel { run }).as_ref(), &[Request::Close { peer: Token::new(100) }]);
+            } else {
+                drop(harness.step(finish(conversation, 51, report())));
+            }
+            let answer = answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })).1;
+            assert_eq!(
+                answer,
+                if later_cancel {
+                    Answer::Failed { failure: Failure::Cancelled, spent: Spend::ZERO }
+                } else {
+                    Answer::Accepted { outcome: report(), spent: Spend::ZERO }
+                }
+            );
+        }
+    }
 }

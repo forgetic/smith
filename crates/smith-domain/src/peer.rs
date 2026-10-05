@@ -6,8 +6,8 @@
 //! level resolves to the value it stands for when it translates the session's
 //! records for the run and the protocol layer. Tickets name values within one
 //! session, so each peer keeps its own, and they go when it does: the tools
-//! the run serves it, two fixed tickets ([`FINISH`], [`SUB_AGENT`]); the asks
-//! of its last completion's calls to them, from the completion until the
+//! the run serves it, three fixed tickets ([`FINISH`], [`DELIVER`], [`SUB_AGENT`]);
+//! the asks of its last completion's calls to them, from the completion until the
 //! session dispatches each to the run (or until it yields or calls the LLM
 //! again, when the calls it did not dispatch never will be); and the run's
 //! answers, from the run's `Return` until the session ends, as they stay in
@@ -173,7 +173,7 @@ impl Peer {
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) fn prompt(&self, prompt: sllm::Prompt) -> Prompt {
         let sllm::Prompt { endpoint, model, system, tools, delegated, messages, max_tokens } = prompt;
-        let mut served = List::with_capacity(u32::try_from(delegated.len()).expect("two at most"));
+        let mut served = List::with_capacity(u32::try_from(delegated.len()).expect("three at most"));
         for descriptor in &delegated {
             let tool = match descriptor.ticket {
                 DELIVER => Served::Deliver,

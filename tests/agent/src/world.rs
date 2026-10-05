@@ -23,6 +23,10 @@ use crate::{
 /// It is scenario data, not a second protocol or delivery implementation.
 /// Contract: domain/run.md, sections 8.2 and 13; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "scenario choices retain the sealed fixed diagnostic inline and stay Copy"
+)]
 pub enum HostReply {
     /// Real changed-directory receipt. Contract: domain/run.md, section 8.2.
     Delivered,
@@ -240,8 +244,10 @@ impl World {
             schedule.send(Time::ZERO.saturating_add(after), Delivery::Cancel);
         }
         let mut referee = Referee::new(Meeting::default());
-        let change =
-            matches!(settings.job, Job::Coding | Job::Delegating | Job::Wandering | Job::MidReport | Job::MarkerReport);
+        let change = matches!(
+            settings.job,
+            Job::Coding | Job::Delegating | Job::Wandering | Job::MidReport | Job::MidChange | Job::MarkerReport
+        );
         let mut stimuli = Vec::new();
         referee.observe(
             Time::ZERO,
@@ -249,7 +255,7 @@ impl World {
                 contract: observed_contract,
                 outcome_bytes: settings.limits.run.outcome_bytes,
                 checks: change,
-                delivery: matches!(settings.job, Job::MidReport | Job::MarkerReport),
+                delivery: matches!(settings.job, Job::MidReport | Job::MidChange | Job::MarkerReport),
                 within: settings.budget.time.saturating_add(Duration::from_secs(120)),
             },
             &mut stimuli,
@@ -500,7 +506,7 @@ impl World {
             Request::Deliver { worker, owner, change, name, deadline } => {
                 // Title/body are this fixture host's final-Change policy only.
                 // The Report-only mid-run fixture instead requires opaque ticket.
-                let required: &[&[u8]] = if matches!(self.settings.job, Job::MidReport | Job::MarkerReport) {
+                let required: &[&[u8]] = if change.fields.iter().any(|field| field.name.as_ref() == b"ticket") {
                     &[b"ticket"]
                 } else {
                     &[b"title", b"body"]
@@ -516,7 +522,8 @@ impl World {
                 assert_eq!(worker, Token::new(1), "the push names the scripted host's request");
                 self.delivery_names.push((name, self.now));
                 let tree = self.code();
-                self.observe(Seen::Pushing { owner, name, tree: tree.clone() });
+                let finishing = !change.fields.iter().any(|field| field.name.as_ref() == b"ticket");
+                self.observe(Seen::Pushing { owner, name, tree: tree.clone(), finishing });
                 self.snapshots.insert(owner, tree);
                 self.flights.open((Family::Delivery, owner), Flight { key: None, cancelled: false });
                 let after = self.settings.network.draw(&mut self.rng);
@@ -811,7 +818,7 @@ impl World {
 fn charter(settings: &Settings, root: u64) -> run::Charter {
     use run::charter::{Checkout as Roots, Endpoint, Grants, Llm, Repository, Tools};
     use run::outcome::{ChangeSpec, FieldRule, ItemRule, ItemSpec, OutcomeSpec, TextSpec, VerdictRule};
-    let change = matches!(settings.job, Job::Coding | Job::Delegating | Job::Wandering);
+    let change = matches!(settings.job, Job::Coding | Job::Delegating | Job::Wandering | Job::MidChange);
     let review = settings.job == Job::Review;
     let rule = VerdictRule {
         name: b"request-changes".as_slice().into(),
@@ -840,7 +847,7 @@ fn charter(settings: &Settings, root: u64) -> run::Charter {
             }]),
         },
         grants: Grants {
-            deliver: if matches!(settings.job, Job::MidReport | Job::MarkerReport) {
+            deliver: if matches!(settings.job, Job::MidReport | Job::MidChange | Job::MarkerReport) {
                 Some(ChangeSpec { fields: Box::new([FieldRule { name: b"ticket".as_slice().into(), max: 128 }]) })
             } else {
                 None
@@ -891,6 +898,9 @@ fn copy_answer(answer: &run::Answer) -> run::Answer {
     use run::outcome::Declared;
     match answer {
         run::Answer::Refused(refusal) => run::Answer::Refused(*refusal),
+        run::Answer::Delivered { name, receipts, stopped, spent } => {
+            run::Answer::Delivered { name: *name, receipts: receipts.clone(), stopped: *stopped, spent: *spent }
+        }
         run::Answer::Failed { failure, spent } => run::Answer::Failed { failure: *failure, spent: *spent },
         run::Answer::Accepted { outcome, spent } => {
             let outcome = match outcome {

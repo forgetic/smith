@@ -19,7 +19,9 @@ pub struct CallName {
     ///
     /// Contract: domain/run.md, section 8.2; domain/session.md, sections 3 and 5.
     pub completion: u32,
-    /// Zero-based assistant block ordinal, bounded by the session's message cap.
+
+    /// Zero-based assistant block ordinal, bounded by assistant content byte storage and
+    /// checked block-count representability before any completion effects.
     /// Repeated provider call ids in distinct positions or turns are permitted.
     ///
     /// Contract: domain/run.md, section 8.2; domain/session.md, sections 3 and 5.
@@ -269,15 +271,19 @@ impl DeliveryRefusal {
 pub enum DeliveryStatus {
     /// Actual landing. Contract: domain/run.md, section 8.2.
     Delivered,
+
     /// No changed directory. Contract: domain/run.md, section 8.2.
     Nothing,
+
     /// Correctable host refusal. Contract: domain/run.md, section 8.2.
     Refused,
+
     /// Actual host failure classification. Contract: domain/run.md, section 8.2.
     Failed(
         /// Fixed host reason, with no diagnostic or policy bytes. Contract: domain/run.md, sections 8.2 and 12.
         DeliveryReason,
     ),
+
     /// Host context moved. Contract: domain/run.md, section 8.2.
     Stale,
 }
@@ -350,22 +356,31 @@ impl Diagnostic {
 pub enum DeliveryReason {
     /// Host cannot reach the target. Contract: domain/run.md, section 8.2.
     Unreachable,
+
     /// Target refused the operation. Contract: domain/run.md, section 8.2.
     RefusedByTarget,
+
     /// Host deadline ended the actual operation. Contract: domain/run.md, section 8.2.
     TimedOut,
+
     /// Operation or malformed host terminal is broken. Contract: domain/run.md, section 8.2.
     Broken,
+
     /// Host's count or byte allowance is exceeded. Contract: domain/run.md, section 8.2.
     TooLarge,
+
     /// Required target data is missing. Contract: domain/run.md, section 8.2.
     Missing,
+
     /// Target temporarily has no capacity. Contract: domain/run.md, section 8.2.
     Busy,
+
     /// Target is currently unavailable. Contract: domain/run.md, section 8.2.
     Unavailable,
+
     /// Host operation itself ended cancelled; the run never abandons it. Contract: domain/run.md, section 8.2.
     Cancelled,
+
     /// Host has no more specific classification. Contract: domain/run.md, section 8.2.
     Unknown,
 }
@@ -379,6 +394,7 @@ pub struct DeliveryFailure {
     /// Generic host classification, never a forge or policy label.
     /// Contract: domain/run.md, section 8.2.
     pub reason: DeliveryReason,
+
     /// Last at most 512 bytes plus a saturating count of preceding dropped bytes.
     /// Contract: domain/run.md, section 8.2.
     pub diagnostic: Diagnostic,
@@ -406,18 +422,22 @@ pub enum Delivery {
         /// Sealed per-directory opaque receipts, revalidated against writable mounts. Contract: domain/run.md, section 8.2.
         Delivered,
     ),
+
     /// No mounted writable directory changed. Contract: domain/run.md, section 8.2.
     Nothing,
+
     /// Named correctable feedback, optionally locating a marker file. Contract: domain/run.md, section 8.2.
     Refused(
         /// Sealed named refusal with optional marker detail. Contract: domain/run.md, section 8.2.
         DeliveryRefusal,
     ),
+
     /// Actual failed operation with bounded feedback. Contract: domain/run.md, section 8.2.
     Failed(
         /// Generic reason and fixed 512-byte diagnostic tail/drop count. Contract: domain/run.md, section 8.2.
         DeliveryFailure,
     ),
+
     /// Host context moved; this run cannot land later. Contract: domain/run.md, section 8.2.
     Stale,
 }

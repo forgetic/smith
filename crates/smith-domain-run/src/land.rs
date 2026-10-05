@@ -31,7 +31,7 @@ pub(crate) struct Landing {
 enum Stage {
     Checking { check: u32 },
     Aborting { why: Withdrawal },
-    Delivering { stopped: Option<Withdrawal> },
+    Delivering,
     Closed,
 }
 
@@ -39,7 +39,7 @@ enum Stage {
 pub(crate) enum Settled {
     Going,
     Finished(Change),
-    Delivered { name: CallName, receipts: Delivered, stopped: Option<crate::Failure> },
+    Delivered { name: CallName, receipts: Delivered },
     Refused,
     Stale,
     Cancelled,
@@ -81,7 +81,7 @@ pub(crate) fn checked(
             }
         },
         Stage::Aborting { why } => back(owner, call::stopped(why), Settled::Cancelled, out),
-        Stage::Delivering { .. } | Stage::Closed => unreachable!("checks end only while they run"),
+        Stage::Delivering | Stage::Closed => unreachable!("checks end only while they run"),
     }
 }
 
@@ -89,11 +89,10 @@ pub(crate) fn aborted(landing: &mut Landing, owner: Token, out: &mut Queue<Reque
     let stage = mem::replace(&mut landing.stage, Stage::Closed);
     match stage {
         Stage::Aborting { why } => back(owner, call::stopped(why), Settled::Cancelled, out),
-        Stage::Checking { .. } | Stage::Delivering { .. } | Stage::Closed => unreachable!("terminal follows an abort"),
+        Stage::Checking { .. } | Stage::Delivering | Stage::Closed => unreachable!("terminal follows an abort"),
     }
 }
 
-#[expect(clippy::large_types_passed_by_value, reason = "bounded actual host terminal passes ownership")]
 pub(crate) fn delivered(
     landing: &mut Landing,
     owner: Token,
@@ -102,10 +101,10 @@ pub(crate) fn delivered(
     out: &mut Queue<Request>,
 ) -> Settled {
     let stage = mem::replace(&mut landing.stage, Stage::Closed);
-    let stopped = match stage {
-        Stage::Delivering { stopped } => stopped,
+    match stage {
+        Stage::Delivering => {}
         Stage::Checking { .. } | Stage::Aborting { .. } | Stage::Closed => unreachable!("terminal follows submission"),
-    };
+    }
     match delivery {
         Delivery::Delivered(receipts) => {
             for receipt in receipts.receipts() {
@@ -116,15 +115,7 @@ pub(crate) fn delivered(
             let settled = if landing.finish {
                 Settled::Finished(landing.change.clone())
             } else {
-                Settled::Delivered {
-                    name: landing.name,
-                    receipts: receipts.clone(),
-                    stopped: match stopped {
-                        Some(Withdrawal::Withdrawn) => Some(crate::Failure::Cancelled),
-                        Some(Withdrawal::Expired) => Some(crate::Failure::Budget(crate::Exhausted::Time)),
-                        None => None,
-                    },
-                }
+                Settled::Delivered { name: landing.name, receipts: receipts.clone() }
             };
             back(owner, Returned::Delivered(receipts), settled, out)
         }
@@ -166,7 +157,9 @@ pub(crate) fn withdraw(landing: &mut Landing, id: Id<Call>, why: Withdrawal, out
             out.push(Request::Abort { owner: id.token() });
             Stage::Aborting { why }
         }
-        Stage::Delivering { stopped } => Stage::Delivering { stopped: stopped.or(Some(why)) },
+        // Submission owes its actual terminal. Caller-only withdrawal or expiry
+        // grants no authority to decide the run's independent shutdown outcome.
+        Stage::Delivering => Stage::Delivering,
         Stage::Aborting { why: first } => {
             assert!(why == Withdrawal::Withdrawn, "withdraw cancels the call alarm");
             Stage::Aborting { why: first }
@@ -186,7 +179,7 @@ fn next(landing: &Landing, id: Id<Call>, run: &Run, check: u32, env: &Env<Limits
             deadline,
             change: landing.change.clone(),
         });
-        return Stage::Delivering { stopped: None };
+        return Stage::Delivering;
     };
     let root = repository_at(run, index).root;
     let deadline = landing.deadline.min(env.now.saturating_add(env.limits.check_timeout));

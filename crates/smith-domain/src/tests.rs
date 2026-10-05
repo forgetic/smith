@@ -184,7 +184,13 @@ impl Harness {
         };
         assert_eq!(owner, run);
         let run = *run;
-        let (main, prompt) = completing(self.step(Event::Read { owner: run, read: run::Read::Missing }));
+        let emitted = self.step(Event::Read { owner: run, read: run::Read::Missing });
+        let prepared = match emitted.as_ref() {
+            [Request::Probe { owner, .. }] => self.step(Event::Probed { owner: *owner, executable: false }),
+            [Request::Complete { .. }] => emitted,
+            _ => panic!("expected convention probe or prepared main, got {emitted:?}"),
+        };
+        let (main, prompt) = completing(prepared);
         (run, main, prompt)
     }
 

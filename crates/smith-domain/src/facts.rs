@@ -125,10 +125,6 @@ fn fixed(count: usize, size: usize) -> u64 {
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "fixed diagnostic tails keep boundary records bounded without allocation"
-)]
 pub enum Fact {
     /// In the run child domain.
     ///

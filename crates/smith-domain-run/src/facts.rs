@@ -13,7 +13,7 @@
 //! admitted run says which run it is about; the facts its requests tell are
 //! derived from them in one place ([`tell`]), and the facts of what happened
 //! to the run without a request (a conversation ending, a call made, checks
-//! or a push ending) are told where they happen.
+//! or a delivery ending) are told where they happen.
 
 use skein_lib::{Queue, Slab, Time, Token};
 
@@ -25,7 +25,6 @@ use crate::run::{self, Conversation, Run};
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-#[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Fact {
     /// The run was admitted.
     ///
@@ -152,7 +151,7 @@ pub enum Fact {
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         exit: Exit,
     },
-    /// A push ended.
+    /// An actual host delivery ended with its content-free classification.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Delivered {
@@ -220,11 +219,11 @@ pub enum Return {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     ChecksFailed,
-    /// The host found the target branch stale.
+    /// The host found its delivery context stale.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Stale,
-    /// The host refused or failed the push and returned bounded feedback.
+    /// The actual host delivery failed and returned bounded feedback.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     DeliveryFailed,
@@ -298,7 +297,6 @@ impl Facts {
     /// Keeps `fact` if there is room for it, and counts it otherwise.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    #[expect(clippy::large_types_passed_by_value, reason = "a bounded fact moves into its fixed-capacity queue")]
     pub(crate) fn push(&mut self, fact: Fact) {
         if self.queue.try_push(fact).is_err() {
             self.lost = self.lost.saturating_add(1);
@@ -330,7 +328,7 @@ impl Facts {
 
 /// What the step that made the requests in `out` from `mark` on tells, a fact
 /// for each but the requests whose outcome is told when it comes (closes,
-/// says, cancels, pushes) or that tell nothing of their own (looks).
+/// says, cancels, deliveries) or that tell nothing of their own (looks).
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn tell(

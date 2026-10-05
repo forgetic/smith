@@ -25,11 +25,14 @@
 //!   [`Event::Delegated`] call is ended by exactly one [`Request::Return`],
 //!   after an [`Event::Withdraw`] too; the call is named by the
 //!   conversation's own token for it, `call`. It carries its deadline, and
-//!   the run runs the race: past it, the run stops what the call is doing and
-//!   returns it as timed out, once that has settled.
+//!   the run runs the race: past it, the run stops work before submission and
+//!   returns it as timed out once that settles. A submitted delivery always
+//!   owes its actual host terminal, including after withdrawal or expiry;
+//!   caller-only expiry does not decide the run's shutdown (domain/run.md, 8.2 and 10).
 //!
 //! A request's `owner` is the run's token for what asked: the run itself for
-//! a read or a probe, a finishing call for a check, a push or their cancels.
+//! a read or a probe, or a delivery call for a check and its abort or host
+//! submission. Submitted host delivery has no cancellation request.
 //! It is echoed on the terminal.
 
 use alloc::boxed::Box;
@@ -168,9 +171,10 @@ pub enum Event {
     },
     /// A call the conversation's LLM made of the run, which the run answers
     /// with one `Return`. `deadline` is the conversation's own expiry: past
-    /// it, pre-submission checks may stop and return `TimedOut`. A submitted
-    /// delivery remains owed until its bounded actual host terminal settles. The conversation waits for the return, past its
-    /// expiry too, unless it closes.
+    /// it, pre-submission checks abort and return `TimedOut` once settled.
+    /// After submission the actual host terminal remains owed through caller
+    /// expiry or withdrawal, including while the conversation closes. A caller-only
+    /// stop does not decide the run's independent shutdown outcome.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Delegated {
@@ -418,7 +422,7 @@ pub enum Request {
     Deliver {
         /// Durable transcript-derived host call name, scoped by the logical host run.
         /// Callback `owner` is separate; retries of this operation reuse this name.
-        /// Contract: domain/run.md, section 8.2; domain/host.md, section 7.
+        /// Contract: domain/run.md, section 8.2; domain/host.md, section 2.
         name: CallName,
         /// Bounded actual host-operation deadline; the host supplies exactly one
         /// terminal even during shutdown. The run never abandons submission.
@@ -900,7 +904,7 @@ pub enum Answer {
     /// A mid-run delivery actually landed after shutdown was already decided.
     /// This is host evidence, not an LLM-declared Accepted result: even a
     /// Report-only charter preserves the real operation without inventing a Report.
-    /// Contract: domain/run.md, sections 8.2, 8.4 and 10; domain/host.md, section 7.
+    /// Contract: domain/run.md, sections 8.2, 8.4 and 10; domain/host.md, section 2.
     Delivered {
         /// Stable transcript origin of the landed host operation, scoped by the logical run.
         /// Contract: domain/run.md, section 8.2.
@@ -928,7 +932,7 @@ pub enum Answer {
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Refused(Refusal),
     /// The run finished with `outcome`, having spent `spent`. A change has
-    /// been pushed.
+    /// been checked and delivered by the host.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Accepted {
@@ -1034,9 +1038,8 @@ pub enum Failure {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Cancelled,
-    /// The branch the change is pushed to moved since the run started: no
-    /// change this run makes can land, and the engine plans again from what
-    /// the forge holds now.
+    /// The host's delivery context moved: no later delivery from this run can
+    /// land. The host decides what context a new run receives.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Stale,

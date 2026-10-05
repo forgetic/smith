@@ -25,6 +25,7 @@ fn answers(world: &World) -> Vec<&Answer> {
 fn failure(answer: &Answer) -> Failure {
     match answer {
         Answer::Failed { failure, .. } => *failure,
+        Answer::Delivered { stopped, .. } => *stopped,
         Answer::Refused(refusal) => panic!("the run was refused: {refusal:?}"),
         Answer::Accepted { outcome, .. } => panic!("the run finished with {outcome:?}"),
     }
@@ -248,17 +249,29 @@ fn an_outcome_that_does_not_fit_is_rejected_and_the_llm_tries_again() {
 }
 
 #[test]
-fn a_finish_past_its_deadline_has_its_checks_aborted_and_times_out() {
+fn a_check_deadline_terminal_returns_feedback_without_submitting_to_host() {
     let settings = finishing(18);
     let world = settled(&Settings {
-        host: host::Script { time: Span::millis(2_000, 10_000), ..settings.host },
-        partner: Script { changes: 1000, turn: Span::millis(100, 2_000), ..settings.partner },
-        checkout: Checkouts { check: Span::millis(2_000, 8_000), ..settings.checkout },
+        host: host::Script { time: Span::millis(4_000, 4_000), ..settings.host },
+        partner: Script { changes: 1000, finishes: 1000, turn: Span::millis(100, 100), ..settings.partner },
+        checkout: Checkouts {
+            check: Span::millis(8_000, 8_000),
+            check_failures: 0,
+            io: Span::millis(1, 1),
+            ..settings.checkout
+        },
         races: 0,
         ..settings
     });
     let stats = world.stats();
-    assert!(stats.aborts > 0 && stats.partner.timed_out > 0, "{stats:?}");
+    // IO supplies its deadline terminal before alarms fire (programming-model.md, section 2).
+    // The stopped check returns feedback; there is no live check to abort or delivery to submit.
+    assert!(stats.checks == 4 && stats.partner.checks_failed == 4, "{stats:?}");
+    assert_eq!(stats.aborts, 0, "{stats:?}");
+    assert_eq!(stats.pushes, 0, "{stats:?}");
+    for answer in answers(&world) {
+        assert!(matches!(answer, Answer::Failed { failure: Failure::Budget(Exhausted::Time), .. }), "{answer:?}");
+    }
 }
 
 #[test]
@@ -465,6 +478,7 @@ fn empty_reports_and_declared_failures_are_terminal_results_without_delivery() {
                     assert_eq!(&*declared.reason, b"Required access is unavailable.");
                 }
                 Answer::Accepted { outcome: Declared::Change(_) | Declared::Verdict(_), .. }
+                | Answer::Delivered { .. }
                 | Answer::Failed { .. }
                 | Answer::Refused(_) => panic!("expected a text result: {answer:?}"),
             }

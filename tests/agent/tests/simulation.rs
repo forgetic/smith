@@ -164,7 +164,7 @@ fn host_cancellation_at_many_moments_closes_the_whole_tree() {
                     usize::from(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { depth: 1, .. })) > 0);
             }
             Answer::Accepted { .. } => done += 1,
-            answer @ (Answer::Refused(_) | Answer::Failed { .. }) => {
+            answer @ (Answer::Refused(_) | Answer::Failed { .. } | Answer::Delivered { .. }) => {
                 panic!("seed {seed}: expected cancelled or already finished, got {answer:?}")
             }
         }
@@ -275,11 +275,22 @@ fn separately_granted_mid_delivery_continues_to_a_real_report() {
     assert_eq!(world.checked(), [true]);
     assert_eq!(world.pushes(), [smith_agent_world::delivered()]);
     assert_eq!(world.landed(), FIXED);
+    let Delivery::Delivered(receipts) = smith_agent_world::delivered() else {
+        unreachable!("the host fixture returns sealed receipts")
+    };
+    // This world renders ordinary served results with Debug; opaque byte arrays
+    // therefore appear as decimal bytes, not their UTF-8 spelling. Compare the
+    // complete expected feedback, including mount ordinal and actual receipt bytes.
+    let expected_feedback = format!(
+        "{:?}",
+        smith_domain::llm::Returned::Served { returned: run::Returned::Delivered(receipts), error: false }
+    )
+    .into_bytes();
     let receipt_reached_llm =
         world.prompts().iter().flat_map(|prompt| &prompt.messages).flat_map(|message| &message.parts).any(|part| {
             matches!(part,
             smith_fake_llm_domain::api::Part::ToolOutput { output, is_error: false, .. }
-            if output.windows(b"scripted receipt".len()).any(|bytes| bytes == b"scripted receipt"))
+            if output.as_ref() == expected_feedback.as_slice())
         });
     assert!(receipt_reached_llm, "actual receipts are continuation feedback");
 }
@@ -339,8 +350,8 @@ fn mid_landing_during_explicit_shutdown_preserves_actual_receipts_and_spend() {
 #[test]
 fn mid_delivery_replays_same_names_and_facts_are_observations() {
     let settings = Settings { job: Job::MarkerReport, ..Settings::calm(44) };
-    assert_replays(settings, |settings| {
-        let world = settled(&settings);
+    assert_replays(44, 45, |seed| {
+        let world = settled(&Settings { seed, ..settings });
         (world.trace().to_vec(), format!("{:?} {:?}", world.answer(), world.delivery_names()))
     });
     let observed = settled(&settings);
@@ -366,4 +377,16 @@ fn submitted_delivery_gets_a_real_timed_out_host_terminal_during_shutdown() {
     assert_eq!(world.pushes(), [Delivery::Failed(run::DeliveryFailure::new(run::DeliveryReason::TimedOut))]);
     assert!(world.landed().is_empty());
     assert!(matches!(world.answer(), Answer::Failed { failure: Failure::Cancelled, .. }));
+}
+
+#[test]
+fn real_mid_delivery_then_final_change_checks_and_lands_each_snapshot() {
+    let world = settled(&Settings { job: Job::MidChange, ..Settings::calm(46) });
+    assert!(matches!(world.answer(), Answer::Accepted { outcome: Declared::Change(_), .. }));
+    assert_eq!(world.pushes(), [smith_agent_world::delivered(), smith_agent_world::delivered()]);
+    assert_eq!(world.checked(), [true, true]);
+    assert_eq!(world.landed(), b"pub fn answer() -> u32 { 43 /* checked answer */ }\n");
+    assert_eq!(world.delivery_names()[0].0.completion, 2);
+    assert_eq!(world.delivery_names()[1].0.completion, 4);
+    assert_eq!(world.judged().1, 1, "both deliveries precede the one independently judged final answer");
 }

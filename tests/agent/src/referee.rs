@@ -110,6 +110,9 @@ pub enum Seen {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Pushing {
+        /// Host-observed final Change metadata rather than the separate delivery grant's metadata.
+        /// Contract: domain/run.md, sections 7.1, 8.4 and 13.
+        finishing: bool,
         /// Public durable transcript origin, separate from the live callback owner.
         /// Contract: domain/run.md, sections 8.2 and 13; testing-strategy.md, section 7.
         name: smith_domain::run::CallName,
@@ -173,13 +176,15 @@ pub struct Meeting {
     delivery: bool,
     stopped: Option<smith_domain::run::Failure>,
     checking: std::collections::BTreeMap<Token, Vec<u8>>,
-    names: std::collections::HashSet<smith_domain::run::CallName>,
-    last_landed: Option<(smith_domain::run::CallName, smith_domain::run::Delivered)>,
+    names: BTreeSet<(u32, u32)>,
+    interrupted: BTreeSet<Token>,
+    required_delivery: Option<(smith_domain::run::CallName, smith_domain::run::Delivered, smith_domain::run::Failure)>,
     completing: BTreeSet<Token>,
     spent: Spend,
     passed: std::collections::BTreeMap<Token, Vec<u8>>,
-    pushing: std::collections::BTreeMap<Token, (smith_domain::run::CallName, Vec<u8>)>,
+    pushing: std::collections::BTreeMap<Token, (smith_domain::run::CallName, Vec<u8>, bool)>,
     landed: u32,
+    final_landed: u32,
 }
 
 impl Default for Meeting {
@@ -192,13 +197,15 @@ impl Default for Meeting {
             delivery: false,
             stopped: None,
             checking: std::collections::BTreeMap::new(),
-            names: std::collections::HashSet::new(),
-            last_landed: None,
+            names: BTreeSet::new(),
+            interrupted: BTreeSet::new(),
+            required_delivery: None,
             completing: BTreeSet::new(),
             spent: Spend::ZERO,
             passed: std::collections::BTreeMap::new(),
             pushing: std::collections::BTreeMap::new(),
             landed: 0,
+            final_landed: 0,
         }
     }
 }
@@ -215,6 +222,11 @@ impl Expectations for Meeting {
             Seen::Stopped { failure } => {
                 if self.stopped.is_none() {
                     self.stopped = Some(failure);
+                    for (owner, (_, _, finishing)) in &self.pushing {
+                        if !finishing {
+                            self.interrupted.insert(*owner);
+                        }
+                    }
                 }
             }
             Seen::Checking { owner, tree } => {
@@ -253,10 +265,14 @@ impl Expectations for Meeting {
                     self.passed.insert(owner, tree.unwrap_or_default());
                 }
             }
-            Seen::Pushing { owner, tree, name } => {
+            Seen::Pushing { owner, tree, name, finishing } => {
                 judge.check(
                     self.phase == Phase::Running
-                        && (self.delivery || self.contract.as_ref().is_some_and(|contract| contract.change.is_some())),
+                        && if finishing {
+                            self.contract.as_ref().is_some_and(|contract| contract.change.is_some())
+                        } else {
+                            self.delivery
+                        },
                     "only a live change charter pushes",
                 );
                 judge.check(
@@ -264,10 +280,13 @@ impl Expectations for Meeting {
                     "delivery is the exclusive checked snapshot",
                 );
                 judge.check(
-                    name.completion > 0 && self.names.insert(name),
+                    name.completion > 0 && self.names.insert((name.completion, name.position)),
                     "durable names are nonzero and distinct across actual submissions",
                 );
-                judge.check(self.pushing.insert(owner, (name, tree)).is_none(), "one push in flight per owner");
+                judge.check(
+                    self.pushing.insert(owner, (name, tree, finishing)).is_none(),
+                    "one push in flight per owner",
+                );
             }
             Seen::Delivered { owner, push, tree } => {
                 let asked = self.pushing.remove(&owner);
@@ -275,58 +294,78 @@ impl Expectations for Meeting {
                 match push {
                     Delivery::Delivered(receipts) => {
                         judge.check(
-                            asked.as_ref().map(|(_, snapshot)| snapshot) == Some(&tree),
+                            asked.as_ref().map(|(_, snapshot, _)| snapshot) == Some(&tree),
                             "the host lands exactly the tree the agent left",
                         );
-                        if let Some((name, _)) = &asked {
-                            self.last_landed = Some((*name, receipts));
+                        if let Some((name, _, finishing)) = &asked {
+                            if *finishing {
+                                self.final_landed += 1;
+                            } else if self.interrupted.remove(&owner) {
+                                self.required_delivery =
+                                    Some((*name, receipts, self.stopped.expect("interruption observed")));
+                            }
                         }
                         self.landed += 1;
                     }
                     Delivery::Stale | Delivery::Failed(_) | Delivery::Refused(_) | Delivery::Nothing => {
+                        self.interrupted.remove(&owner);
                         judge.check(tree.is_empty(), "an unsuccessful push lands nothing");
                     }
                 }
             }
-            Seen::Answered { answer, pending } => {
-                judge.check(self.phase == Phase::Running, "exactly one answer per host start");
-                judge.check(
-                    pending == 0 && self.pushing.is_empty() && self.completing.is_empty() && self.checking.is_empty(),
-                    "an answer waits for every request terminal",
-                );
-                let (spent, change) = match &answer {
-                    Answer::Delivered { spent, name, receipts, stopped } => {
-                        judge.check(
-                            self.delivery && self.last_landed.as_ref() == Some(&(*name, receipts.clone())),
-                            "interrupted mid delivery preserves its actual name and receipts",
-                        );
-                        judge.check(
-                            self.stopped == Some(*stopped),
-                            "interrupted delivery preserves the already observed stop",
-                        );
-                        (*spent, false)
-                    }
-                    Answer::Refused(_) => (Spend::ZERO, false),
-                    Answer::Accepted { spent, outcome } => (*spent, matches!(outcome, Declared::Change(_))),
-                    Answer::Failed { spent, .. } => (*spent, false),
-                };
-                judge.check(spent == self.spent, "the answer accounts for every accepted provider turn exactly once");
-                judge.check(!change || self.landed == 1, "an accepted change landed exactly once");
-                judge.check(
-                    change || self.delivery || self.landed == 0,
-                    "a non-change result only lands under a separate main grant",
-                );
-                if let Answer::Accepted { outcome, .. } = &answer {
-                    judge.check(
-                        self.contract.as_ref().is_some_and(|contract| accepted(contract, outcome, self.outcome_bytes)),
-                        "an accepted result meets the host contract and byte cap",
-                    );
-                }
-                self.phase = Phase::Answered;
-                let met = judge.meet(&"host answer");
-                judge.check(met, "the start's answer obligation is met once");
-            }
+            Seen::Answered { answer, pending } => self.answer(&answer, pending, judge),
         }
+    }
+}
+
+impl Meeting {
+    /// Check the final boundary value against actual terminals and provider usage,
+    /// then discharge the one answer obligation. No production state is inspected.
+    /// Contract: domain/run.md, sections 8.4, 10 and 13; testing-strategy.md, section 7.
+    fn answer(&mut self, answer: &Answer, pending: usize, judge: &mut Judge<&'static str, ()>) {
+        judge.check(self.phase == Phase::Running, "exactly one answer per host start");
+        judge.check(
+            pending == 0 && self.pushing.is_empty() && self.completing.is_empty() && self.checking.is_empty(),
+            "an answer waits for every request terminal",
+        );
+        let (spent, change) = match answer {
+            Answer::Delivered { spent, name, receipts, stopped } => {
+                judge.check(
+                    self.delivery
+                        && self.required_delivery.as_ref().is_some_and(|(actual_name, actual_receipts, _)| {
+                            actual_name == name && actual_receipts == receipts
+                        }),
+                    "interrupted mid delivery preserves its actual name and receipts",
+                );
+                judge.check(
+                    self.required_delivery.as_ref().map(|(_, _, actual_stop)| *actual_stop) == Some(*stopped),
+                    "interrupted delivery preserves the already observed stop",
+                );
+                (*spent, false)
+            }
+            Answer::Refused(_) => (Spend::ZERO, false),
+            Answer::Accepted { spent, outcome } => (*spent, matches!(outcome, Declared::Change(_))),
+            Answer::Failed { spent, .. } => (*spent, false),
+        };
+        judge.check(
+            self.required_delivery.is_none() || matches!(answer, Answer::Delivered { .. }),
+            "an interrupted landing requires its delivered answer",
+        );
+        judge.check(spent == self.spent, "the answer accounts for every accepted provider turn exactly once");
+        if let Answer::Accepted { outcome, .. } = answer {
+            judge.check(
+                self.contract.as_ref().is_some_and(|contract| accepted(contract, outcome, self.outcome_bytes)),
+                "an accepted result meets the host contract and byte cap",
+            );
+        }
+        judge.check(!change || self.final_landed == 1, "an accepted change landed exactly once");
+        judge.check(
+            change || self.delivery || self.landed == 0,
+            "a non-change result only lands under a separate main grant",
+        );
+        self.phase = Phase::Answered;
+        let met = judge.meet(&"host answer");
+        judge.check(met, "the start's answer obligation is met once");
     }
 }
 

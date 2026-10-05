@@ -64,7 +64,7 @@ pub struct Prompt {
 pub enum Served {
     /// Main-only mid-run delivery descriptor, offered only by a separate grant.
     /// This fixed descriptor names a tool; operation names come from transcript origin.
-    /// Contract: domain/run.md, sections 8.2 and 8.4; domain/host.md, section 7.
+    /// Contract: domain/run.md, sections 8.2 and 8.4; domain/host.md, section 2.
     Deliver,
     /// Finish the run with an outcome.
     ///

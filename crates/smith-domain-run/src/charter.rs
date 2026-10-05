@@ -93,7 +93,7 @@ pub struct Grants {
     /// Final Change permission does not grant this tool; children never inherit it.
     /// Admission checks minimum container/name/value fit before session or IO.
     /// Contract: domain/run.md, sections 7.1, 8.1 and 8.4.
-    pub deliver: Option<crate::outcome::ChangeSpec>,
+    pub deliver: Option<outcome::ChangeSpec>,
     /// The tools that act on the checkout, which conversations run themselves.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.

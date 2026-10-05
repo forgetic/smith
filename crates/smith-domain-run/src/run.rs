@@ -28,7 +28,7 @@ use crate::domain::Domain;
 use crate::facts::{Asked, Fact};
 use crate::land::{self, Settled};
 use crate::limits::Limits;
-use crate::outcome::{self, Declared};
+use crate::outcome::{self, Change, Declared};
 use crate::prepare::{self, Found, Step};
 use crate::prompt;
 
@@ -444,18 +444,18 @@ pub(crate) fn delegated(
         State::Working { reply_to, main } => match ask {
             Ask::Deliver { change } => {
                 assert!(main == id, "only main is offered delivery");
-                let made = Asking { call, deadline, name };
+                let made = Asking { name, call, deadline };
                 deliver(run, run_id, conversations, calls, alarms, main, made, change, env, out);
                 State::Working { reply_to, main }
             }
             Ask::Finish { outcome } => {
                 assert!(main == id, "only main is offered finish");
-                let made = Asking { call, deadline, name };
+                let made = Asking { name, call, deadline };
                 finish(run, run_id, conversations, calls, alarms, reply_to, main, None, made, outcome, env, out)
             }
             Ask::SubAgent { brief, families, llm, share } => {
                 let wanted = Wanted { brief, families, llm, share };
-                let made = Asking { call, deadline, name };
+                let made = Asking { name, call, deadline };
                 sub_agent(run, run_id, conversations, calls, alarms, id, made, wanted, env, out);
                 State::Working { reply_to, main }
             }
@@ -463,7 +463,7 @@ pub(crate) fn delegated(
         State::Over { reply_to, main, exhausted } => match ask {
             Ask::Finish { outcome } => {
                 assert!(main == id, "only main is offered finish");
-                let made = Asking { call, deadline, name };
+                let made = Asking { name, call, deadline };
                 let over = Some(exhausted);
                 finish(run, run_id, conversations, calls, alarms, reply_to, main, over, made, outcome, env, out)
             }
@@ -523,7 +523,6 @@ pub(crate) fn aborted(domain: &mut Domain, owner: Token, out: &mut Queue<Request
     settle(domain, id, settled, out);
 }
 
-#[expect(clippy::large_types_passed_by_value, reason = "bounded host terminal passes ownership")]
 pub(crate) fn delivered(domain: &mut Domain, owner: Token, delivery: Delivery, out: &mut Queue<Request>) {
     let id = Id::<Call>::from_token(owner);
     let Some(call) = domain.calls.get(id) else {
@@ -672,13 +671,8 @@ fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<R
     let run = runs.get_mut(run_id).expect("a run lives until its calls have returned");
     let state = mem::replace(&mut run.state, State::Closed);
     run.state = match settled {
-        Settled::Delivered { name, receipts, stopped } => match state {
-            State::Working { reply_to, main } => match stopped {
-                Some(stopped) => {
-                    wind_down(conversations, reply_to, main, Ending::Delivered { name, receipts, stopped }, out)
-                }
-                None => State::Working { reply_to, main },
-            },
+        Settled::Delivered { name, receipts } => match state {
+            State::Working { reply_to, main } => State::Working { reply_to, main },
             State::Over { reply_to, main, exhausted } => wind_down(
                 conversations,
                 reply_to,
@@ -845,7 +839,7 @@ fn finish(
     env: &Env<Limits>,
     out: &mut Queue<Request>,
 ) -> State {
-    let Asking { call, deadline, name } = made;
+    let Asking { name, call, deadline } = made;
     let conversation = conversations.get(main).expect("main lives while its run works");
     assert!(conversation.calls == 0, "a finish is a write, which a conversation runs alone");
     let max = env.limits.outcome_bytes;
@@ -919,7 +913,7 @@ fn deliver(
     env: &Env<Limits>,
     out: &mut Queue<Request>,
 ) {
-    let Asking { call, deadline, name } = made;
+    let Asking { name, call, deadline } = made;
     assert!(conversations.get(main).expect("main lives").calls == 0, "delivery is an exclusive write");
     let Some(spec) = &run.charter.grants.deliver else {
         out.push(Request::Return { call, result: Returned::Refused { refusal: AskRefusal::NotGranted } });

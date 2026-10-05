@@ -119,3 +119,13 @@ the run world has 30 focused tests / 0.537 seconds and one fuzzy test /
 0.273 seconds. These world shares sum the rounded individual PASS
 durations, rather than the suite elapsed time. Existing seed sweeps and
 memory drivers remain; no timeout or budget was increased.
+
+05s4 DELIVERY was measured serially on 2026-10-05, from `6dfff6a` plus
+independently reviewed terminal, fixture and documentation corrections.
+The commands in section 2 passed 394 focused tests in 4.429 seconds and
+nine fuzzy tests in 6.229 seconds, with no skips. The affected agent world
+has 40 focused tests / 0.269 seconds and three fuzzy tests / 2.634 seconds;
+the run world has 32 focused tests / 0.549 seconds and one fuzzy test /
+0.264 seconds. Shares sum rounded individual PASS durations. The additional
+mid-delivery schedule sweep retains all five actual host outcomes; the
+existing memory and replay sweeps remain. Workspace budgets are unchanged.

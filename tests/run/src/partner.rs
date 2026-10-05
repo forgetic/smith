@@ -487,11 +487,12 @@ impl Partner {
         let peer = self.calls.remove(&call).expect("a return names a call in flight");
         match result {
             Returned::Accepted | Returned::Delivered(_) => self.tally.accepted += 1,
-            Returned::Nothing | Returned::DeliveryRefused(_) => self.tally.unpushed += 1,
+            Returned::Nothing | Returned::DeliveryRefused(_) | Returned::DeliveryFailed { .. } => {
+                self.tally.unpushed += 1;
+            }
             Returned::Rejected { .. } => self.tally.rejected += 1,
             Returned::ChecksFailed { .. } => self.tally.checks_failed += 1,
             Returned::Stale => self.tally.moved += 1,
-            Returned::DeliveryFailed { .. } => self.tally.unpushed += 1,
             Returned::Cancelled => self.tally.cancelled += 1,
             Returned::TimedOut => self.tally.timed_out += 1,
             Returned::Busy => self.tally.busy += 1,

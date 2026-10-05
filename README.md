@@ -11,8 +11,11 @@ fake LLM peers, component worlds and the composed agent on a scripted typed
 host. The [copy ledger](docs/development/migration-05s2.md) records the named
 source and the preserved stories. The first 05s4 increment adds
 [generic result contracts](docs/development/migration-05s4-results.md),
-including real reports and declared failures. Further generic host changes, live channel and
-protocol integration, host domains and the executable remain later
+including real reports and declared failures. The next increment adds
+[generic checked delivery](docs/development/migration-05s4-delivery.md),
+including mid-run delivery and actual host evidence during shutdown.
+Further generic host changes, live channel and protocol integration, host
+domains and the executable remain later
 increments of temper's `05s-smith.md` migration plan.
 
 ## Layout

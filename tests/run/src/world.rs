@@ -161,7 +161,6 @@ impl Settings {
                 changes: 700,
                 reports: 0,
                 failures: 0,
-                checks: 800,
                 verdicts: 700,
                 agents: 0,
                 push: Span::millis(10, 500),
@@ -307,7 +306,7 @@ enum Delivery {
     Checking {
         worker: Token,
     },
-    Delivery {
+    Submit {
         worker: Token,
         owner: Token,
         deadline: Time,
@@ -817,7 +816,7 @@ impl World {
                 let run = &self.views[&self.run_of_call[&owner]];
                 assert!(run.checks.is_subset(&passed), "a change is pushed once every repository's checks passed it");
                 self.stats.pushes += 1;
-                self.send(Lane::Host, Delivery::Delivery { worker, owner, deadline });
+                self.send(Lane::Host, Delivery::Submit { worker, owner, deadline });
             }
         }
         current
@@ -1152,7 +1151,7 @@ impl World {
                     if matches!(push, run::Delivery::Delivered(_)) {
                         self.pushed.insert(job);
                     }
-                    self.send(Lane::Agent, Delivery::Host(event));
+                    self.send(Lane::Agent, Delivery::Host(run::Event::Delivered { owner, push }));
                 }
                 run::Event::Started { .. }
                 | run::Event::Yielded { .. }
@@ -1192,7 +1191,7 @@ impl World {
                 Delivery::Admitted { worker, run } => self.host.admitted(self.now, worker, run),
                 Delivery::Answered { worker } => self.host.answered(self.now, worker),
                 Delivery::Checking { worker } => self.host.checking(worker),
-                Delivery::Delivery { worker, owner, deadline } => self.host.push(self.now, worker, owner, deadline),
+                Delivery::Submit { worker, owner, deadline } => self.host.push(self.now, worker, owner, deadline),
                 Delivery::Open { conversation, opening } => {
                     let mut out = Vec::new();
                     self.partner.open(self.now, conversation, &opening, &mut out);

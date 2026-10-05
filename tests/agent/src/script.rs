@@ -19,6 +19,9 @@ pub enum Job {
     /// continues and finishes Report. No final Change is allowed.
     /// Contract: domain/run.md, sections 8.4 and 13.
     MidReport,
+    /// Delivers mid-run, adds a source comment, then finishes with a final Change.
+    /// Contract: domain/run.md, sections 8.4 and 13.
+    MidChange,
     /// Leaves conflict markers in a named file, receives the host's marker
     /// refusal, corrects that file, redelivers and ends Report.
     /// Contract: domain/run.md, sections 8.1, 8.2, 8.4 and 13.
@@ -62,8 +65,9 @@ pub enum Job {
 /// Every job, for worlds that draw them.
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
-pub const JOBS: [Job; 9] = [
+pub const JOBS: [Job; 10] = [
     Job::MidReport,
+    Job::MidChange,
     Job::MarkerReport,
     Job::Coding,
     Job::Review,
@@ -80,6 +84,7 @@ pub const JOBS: [Job; 9] = [
 #[must_use]
 pub const fn cue(job: Job) -> Option<&'static [u8]> {
     match job {
+        Job::MidChange => Some(b"@midchange"),
         Job::MidReport => Some(b"@midreport"),
         Job::MarkerReport => Some(b"@markerreport"),
         Job::Coding => Some(b"@coding"),
@@ -99,6 +104,7 @@ pub const fn cue(job: Job) -> Option<&'static [u8]> {
 pub fn all() -> Box<[Script]> {
     Box::new([
         script(b"@midreport", mid_report()),
+        script(b"@midchange", mid_change()),
         script(b"@markerreport", marker_report()),
         script(b"@coding", coding()),
         script(b"@review", review()),
@@ -250,7 +256,7 @@ fn burning() -> Vec<Turn> {
 
 fn mid_report() -> Vec<Turn> {
     vec![
-        calls(vec![edit("42", "43")]),
+        calls(vec![read("src/lib.rs"), edit("42", "43")]),
         calls(vec![call("deliver", r#"{"ticket":"opaque-host-value"}"#)]),
         calls(vec![call(
             "finish",
@@ -262,6 +268,7 @@ fn mid_report() -> Vec<Turn> {
 fn marker_report() -> Vec<Turn> {
     vec![
         calls(vec![
+            read("src/lib.rs"),
             edit("42", "43"),
             call("write", r#"{"path":"conflict.txt","content":"<<<<<<< ours\n=======\n>>>>>>> theirs\n"}"#),
         ]),
@@ -269,5 +276,14 @@ fn marker_report() -> Vec<Turn> {
         calls(vec![call("write", r#"{"path":"conflict.txt","content":"resolved\n"}"#)]),
         calls(vec![call("deliver", r#"{"ticket":"corrected"}"#)]),
         calls(vec![call("finish", r#"{"report":"Marker corrected and delivered.","source":"checkout"}"#)]),
+    ]
+}
+
+fn mid_change() -> Vec<Turn> {
+    vec![
+        calls(vec![read("src/lib.rs"), edit("42", "43")]),
+        calls(vec![call("deliver", r#"{"ticket":"opaque-host-value"}"#)]),
+        calls(vec![edit("43", "43 /* checked answer */")]),
+        calls(vec![change("The checked answer now has a source comment.")]),
     ]
 }

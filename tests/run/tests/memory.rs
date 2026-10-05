@@ -210,15 +210,7 @@ fn fill(limits: Limits) {
         assert_eq!(step(yielded), [Asked::Other], "the sub-agent is closed");
         let ended = Event::Ended { conversation: child, end: End::Closed, spend };
         assert_eq!(step(ended), [Asked::Other], "its call returns its answer");
-        let change = Change {
-            fields: Box::new([
-                smith_domain_run::outcome::Field { name: b"title".as_slice().into(), value: bytes(1) },
-                smith_domain_run::outcome::Field {
-                    name: b"body".as_slice().into(),
-                    value: bytes(limits.outcome_bytes - 2 * size(size_of::<Field>()) - 5 - 4 - 1),
-                },
-            ]),
-        };
+        let change = full_change(limits.outcome_bytes);
         let ask = Ask::Finish { outcome: Declared::Change(change) };
         let call = Token::new(u64::from(run) + 1_000_000);
         let finish = Event::Delegated {
@@ -255,6 +247,18 @@ fn a_domain_with_every_run_full_stays_within_its_worst_case() {
     fill(LIMITS);
     fill(Limits { runs: 64, conversations: 128, calls: 128, run_bytes: 65_536, guide_bytes: 32_768, ..LIMITS });
     fill(Limits { runs: 1000, conversations: 2000, calls: 2000, run_bytes: 2048, guide_bytes: 16, ..LIMITS });
+}
+
+fn full_change(outcome_bytes: u64) -> Change {
+    Change {
+        fields: Box::new([
+            Field { name: b"title".as_slice().into(), value: bytes(1) },
+            Field {
+                name: b"body".as_slice().into(),
+                value: bytes(outcome_bytes - 2 * size(size_of::<Field>()) - 5 - 4 - 1),
+            },
+        ]),
+    }
 }
 
 fn delivered() -> smith_domain_run::Delivery {

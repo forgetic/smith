@@ -382,6 +382,8 @@ exists: the actual operation runs to its deadline, the earlier of caller expiry
 and the receiving delivery timeout. The host returns exactly one actual terminal
 by that deadline (delivery, failure or another typed outcome); it must report a
 landing that won the deadline race. Transport may deliver that terminal later.
+A caller-only withdrawal or expiry does not decide run shutdown: an actual
+mid-run landing returns receipts and continues while the run still works.
 The run waits for it even while winding down. Duplicate or stale callback
 generations are inert, never another semantic delivery.
 
