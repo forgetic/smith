@@ -2,21 +2,28 @@
 //! and 11; domain/run.md, section 14). It keeps schedules, pending boundary
 //! requests, checkout bytes and observations; it never uses private state to
 //! choose replies. Only final quiescence checks read public domain counters.
+//! An opt-in wire composition retains actual Clients separately from root callback
+//! lookup, exposes byte-peer queries, and closes physical owners bottom-up. The
+//! root's iteration supplies both clocks; pending wire progress prevents timer
+//! jumps. Provider grammar and generic stream scheduling remain unknown here.
+//! Entrances are original Start, bounded drive, parent message/cancel and wall
+//! injection (domain/client.md, sections 1, 4 and 5; programming-model.md, section 9).
 
 use std::collections::BTreeMap;
 
 use skein_fake_checkout::Checkout;
 use skein_fake_llm_domain as provider;
-use skein_lib::{Duration, ReplyTo, Rng, Time, Token};
+use skein_lib::{Duration, ReplyTo, Rng, Time, Token, Wall};
 use skein_world::domain::{Key, Ledger, Referee, Schedule, Span, Stage, Trace};
 use smith_domain::{self as agent, Event, Fact, Grant, GrantName, Limits, Request, llm, run, tools};
+use smith_protocol_llm::{Limits as WireLimits, Receiving};
 use smith_tools_world::translate as io;
 
 use crate::{
     BUDGET, LIMITS, fixture,
     referee::{Meeting, Seen},
     script::{self, Job},
-    translate,
+    translate, wire,
 };
 
 /// Scripted host choice; materialized as a sealed actual terminal at submission.
@@ -235,6 +242,7 @@ pub struct World {
     provider: provider::Domain,
     provider_stage: Stage<provider::Config, provider::Event, provider::Request>,
     provider_calls: Ledger<Token, (tools::Grants, Box<[llm::Served]>)>,
+    wire: Option<wire::Composition>,
     schedule: Schedule<Delivery>,
     flights: Ledger<(Family, Token), Flight>,
     disk: Checkout,
@@ -332,6 +340,7 @@ impl World {
             .expect("scripts and application menu obey provider admission"),
             provider_stage: Stage::new(settings.provider, provider::MAX_OUT, provider::MAX_OUT + 3),
             provider_calls: Ledger::new("fake provider call"),
+            wire: None,
             schedule,
             flights: Ledger::new("agent request"),
             disk,
@@ -360,6 +369,59 @@ impl World {
             referee,
             stimuli,
             terminals: 0,
+        }
+    }
+
+    /// Opt into actual adapter/Client/byte-peer routing for the queued original
+    /// Start and discovery. Caller data supplies native endpoint, credentials,
+    /// limits and scripts; typed worlds keep their existing backend. Receiving
+    /// metadata comes only from each actual Complete. The fixture asserts a
+    /// 256-call ceiling and compatible admission before any wire effect.
+    /// Contract: domain/client.md, sections 1, 5 and 6; domain/run.md, sections 3 and 14.
+    #[must_use]
+    pub fn with_wire(
+        settings: Settings,
+        configuration: wire::Configuration,
+        limits: WireLimits,
+        scripts: Box<[provider::api::Script]>,
+    ) -> World {
+        let mut world = Self::new(settings);
+        world.wire = Some(wire::Composition::new(configuration, limits, scripts));
+        world
+    }
+
+    /// Set the externally injected wall clock before the next iteration.
+    /// Monotonic deadlines keep running independently; the same wall is handed
+    /// to root, shared Client, scripted domain and byte peer.
+    /// Contract: domain/client.md, section 1; programming-model.md, section 9.
+    pub fn wall_at(&mut self, wall: Wall) {
+        self.stage.env.wall = wall;
+        self.provider_stage.env.wall = wall;
+    }
+
+    /// Queue a real parent cancellation for the admitted original run. Its
+    /// Start reply and all actual lower terminals remain owed through close.
+    /// Contract: domain/run.md, sections 10 and 13; domain/client.md, section 5.
+    pub fn cancel_run(&mut self) {
+        assert!(self.admitted.is_some(), "parent cancellation follows actual admission");
+        self.schedule.send(self.now, Delivery::Cancel);
+    }
+
+    /// Current injected monotonic clock, for outside chronology controls.
+    /// Contract: domain/run.md, sections 6 and 10; programming-model.md, section 9.
+    #[must_use]
+    pub const fn now(&self) -> Time {
+        self.now
+    }
+
+    /// Actual physical-binding observations; typed-only worlds expose none.
+    /// Retired records keep no Client or credential. Contract: domain/client.md,
+    /// section 5; testing-strategy.md, sections 2.3 and 6.
+    #[must_use]
+    pub fn wire_bindings(&self) -> &[wire::Binding] {
+        match &self.wire {
+            Some(wire) => wire.bindings(),
+            None => &[],
         }
     }
 
@@ -410,30 +472,7 @@ impl World {
                 self.trace.log(self.now, format!("agent -> {request:?}"));
                 self.request(request);
             }
-            while let Some(event) = self.provider_stage.next_event() {
-                provider::step(&mut self.provider, &self.provider_stage.env, event, &mut self.provider_stage.out);
-            }
-            while self.provider_stage.has_room() && self.provider.is_due(self.now) {
-                provider::fire(&mut self.provider, &self.provider_stage.env, &mut self.provider_stage.out);
-            }
-            while let Some(provider::Request::Reply { to, result }) = self.provider_stage.out.pop() {
-                let owner = to.into_token();
-                let (grants, served) = self.provider_calls.end(owner);
-                if self.flights.get((Family::Completion, owner)).is_some_and(|flight| !flight.cancelled) {
-                    let event = match result {
-                        Ok(answer) => {
-                            Event::Completed { owner, completion: translate::completion(answer, grants, &served) }
-                        }
-                        Err(error) => Event::Failed {
-                            owner,
-                            failure: translate::failure(error),
-                            evidence: smith_domain::llm::Evidence::Unknown,
-                            detail: Box::default(),
-                        },
-                    };
-                    self.send(Family::Completion, owner, event);
-                }
-            }
+            let wire_immediate = self.advance_provider();
             self.agent.reclaim();
             self.provider.reclaim();
             if self.referee.is_due(self.now) {
@@ -451,11 +490,13 @@ impl World {
                 && !self.provider_stage.has_events()
                 && self.provider.calls() == 0
                 && !self.agent.is_ready()
+                && self.wire.as_ref().is_none_or(wire::Composition::is_settled)
             {
                 self.settled();
                 return true;
             }
-            let immediate = self.stage.has_events() || self.provider_stage.has_events() || self.agent.is_ready();
+            let immediate =
+                wire_immediate || self.stage.has_events() || self.provider_stage.has_events() || self.agent.is_ready();
             if !immediate {
                 self.now = [
                     self.schedule.next_time(),
@@ -467,6 +508,45 @@ impl World {
                 .flatten()
                 .min()
                 .expect("an unsettled world has a next boundary");
+            }
+        }
+        false
+    }
+
+    fn advance_provider(&mut self) -> bool {
+        if let Some(wire) = &mut self.wire {
+            let progress = wire.advance(self.stage.env.now, self.stage.env.wall, self.answer.is_some());
+            for query in progress.queries {
+                self.messages_seen.push((self.now, crate::messages_referee::Seen::Prompt { query: query.clone() }));
+                self.prompts.push(query);
+            }
+            for (owner, event) in progress.terminals {
+                self.terminal(Family::Completion, owner, event);
+            }
+            return progress.immediate;
+        }
+        while let Some(event) = self.provider_stage.next_event() {
+            provider::step(&mut self.provider, &self.provider_stage.env, event, &mut self.provider_stage.out);
+        }
+        while self.provider_stage.has_room() && self.provider.is_due(self.now) {
+            provider::fire(&mut self.provider, &self.provider_stage.env, &mut self.provider_stage.out);
+        }
+        while let Some(provider::Request::Reply { to, result }) = self.provider_stage.out.pop() {
+            let owner = to.into_token();
+            let (grants, served) = self.provider_calls.end(owner);
+            if self.flights.get((Family::Completion, owner)).is_some_and(|flight| !flight.cancelled) {
+                let event = match result {
+                    Ok(answer) => {
+                        Event::Completed { owner, completion: translate::completion(answer, grants, &served) }
+                    }
+                    Err(error) => Event::Failed {
+                        owner,
+                        failure: translate::failure(error),
+                        evidence: smith_domain::llm::Evidence::Unknown,
+                        detail: Box::default(),
+                    },
+                };
+                self.send(Family::Completion, owner, event);
             }
         }
         false
@@ -538,17 +618,41 @@ impl World {
             Request::Checking { worker, .. } => {
                 assert_eq!(worker, Token::new(1), "checking notice echoes the host identity");
             }
-            Request::Complete { owner, prompt, .. } => {
+            Request::Complete {
+                owner,
+                prompt,
+                max_completion_bytes,
+                max_completion_blocks,
+                max_failure_bytes,
+                decoded_call_bytes,
+                ..
+            } => {
                 self.host_history.prompt(&prompt).expect("exact feedback for observed provider host call");
                 self.observe(Seen::Completing { owner });
                 self.flights.open((Family::Completion, owner), Flight { key: None, cancelled: false });
-                self.provider_calls.open(owner, (prompt.tools, prompt.served.clone()));
-                let query = translate::query(prompt);
-                self.messages_seen.push((self.now, crate::messages_referee::Seen::Prompt { query: query.clone() }));
-                self.prompts.push(query.clone());
-                self.provider_stage.push(provider::Event::Call { reply_to: ReplyTo::new(owner), query });
+                if let Some(wire) = &mut self.wire {
+                    let receiving = Receiving {
+                        max_completion_bytes,
+                        max_completion_blocks,
+                        max_failure_bytes,
+                        decoded_call_bytes,
+                    };
+                    wire.start(owner, prompt, receiving, self.stage.env.now, self.stage.env.wall);
+                } else {
+                    self.provider_calls.open(owner, (prompt.tools, prompt.served.clone()));
+                    let query = translate::query(prompt);
+                    self.messages_seen.push((self.now, crate::messages_referee::Seen::Prompt { query: query.clone() }));
+                    self.prompts.push(query.clone());
+                    self.provider_stage.push(provider::Event::Call { reply_to: ReplyTo::new(owner), query });
+                }
             }
-            Request::Cancel { owner } => self.cancel(Family::Completion, owner, Event::Cancelled { owner }),
+            Request::Cancel { owner } => {
+                if let Some(wire) = &mut self.wire {
+                    wire.cancel(owner, self.stage.env.now, self.stage.env.wall);
+                } else {
+                    self.cancel(Family::Completion, owner, Event::Cancelled { owner });
+                }
+            }
             Request::Io { owner, op, deadline } => {
                 self.flights.open((Family::Io, owner), Flight { key: None, cancelled: false });
                 let delivery = match op {

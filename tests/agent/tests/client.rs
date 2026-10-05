@@ -130,6 +130,12 @@ fn conveys(configuration: &Configuration, error: bool) {
     };
     assert_eq!(tool.name.as_ref(), b"opaque_host");
     assert_eq!(tool.description.as_ref(), b"Whole caller host contract.");
+    assert!(
+        tool.parameters
+            .windows(br#""x-caller":{"nested":[1,null,true]}"#.len())
+            .any(|bytes| bytes == br#""x-caller":{"nested":[1,null,true]}"#),
+        "independent literal observation retains the compact schema extension"
+    );
     assert_eq!(
         skein_llm::Json::from_bytes(&tool.parameters, &limits().client.dialect).expect("actual full schema"),
         skein_llm::Json::from_bytes(SCHEMA, &limits().client.dialect).expect("independent complete expected schema")

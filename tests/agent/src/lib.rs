@@ -3,12 +3,18 @@
 //! testing-strategy.md, sections 2.2, 6 and 7).
 //!
 //! The world owns time, seeds, a fake checkout and the real fake LLM domain.
+//! Its opt-in actual-wire backend adopts prepared shared Clients and byte peers,
+//! passes each actual root Complete receiving contract through the adapter, and
+//! synchronizes their clocks with the root iteration. Active logical callbacks
+//! and retained physical close rights have separate ownership until actual Closed
+//! (domain/client.md, sections 1, 4, 5 and 6).
 //! It calls the real agent's step, fire and resume entrances under bounded
 //! output pressure. Its host starts one charter, receives one answer and
 //! supplies typed push replies. No engine, worker, forge, channel or agent
 //! protocol is linked. Opaque host objects are attested by the real skein JSON
-//! parser in the test protocol face; provider schemas, transport and deployment
-//! decisions remain in temper's legacy worlds or await migration 05s5.
+//! parser in the test protocol face. Whole fixture schemas are explicit caller
+//! data; shared Skein owns provider grammar and transport. Arbitrary application
+//! Finish decoding and deployment remain later migration work.
 //!
 //! A fixture translator recognizes the copied scripts, not arbitrary provider
 //! documents. The independent referee sees only boundary observations. Facts

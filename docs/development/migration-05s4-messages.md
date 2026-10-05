@@ -3,13 +3,22 @@
 This is the implementation ledger for the approved messages increment. Source
 is in progress; the early compiler checkpoint is
 `49d15601c4346251eb3c514a4ba68058b9da6f83`, rebased onto Smith `45a2eea`.
-The original author base was `51fdd24`. The later frozen temporary draft passes
-formatting, full workspace/all-target clippy, 489 focused tests and ten fuzzy
-tests, with idle serial measurements recorded below. These are draft results,
-not a final rebased-tip gate or full combined-source approval. Actual root/wire
-composition, further composed ownership evidence, final public documentation
-and independent final review remain pending. This checkpoint is not a main
-merge, migration completion or legacy adapter removal.
+The original author base was `51fdd24`. The frozen temporary root/Wire draft
+passes formatting, full workspace/all-target clippy, 490 focused tests and ten
+fuzzy tests, with idle serial measurements recorded below. Its root/Wire source
+and public documentation backfill have independent scoped approval. Further
+composed ownership evidence and adapter boundary controls remain pending. These
+results do not claim full replacement acceptance, a main merge, migration
+completion or legacy adapter removal.
+
+The narrow root/Wire increment follows temporary checkpoint
+`9b7990a79953ca8e662c9731522b6de9528eb64c`. It adds an opt-in actual-wire backend
+to the existing agent world, using the pinned shared `Exchange::at` mechanism
+without changing the default typed worlds or production domains. Independent
+review and the four parent-run checks cover this increment. Public documentation
+backfill at temporary `edc583ebebe2a97a936224e6cfd9aa9adfbcad2b` separately passed
+the four checks, including 489 focused tests in 1.937 seconds and ten fuzzy
+tests in 4.294 seconds, before integration with the root/Wire increment.
 
 ## Source and contract
 
@@ -111,11 +120,40 @@ unit one; scalar record spend is zero, while copied typed token/turn/wall budget
 and child spend remain enforced. Scalar run pricing, optional workspace and
 conventions, live channel/transcript codecs and executable are later increments.
 The live composition's full Debug record is a test encoding, not a production
-codec claim. Actual Client binding integration and final copy removal belong to
-the shared-client replacement and must retain each physical binding through
-Reusable, explicit Close and actual Closed, even when a root owner is reused.
+codec claim. The opt-in actual Client binding retains each physical owner through
+Reusable, explicit Close and actual Closed, even when a root callback is reused.
+Final copy removal still requires the remaining shared-client replacement
+evidence and final acceptance.
 
 ## Written focused evidence
+
+The passing `actual_root_wire_host_feedback_and_reused_owner_close_survive_parent_cancel`
+starts the original root and discovery under the Codex and Anthropic caller
+endpoint fixtures.
+Actual Complete metadata goes unchanged to adapter preparation; peer-decoded
+queries supply observations. Actual discovery Read request and terminal precede
+Complete; the exact discovered guide reaches the first query's system text.
+The story selects one declared opaque host write,
+checks exact incoming argument bytes/effect and the actual first host answer,
+and uses handwritten native continuation arguments plus literal provider ID,
+feedback and error expectations. Positive-first controls remove or rewrite the
+observed result. A separate compact literal schema-extension check supplements
+the existing parsed whole-schema check in the standalone client story.
+
+The composition keeps active root callbacks separate from retained physical
+bindings. The selected lower schedule holds the first won Close until the next
+physical call starts, records that overlap, and requires actual Closed before
+retirement. A reused callback cannot identify the older physical cleanup. The
+second actual query precedes real parent cancellation; cancellation's terminal
+is translated only after shared lower settlement. Root and Client/peer clocks
+come from the same iteration, including independently moved wall time, and
+immediate wire progress prevents a jump to the root deadline. Outside records
+have a finite 256-call ceiling and four lifecycle observations per binding;
+this is not an attained allocation measurement. Arbitrary application Finish
+decoding, actual submitted delivery composition, remaining receiving corruption
+controls, full memory attainment and a bounded actual message schedule sweep
+remain pending. The passing gates cover the scoped increment; final replacement
+acceptance remains outstanding.
 
 These groups use actual root/session/tool entrances and shared fake observations:
 
@@ -210,8 +248,9 @@ specified compact object. Both retain the whole nested value and extra field,
 exact provider/result IDs, feedback text and native error classification.
 Positive controls precede changed nested value, dropped extra field, missing
 feedback and rewritten feedback mutations. No production provider branch or
-translator-derived expected object supplies this oracle. These are prepared
-Client boundary stories; actual root/wire composition remains pending.
+translator-derived expected object supplies this oracle. The prepared Client
+boundary controls and actual root/Wire story provide distinct evidence: the
+latter uses the original Start/discovery and actual host request/result routing.
 
 The random root memory driver retains each actual `Complete` request's byte,
 block and decoded receiving allowances. It prices root/session cells, original
@@ -230,26 +269,34 @@ not replace the pending attained root/handoff memory story or message sweep.
 
 ## Remaining checkpoint work and validation
 
-The early checkpoint intentionally precedes completion of the actual wire/root
-binding composition, the submitted-delivery extension of live host composition,
-attained many-tiny Message/Turn plus cap-filled payload transit memory driver,
-and bounded randomized message race sweep with observed classification counts.
-All named source distinctions and existing tests remain in scope; no passing
-subset replaces these requirements. Full public module/type/variant/field/entry
-documentation and subset review remain pending alongside the integration work.
+The current checkpoint retains the approved actual wire/root binding composition
+and public documentation backfill. The submitted-delivery extension of live host
+composition, attained many-tiny Message/Turn plus cap-filled payload transit
+memory driver, and bounded randomized message race sweep with observed
+classification counts remain outstanding. All named source distinctions and
+existing tests remain in scope; no passing subset replaces these requirements. New public items continue
+to require full module/type/variant/field/entry documentation and independent
+subset review alongside later integration work.
 
-The wire composition must consume the receiving fields of the actual root
-`Complete`, rather than reconstructing them from a token allowance. Its active
-logical-owner lookup is distinct from its retained physical bindings: one
+The approved wire composition consumes the receiving fields of the actual root
+`Complete`. Its active logical-owner lookup is distinct from its retained physical bindings: one
 Client terminal ends the root request, while that physical binding remains
 owned through `Reusable`, an explicit `Close` and actual `Closed`. A later
 request carrying the same logical owner cannot redirect an older binding's
 cleanup. Actual byte-peer queries and real translated terminals, rather than a
 second typed response, supply the composition's outside observations. The
-first required root story exercises a declared opaque host call, its exact
+passing root story exercises a declared opaque host call, its exact
 continued result and parent cancellation; it makes no unsupported application
 `Finish` decoder claim. All participating stages receive the same injected
 monotonic and wall clocks through the shared world's clock entrance.
+
+Remaining adapter consumer controls must reject wrong owners at all three
+terminal entrances; malformed, duplicate or unused ResolvedCall position/name/
+input/kind entries; and missing, duplicate or unoffered schema/result inventory.
+Actual failure class/evidence/detail, refusal/reasoning, all four usage counters
+and malformed-call no-effect continuation still need explicit outside evidence.
+The compact literal schema-extension observation now supplements parsed schema
+equality; it does not discharge these other boundary requirements.
 
 The live-host extension must submit an actual delivery through the root and
 host entrances and retain its parent operation right independently from Turn
@@ -274,24 +321,25 @@ The frozen temporary draft has the following parent-run evidence on 2026-10-05:
 | --- | --- |
 | `cargo fmt --check` | Passed. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed. |
-| `cargo nextest run --workspace` | 489 passed, zero skipped, 1.895 seconds. |
-| `cargo nextest run --workspace --profile fuzzy` | Ten passed, zero skipped, 4.362 seconds. |
-| Idle serial focused measurement | 489 passed in 6.292 seconds. |
-| Idle serial fuzzy measurement | Ten passed in 7.926 seconds. |
+| `cargo nextest run --workspace` | 490 passed, zero skipped, 1.983 seconds. |
+| `cargo nextest run --workspace --profile fuzzy` | Ten passed, zero skipped, 4.310 seconds. |
+| Idle serial focused measurement | 490 passed in 6.292 seconds. |
+| Idle serial fuzzy measurement | Ten passed in 7.893 seconds. |
 
 Runtime logs are `/tmp/temper-next-migration/`'s
-`smith-client-messages-resume-default-6.log`,
-`smith-client-messages-resume-fuzzy-4.log`,
-`smith-client-messages-resume-serial-default.log` and
-`smith-client-messages-resume-serial-fuzzy.log`. Independent receiving/counter
+`smith-root-wire-default-final.log`, `smith-root-wire-fuzzy-final.log`,
+`smith-root-wire-serial-default.log` and `smith-root-wire-serial-fuzzy.log`.
+The earlier messages checkpoint remains documented by
+`smith-client-messages-resume-default-6.log` and
+`smith-client-messages-resume-fuzzy-4.log`. Independent receiving/counter
 review approved final formatted driver blob
 `f08c9c0650ea6d9fcb23484182b47947b56b64fc`; that is scoped driver approval,
 not approval of all source or the remaining integration stories.
 
 Smith's canonical Skein dependency is pinned to temporary shared-clock revision
 `e86a7d69fcee41028337ed1288e5758015921faa`, including reviewed raw-history work.
-The shared `Exchange::at(now, wall)` entrance is available for the pending
-root/wire composition. Separately reviewed shared fake mechanics are at
+The shared `Exchange::at(now, wall)` entrance synchronizes the actual
+root/Wire composition. Separately reviewed shared fake mechanics are at
 temporary SDK revision `3bdc669bf512e2f566cb432b52cd55f1f834e28c`: its expanded
 shared-client scope passed 132 tests in 0.838 seconds and its full SDK fuzzy
 diagnostic passed 64 tests in 18.997 seconds. Those mechanics changes are
