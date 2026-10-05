@@ -6,14 +6,24 @@ use skein_world::domain::{Referee, Verdict};
 use smith_agent_world::referee::{Meeting, Seen};
 use smith_domain::run::{
     Answer, Exit, Push, Refusal, Spend,
-    outcome::{Change, Declared},
+    outcome::{Change, ChangeSpec, Declared, DeclaredFailure, Field, FieldRule, OutcomeSpec, Report, TextSpec},
 };
 
 fn started() -> Referee<Meeting> {
     let mut referee = Referee::new(Meeting::default());
     referee.observe(
         Time::ZERO,
-        Seen::Started { change: true, checks: true, within: Duration::from_secs(5) },
+        Seen::Started {
+            contract: OutcomeSpec {
+                change: Some(ChangeSpec { checks: true, fields: Box::new([]) }),
+                verdicts: Box::new([]),
+                report: None,
+                failure: None,
+            },
+            outcome_bytes: 1024,
+            checks: true,
+            within: Duration::from_secs(5),
+        },
         &mut Vec::new(),
     );
     referee
@@ -45,7 +55,15 @@ fn a_host_that_lands_different_bytes_is_rejected() {
 #[test]
 fn a_change_answer_without_a_landed_push_is_rejected() {
     let answer = Answer::Accepted {
-        outcome: Declared::Change(Change { title: b"change".as_slice().into(), body: Box::new([]) }),
+        outcome: Declared::Change(Change {
+            fields: Box::new([
+                smith_domain::run::outcome::Field {
+                    name: b"title".as_slice().into(),
+                    value: b"change".as_slice().into(),
+                },
+                smith_domain::run::outcome::Field { name: b"body".as_slice().into(), value: Box::new([]) },
+            ]),
+        }),
         spent: Spend::ZERO,
     };
     broken(started(), Seen::Answered { answer, pending: 0 }, "an accepted change landed exactly once");
@@ -91,5 +109,84 @@ fn a_duplicate_answer_is_rejected() {
         referee,
         Seen::Answered { answer: Answer::Refused(Refusal::Busy), pending: 0 },
         "exactly one answer per host start",
+    );
+}
+
+fn text_started(failure: bool, cap: u64) -> Referee<Meeting> {
+    let mut referee = Referee::new(Meeting::default());
+    let rule = TextSpec {
+        min: u32::from(failure),
+        max: 8,
+        fields: Box::new([FieldRule { name: b"source".as_slice().into(), max: 3 }]),
+    };
+    referee.observe(
+        Time::ZERO,
+        Seen::Started {
+            contract: OutcomeSpec {
+                change: None,
+                verdicts: Box::new([]),
+                report: if failure { None } else { Some(rule.clone()) },
+                failure: if failure { Some(rule) } else { None },
+            },
+            outcome_bytes: cap,
+            checks: false,
+            within: Duration::from_secs(5),
+        },
+        &mut Vec::new(),
+    );
+    referee
+}
+
+#[test]
+fn an_accepted_report_that_omits_the_hosts_field_is_rejected() {
+    broken(
+        text_started(false, 1024),
+        Seen::Answered {
+            answer: Answer::Accepted {
+                outcome: Declared::Report(Report { text: Box::new([]), fields: Box::new([]) }),
+                spent: Spend::ZERO,
+            },
+            pending: 0,
+        },
+        "an accepted result meets the host contract and byte cap",
+    );
+}
+
+#[test]
+fn an_accepted_failure_with_no_required_reason_is_rejected() {
+    broken(
+        text_started(true, 1024),
+        Seen::Answered {
+            answer: Answer::Accepted {
+                outcome: Declared::Failure(DeclaredFailure {
+                    reason: Box::new([]),
+                    fields: Box::new([Field { name: b"source".as_slice().into(), value: b"ref".as_slice().into() }]),
+                }),
+                spent: Spend::ZERO,
+            },
+            pending: 0,
+        },
+        "an accepted result meets the host contract and byte cap",
+    );
+}
+
+#[test]
+fn extra_field_storage_cannot_be_omitted_from_the_referees_byte_charge() {
+    broken(
+        text_started(false, 64),
+        Seen::Answered {
+            answer: Answer::Accepted {
+                outcome: Declared::Report(Report {
+                    text: Box::new([]),
+                    fields: Box::new([
+                        Field { name: b"source".as_slice().into(), value: b"ref".as_slice().into() },
+                        Field { name: b"extra".as_slice().into(), value: vec![b'x'; 64].into() },
+                    ]),
+                }),
+                spent: Spend::ZERO,
+            },
+            pending: 0,
+        },
+        "an accepted result meets the host contract and byte cap",
     );
 }

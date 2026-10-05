@@ -87,8 +87,10 @@ pub struct Limits {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub io_timeout: Duration,
-    /// The most bytes an outcome declared to `finish` may hold, as a run
-    /// counts them. A larger one is rejected.
+    /// Largest aggregate result ownership beyond its inline declaration,
+    /// counting every field/item container, name and value as
+    /// `outcome::owned_bytes` does. A larger finish is feedback, before
+    /// shape judgement or any checks/Push.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub outcome_bytes: u64,

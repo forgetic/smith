@@ -61,6 +61,8 @@ pub fn noisy(seed: u64) -> Settings {
         shares: small(pick(0, 500)),
         parallel: small(pick(1, 4)),
         changes: small(pick(0, 1000)),
+        reports: small(pick(0, 400)),
+        failures: small(pick(0, 400)),
         good: small(pick(0, 1000)),
         yields: small(pick(0, 500)),
         odd_stops: small(pick(0, 300)),
@@ -95,7 +97,7 @@ pub fn noisy(seed: u64) -> Settings {
         facts: small(pick(0, 64)),
         ..run
     };
-    let host = host::Script { agents: small(pick(0, 1000)), ..host };
+    let host = host::Script { agents: small(pick(0, 1000)), reports: 700, failures: 700, ..host };
     Settings {
         run,
         host,

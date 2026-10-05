@@ -29,6 +29,11 @@ pub enum Job {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Reporting,
+    /// Declares a failure with an empty reason, corrects it from finish feedback,
+    /// then ends with an accepted host-bound reason and fields, without delivery.
+    ///
+    /// Contract: domain/run.md, sections 7.1, 7.2 and 13.
+    Failing,
     /// Asks two read-only sub-agents side by side, then a writable one that
     /// fixes the code and asks one of its own (and tries to finish, which it
     /// may not), then finishes with a change.
@@ -49,7 +54,8 @@ pub enum Job {
 /// Every job, for worlds that draw them.
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
-pub const JOBS: [Job; 6] = [Job::Coding, Job::Review, Job::Reporting, Job::Delegating, Job::Spending, Job::Wandering];
+pub const JOBS: [Job; 7] =
+    [Job::Coding, Job::Review, Job::Reporting, Job::Failing, Job::Delegating, Job::Spending, Job::Wandering];
 
 /// The word that cues the script of `job`'s main conversation, if it has one.
 ///
@@ -60,6 +66,7 @@ pub const fn cue(job: Job) -> Option<&'static [u8]> {
         Job::Coding => Some(b"@coding"),
         Job::Review => Some(b"@review"),
         Job::Reporting => Some(b"@report"),
+        Job::Failing => Some(b"@failure"),
         Job::Delegating => Some(b"@delegate"),
         Job::Spending => Some(b"@spend"),
         Job::Wandering => None,
@@ -75,6 +82,7 @@ pub fn all() -> Box<[Script]> {
         script(b"@coding", coding()),
         script(b"@review", review()),
         script(b"@report", reporting()),
+        script(b"@failure", failing()),
         script(b"@delegate", delegating()),
         script(b"@spend", spending()),
         script(b"@explore", exploring()),
@@ -164,7 +172,17 @@ fn review() -> Vec<Turn> {
 fn reporting() -> Vec<Turn> {
     vec![
         calls(vec![read("README.md"), call("list", r#"{"path":"."}"#)]),
-        calls(vec![call("finish", r#"{"verdict":"report","body":"The answer is 42, and the checks want 43."}"#)]),
+        calls(vec![call("finish", r#"{"report":"The answer is 42, and the checks want 43.","source":"README.md"}"#)]),
+    ]
+}
+
+fn failing() -> Vec<Turn> {
+    vec![
+        calls(vec![call("finish", r#"{"failure":"","cause":"missing-authority"}"#)]),
+        calls(vec![call(
+            "finish",
+            r#"{"failure":"The host has not supplied the needed access.","cause":"missing-authority"}"#,
+        )]),
     ]
 }
 

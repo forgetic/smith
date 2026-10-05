@@ -11,12 +11,13 @@ fn many_host_schedules_settle_against_the_boundary_referee() {
     for seed in 0..120 {
         let mut rng = Rng::new(seed);
         let calm = Settings::calm(seed);
-        let job = match rng.below(5) {
+        let job = match rng.below(6) {
             0 => Job::Coding,
             1 => Job::Review,
             2 => Job::Reporting,
             3 => Job::Delegating,
-            _ => Job::Spending,
+            4 => Job::Spending,
+            _ => Job::Failing,
         };
         let push = match rng.below(4) {
             0 => Push::Moved,

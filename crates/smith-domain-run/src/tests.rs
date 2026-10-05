@@ -6,9 +6,7 @@ use skein_lib::{Duration, Env, List, Queue, ReplyTo, Time, Token, Wall};
 
 use crate::charter::{Checkout, Endpoint, Grants, Llm, Outlet, Repository, Tools};
 use crate::facts::{Answered, Asked, Fact, Return};
-use crate::outcome::{
-    Change, ChangeSpec, Child, Children, Declared, Field, OutcomeSpec, Problem, Problems, Verdict, VerdictRule,
-};
+use crate::outcome::{Change, ChangeSpec, Declared, Field, Item, OutcomeSpec, Problem, Problems, Verdict, VerdictRule};
 use crate::prepare::{Found, Guide};
 use crate::{
     Answer, Ask, AskRefusal, Budget, Charter, Domain, End, Event, Exhausted, Exit, Failure, Fault, Invalid, Limits,
@@ -24,7 +22,9 @@ const BUDGET: Budget = Budget {
     time: Duration::from_secs(600),
 };
 
-const LIMITS: Limits = Limits {
+/// Fixed admission and ownership limits shared by focused run and result tests.
+/// Contract: domain/run.md, sections 3.1, 7.1 and 13.
+pub(crate) const LIMITS: Limits = Limits {
     runs: 2,
     conversations: 4,
     run_bytes: 4096,
@@ -140,9 +140,27 @@ pub(crate) fn bytes(text: &[u8]) -> Box<[u8]> {
 pub(crate) fn rule(name: &[u8], min: u32, max: u32) -> VerdictRule {
     VerdictRule {
         name: bytes(name),
-        children: Children { min, max },
-        kinds: Box::new([bytes(b"blocking"), bytes(b"nit")]),
-        fields: Box::new([bytes(b"path"), bytes(b"body")]),
+        text_max: 1024,
+        fields: Box::new([]),
+        items: crate::outcome::ItemSpec {
+            min,
+            max,
+            kinds: {
+                let required: Box<[Box<[u8]>]> = Box::new([bytes(b"path"), bytes(b"body")]);
+                let kinds: Box<[Box<[u8]>]> = Box::new([bytes(b"blocking"), bytes(b"nit")]);
+                kinds
+                    .into_vec()
+                    .into_iter()
+                    .map(|kind| crate::outcome::ItemRule {
+                        kind,
+                        fields: required
+                            .iter()
+                            .map(|name| crate::outcome::FieldRule { name: name.clone(), max: 1024 })
+                            .collect(),
+                    })
+                    .collect()
+            },
+        },
     }
 }
 
@@ -158,7 +176,12 @@ pub(crate) fn charter() -> Charter {
             agents: false,
             outlets: Box::new([Outlet { name: bytes(b"comment") }]),
         },
-        outcome: OutcomeSpec { change: None, verdicts: Box::new([rule(b"approve", 0, 0), rule(b"request", 1, 8)]) },
+        outcome: OutcomeSpec {
+            change: None,
+            verdicts: Box::new([rule(b"approve", 0, 0), rule(b"request", 1, 8)]),
+            report: None,
+            failure: None,
+        },
         budget: BUDGET,
         llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 1024 },
         models: Box::new([]),
@@ -226,7 +249,18 @@ fn a_run_looks_for_checks_in_writable_repositories_when_a_change_must_pass_them(
             Repository { name: bytes(b"docs"), root: Token::new(901), writable: false },
         ]),
     };
-    let outcome = OutcomeSpec { change: Some(ChangeSpec { checks: true }), verdicts: Box::new([]) };
+    let outcome = OutcomeSpec {
+        change: Some(ChangeSpec {
+            checks: true,
+            fields: Box::new([
+                crate::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                crate::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+            ]),
+        }),
+        verdicts: Box::new([]),
+        report: None,
+        failure: None,
+    };
     let emitted = h.start(1, Charter { checkout, outcome, ..charter() });
     let [Request::Admitted { run, .. }, Request::Read { at, .. }] = &*emitted else {
         panic!("expected a read, got {emitted:?}");
@@ -304,9 +338,15 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
             Invalid::Outcome,
         ),
         (Charter { outcome: spec(Box::new([rule(b"a", 3, 2)])), ..charter() }, Invalid::Outcome),
-        // Children allowed, with no kind for them to be.
+        // ItemSpec allowed, with no kind for them to be.
         (
-            Charter { outcome: spec(Box::new([VerdictRule { kinds: Box::new([]), ..rule(b"a", 0, 1) }])), ..charter() },
+            Charter {
+                outcome: spec(Box::new([VerdictRule {
+                    items: crate::outcome::ItemSpec { kinds: Box::new([]), ..(rule(b"a", 0, 1)).items },
+                    ..rule(b"a", 0, 1)
+                }])),
+                ..charter()
+            },
             Invalid::Outcome,
         ),
     ];
@@ -320,7 +360,18 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
     drop(h.start(
         1,
         Charter {
-            outcome: OutcomeSpec { change: Some(ChangeSpec { checks: true }), verdicts: Box::new([]) },
+            outcome: OutcomeSpec {
+                change: Some(ChangeSpec {
+                    checks: true,
+                    fields: Box::new([
+                        crate::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                        crate::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                    ]),
+                }),
+                verdicts: Box::new([]),
+                report: None,
+                failure: None,
+            },
             ..charter()
         },
     ));
@@ -332,7 +383,7 @@ fn repository(name: &[u8]) -> Repository {
 }
 
 fn spec(verdicts: Box<[VerdictRule]>) -> OutcomeSpec {
-    OutcomeSpec { change: None, verdicts }
+    OutcomeSpec { change: None, verdicts: verdicts, report: None, failure: None }
 }
 
 #[test]
@@ -492,20 +543,25 @@ fn returned(call: u64, result: Returned) -> Request {
     Request::Return { call: Token::new(call), result }
 }
 
-fn verdict(name: &[u8], children: Box<[Child]>) -> Declared {
-    Declared::Verdict(Verdict { name: bytes(name), body: bytes(b"Looks good."), children })
+fn verdict(name: &[u8], children: Box<[Item]>) -> Declared {
+    Declared::Verdict(Verdict { name: bytes(name), text: bytes(b"Looks good."), items: children, fields: Box::new([]) })
 }
 
-fn comment() -> Child {
+fn comment() -> Item {
     let fields = Box::new([
         Field { name: bytes(b"path"), value: bytes(b"a.rs") },
         Field { name: bytes(b"body"), value: bytes(b"Nit.") },
     ]);
-    Child { kind: bytes(b"nit"), fields }
+    Item { kind: bytes(b"nit"), fields }
 }
 
 fn change() -> Change {
-    Change { title: bytes(b"Fix the parser"), body: bytes(b"It accepts tabs now.") }
+    Change {
+        fields: Box::new([
+            crate::outcome::Field { name: b"title".as_slice().into(), value: bytes(b"Fix the parser") },
+            crate::outcome::Field { name: b"body".as_slice().into(), value: bytes(b"It accepts tabs now.") },
+        ]),
+    }
 }
 
 /// The test charter, finishing with a change whose checks must pass, in two
@@ -519,7 +575,18 @@ fn coding() -> Charter {
     };
     Charter {
         checkout,
-        outcome: OutcomeSpec { change: Some(ChangeSpec { checks: true }), verdicts: Box::new([]) },
+        outcome: OutcomeSpec {
+            change: Some(ChangeSpec {
+                checks: true,
+                fields: Box::new([
+                    crate::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                    crate::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                ]),
+            }),
+            verdicts: Box::new([]),
+            report: None,
+            failure: None,
+        },
         ..charter()
     }
 }
@@ -574,7 +641,7 @@ fn an_outcome_that_does_not_fit_the_spec_is_rejected_and_the_run_goes_on() {
     assert_eq!(&*emitted, &[returned(7, Returned::Rejected { problems })]);
     let huge = verdict(b"approve", Box::new([]));
     let Declared::Verdict(mut huge) = huge else { unreachable!("a verdict") };
-    huge.body = Box::from([b'x'; 2000].as_slice());
+    huge.text = Box::from([b'x'; 2000].as_slice());
     let emitted = h.step(finish(conversation, 8, Declared::Verdict(huge)));
     let problems = Problems { listed: Box::new([Problem::TooLarge { max: LIMITS.outcome_bytes }]), more: 0 };
     assert_eq!(&*emitted, &[returned(8, Returned::Rejected { problems })]);
@@ -1331,4 +1398,103 @@ fn failed_push_reason_and_diagnostics_return_to_the_finish_caller() {
         panic!("failed push fact");
     };
     assert!(told.diagnostic.output().is_empty(), "facts hold no diagnostic content");
+}
+
+fn text_charter(failure: bool) -> Charter {
+    let contract = crate::outcome::TextSpec {
+        min: u32::from(failure),
+        max: 8,
+        fields: Box::new([crate::outcome::FieldRule { name: bytes(b"source"), max: 4 }]),
+    };
+    Charter {
+        outcome: OutcomeSpec {
+            change: None,
+            verdicts: Box::new([]),
+            report: if failure { None } else { Some(contract.clone()) },
+            failure: if failure { Some(contract) } else { None },
+        },
+        ..charter()
+    }
+}
+
+fn text_result(failure: bool, text: &[u8]) -> Declared {
+    let fields = Box::new([Field { name: bytes(b"source"), value: bytes(b"ref") }]);
+    if failure {
+        Declared::Failure(crate::outcome::DeclaredFailure { reason: bytes(text), fields })
+    } else {
+        Declared::Report(crate::outcome::Report { text: bytes(text), fields })
+    }
+}
+
+#[test]
+fn reports_and_declared_failures_settle_once_without_checks_or_push() {
+    for (failure, text) in [(false, b"".as_slice()), (true, b"no".as_slice())] {
+        let mut h = Harness::new(LIMITS);
+        let (_, conversation) = h.running_on(1, 100, text_charter(failure));
+        let emitted = h.step(finish(conversation, 7, text_result(failure, text)));
+        assert_eq!(&*emitted, &[returned(7, Returned::Accepted), Request::Close { peer: Token::new(100) }]);
+        assert!(h.step(Event::Cancel { run: Token::new(999) }).is_empty());
+        let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: spend(5) });
+        assert_eq!(answered(emitted), (1, Answer::Accepted { outcome: text_result(failure, text), spent: spend(5) }));
+        assert!(h.step(Event::Ended { conversation, end: End::Closed, spend: spend(5) }).is_empty());
+    }
+}
+
+#[test]
+fn rejected_failure_reason_can_be_corrected_without_starting_delivery() {
+    let mut h = Harness::new(LIMITS);
+    let (_, conversation) = h.running_on(1, 100, text_charter(true));
+    let emitted = h.step(finish(conversation, 7, text_result(true, b"")));
+    assert_eq!(
+        &*emitted,
+        &[returned(
+            7,
+            Returned::Rejected {
+                problems: Problems {
+                    listed: Box::new([Problem::TextTooShort { form: crate::outcome::Form::Failure, min: 1 }]),
+                    more: 0
+                }
+            }
+        )]
+    );
+    let emitted = h.step(finish(conversation, 8, text_result(true, b"no")));
+    assert_eq!(&*emitted, &[returned(8, Returned::Accepted), Request::Close { peer: Token::new(100) }]);
+}
+
+#[test]
+fn impossible_result_contracts_refuse_before_any_preparation_or_session() {
+    let mut c = text_charter(false);
+    c.outcome.report.as_mut().unwrap().min = 9;
+    let mut h = Harness::new(LIMITS);
+    assert_eq!(answered(h.start(1, c)), (1, Answer::Refused(Refusal::Invalid(Invalid::Outcome))));
+    assert_eq!((h.domain.runs(), h.domain.conversations()), (0, 0));
+    let min = u64::try_from(core::mem::size_of::<Field>()).unwrap() + 6 + 1;
+    let mut h = Harness::new(Limits { outcome_bytes: min - 1, ..LIMITS });
+    assert_eq!(answered(h.start(2, text_charter(false))), (2, Answer::Refused(Refusal::Invalid(Invalid::Outcome))));
+    assert_eq!((h.domain.runs(), h.domain.conversations()), (0, 0));
+}
+
+#[test]
+fn unknown_extra_field_ownership_is_checked_before_shape_judgement() {
+    let mut h = Harness::new(LIMITS);
+    let (_, conversation) = h.running_on(1, 100, text_charter(false));
+    let value = Declared::Report(crate::outcome::Report {
+        text: Box::new([]),
+        fields: Box::new([
+            Field { name: bytes(b"source"), value: bytes(b"ref") },
+            Field {
+                name: bytes(b"opaque"),
+                value: alloc::vec![b'x'; usize::try_from(LIMITS.outcome_bytes).unwrap()].into(),
+            },
+        ]),
+    });
+    let emitted = h.step(finish(conversation, 7, value));
+    assert_eq!(
+        &*emitted,
+        &[returned(7, Returned::Rejected { problems: crate::outcome::too_large(LIMITS.outcome_bytes) })]
+    );
+    assert_eq!(
+        &*h.step(finish(conversation, 8, text_result(false, b""))),
+        &[returned(8, Returned::Accepted), Request::Close { peer: Token::new(100) }]
+    );
 }

@@ -7,7 +7,7 @@ use std::mem::size_of;
 use skein_lib::{Duration, Env, Queue, ReplyTo, Time, Token, Wall};
 use skein_world::domain::heap::{self, Meter};
 use smith_domain_run::charter::{Checkout, Endpoint, Families, Grants, Llm, Outlet, Repository, Tools};
-use smith_domain_run::outcome::{Change, ChangeSpec, Children, Declared, OutcomeSpec, VerdictRule};
+use smith_domain_run::outcome::{Change, ChangeSpec, Declared, Field, FieldRule, ItemRule, OutcomeSpec, VerdictRule};
 use smith_domain_run::{
     Answer, Ask, Budget, Charter, Domain, End, Event, Exit, Invalid, Limits, MAX_OUT, Push, Ran, Read, Refusal,
     Request, Spend, Stop, worst_case,
@@ -60,12 +60,12 @@ const LIMITS: Limits = Limits {
 /// every part held in a box, at its fixed size plus a byte of payload each,
 /// and a brief of the rest.
 fn charter(held: u64) -> Charter {
-    let label = size(size_of::<Box<[u8]>>());
     let parts =
         (size(size_of::<Repository>()) + 1) + (size(size_of::<Outlet>()) + 1) + 1 + (size(size_of::<Llm>()) + 1);
-    let rule = size(size_of::<VerdictRule>()) + 1 + 2 * (label + 1);
+    let rule = size(size_of::<VerdictRule>()) + 1 + size(size_of::<ItemRule>()) + 1 + size(size_of::<FieldRule>()) + 1;
+    let change_rules = 2 * size(size_of::<FieldRule>()) + 5 + 4;
     Charter {
-        brief: bytes(held - parts - rule),
+        brief: bytes(held - parts - rule - change_rules),
         checkout: Checkout {
             repositories: Box::new([Repository { name: bytes(1), root: Token::new(1), writable: true }]),
         },
@@ -76,13 +76,39 @@ fn charter(held: u64) -> Charter {
             outlets: Box::new([Outlet { name: bytes(1) }]),
         },
         outcome: OutcomeSpec {
-            change: Some(ChangeSpec { checks: true }),
+            change: Some(ChangeSpec {
+                checks: true,
+                fields: Box::new([
+                    smith_domain_run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                    smith_domain_run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                ]),
+            }),
             verdicts: Box::new([VerdictRule {
                 name: bytes(1),
-                children: Children { min: 0, max: 1 },
-                kinds: Box::new([bytes(1)]),
-                fields: Box::new([bytes(1)]),
+                text_max: 1024,
+                fields: Box::new([]),
+                items: smith_domain_run::outcome::ItemSpec {
+                    min: 0,
+                    max: 1,
+                    kinds: {
+                        let required: Box<[Box<[u8]>]> = Box::new([bytes(1)]);
+                        let kinds: Box<[Box<[u8]>]> = Box::new([bytes(1)]);
+                        kinds
+                            .into_vec()
+                            .into_iter()
+                            .map(|kind| smith_domain_run::outcome::ItemRule {
+                                kind,
+                                fields: required
+                                    .iter()
+                                    .map(|name| smith_domain_run::outcome::FieldRule { name: name.clone(), max: 1024 })
+                                    .collect(),
+                            })
+                            .collect()
+                    },
+                },
             }]),
+            report: None,
+            failure: None,
         },
         budget: BUDGET,
         llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1 },
@@ -178,7 +204,15 @@ fn fill(limits: Limits) {
         assert_eq!(step(yielded), [Asked::Other], "the sub-agent is closed");
         let ended = Event::Ended { conversation: child, end: End::Closed, spend };
         assert_eq!(step(ended), [Asked::Other], "its call returns its answer");
-        let change = Change { title: bytes(1), body: bytes(limits.outcome_bytes - 1) };
+        let change = Change {
+            fields: Box::new([
+                smith_domain_run::outcome::Field { name: b"title".as_slice().into(), value: bytes(1) },
+                smith_domain_run::outcome::Field {
+                    name: b"body".as_slice().into(),
+                    value: bytes(limits.outcome_bytes - 2 * size(size_of::<Field>()) - 5 - 4 - 1),
+                },
+            ]),
+        };
         let ask = Ask::Finish { outcome: Declared::Change(change) };
         let call = Token::new(u64::from(run) + 1_000_000);
         let finish = Event::Delegated { conversation, call, ask, deadline: expiry };

@@ -28,7 +28,6 @@
 use core::mem::size_of;
 
 use skein_lib::{List, Map, Token};
-use smith_domain_run::outcome::{Change, Child, Declared, Field, Verdict};
 use smith_domain_run::{self as run, Ask};
 use smith_domain_session::{self as session, llm as sllm};
 
@@ -259,19 +258,7 @@ fn per(bytes: u64, size: usize) -> u32 {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn ask_cost(ask: &Ask) -> Option<u64> {
     let payload = match ask {
-        Ask::Finish { outcome: Declared::Change(Change { title, body }) } => len(title)?.checked_add(len(body)?)?,
-        Ask::Finish { outcome: Declared::Verdict(Verdict { name, body, children }) } => {
-            let child = size(size_of::<Child>())?;
-            let field = size(size_of::<Field>())?;
-            let mut cost = len(name)?.checked_add(len(body)?)?;
-            for Child { kind, fields } in children {
-                cost = cost.checked_add(child)?.checked_add(len(kind)?)?;
-                for Field { name, value } in fields {
-                    cost = cost.checked_add(field)?.checked_add(len(name)?)?.checked_add(len(value)?)?;
-                }
-            }
-            cost
-        }
+        Ask::Finish { outcome } => run::outcome::owned_bytes(outcome)?,
         Ask::SubAgent { brief, families: _, llm, share: _ } => {
             let llm = match llm {
                 Some(llm) => len(llm)?,
@@ -317,18 +304,21 @@ fn returned_cost(returned: &run::Returned) -> Option<u64> {
             let mut cost = problem.checked_mul(size(problems.listed.len())?)?;
             for listed in &problems.listed {
                 let field = match listed {
-                    run::outcome::Problem::MissingField { child: _, field }
-                    | run::outcome::Problem::EmptyField { child: _, field }
-                    | run::outcome::Problem::RepeatedField { child: _, field } => len(field)?,
+                    run::outcome::Problem::MissingField { item: _, field }
+                    | run::outcome::Problem::EmptyField { item: _, field }
+                    | run::outcome::Problem::RepeatedField { item: _, field }
+                    | run::outcome::Problem::FieldTooLarge { item: _, field, max: _ } => len(field)?,
                     run::outcome::Problem::TooLarge { .. }
                     | run::outcome::Problem::ChangeNotAllowed
                     | run::outcome::Problem::VerdictNotAllowed
                     | run::outcome::Problem::UnknownVerdict
-                    | run::outcome::Problem::TooFewChildren { .. }
-                    | run::outcome::Problem::TooManyChildren { .. }
+                    | run::outcome::Problem::TooFewItems { .. }
+                    | run::outcome::Problem::TooManyItems { .. }
                     | run::outcome::Problem::KindNotAllowed { .. }
-                    | run::outcome::Problem::EmptyTitle
-                    | run::outcome::Problem::EmptyBody => 0,
+                    | run::outcome::Problem::ReportNotAllowed
+                    | run::outcome::Problem::FailureNotAllowed
+                    | run::outcome::Problem::TextTooShort { .. }
+                    | run::outcome::Problem::TextTooLarge { .. } => 0,
                 };
                 cost = cost.checked_add(field)?;
             }

@@ -155,9 +155,9 @@ pub(crate) fn checks(found: &mut Found, step: Step, executable: bool) {
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn wants_checks(charter: &Charter, index: u32) -> bool {
-    match charter.outcome.change {
-        Some(ChangeSpec { checks: true }) => repository(charter, index).writable,
-        Some(ChangeSpec { checks: false }) | None => false,
+    match &charter.outcome.change {
+        Some(ChangeSpec { checks: true, fields: _ }) => repository(charter, index).writable,
+        Some(ChangeSpec { checks: false, fields: _ }) | None => false,
     }
 }
 

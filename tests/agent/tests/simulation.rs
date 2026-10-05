@@ -54,7 +54,7 @@ fn a_review_retries_the_verdict_its_charter_rejected() {
         panic!("a review answers its verdict")
     };
     assert_eq!(&*verdict.name, b"request-changes");
-    assert_eq!(verdict.children.len(), 1);
+    assert_eq!(verdict.items.len(), 1);
     assert!(world.checked().is_empty() && world.pushes().is_empty());
     assert_eq!(
         count(&world, |fact| matches!(fact, run::facts::Fact::Returned { result: run::facts::Return::Rejected, .. })),
@@ -72,10 +72,12 @@ fn a_writable_review_still_lands_only_its_verdict() {
 #[test]
 fn a_report_answers_the_host_without_checks_or_pushes() {
     let world = settled(&Settings { job: Job::Reporting, writable: false, ..Settings::calm(10) });
-    let Answer::Accepted { outcome: Declared::Verdict(verdict), .. } = world.answer() else {
-        panic!("a report answers a verdict")
+    let Answer::Accepted { outcome: Declared::Report(report), .. } = world.answer() else {
+        panic!("a real report answers its typed host contract")
     };
-    assert_eq!(&*verdict.name, b"report");
+    assert_eq!(&*report.text, b"The answer is 42, and the checks want 43.");
+    assert_eq!(&*report.fields[0].name, b"source");
+    assert_eq!(&*report.fields[0].value, b"README.md");
     assert!(world.pushes().is_empty() && world.checked().is_empty());
 }
 
@@ -227,20 +229,39 @@ fn a_world_replays_its_boundaries_and_answer_from_its_seed() {
 
 #[test]
 fn dropping_facts_changes_no_agent_decision_or_host_boundary() {
-    let kept = settled(&Settings::calm(44));
-    let calm = Settings::calm(44);
-    let limits = smith_domain::Limits {
-        run: run::Limits { facts: 0, ..calm.limits.run },
-        session: smith_domain::session::Limits {
-            facts: 0,
-            tools: smith_domain::tools::Limits { facts: 0, ..calm.limits.session.tools },
-            ..calm.limits.session
-        },
-        ..calm.limits
+    for job in [Job::Coding, Job::Review, Job::Reporting, Job::Failing] {
+        let calm = Settings { job, ..Settings::calm(44) };
+        let kept = settled(&calm);
+        let limits = smith_domain::Limits {
+            run: run::Limits { facts: 0, ..calm.limits.run },
+            session: smith_domain::session::Limits {
+                facts: 0,
+                tools: smith_domain::tools::Limits { facts: 0, ..calm.limits.session.tools },
+                ..calm.limits.session
+            },
+            ..calm.limits
+        };
+        let silent = settled(&Settings { limits, drain_facts: false, ..calm });
+        assert_eq!(silent.answer(), kept.answer());
+        assert_eq!(silent.trace(), kept.trace());
+        assert_eq!(silent.landed(), kept.landed());
+        assert!(silent.facts().is_empty() && silent.lost() > 0);
+    }
+}
+
+#[test]
+fn a_declared_failure_corrects_its_contract_and_is_an_accepted_result() {
+    let world = settled(&Settings { job: Job::Failing, writable: false, ..Settings::calm(19) });
+    let Answer::Accepted { outcome: Declared::Failure(failure), .. } = world.answer() else {
+        panic!("a declared inability is a result, not a runtime failure")
     };
-    let silent = settled(&Settings { limits, drain_facts: false, ..calm });
-    assert_eq!(silent.answer(), kept.answer());
-    assert_eq!(silent.trace(), kept.trace());
-    assert_eq!(silent.landed(), kept.landed());
-    assert!(silent.facts().is_empty() && silent.lost() > 0);
+    assert_eq!(&*failure.reason, b"The host has not supplied the needed access.");
+    assert_eq!(&*failure.fields[0].name, b"cause");
+    assert_eq!(&*failure.fields[0].value, b"missing-authority");
+    assert_eq!(count(&world, |fact| matches!(fact, run::facts::Fact::Rejected { .. })), 1);
+    assert!(world.pushes().is_empty() && world.checked().is_empty());
+    assert_replays(19, 20, |seed| {
+        let world = settled(&Settings { job: Job::Failing, ..Settings::calm(seed) });
+        (format!("{:?}", world.answer()), world.trace().to_vec())
+    });
 }

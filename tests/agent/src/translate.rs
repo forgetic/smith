@@ -161,17 +161,36 @@ fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent:
 }
 
 fn finish(arguments: &[u8]) -> Option<run::outcome::Declared> {
-    use run::outcome::{Change, Child, Declared, Field, Verdict};
+    use run::outcome::{Change, Declared, DeclaredFailure, Field, Item, Report, Verdict};
     if !arguments.starts_with(b"{") || !arguments.ends_with(b"}") {
         return None;
     }
+    if let Some(text) = field(arguments, b"report") {
+        let fields: Box<[Field]> = match field(arguments, b"source") {
+            Some(value) => Box::new([Field { name: b"source".as_slice().into(), value }]),
+            None => Box::new([]),
+        };
+        return Some(Declared::Report(Report { text, fields }));
+    }
+    if let Some(reason) = field(arguments, b"failure") {
+        let fields: Box<[Field]> = match field(arguments, b"cause") {
+            Some(value) => Box::new([Field { name: b"cause".as_slice().into(), value }]),
+            None => Box::new([]),
+        };
+        return Some(Declared::Failure(DeclaredFailure { reason, fields }));
+    }
     let body = field(arguments, b"body")?;
     if let Some(title) = field(arguments, b"title") {
-        return Some(Declared::Change(Change { title, body }));
+        return Some(Declared::Change(Change {
+            fields: Box::new([
+                smith_domain::run::outcome::Field { name: b"title".as_slice().into(), value: title },
+                smith_domain::run::outcome::Field { name: b"body".as_slice().into(), value: body },
+            ]),
+        }));
     }
     let name = field(arguments, b"verdict")?;
-    let children: Box<[Child]> = if arguments.windows(10).any(|part| part == b"\"children\"") {
-        let child = Child {
+    let children: Box<[Item]> = if arguments.windows(10).any(|part| part == b"\"children\"") {
+        let child = Item {
             kind: field(arguments, b"kind")?,
             fields: Box::new([
                 Field { name: b"path".as_slice().into(), value: field(arguments, b"path")? },
@@ -182,7 +201,7 @@ fn finish(arguments: &[u8]) -> Option<run::outcome::Declared> {
     } else {
         Box::new([])
     };
-    Some(Declared::Verdict(Verdict { name, body, children }))
+    Some(Declared::Verdict(Verdict { name, text: body, items: children, fields: Box::new([]) }))
 }
 
 /// The copied scripts use unescaped string fields. This recognizes that finite

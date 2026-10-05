@@ -40,7 +40,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use skein_lib::{Duration, Rng, Time, Token};
 use smith_domain_run::charter::Families;
-use smith_domain_run::outcome::{Change, Child, Declared, Field, Verdict};
+use smith_domain_run::outcome::{Change, Declared, DeclaredFailure, Field, Item, Report, Verdict};
 use smith_domain_run::{Ask, Budget, End, Event, Exhausted, Fault, Opening, Returned, Spend, Stop};
 
 use skein_world::domain::Span;
@@ -111,6 +111,14 @@ pub struct Script {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub changes: u32,
+    /// Chance per mille of a report form; zero preserves the earlier fixture's random draws.
+    ///
+    /// Scripted-world contract: domain/run.md, sections 7.1 and 13; testing-strategy.md, section 2.2.
+    pub reports: u32,
+    /// Chance per mille of a declared failure after report selection; zero preserves earlier random draws.
+    ///
+    /// Scripted-world contract: domain/run.md, sections 7.1 and 13; testing-strategy.md, section 2.2.
+    pub failures: u32,
     /// Chance per mille that a generated finish meets the charter.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -674,17 +682,45 @@ impl Partner {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn outcome(&mut self) -> Declared {
+        if self.script.reports > 0 && self.rng.chance(self.script.reports) {
+            let good = self.rng.chance(self.script.good);
+            return Declared::Report(Report {
+                text: Box::new([]),
+                fields: Box::new([Field {
+                    name: b"source".as_slice().into(),
+                    value: if good { b"README.md".as_slice().into() } else { Box::new([]) },
+                }]),
+            });
+        }
+        if self.script.failures > 0 && self.rng.chance(self.script.failures) {
+            let good = self.rng.chance(self.script.good);
+            return Declared::Failure(DeclaredFailure {
+                reason: if good { b"Required access is unavailable.".as_slice().into() } else { Box::new([]) },
+                fields: Box::new([Field {
+                    name: b"cause".as_slice().into(),
+                    value: b"missing-access".as_slice().into(),
+                }]),
+            });
+        }
         let change = self.rng.chance(self.script.changes);
         let good = self.rng.chance(self.script.good);
         if change {
             let title = if good { b"Fix the parser"[..].into() } else { Box::default() };
-            return Declared::Change(Change { title, body: b"It accepts tabs now."[..].into() });
+            return Declared::Change(Change {
+                fields: Box::new([
+                    smith_domain_run::outcome::Field { name: b"title".as_slice().into(), value: title },
+                    smith_domain_run::outcome::Field {
+                        name: b"body".as_slice().into(),
+                        value: b"It accepts tabs now."[..].into(),
+                    },
+                ]),
+            });
         }
-        let comment = |kind: &[u8], fields: &[&[u8]]| Child {
+        let comment = |kind: &[u8], fields: &[&[u8]]| Item {
             kind: kind.into(),
             fields: fields.iter().map(|name| Field { name: (*name).into(), value: b"...".as_slice().into() }).collect(),
         };
-        let (name, children): (&[u8], Box<[Child]>) = match (good, self.rng.below(3)) {
+        let (name, children): (&[u8], Box<[Item]>) = match (good, self.rng.below(3)) {
             (true, 0) => (b"approve", Box::new([])),
             (true, _) => {
                 let count = self.rng.between(1, 3);
@@ -694,7 +730,12 @@ impl Partner {
             (false, 1) => (b"request-changes", Box::new([])),
             (false, _) => (b"request-changes", Box::new([comment(b"praise", &[b"path"])])),
         };
-        Declared::Verdict(Verdict { name: name.into(), body: b"See the comments."[..].into(), children })
+        Declared::Verdict(Verdict {
+            name: name.into(),
+            text: b"See the comments."[..].into(),
+            items: children,
+            fields: Box::new([]),
+        })
     }
 
     /// The LLM goes on: another turn, unless the share leaves no room for one.

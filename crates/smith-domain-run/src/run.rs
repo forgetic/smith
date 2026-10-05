@@ -904,7 +904,7 @@ fn finish(
     let conversation = conversations.get(main).expect("main lives while its run works");
     assert!(conversation.calls == 0, "a finish is a write, which a conversation runs alone");
     let max = env.limits.outcome_bytes;
-    let judged = match outcome::declared_cost(&declared) {
+    let judged = match outcome::owned_bytes(&declared) {
         Some(cost) if cost <= max => outcome::judge(&run.charter.outcome, &declared),
         Some(_) | None => Err(outcome::too_large(max)),
     };
@@ -919,9 +919,9 @@ fn finish(
         };
     }
     match declared {
-        Declared::Verdict(verdict) => {
+        completed @ (Declared::Verdict(_) | Declared::Report(_) | Declared::Failure(_)) => {
             out.push(Request::Return { call, result: Returned::Accepted });
-            wind_down(conversations, reply_to, main, Ending::Accepted(Declared::Verdict(verdict)), out)
+            wind_down(conversations, reply_to, main, Ending::Accepted(completed), out)
         }
         Declared::Change(change) => {
             if calls.is_full() {

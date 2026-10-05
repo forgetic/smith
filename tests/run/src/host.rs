@@ -46,7 +46,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use skein_lib::{Duration, ReplyTo, Rng, Time, Token};
 use smith_domain_run::charter::{Checkout, Endpoint, Grants, Llm, Outlet, Repository, Tools};
-use smith_domain_run::outcome::{ChangeSpec, Children, OutcomeSpec, VerdictRule};
+use smith_domain_run::outcome::{ChangeSpec, FieldRule, OutcomeSpec, TextSpec, VerdictRule};
 use smith_domain_run::{Budget, Charter, Event, Push};
 
 use skein_world::domain::Span;
@@ -133,6 +133,14 @@ pub struct Script {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub changes: u32,
+    /// Chance per mille of a report form; zero preserves the earlier fixture's random draws.
+    ///
+    /// Scripted-world contract: domain/run.md, sections 7.1 and 13; testing-strategy.md, section 2.2.
+    pub reports: u32,
+    /// Chance per mille of a declared failure after report selection; zero preserves earlier random draws.
+    ///
+    /// Scripted-world contract: domain/run.md, sections 7.1 and 13; testing-strategy.md, section 2.2.
+    pub failures: u32,
     /// Chance per mille that the generated charter requires checks.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -509,7 +517,9 @@ impl Host {
         let forge = self.rng.chance(500);
         let outlets = if self.rng.chance(500) { vec![Outlet { name: Box::from(&b"comment"[..]) }] } else { Vec::new() };
         let verdicts = if self.rng.chance(script.verdicts) { verdicts() } else { Vec::new() };
-        let change = self.rng.chance(script.changes) || verdicts.is_empty();
+        let report = script.reports > 0 && self.rng.chance(script.reports);
+        let failure = script.failures > 0 && self.rng.chance(script.failures);
+        let change = self.rng.chance(script.changes) || (verdicts.is_empty() && !report && !failure);
         let checks = change && self.rng.chance(script.checks);
         let tokens = |rng: &mut Rng| rng.between(script.tokens_min, script.tokens_max);
         let budget = Budget {
@@ -532,7 +542,26 @@ impl Host {
             brief,
             checkout: Checkout { repositories: repositories.into() },
             grants: Grants { tools, forge, agents, outlets: outlets.into() },
-            outcome: OutcomeSpec { change: change.then_some(ChangeSpec { checks }), verdicts: verdicts.into() },
+            outcome: OutcomeSpec {
+                change: change.then_some(ChangeSpec {
+                    checks,
+                    fields: Box::new([
+                        smith_domain_run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                        smith_domain_run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                    ]),
+                }),
+                verdicts: verdicts.into(),
+                report: report.then_some(TextSpec {
+                    min: 0,
+                    max: 1024,
+                    fields: Box::new([FieldRule { name: b"source".as_slice().into(), max: 128 }]),
+                }),
+                failure: failure.then_some(TextSpec {
+                    min: 1,
+                    max: 1024,
+                    fields: Box::new([FieldRule { name: b"cause".as_slice().into(), max: 128 }]),
+                }),
+            },
             budget,
             llm: llm(b"fake-1"),
             models: Box::new([llm(b"fake-2"), llm(b"fake-3")]),
@@ -543,15 +572,33 @@ impl Host {
 fn verdicts() -> Vec<VerdictRule> {
     let approve = VerdictRule {
         name: Box::from(&b"approve"[..]),
-        children: Children { min: 0, max: 0 },
-        kinds: Box::new([]),
+        text_max: 1024,
         fields: Box::new([]),
+        items: smith_domain_run::outcome::ItemSpec { min: 0, max: 0, kinds: Box::new([]) },
     };
     let request = VerdictRule {
         name: Box::from(&b"request-changes"[..]),
-        children: Children { min: 1, max: 8 },
-        kinds: Box::new([Box::from(&b"blocking"[..]), Box::from(&b"nit"[..])]),
-        fields: Box::new([Box::from(&b"path"[..]), Box::from(&b"body"[..])]),
+        text_max: 1024,
+        fields: Box::new([]),
+        items: smith_domain_run::outcome::ItemSpec {
+            min: 1,
+            max: 8,
+            kinds: {
+                let required: Box<[Box<[u8]>]> = Box::new([Box::from(&b"path"[..]), Box::from(&b"body"[..])]);
+                let kinds: Box<[Box<[u8]>]> = Box::new([Box::from(&b"blocking"[..]), Box::from(&b"nit"[..])]);
+                kinds
+                    .into_vec()
+                    .into_iter()
+                    .map(|kind| smith_domain_run::outcome::ItemRule {
+                        kind,
+                        fields: required
+                            .iter()
+                            .map(|name| smith_domain_run::outcome::FieldRule { name: name.clone(), max: 1024 })
+                            .collect(),
+                    })
+                    .collect()
+            },
+        },
     };
     vec![approve, request]
 }

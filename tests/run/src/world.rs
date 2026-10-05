@@ -158,6 +158,8 @@ impl Settings {
                 max_tokens: 4096,
                 writable: 500,
                 changes: 700,
+                reports: 0,
+                failures: 0,
                 checks: 800,
                 verdicts: 700,
                 agents: 0,
@@ -180,6 +182,8 @@ impl Settings {
                 shares: 0,
                 parallel: 1,
                 changes: 500,
+                reports: 0,
+                failures: 0,
                 good: 1000,
                 odd_stops: 0,
                 settle: Span::millis(1, 500),
@@ -1194,7 +1198,8 @@ impl World {
             match delivery {
                 Delivery::Start { reply_to, worker, charter } => {
                     self.checkout(&charter.checkout.repositories);
-                    let wants = matches!(charter.outcome.change, Some(run::outcome::ChangeSpec { checks: true }));
+                    let wants =
+                        matches!(&charter.outcome.change, Some(run::outcome::ChangeSpec { checks: true, fields: _ }));
                     let mut checks = BTreeSet::new();
                     for repository in &charter.checkout.repositories {
                         let executable = (repository.root, b".temper/pre-pr".to_vec());

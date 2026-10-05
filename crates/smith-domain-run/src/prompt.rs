@@ -16,7 +16,7 @@ use skein_lib::Writer;
 
 use crate::boundary::Stop;
 use crate::charter::{Charter, Families, Llm, Repository, Tools};
-use crate::outcome::{ChangeSpec, Children, OutcomeSpec, VerdictRule};
+use crate::outcome::{FieldRule, OutcomeSpec, TextSpec, VerdictRule};
 use crate::prepare::{self, Found, Guide};
 
 /// The first user message of a main conversation.
@@ -179,25 +179,52 @@ fn render_checkout(text: &mut Text, repositories: &[Repository], checks: &[u32])
 
 fn render_finishing(text: &mut Text, spec: &OutcomeSpec, checks: bool) {
     text.put(b"## Finishing\n\n");
-    text.put(
-        b"When the work is done, call `finish` with its outcome. If the outcome does not fit what this run allows, ",
-    );
-    text.put(b"`finish` says what is wrong, and you can fix it and call `finish` again. Stopping without calling ");
-    text.put(b"`finish` does not finish the run.\n");
-    if let Some(ChangeSpec { checks: wanted }) = spec.change {
-        text.put(b"\nYou can finish with a change: what you changed in the checkout, with a title and a body for ");
-        text.put(b"its pull request.");
-        if wanted && checks {
-            text.put(b" First the checks of the repositories that have them run; if any fail, `finish` gives you ");
-            text.put(b"their output, and you can carry on.");
+    text.put(b"When the work is done, call `finish` with its result. A result outside the host's contract returns ");
+    text.put(b"typed feedback; fix it and call `finish` again. Stopping without `finish` does not finish the run.\n");
+    if let Some(rule) = &spec.change {
+        text.put(b"\nChange: the workspace changes, with these host-required result fields:\n");
+        render_fields(text, &rule.fields);
+        if rule.checks && checks {
+            text.put(b"Checks run before the host receives the change. A failed check returns its output so you can fix it.\n");
         }
-        text.put(b" Then the change is pushed; if its branch has moved since the run started, `finish` says so.\n");
+        text.put(b"The host pushes the checked state. A moved target ends this run; other refusals are feedback.\n");
+    }
+    if let Some(rule) = &spec.report {
+        render_text_rule(text, b"Report", rule);
+    }
+    if let Some(rule) = &spec.failure {
+        render_text_rule(text, b"Declared failure", rule);
     }
     if !spec.verdicts.is_empty() {
-        text.put(b"\nYou can finish with one of these verdicts:\n\n");
+        text.put(b"\nVerdict: one exact host label from this closed list:\n");
         for rule in &spec.verdicts {
             render_verdict(text, rule);
         }
+    }
+    text.put(b"Extra fields are allowed within the aggregate result byte limit; no field name may repeat.\n");
+}
+
+fn render_text_rule(text: &mut Text, form: &[u8], rule: &TextSpec) {
+    text.put(b"\n");
+    text.put(form);
+    text.put(b": text from ");
+    text.put_decimal(rule.min);
+    text.put(b" through ");
+    text.put_decimal(rule.max);
+    text.put(b" bytes, with these host-required fields:\n");
+    render_fields(text, &rule.fields);
+}
+
+fn render_fields(text: &mut Text, fields: &[FieldRule]) {
+    if fields.is_empty() {
+        text.put(b"(none)\n");
+    }
+    for field in fields {
+        text.put(b"- `");
+        text.put(&field.name);
+        text.put(b"`: nonempty, at most ");
+        text.put_decimal(field.max);
+        text.put(b" bytes\n");
     }
 }
 
@@ -212,48 +239,20 @@ fn name(repositories: &[Repository], index: u32) -> &Repository {
 fn render_verdict(text: &mut Text, rule: &VerdictRule) {
     text.put(b"- `");
     text.put(&rule.name);
-    text.put(b"`, with ");
-    let Children { min, max } = rule.children;
-    if max == 0 {
-        text.put(b"no children\n");
-        return;
-    }
-    if min == max {
-        text.put(b"exactly ");
-        text.put_decimal(min);
-    } else if min == 0 {
-        text.put(b"up to ");
-        text.put_decimal(max);
-    } else {
-        text.put_decimal(min);
-        text.put(b" to ");
-        text.put_decimal(max);
-    }
-    text.put(if max == 1 { b" child, " } else { b" children, " });
-    text.put(b"each of kind ");
-    render_labels(text, &rule.kinds, b" or ");
-    if !rule.fields.is_empty() {
-        text.put(if rule.fields.len() == 1 { b", each with the field " } else { b", each with the fields " });
-        render_labels(text, &rule.fields, b" and ");
-    }
-    text.put(b"\n");
-}
-
-/// Labels in backticks, as a list in prose: `a`, `b` and `c`.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-fn render_labels(text: &mut Text, labels: &[Box<[u8]>], last: &[u8]) {
-    let mut rest = labels.len();
-    for label in labels {
+    text.put(b"`: text at most ");
+    text.put_decimal(rule.text_max);
+    text.put(b" bytes; required result fields:\n");
+    render_fields(text, &rule.fields);
+    text.put(b"Items: ");
+    text.put_decimal(rule.items.min);
+    text.put(b" to ");
+    text.put_decimal(rule.items.max);
+    text.put(b"; allowed kinds and their required fields:\n");
+    for kind in &rule.items.kinds {
         text.put(b"`");
-        text.put(label);
-        text.put(b"`");
-        rest = rest.saturating_sub(1);
-        match rest {
-            0 => {}
-            1 => text.put(last),
-            _ => text.put(b", "),
-        }
+        text.put(&kind.kind);
+        text.put(b"`:\n");
+        render_fields(text, &kind.fields);
     }
 }
 
@@ -331,79 +330,100 @@ impl Text {
 
 #[cfg(test)]
 mod tests {
-    use alloc::boxed::Box;
-
-    use skein_lib::Token;
-
-    use super::{Text, child, nudge, system};
+    use super::{child, nudge, system};
     use crate::boundary::Stop;
     use crate::charter::{Charter, Checkout, Families, Grants, Repository, Tools};
-    use crate::outcome::{ChangeSpec, Children, OutcomeSpec, VerdictRule};
+    use crate::outcome::{ChangeSpec, FieldRule, ItemRule, ItemSpec, OutcomeSpec, TextSpec, VerdictRule};
     use crate::prepare::{Found, Guide};
-    use crate::tests::{bytes, charter, rule};
+    use crate::tests::{bytes, charter};
+    use alloc::boxed::Box;
+    use skein_lib::Token;
 
-    /// A rendered text, to compare and print.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    #[expect(clippy::disallowed_methods, reason = "a test reads the text it checks")]
+    #[expect(clippy::disallowed_methods, reason = "a test reads the exact fixture text it checks")]
     fn text(bytes: &[u8]) -> &str {
-        core::str::from_utf8(bytes).expect("the test charters are text")
+        core::str::from_utf8(bytes).expect("fixture text")
     }
 
-    /// What a run of the test charter found: a guide for `temper`, cut, and
-    /// checks in `docs`.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     fn found() -> Found {
         let mut found = Found::with_capacity(2);
-        let guide = Guide { repository: 0, text: bytes(b"Run `make test` before you finish."), whole: false };
-        found.guides.push(guide).expect("room");
+        found
+            .guides
+            .push(Guide { repository: 0, text: bytes(b"Run `make test` before you finish."), whole: false })
+            .expect("room");
         found.checks.push(1).expect("room");
         found
     }
 
+    fn fields(name: &[u8], max: u32) -> Box<[FieldRule]> {
+        Box::new([FieldRule { name: bytes(name), max }])
+    }
+
     #[test]
-    fn the_system_text_is_the_brief_then_the_checkouts_guides_then_the_runs_mechanics() {
-        let mut charter = charter();
-        charter.checkout.repositories = Box::new([
-            charter.checkout.repositories[0].clone(),
-            Repository { name: bytes(b"docs"), root: Token::new(901), writable: true },
-        ]);
-        charter.outcome.change = Some(ChangeSpec { checks: true });
-        let expected: &[u8] = b"Review the change.
+    fn host_names_and_individual_caps_are_rendered_without_builtin_change_fields() {
+        let charter = Charter {
+            outcome: OutcomeSpec {
+                change: Some(ChangeSpec { checks: true, fields: fields(b"ticket", 17) }),
+                report: Some(TextSpec { min: 0, max: 32, fields: fields(b"source", 9) }),
+                failure: Some(TextSpec { min: 0, max: 24, fields: Box::new([]) }),
+                verdicts: Box::new([VerdictRule {
+                    name: bytes(b"triaged"),
+                    text_max: 11,
+                    fields: fields(b"owner", 6),
+                    items: ItemSpec {
+                        min: 1,
+                        max: 2,
+                        kinds: Box::new([
+                            ItemRule { kind: bytes(b"risk"), fields: fields(b"severity", 4) },
+                            ItemRule { kind: bytes(b"lead"), fields: fields(b"url", 19) },
+                        ]),
+                    },
+                }]),
+            },
+            ..charter()
+        };
+        let rendered = system(&charter, &found());
+        let rendered = text(&rendered);
+        let brief = rendered.find("Review the change.").expect("brief");
+        let guide = rendered.find("## AGENTS.md").expect("guide");
+        let finish = rendered.find("## Finishing").expect("finish");
+        assert!(brief < guide && guide < finish, "brief, guides then mechanics");
+        for fragment in [
+            "`ticket`: nonempty, at most 17 bytes",
+            "Report: text from 0 through 32 bytes",
+            "`source`: nonempty, at most 9 bytes",
+            "Declared failure: text from 0 through 24 bytes",
+            "`triaged`: text at most 11 bytes",
+            "`owner`: nonempty, at most 6 bytes",
+            "Items: 1 to 2",
+            "`risk`:\n- `severity`",
+            "`lead`:\n- `url`",
+        ] {
+            assert!(rendered.contains(fragment), "missing {fragment}: {rendered}");
+        }
+        assert!(
+            !rendered.contains("pull request") && !rendered.contains("`title`") && !rendered.contains("`body`"),
+            "host names only"
+        );
+    }
 
-## AGENTS.md in `temper`
-
-Run `make test` before you finish.
-
-(The file goes on: read the rest with your tools.)
-
-## Tools
-
-You can read, list and search the files in the checkout.
-You can run shell commands.
-
-## Checkout
-
-- `temper`, which you may only read
-- `docs`, which you may change, with checks (`.temper/pre-pr`)
-
-## Finishing
-
-When the work is done, call `finish` with its outcome. If the outcome does not fit what this run allows, \
-`finish` says what is wrong, and you can fix it and call `finish` again. Stopping without calling `finish` \
-does not finish the run.
-
-You can finish with a change: what you changed in the checkout, with a title and a body for its pull request. \
-First the checks of the repositories that have them run; if any fail, `finish` gives you their output, and you \
-can carry on. Then the change is pushed; if its branch has moved since the run started, `finish` says so.
-
-You can finish with one of these verdicts:
-
-- `approve`, with no children
-- `request`, with 1 to 8 children, each of kind `blocking` or `nit`, each with the fields `path` and `body`
-";
-        assert_eq!(text(&system(&charter, &found())), text(expected));
+    #[test]
+    fn absent_workspace_and_empty_field_rules_are_said_plainly() {
+        let charter = Charter {
+            checkout: Checkout { repositories: Box::new([]) },
+            grants: Grants { tools: Tools { inspect: false, modify: false, shell: false }, ..charter().grants },
+            outcome: OutcomeSpec {
+                change: None,
+                verdicts: Box::new([]),
+                report: Some(TextSpec { min: 0, max: 16, fields: Box::new([]) }),
+                failure: None,
+            },
+            ..charter()
+        };
+        let rendered = system(&charter, &Found::with_capacity(0));
+        let rendered = text(&rendered);
+        assert!(rendered.contains("There is no checkout."));
+        assert!(rendered.contains("Report: text from 0 through 16 bytes, with these host-required fields:\n(none)"));
+        assert!(!rendered.contains("Change:") && !rendered.contains("Verdict:"));
     }
 
     #[test]
@@ -435,74 +455,6 @@ you, and you are done.
 ";
         let found = Found::with_capacity(1);
         assert_eq!(text(&child(&charter, &found, b"Find where tabs are parsed.", families)), text(expected));
-    }
-
-    #[test]
-    fn what_a_charter_leaves_out_is_said_plainly() {
-        let charter = Charter {
-            brief: bytes(b"Write the release notes.\n"),
-            checkout: Checkout { repositories: Box::new([]) },
-            grants: Grants { tools: Tools { inspect: false, modify: false, shell: false }, ..charter().grants },
-            outcome: OutcomeSpec { change: Some(ChangeSpec { checks: true }), verdicts: Box::new([]) },
-            ..charter()
-        };
-        let expected: &[u8] = b"Write the release notes.
-
-## Tools
-
-You have no tools that act on the checkout.
-
-## Checkout
-
-There is no checkout.
-
-## Finishing
-
-When the work is done, call `finish` with its outcome. If the outcome does not fit what this run allows, \
-`finish` says what is wrong, and you can fix it and call `finish` again. Stopping without calling `finish` \
-does not finish the run.
-
-You can finish with a change: what you changed in the checkout, with a title and a body for its pull request. \
-Then the change is pushed; if its branch has moved since the run started, `finish` says so.
-";
-        assert_eq!(text(&system(&charter, &Found::with_capacity(0))), text(expected));
-    }
-
-    fn contract(min: u32, max: u32, kinds: Box<[Box<[u8]>]>, fields: Box<[Box<[u8]>]>) -> VerdictRule {
-        VerdictRule { children: Children { min, max }, kinds, fields, ..rule(b"split", 0, 0) }
-    }
-
-    #[test]
-    fn a_verdicts_contract_is_said_as_it_reads() {
-        let cases = [
-            (
-                contract(1, 1, Box::new([bytes(b"bug")]), Box::new([bytes(b"title")])),
-                "- `split`, with exactly 1 child, each of kind `bug`, each with the field `title`\n",
-            ),
-            (
-                contract(0, 3, Box::new([bytes(b"bug"), bytes(b"feature"), bytes(b"chore")]), Box::new([])),
-                "- `split`, with up to 3 children, each of kind `bug`, `feature` or `chore`\n",
-            ),
-            (
-                contract(
-                    2,
-                    2,
-                    Box::new([bytes(b"bug")]),
-                    Box::new([bytes(b"title"), bytes(b"body"), bytes(b"labels")]),
-                ),
-                "- `split`, with exactly 2 children, each of kind `bug`, each with the fields `title`, `body` and `labels`\n",
-            ),
-            (
-                contract(10, 4_000_000_000, Box::new([bytes(b"bug")]), Box::new([])),
-                "- `split`, with 10 to 4000000000 children, each of kind `bug`\n",
-            ),
-        ];
-        for (verdict, expected) in cases {
-            let spec = OutcomeSpec { change: None, verdicts: Box::new([verdict]) };
-            let text = system(&Charter { outcome: spec, ..charter() }, &Found::with_capacity(1));
-            let rendered = self::text(&text);
-            assert!(rendered.ends_with(expected), "{rendered}");
-        }
     }
 
     #[test]

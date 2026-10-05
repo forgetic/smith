@@ -430,3 +430,69 @@ fn facts_tell_what_runs_did_and_nothing_depends_on_them() {
     let (_, lost) = tight.facts();
     assert!(lost > 0, "a tight queue drops facts");
 }
+
+#[test]
+fn empty_reports_and_declared_failures_are_terminal_results_without_delivery() {
+    use smith_domain_run::outcome::Declared;
+    for failure in [false, true] {
+        let calm = Settings::calm(41);
+        let host = host::Script {
+            changes: 0,
+            verdicts: 0,
+            reports: if failure { 0 } else { 1000 },
+            failures: if failure { 1000 } else { 0 },
+            ..calm.host
+        };
+        let partner = Script {
+            finishes: 1000,
+            yields: 0,
+            changes: 0,
+            reports: if failure { 0 } else { 1000 },
+            failures: if failure { 1000 } else { 0 },
+            ..calm.partner
+        };
+        let settings = Settings { host, partner, ..calm };
+        let world = settled(&settings);
+        for answer in answers(&world) {
+            match answer {
+                Answer::Accepted { outcome: Declared::Report(report), .. } => {
+                    assert!(!failure);
+                    assert!(report.text.is_empty(), "the host's zero minimum is honored");
+                    assert_eq!(&*report.fields[0].value, b"README.md");
+                }
+                Answer::Accepted { outcome: Declared::Failure(declared), .. } => {
+                    assert!(failure);
+                    assert_eq!(&*declared.reason, b"Required access is unavailable.");
+                }
+                Answer::Accepted { outcome: Declared::Change(_) | Declared::Verdict(_), .. }
+                | Answer::Failed { .. }
+                | Answer::Refused(_) => panic!("expected a text result: {answer:?}"),
+            }
+        }
+        assert_eq!((world.stats().checks, world.stats().pushes), (0, 0));
+        assert_eq!(world.stats().partner.accepted, 4);
+        let silent = settled(&Settings { run: Limits { facts: 0, ..settings.run }, ..settings });
+        assert_eq!(silent.trace(), world.trace(), "facts never decide text-result behavior");
+        assert_eq!(answers(&silent), answers(&world));
+        assert!(silent.facts().1 > 0);
+        skein_world::domain::assert_replays(41, 42, |seed| {
+            let world = settled(&Settings { seed, ..settings });
+            (world.trace().to_vec(), (world.stats(), world.now()))
+        });
+    }
+}
+
+#[test]
+fn a_bad_failure_reason_is_feedback_and_can_be_corrected_in_the_run_world() {
+    let calm = Settings::calm(43);
+    let host = host::Script { changes: 0, verdicts: 0, failures: 1000, ..calm.host };
+    let partner = Script { finishes: 1000, yields: 0, changes: 0, failures: 1000, good: 500, ..calm.partner };
+    let world = settled(&Settings { host, partner, ..calm });
+    assert!(world.stats().partner.rejected > 0);
+    assert_eq!(world.stats().partner.accepted, 4);
+    assert_eq!((world.stats().checks, world.stats().pushes), (0, 0));
+    assert!(answers(&world).iter().all(|answer| matches!(
+        answer,
+        Answer::Accepted { outcome: smith_domain_run::outcome::Declared::Failure(_), .. }
+    )));
+}

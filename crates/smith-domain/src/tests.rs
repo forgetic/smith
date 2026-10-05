@@ -7,7 +7,7 @@ use alloc::boxed::Box;
 
 use skein_lib::{Duration, Env, List, Queue, ReplyTo, Time, Token, Wall};
 use smith_domain_run::charter::{Checkout, Endpoint, Families, Grants, Llm, Repository, Tools};
-use smith_domain_run::outcome::{Change, ChangeSpec, Children, Declared, OutcomeSpec, Verdict, VerdictRule};
+use smith_domain_run::outcome::{Change, ChangeSpec, Declared, OutcomeSpec, Verdict, VerdictRule};
 use smith_domain_run::{self as run, Ask, Charter};
 use smith_domain_session as session;
 
@@ -212,7 +212,7 @@ fn charter() -> Charter {
             repositories: Box::new([Repository { name: bytes(b"temper"), root: Token::new(900), writable: true }]),
         },
         grants: Grants { tools: TOOLS, forge: false, agents: true, outlets: Box::new([]) },
-        outcome: OutcomeSpec { change: None, verdicts: Box::new([rule(b"approve")]) },
+        outcome: OutcomeSpec { change: None, verdicts: Box::new([rule(b"approve")]), report: None, failure: None },
         budget: BUDGET,
         llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 512 },
         models: Box::new([]),
@@ -222,12 +222,22 @@ fn charter() -> Charter {
 const TOOLS: Tools = Tools { inspect: true, modify: true, shell: false };
 
 fn rule(name: &[u8]) -> VerdictRule {
-    VerdictRule { name: bytes(name), children: Children { min: 0, max: 0 }, kinds: Box::new([]), fields: Box::new([]) }
+    VerdictRule {
+        name: bytes(name),
+        text_max: 1024,
+        fields: Box::new([]),
+        items: smith_domain_run::outcome::ItemSpec { min: 0, max: 0, kinds: Box::new([]) },
+    }
 }
 
 fn verdict(name: &[u8]) -> Ask {
     Ask::Finish {
-        outcome: Declared::Verdict(Verdict { name: bytes(name), body: bytes(b"ok"), children: Box::new([]) }),
+        outcome: Declared::Verdict(Verdict {
+            name: bytes(name),
+            text: bytes(b"ok"),
+            items: Box::new([]),
+            fields: Box::new([]),
+        }),
     }
 }
 
@@ -546,9 +556,25 @@ fn an_accepted_finish_closes_main_and_the_run_answers_the_worker() {
 #[test]
 fn a_change_lands_through_the_worker_and_the_run_answers_with_it() {
     let mut h = Harness::new();
-    let outcome = OutcomeSpec { change: Some(ChangeSpec { checks: false }), verdicts: Box::new([]) };
+    let outcome = OutcomeSpec {
+        change: Some(ChangeSpec {
+            checks: false,
+            fields: Box::new([
+                smith_domain_run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                smith_domain_run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+            ]),
+        }),
+        verdicts: Box::new([]),
+        report: None,
+        failure: None,
+    };
     let (_, main, _) = h.admit(7, Charter { outcome, ..charter() });
-    let change = Change { title: bytes(b"Fix the bug"), body: bytes(b"It was in main.rs.") };
+    let change = Change {
+        fields: Box::new([
+            smith_domain_run::outcome::Field { name: b"title".as_slice().into(), value: bytes(b"Fix the bug") },
+            smith_domain_run::outcome::Field { name: b"body".as_slice().into(), value: bytes(b"It was in main.rs.") },
+        ]),
+    };
     let finish = Ask::Finish { outcome: Declared::Change(change.clone()) };
     let emitted = h.answer(main, Box::new([served(b"f1", finish)]));
     let [Request::Push { worker, owner, change: pushed }] = &*emitted else {

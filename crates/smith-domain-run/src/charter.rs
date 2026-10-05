@@ -33,7 +33,8 @@ pub struct Charter {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub grants: Grants,
-    /// What counts as done.
+    /// Host-supplied permitted result forms and their field/text/item rules;
+    /// admission refuses malformed or impossible contracts before effects.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub outcome: OutcomeSpec,

@@ -258,6 +258,19 @@ title and a body, its review's verdicts are an approval and a request
 for changes whose items are follow-up tasks. smith knows only that a
 field is required, non-empty and within its bound.
 
+The host supplies inclusive minimum and maximum byte lengths for report
+text and a declared failure reason. A zero minimum permits empty text; a
+failure contract may require a reason by choosing a positive minimum. A
+verdict text may be empty and has its own maximum. Required named fields
+remain non-empty, each within its host-declared cap. Extra fields are
+allowed, including empty extra values, but all owned names and values count
+toward the checked aggregate result-byte limit. Names may occur only once
+within each result or item. A contract must have at least one allowed form,
+unique nonempty declared names and kinds, valid ranges, and enough aggregate
+space for the smallest accepted value of every allowed form, including its
+required field and item storage. Otherwise admission refuses it before
+preparation, session or IO requests.
+
 ### 7.2 Finishing
 
 `finish` is a tool, not a convention about the last message. Its input

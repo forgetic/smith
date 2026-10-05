@@ -173,6 +173,7 @@ impl World {
         let max_out = agent::max_out(&settings.limits);
         let mut stage = Stage::new(settings.limits, max_out, max_out + 3);
         let charter = charter(&settings, root);
+        let observed_contract = charter.outcome.clone();
         stage.push(Event::Start {
             reply_to: ReplyTo::new(Token::new(1)),
             worker: Token::new(1),
@@ -192,7 +193,8 @@ impl World {
         referee.observe(
             Time::ZERO,
             Seen::Started {
-                change,
+                contract: observed_contract,
+                outcome_bytes: settings.limits.run.outcome_bytes,
                 checks: change,
                 within: settings.budget.time.saturating_add(Duration::from_secs(120)),
             },
@@ -439,7 +441,15 @@ impl World {
                 self.flights.get_mut((Family::Check, owner)).expect("the check is pending").key = Some(key);
             }
             Request::Abort { owner } => self.cancel(Family::Check, owner, Event::Aborted { owner }),
-            Request::Push { worker, owner, .. } => {
+            Request::Push { worker, owner, change } => {
+                for name in [b"title".as_slice(), b"body"] {
+                    let value = change
+                        .fields
+                        .iter()
+                        .find(|field| &*field.name == name)
+                        .expect("the scripted host requires this field");
+                    assert!(!value.value.is_empty(), "the host receives the metadata its own contract required");
+                }
                 assert_eq!(worker, Token::new(1), "the push names the scripted host's request");
                 let tree = self.code();
                 self.observe(Seen::Pushing { owner, tree: tree.clone() });
@@ -708,14 +718,24 @@ impl World {
 
 fn charter(settings: &Settings, root: u64) -> run::Charter {
     use run::charter::{Checkout as Roots, Endpoint, Grants, Llm, Repository, Tools};
-    use run::outcome::{ChangeSpec, Children, OutcomeSpec, VerdictRule};
+    use run::outcome::{ChangeSpec, FieldRule, ItemRule, ItemSpec, OutcomeSpec, TextSpec, VerdictRule};
     let change = matches!(settings.job, Job::Coding | Job::Delegating | Job::Wandering);
     let review = settings.job == Job::Review;
     let rule = VerdictRule {
-        name: if review { b"request-changes".as_slice().into() } else { b"report".as_slice().into() },
-        children: Children { min: u32::from(review), max: if review { 4 } else { 0 } },
-        kinds: if review { Box::new([b"blocking".as_slice().into()]) } else { Box::new([]) },
-        fields: if review { Box::new([b"path".as_slice().into(), b"body".as_slice().into()]) } else { Box::new([]) },
+        name: b"request-changes".as_slice().into(),
+        text_max: 1024,
+        fields: Box::new([]),
+        items: ItemSpec {
+            min: 1,
+            max: 4,
+            kinds: Box::new([ItemRule {
+                kind: b"blocking".as_slice().into(),
+                fields: Box::new([
+                    FieldRule { name: b"path".as_slice().into(), max: 1024 },
+                    FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                ]),
+            }]),
+        },
     };
     let llm = Llm { account: 0, endpoint: Endpoint(0), model: b"fake-1".as_slice().into(), max_tokens: 4096 };
     run::Charter {
@@ -734,8 +754,36 @@ fn charter(settings: &Settings, root: u64) -> run::Charter {
             outlets: Box::new([]),
         },
         outcome: OutcomeSpec {
-            change: if change { Some(ChangeSpec { checks: true }) } else { None },
-            verdicts: if change { Box::new([]) } else { Box::new([rule]) },
+            change: if change {
+                Some(ChangeSpec {
+                    checks: true,
+                    fields: Box::new([
+                        smith_domain::run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                        smith_domain::run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                    ]),
+                })
+            } else {
+                None
+            },
+            verdicts: if review { Box::new([rule]) } else { Box::new([]) },
+            report: if !change && !review && settings.job != Job::Failing {
+                Some(TextSpec {
+                    min: 0,
+                    max: 1024,
+                    fields: Box::new([FieldRule { name: b"source".as_slice().into(), max: 128 }]),
+                })
+            } else {
+                None
+            },
+            failure: if settings.job == Job::Failing {
+                Some(TextSpec {
+                    min: 1,
+                    max: 1024,
+                    fields: Box::new([FieldRule { name: b"cause".as_slice().into(), max: 128 }]),
+                })
+            } else {
+                None
+            },
         },
         budget: settings.budget,
         models: Box::new([Llm { model: b"fake-2".as_slice().into(), ..llm.clone() }]),
@@ -744,31 +792,16 @@ fn charter(settings: &Settings, root: u64) -> run::Charter {
 }
 
 fn copy_answer(answer: &run::Answer) -> run::Answer {
-    use run::outcome::{Change, Child, Declared, Field, Verdict};
+    use run::outcome::Declared;
     match answer {
         run::Answer::Refused(refusal) => run::Answer::Refused(*refusal),
         run::Answer::Failed { failure, spent } => run::Answer::Failed { failure: *failure, spent: *spent },
         run::Answer::Accepted { outcome, spent } => {
             let outcome = match outcome {
-                Declared::Change(change) => {
-                    Declared::Change(Change { title: change.title.clone(), body: change.body.clone() })
-                }
-                Declared::Verdict(verdict) => Declared::Verdict(Verdict {
-                    name: verdict.name.clone(),
-                    body: verdict.body.clone(),
-                    children: verdict
-                        .children
-                        .iter()
-                        .map(|child| Child {
-                            kind: child.kind.clone(),
-                            fields: child
-                                .fields
-                                .iter()
-                                .map(|field| Field { name: field.name.clone(), value: field.value.clone() })
-                                .collect(),
-                        })
-                        .collect(),
-                }),
+                Declared::Change(change) => Declared::Change(change.clone()),
+                Declared::Verdict(verdict) => Declared::Verdict(verdict.clone()),
+                Declared::Report(report) => Declared::Report(report.clone()),
+                Declared::Failure(failure) => Declared::Failure(failure.clone()),
             };
             run::Answer::Accepted { outcome, spent: *spent }
         }

@@ -21,8 +21,9 @@
 
 //!
 //! Copy baseline: temper `25ac2ad`, migration 05s2 (domain/run.md, section 14).
-//! The temper-specific charter, push, verdict and token-budget vocabulary
-//! is retained until 05s4; this copy does not yet implement the generic design.
+//! Generic result contracts implement domain/run.md, section 7 in 05s4.
+//! The copied charter, Push delivery and split token-budget vocabulary remain
+//! pending subsequent 05s4 increments (domain/run.md, section 14).
 
 //!
 //! The retained state is each admitted charter, conversation binding, shared

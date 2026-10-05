@@ -1,336 +1,433 @@
-//! What counts as done (domain/run.md, section 14): the outcome spec a
-//! charter carries, the outcome an LLM declares when it finishes, and
-//! [`judge`], which checks the one against the other. Names are labels,
-//! compared byte for byte and never interpreted.
+//! Host-supplied result contracts and protocol-decoded finish values
+//! (domain/run.md, sections 3.1, 7.1–7.3 and 14). Labels have no built-in
+//! meaning: this module keeps no runtime state, reads no clocks and performs
+//! no checkout or host effect. The run admits a satisfiable bounded contract,
+//! bounds a declaration with `owned_bytes`, then calls `judge` for shape.
+//! `Report`, verdict and declared failure finish without delivery; a change
+//! still follows the copied check/`Push` lifecycle until the delivery increment.
 
 use alloc::boxed::Box;
 use core::mem::size_of;
 
-use skein_lib::List;
-use skein_lib::bytes::copy_of;
+use skein_lib::{List, bytes::copy_of};
 
 use crate::charter::{count, len};
 use crate::limits::Limits;
 
-/// What a run may finish with: a change, a verdict from a closed list, or
-/// either.
+/// The host's permitted forms. Admission requires at least one, valid unique rules and a smallest accepted value for every allowed form within the result cap.
 ///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(PartialEq, Eq, Hash, Debug)]
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct OutcomeSpec {
-    /// Whether it may finish with a change, the diff of its checkout with a
-    /// title and body for its pull request, and on what terms.
+    /// `Change` contract, or none. A validated change requires the existing host `Push` terminal before acceptance.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Contract: domain/run.md, section 7.1.
     pub change: Option<ChangeSpec>,
-    /// Closed verdict rules supplied by the host. An empty slice permits no verdict;
-    /// admission bounds the rule count by `Limits.verdicts` and the aggregate
-    /// charter ownership by `Limits.run_bytes`.
+    /// Closed host labels and their contracts; empty forbids verdicts. Count is bounded by `Limits`.verdicts, total rule ownership by `Limits`.`run_bytes`.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Contract: domain/run.md, section 7.1.
     pub verdicts: Box<[VerdictRule]>,
-}
-
-/// The terms on which a run may finish with a change.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct ChangeSpec {
-    /// Whether the checks of the repositories that have them must pass before
-    /// the change is pushed (domain/run.md, section 14).
-    pub checks: bool,
-}
-
-/// A verdict a run may finish with, and its contract.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(PartialEq, Eq, Hash, Debug)]
-pub struct VerdictRule {
-    /// Boundary name, compared byte for byte; it carries no authority by itself.
+    /// `Report` contract, or none. A validated report ends after all sessions settle, without checks or `Push`.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Contract: domain/run.md, section 7.1.
+    pub report: Option<TextSpec>,
+    /// Declared-failure contract, or none. An admitted reason is an accepted result, distinct from a runtime failure.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub failure: Option<TextSpec>,
+}
+
+/// One required field chosen by the host; the run compares its name exactly and applies its byte bound.
+///
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct FieldRule {
+    /// Nonempty required byte name, unique within this rule list. Box and name count against `Limits`.`run_bytes`.
+    ///
+    /// Contract: domain/run.md, section 7.1.
     pub name: Box<[u8]>,
-    /// How many children a verdict of this name has.
+    /// Positive largest accepted value byte length. The required value must be present exactly once and nonempty; all fields also share the aggregate outcome cap.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub children: Children,
-    /// The kinds its children may be.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub kinds: Box<[Box<[u8]>]>,
-    /// The fields each of its children must carry.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub fields: Box<[Box<[u8]>]>,
-}
-
-/// At least `min`, at most `max`.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Children {
-    /// Inclusive minimum count required by this contract.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub min: u32,
-    /// Inclusive maximum count allowed by this contract.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Contract: domain/run.md, section 7.1.
     pub max: u32,
 }
 
-/// An outcome an LLM declares when it finishes, typed by the protocol layer
-/// from the input it wrote.
+/// The host's change result contract; it imposes field requirements and the existing check-before-`Push` policy.
 ///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(PartialEq, Eq, Hash, Debug)]
-pub enum Declared {
-    /// Declared copy-baseline checkout change with title and body.
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct ChangeSpec {
+    /// Whether the prepared checks must pass before the host `Push`. No checks or `Push` is started until finish validates the result.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Change(
-        /// Protocol-decoded change bytes; the run checks aggregate `Limits.outcome_bytes`
-        /// before shape judgement, then required checks and host delivery before acceptance.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        Change,
-    ),
-    /// Declared copy-baseline closed-list verdict and its contract items.
+    /// Contract: domain/run.md, section 7.1.
+    pub checks: bool,
+    /// Required result fields with host-chosen byte names and individual value bounds; no title/body vocabulary is interpreted by smith.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Verdict(
-        /// Protocol-decoded verdict and item bytes; the run checks aggregate
-        /// `Limits.outcome_bytes` before validating the host's closed verdict contract.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        Verdict,
-    ),
+    /// Contract: domain/run.md, section 7.1.
+    pub fields: Box<[FieldRule]>,
 }
 
-/// Protocol-decoded LLM declaration attached to the actual checkout change.
-/// Title and body must be nonempty. Before shape judgement, run finishing
-/// bounds their aggregate owned payload by `Limits.outcome_bytes`; successful
-/// host delivery, with required checks, precedes the accepted terminal.
+/// The host's report or declared-failure contract. Its main text/reason obeys host-defined inclusive byte bounds, and its fields follow the same rules as every result.
 ///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct TextSpec {
+    /// Inclusive smallest report text or declared failure reason length in bytes; zero permits empty text.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub min: u32,
+    /// Inclusive largest report text or declared failure reason length in bytes; aggregate ownership still obeys `Limits`.`outcome_bytes`.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub max: u32,
+    /// Required host-named result fields; retained rules count against `Limits`.`run_bytes`.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub fields: Box<[FieldRule]>,
+}
+
+/// One host-chosen label and its text, root fields and allowed result items. Label equality is byte-exact; smith assigns no review semantics.
+///
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct VerdictRule {
+    /// Nonempty host label, unique across the closed verdict list; counted in charter ownership.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub name: Box<[u8]>,
+    /// Largest verdict text byte length; zero permits empty text only. `Verdict` text is otherwise allowed to be empty.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub text_max: u32,
+    /// Required fields on the verdict itself, checked independently of item fields.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub fields: Box<[FieldRule]>,
+    /// Host-selected count range and per-kind field requirements; no items are required when min is zero.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub items: ItemSpec,
+}
+
+/// Host contract for the result's ordered items. Admission requires min <= max and a nonempty kind list when max is positive; the minimum accepted result must fit aggregate ownership.
+///
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct ItemSpec {
+    /// Inclusive smallest accepted item count; its smallest admissible items must fit `Limits`.`outcome_bytes` together with the result.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub min: u32,
+    /// Inclusive largest accepted item count; concrete item storage and payload remain bounded by the aggregate outcome cap.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub max: u32,
+    /// Closed, uniquely named item kinds. Each carries its own required fields, and every rule contributes to charter ownership.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub kinds: Box<[ItemRule]>,
+}
+
+/// One host-named allowed item kind, with field requirements specific to that kind.
+///
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct ItemRule {
+    /// Nonempty byte name, unique in the kind list. The run never interprets its meaning.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub kind: Box<[u8]>,
+    /// Required fields on an item of this exact kind; another kind's fields confer no requirement.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub fields: Box<[FieldRule]>,
+}
+
+/// Protocol-decoded LLM change result. The run validates fields and aggregate ownership before checks/`Push`; the host receives these fields unchanged.
+///
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Change {
-    /// LLM-supplied nonempty delivery title; its owned bytes contribute to the aggregate outcome cap.
+    /// LLM-provided named values. Host rules require nonempty bounded values for their names; extra names are permitted. All names must be unique.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub title: Box<[u8]>,
-    /// LLM-supplied nonempty delivery body; its owned bytes contribute to the aggregate outcome cap.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub body: Box<[u8]>,
-}
-
-/// Protocol-decoded LLM verdict, checked against the host's closed list and
-/// item contract. The run bounds all boxes and payload bytes together by
-/// `Limits.outcome_bytes` before shape judgement. An accepted verdict ends the run.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(PartialEq, Eq, Hash, Debug)]
-pub struct Verdict {
-    /// Boundary name, compared byte for byte; it carries no authority by itself.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub name: Box<[u8]>,
-    /// What the LLM says about it.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub body: Box<[u8]>,
-    /// Declared result items, checked against the charter's count, kind and field rules.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub children: Box<[Child]>,
-}
-
-/// One of a verdict's children: a comment, an issue to open, whatever its
-/// kind names.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(PartialEq, Eq, Hash, Debug)]
-pub struct Child {
-    /// Typed entry classification or byte label required by the enclosing contract.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub kind: Box<[u8]>,
-    /// Named values of this result item; required names must occur exactly once.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[Field]>,
 }
 
-/// LLM-supplied named value in a verdict item. Repeated names are invalid;
-/// required names must exist with nonempty values. Extra fields are permitted
-/// and may be empty. Names and values contribute to the run's checked aggregate
-/// `Limits.outcome_bytes` bound, including the boxed `Field` storage.
+/// Protocol-decoded LLM report. Accepted after contract judgement and settlement, without checking or pushing the workspace.
 ///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(PartialEq, Eq, Hash, Debug)]
-pub struct Field {
-    /// Boundary name, compared byte for byte; it carries no authority by itself.
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Report {
+    /// Report text within the host `TextSpec` minimum and maximum; its bytes count against aggregate ownership.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Contract: domain/run.md, section 7.1.
+    pub text: Box<[u8]>,
+    /// LLM-provided result fields, checked against the report's own required rules and aggregate ownership.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub fields: Box<[Field]>,
+}
+
+/// Protocol-decoded LLM declaration that the work cannot be completed. Its successful contract judgement yields an accepted result, never a runtime failure classification.
+///
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct DeclaredFailure {
+    /// LLM explanation within the host `TextSpec` minimum and maximum; the host interprets its meaning.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub reason: Box<[u8]>,
+    /// LLM-provided result fields, checked against this failure contract's required rules and aggregate ownership.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub fields: Box<[Field]>,
+}
+
+/// Protocol-decoded LLM verdict. The closed host label selects text, root-field and per-kind item requirements.
+///
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Verdict {
+    /// Byte-exact host verdict label; an unknown label is rejected as finish feedback.
+    ///
+    /// Contract: domain/run.md, section 7.1.
     pub name: Box<[u8]>,
-    /// LLM-supplied result-field bytes; nonempty only when this name is required by the rule.
-    /// Counted with the name and box against the aggregate outcome ownership cap.
+    /// LLM verdict explanation, at most `VerdictRule::text_max` bytes; empty is permitted.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Contract: domain/run.md, section 7.1.
+    pub text: Box<[u8]>,
+    /// Named values on the verdict itself; independent of every item's field list.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub fields: Box<[Field]>,
+    /// Ordered result items. Count, kind-specific required fields and aggregate boxed-storage-plus-payload ownership are checked before acceptance.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub items: Box<[Item]>,
+}
+
+/// One LLM-provided item whose byte kind selects its host-defined field rules. It starts no task or action on its own.
+///
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Item {
+    /// Exact allowed host kind name, counted with item storage against the aggregate outcome cap.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub kind: Box<[u8]>,
+    /// LLM-provided named values, unique within this item and validated under this kind's required rules.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub fields: Box<[Field]>,
+}
+
+/// One LLM-provided named result value. Required host names must exist, be nonempty and fit their own cap; extra fields may be empty, but duplicates are always refused.
+///
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Field {
+    /// Byte name interpreted only as a contract label; box storage and name bytes count against `Limits`.`outcome_bytes`.
+    ///
+    /// Contract: domain/run.md, section 7.1.
+    pub name: Box<[u8]>,
+    /// Result value bytes interpreted by the host. Required names obey `FieldRule::max`; extra fields remain bounded by aggregate ownership.
+    ///
+    /// Contract: domain/run.md, section 7.1.
     pub value: Box<[u8]>,
 }
 
-/// Something wrong with a declared outcome, for the LLM to fix. Children are
-/// counted from zero, in the order the LLM gave them.
+/// Bounded typed finish feedback returned to the LLM; it does not end the run and carries no authority.
 ///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Problem {
-    /// The outcome holds more than `max` bytes, as a run counts them.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    TooLarge {
-        /// Inclusive maximum count allowed by this contract.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        max: u64,
-    },
-    /// The run may not finish with a change.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    ChangeNotAllowed,
-    /// The run may not finish with a verdict.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    VerdictNotAllowed,
-    /// No verdict the run may finish with has this name.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    UnknownVerdict,
-    /// The verdict has fewer children than its contract requires.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    TooFewChildren {
-        /// Inclusive minimum count required by this contract.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        min: u32,
-    },
-    /// The verdict has more children than its contract allows.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    TooManyChildren {
-        /// Inclusive maximum count allowed by this contract.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        max: u32,
-    },
-    /// A child is of a kind its verdict does not allow.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    KindNotAllowed {
-        /// Zero-based result-item index whose contract failed.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        child: u32,
-    },
-    /// A change with no title for its pull request.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    EmptyTitle,
-    /// A change with no body for its pull request.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    EmptyBody,
-    /// A child lacks `field`, which its verdict requires of every child.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    MissingField {
-        /// Zero-based result-item index whose contract failed.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        child: u32,
-        /// Name of the required input member which failed validation.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        field: Box<[u8]>,
-    },
-    /// A child has `field`, which its verdict requires, with nothing in it.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    EmptyField {
-        /// Zero-based result-item index whose contract failed.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        child: u32,
-        /// Name of the required input member which failed validation.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        field: Box<[u8]>,
-    },
-    /// A child has `field` more than once.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    RepeatedField {
-        /// Zero-based result-item index whose contract failed.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        child: u32,
-        /// Name of the required input member which failed validation.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        field: Box<[u8]>,
-    },
-}
-
-/// What is wrong with a declared outcome: the first problems found, at most
-/// [`Problems::LISTED`] of them in the order they were found, and how many
-/// more there were.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Problems {
-    /// First bounded outcome-validation problems, in validation order.
+    /// First at most `LISTED` problems in deterministic validation order. Copied field names come from the already bounded contract or declaration.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Contract: domain/run.md, section 7.1.
     pub listed: Box<[Problem]>,
-    /// Problems or matches omitted after the retained bound.
+    /// Saturating count of additional problems omitted after the feedback list fills.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Contract: domain/run.md, section 7.1.
     pub more: u32,
 }
 
+/// Protocol-decoded finish form. All payloads share `Limits.outcome_bytes`
+/// checked by the run before shape judgement. Only `Change` requires `Push`;
+/// every other valid form winds down the sessions and becomes the accepted answer.
+///
+/// Contract: domain/run.md, sections 7.1, 7.2 and 10.
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub enum Declared {
+    /// Workspace change with generic host fields; accepts only after host delivery.
+    /// Contract: domain/run.md, sections 7.1, 7.2 and 8.
+    Change(
+        /// Protocol-decoded fields validated before any check or `Push`.
+        /// Contract: domain/run.md, sections 7.1 and 7.2.
+        Change,
+    ),
+    /// Host-labelled verdict; starts no workspace delivery.
+    /// Contract: domain/run.md, sections 7.1 and 7.2.
+    Verdict(
+        /// Protocol-decoded verdict and per-kind items, bounded before judgement.
+        /// Contract: domain/run.md, sections 7.1 and 7.2.
+        Verdict,
+    ),
+    /// Text report satisfying the host's own report fields.
+    /// Contract: domain/run.md, sections 7.1 and 7.2.
+    Report(
+        /// Protocol-decoded text and fields, accepted without `Push`.
+        /// Contract: domain/run.md, sections 7.1 and 7.2.
+        Report,
+    ),
+    /// LLM-declared inability to complete, distinct from runtime failure.
+    /// Contract: domain/run.md, sections 7.1, 7.2 and 10.
+    Failure(
+        /// Protocol-decoded bounded reason and fields, accepted after judgement.
+        /// Contract: domain/run.md, sections 7.1 and 7.2.
+        DeclaredFailure,
+    ),
+}
+
+/// Form whose text failed its host contract; it contains no user content.
+/// Contract: domain/run.md, section 7.1.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Form {
+    /// `Report` text. Contract: domain/run.md, section 7.1.
+    Report,
+    /// `Verdict` explanation. Contract: domain/run.md, section 7.1.
+    Verdict,
+    /// Declared failure reason. Contract: domain/run.md, section 7.1.
+    Failure,
+}
+
+/// One shape or ownership violation returned as finish feedback. `Item` indices
+/// are zero-based and `None` on fields of the result itself. Names are copied
+/// only into the first eight listed problems, from already bounded inputs.
+/// Contract: domain/run.md, sections 7.1 and 7.2.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum Problem {
+    /// Aggregate boxed-storage-plus-payload bytes exceed the run's cap.
+    /// Contract: domain/run.md, sections 7.1 and 7.2.
+    TooLarge {
+        /// `Limits.outcome_bytes` applied before shape judgement.
+        /// Contract: domain/run.md, section 7.1.
+        max: u64,
+    },
+    /// Host forbids change. Contract: domain/run.md, section 7.1.
+    ChangeNotAllowed,
+    /// Host forbids verdict. Contract: domain/run.md, section 7.1.
+    VerdictNotAllowed,
+    /// Host forbids report. Contract: domain/run.md, section 7.1.
+    ReportNotAllowed,
+    /// Host forbids declared failure. Contract: domain/run.md, section 7.1.
+    FailureNotAllowed,
+    /// No byte-exact host verdict label matches. Contract: domain/run.md, section 7.1.
+    UnknownVerdict,
+    /// Result text is shorter than its host-defined minimum. Contract: domain/run.md, section 7.1.
+    TextTooShort {
+        /// The text-bearing form rejected, never the text itself.
+        /// Contract: domain/run.md, section 7.1.
+        form: Form,
+        /// Inclusive host text/reason minimum byte length.
+        /// Contract: domain/run.md, section 7.1.
+        min: u32,
+    },
+    /// Result text exceeds its host-defined individual byte cap. Contract: domain/run.md, section 7.1.
+    TextTooLarge {
+        /// The text-bearing form whose byte length exceeded the cap.
+        /// Contract: domain/run.md, section 7.1.
+        form: Form,
+        /// Inclusive host text/reason byte limit.
+        /// Contract: domain/run.md, section 7.1.
+        max: u32,
+    },
+    /// `Verdict` has fewer items than required. Contract: domain/run.md, section 7.1.
+    TooFewItems {
+        /// Inclusive host minimum item count.
+        /// Contract: domain/run.md, section 7.1.
+        min: u32,
+    },
+    /// `Verdict` has more items than allowed. Contract: domain/run.md, section 7.1.
+    TooManyItems {
+        /// Inclusive host maximum item count.
+        /// Contract: domain/run.md, section 7.1.
+        max: u32,
+    },
+    /// `Item` kind is not in this verdict's closed list. Contract: domain/run.md, section 7.1.
+    KindNotAllowed {
+        /// Zero-based index in the declared verdict's ordered items.
+        /// Contract: domain/run.md, section 7.1.
+        item: u32,
+    },
+    /// A required named field is absent. Contract: domain/run.md, section 7.1.
+    MissingField {
+        /// `None` for the result itself; otherwise its zero-based item index.
+        /// Contract: domain/run.md, section 7.1.
+        item: Option<u32>,
+        /// Exact required or repeated byte name; copied only while feedback room remains.
+        /// Contract: domain/run.md, sections 7.1 and 7.2.
+        field: Box<[u8]>,
+    },
+    /// A required named value is empty. Contract: domain/run.md, section 7.1.
+    EmptyField {
+        /// `None` for the result itself; otherwise its zero-based item index.
+        /// Contract: domain/run.md, section 7.1.
+        item: Option<u32>,
+        /// Exact required or repeated byte name; copied only while feedback room remains.
+        /// Contract: domain/run.md, sections 7.1 and 7.2.
+        field: Box<[u8]>,
+    },
+    /// The same byte field name occurs more than once. Contract: domain/run.md, section 7.1.
+    RepeatedField {
+        /// `None` for the result itself; otherwise its zero-based item index.
+        /// Contract: domain/run.md, section 7.1.
+        item: Option<u32>,
+        /// Exact required or repeated byte name; copied only while feedback room remains.
+        /// Contract: domain/run.md, sections 7.1 and 7.2.
+        field: Box<[u8]>,
+    },
+    /// A required named value exceeds its individual host cap. Contract: domain/run.md, section 7.1.
+    FieldTooLarge {
+        /// `None` for the result itself; otherwise its zero-based item index.
+        /// Contract: domain/run.md, section 7.1.
+        item: Option<u32>,
+        /// Exact required or repeated byte name; copied only while feedback room remains.
+        /// Contract: domain/run.md, sections 7.1 and 7.2.
+        field: Box<[u8]>,
+        /// Inclusive maximum required value byte length supplied by the host.
+        /// Contract: domain/run.md, section 7.1.
+        max: u32,
+    },
+}
+
 impl Problems {
-    /// Enough for the LLM to see what is wrong, few enough to keep what it is
-    /// told small.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Maximum retained feedback problems; additional problems are counted.
+    /// Contract: domain/run.md, section 7.2; programming-model.md, section 6.3.
     pub const LISTED: u32 = 8;
 }
 
-/// Pure shape judgement of protocol-decoded `declared` against the host's
-/// `spec`: returns success or the first eight problems and a count of omissions.
-/// This function checks no byte cap. Run finishing first computes checked
-/// boxed-storage-plus-payload ownership and refuses values beyond
-/// `Limits.outcome_bytes`; callers invoking this helper alone supply their own
-/// ownership bounds.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+/// Pure deterministic shape judgement of decoded finish against the host
+/// contract. Returns success or bounded typed feedback, without any effect.
+/// It checks individual field/text caps and item rules, not the aggregate
+/// ownership cap: the run first calls `owned_bytes` and checks its limit.
+/// Other callers must supply their own aggregate input bound.
+/// Contract: domain/run.md, sections 7.1–7.3; programming-model.md, section 6.3.
 pub fn judge(spec: &OutcomeSpec, declared: &Declared) -> Result<(), Problems> {
     let mut found = Found { listed: List::with_capacity(Problems::LISTED), more: 0 };
     match declared {
-        Declared::Change(Change { title, body }) => {
-            if spec.change.is_none() {
-                found.add(Problem::ChangeNotAllowed);
-            }
-            if title.is_empty() {
-                found.add(Problem::EmptyTitle);
-            }
-            if body.is_empty() {
-                found.add(Problem::EmptyBody);
-            }
-        }
+        Declared::Change(change) => match &spec.change {
+            Some(rule) => judge_fields(&rule.fields, &change.fields, None, &mut found),
+            None => found.add(Problem::ChangeNotAllowed),
+        },
+        Declared::Report(report) => match &spec.report {
+            Some(rule) => judge_text(rule, &report.text, &report.fields, Form::Report, &mut found),
+            None => found.add(Problem::ReportNotAllowed),
+        },
+        Declared::Failure(failure) => match &spec.failure {
+            Some(rule) => judge_text(rule, &failure.reason, &failure.fields, Form::Failure, &mut found),
+            None => found.add(Problem::FailureNotAllowed),
+        },
         Declared::Verdict(verdict) => judge_verdict(&spec.verdicts, verdict, &mut found),
     }
     if found.listed.is_empty() {
@@ -339,9 +436,6 @@ pub fn judge(spec: &OutcomeSpec, declared: &Declared) -> Result<(), Problems> {
     Err(Problems { listed: found.listed.into_boxed(), more: found.more })
 }
 
-/// The problems found so far.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 struct Found {
     listed: List<Problem>,
     more: u32,
@@ -355,32 +449,73 @@ impl Found {
         }
     }
 
-    /// Adds a problem about the child `child`'s field `field`, copying the
-    /// field's name only if the problem is listed.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    fn add_field(&mut self, child: u32, field: &[u8], problem: FieldProblem) {
+    fn field(&mut self, item: Option<u32>, field: &[u8], why: FieldProblem) {
         if self.listed.room() == 0 {
             self.more = self.more.saturating_add(1);
             return;
         }
         let field = copy_of(field);
-        self.add(match problem {
-            FieldProblem::Missing => Problem::MissingField { child, field },
-            FieldProblem::Empty => Problem::EmptyField { child, field },
-            FieldProblem::Repeated => Problem::RepeatedField { child, field },
+        self.add(match why {
+            FieldProblem::Missing => Problem::MissingField { item, field },
+            FieldProblem::Empty => Problem::EmptyField { item, field },
+            FieldProblem::Repeated => Problem::RepeatedField { item, field },
+            FieldProblem::TooLarge { max } => Problem::FieldTooLarge { item, field, max },
         });
     }
 }
 
-/// What is wrong with one of a child's fields.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy)]
 enum FieldProblem {
     Missing,
     Empty,
     Repeated,
+    TooLarge { max: u32 },
+}
+
+fn judge_fields(rules: &[FieldRule], fields: &[Field], item: Option<u32>, found: &mut Found) {
+    for rule in rules {
+        let given = match field_named(fields, &rule.name) {
+            Some(index) => fields.get(index),
+            None => None,
+        };
+        match given {
+            None => found.field(item, &rule.name, FieldProblem::Missing),
+            Some(field) => {
+                if field.value.is_empty() {
+                    found.field(item, &rule.name, FieldProblem::Empty);
+                }
+                if past(field.value.len(), rule.max) {
+                    found.field(item, &rule.name, FieldProblem::TooLarge { max: rule.max });
+                }
+            }
+        }
+    }
+    for (at, field) in fields.iter().enumerate() {
+        let earlier = fields.get(..at).unwrap_or_default();
+        let later = fields.get(at.saturating_add(1)..).unwrap_or_default();
+        if field_named(earlier, &field.name).is_none() && field_named(later, &field.name).is_some() {
+            found.field(item, &field.name, FieldProblem::Repeated);
+        }
+    }
+}
+
+fn field_named(fields: &[Field], name: &[u8]) -> Option<usize> {
+    for (index, field) in fields.iter().enumerate() {
+        if &*field.name == name {
+            return Some(index);
+        }
+    }
+    None
+}
+
+fn judge_text(rule: &TextSpec, text: &[u8], fields: &[Field], form: Form, found: &mut Found) {
+    if u64::try_from(text.len()).unwrap_or(u64::MAX) < u64::from(rule.min) {
+        found.add(Problem::TextTooShort { form, min: rule.min });
+    }
+    if past(text.len(), rule.max) {
+        found.add(Problem::TextTooLarge { form, max: rule.max });
+    }
+    judge_fields(&rule.fields, fields, None, found);
 }
 
 fn judge_verdict(rules: &[VerdictRule], verdict: &Verdict, found: &mut Found) {
@@ -388,106 +523,111 @@ fn judge_verdict(rules: &[VerdictRule], verdict: &Verdict, found: &mut Found) {
         found.add(Problem::VerdictNotAllowed);
         return;
     }
-    let named = match rule_named(rules, &verdict.name) {
-        Some(index) => rules.get(index),
-        None => None,
-    };
+    let mut named = None;
+    for rule in rules {
+        if rule.name == verdict.name {
+            named = Some(rule);
+            break;
+        }
+    }
     let Some(rule) = named else {
         found.add(Problem::UnknownVerdict);
         return;
     };
-    let Children { min, max } = rule.children;
-    let children = count(verdict.children.len());
-    if children < min {
-        found.add(Problem::TooFewChildren { min });
+    if past(verdict.text.len(), rule.text_max) {
+        found.add(Problem::TextTooLarge { form: Form::Verdict, max: rule.text_max });
     }
-    if children > max {
-        found.add(Problem::TooManyChildren { max });
+    judge_fields(&rule.fields, &verdict.fields, None, found);
+    if count(verdict.items.len()) < rule.items.min {
+        found.add(Problem::TooFewItems { min: rule.items.min });
     }
-    let mut index: u32 = 0;
-    for child in &verdict.children {
-        if !names(&rule.kinds, &child.kind) {
-            found.add(Problem::KindNotAllowed { child: index });
-        }
-        for field in &rule.fields {
-            let given = match field_named(&child.fields, field) {
-                Some(at) => child.fields.get(at),
-                None => None,
-            };
-            match given {
-                None => found.add_field(index, field, FieldProblem::Missing),
-                Some(given) if given.value.is_empty() => found.add_field(index, field, FieldProblem::Empty),
-                Some(_) => {}
+    if past(verdict.items.len(), rule.items.max) {
+        found.add(Problem::TooManyItems { max: rule.items.max });
+    }
+    for (index, item) in verdict.items.iter().enumerate() {
+        let mut kind = None;
+        for allowed in &rule.items.kinds {
+            if allowed.kind == item.kind {
+                kind = Some(allowed);
+                break;
             }
         }
-        // A name given more than once is said once, where it is first given.
-        for (at, field) in child.fields.iter().enumerate() {
-            let earlier = child.fields.get(..at).unwrap_or_default();
-            let later = child.fields.get(at.saturating_add(1)..).unwrap_or_default();
-            if field_named(earlier, &field.name).is_none() && field_named(later, &field.name).is_some() {
-                found.add_field(index, &field.name, FieldProblem::Repeated);
-            }
+        let index = count(index);
+        match kind {
+            Some(allowed) => judge_fields(&allowed.fields, &item.fields, Some(index), found),
+            None => found.add(Problem::KindNotAllowed { item: index }),
         }
-        index = index.saturating_add(1);
     }
 }
 
-/// Where among `rules` the verdict named `name` is.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-fn rule_named(rules: &[VerdictRule], name: &[u8]) -> Option<usize> {
-    for (index, rule) in rules.iter().enumerate() {
-        if *rule.name == *name {
-            return Some(index);
-        }
-    }
-    None
-}
-
-/// Whether `labels` has `label` among them.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-fn names(labels: &[Box<[u8]>], label: &[u8]) -> bool {
-    for candidate in labels {
-        if **candidate == *label {
-            return true;
-        }
-    }
-    false
-}
-
-/// Where among `fields` the first named `name` is.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-fn field_named(fields: &[Field], name: &[u8]) -> Option<usize> {
-    for (at, field) in fields.iter().enumerate() {
-        if *field.name == *name {
-            return Some(at);
-        }
-    }
-    None
-}
-
-/// Whether `spec` fits `limits` and can be met: it allows some outcome, lists
-/// no more verdicts than a run may hold and no name twice, and each verdict's
-/// contract can be met, requiring no more children than it allows and giving
-/// a kind for children to be if it allows any.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+/// Admission shape and checked minimum-fit validation, without effects.
+/// Charter ownership is bounded separately by charter admission.
+/// Contract: domain/run.md, sections 3.1, 4 and 7.1.
 pub(crate) fn is_valid(spec: &OutcomeSpec, limits: &Limits) -> bool {
-    let OutcomeSpec { change, verdicts } = spec;
-    if change.is_none() && verdicts.is_empty() {
+    if spec.change.is_none() && spec.verdicts.is_empty() && spec.report.is_none() && spec.failure.is_none() {
         return false;
     }
-    if count(verdicts.len()) > limits.verdicts {
+    if count(spec.verdicts.len()) > limits.verdicts {
         return false;
     }
-    for (index, rule) in verdicts.iter().enumerate() {
-        let Children { min, max } = rule.children;
-        if min > max || (max > 0 && rule.kinds.is_empty()) {
+    if let Some(rule) = &spec.change {
+        if !valid_fields(&rule.fields) || !fits(min_fields(&rule.fields), limits.outcome_bytes) {
             return false;
         }
-        for other in verdicts.get(index.saturating_add(1)..).unwrap_or_default() {
+    }
+    for text in [&spec.report, &spec.failure] {
+        if let Some(rule) = text {
+            if rule.min > rule.max || !valid_fields(&rule.fields) || !fits(min_text(rule), limits.outcome_bytes) {
+                return false;
+            }
+        }
+    }
+    for (at, rule) in spec.verdicts.iter().enumerate() {
+        if rule.name.is_empty() || !valid_fields(&rule.fields) || rule.items.min > rule.items.max {
+            return false;
+        }
+        for other in spec.verdicts.get(at.saturating_add(1)..).unwrap_or_default() {
+            if other.name == rule.name {
+                return false;
+            }
+        }
+        if rule.items.max > 0 && rule.items.kinds.is_empty() {
+            return false;
+        }
+        for (index, kind) in rule.items.kinds.iter().enumerate() {
+            if kind.kind.is_empty() || !valid_fields(&kind.fields) {
+                return false;
+            }
+            for other in rule.items.kinds.get(index.saturating_add(1)..).unwrap_or_default() {
+                if other.kind == kind.kind {
+                    return false;
+                }
+            }
+        }
+        if !fits(min_verdict(rule), limits.outcome_bytes) {
+            return false;
+        }
+    }
+    true
+}
+
+fn min_text(rule: &TextSpec) -> Option<u64> {
+    min_fields(&rule.fields)?.checked_add(u64::from(rule.min))
+}
+
+fn fits(cost: Option<u64>, max: u64) -> bool {
+    match cost {
+        Some(cost) => cost <= max,
+        None => false,
+    }
+}
+
+fn valid_fields(rules: &[FieldRule]) -> bool {
+    for (at, rule) in rules.iter().enumerate() {
+        if rule.name.is_empty() || rule.max == 0 {
+            return false;
+        }
+        for other in rules.get(at.saturating_add(1)..).unwrap_or_default() {
             if other.name == rule.name {
                 return false;
             }
@@ -496,250 +636,366 @@ pub(crate) fn is_valid(spec: &OutcomeSpec, limits: &Limits) -> bool {
     true
 }
 
-/// The bytes `spec` holds beyond its fixed size, counted as the charter's are.
-/// `None` past a `u64`.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-pub(crate) fn cost(spec: &OutcomeSpec) -> Option<u64> {
-    let rule = u64::try_from(size_of::<VerdictRule>()).ok()?;
+fn min_fields(rules: &[FieldRule]) -> Option<u64> {
+    let fixed = u64::try_from(size_of::<Field>()).ok()?;
     let mut cost: u64 = 0;
-    for VerdictRule { name, children: _, kinds, fields } in &spec.verdicts {
-        cost = cost
-            .checked_add(rule)?
-            .checked_add(len(name)?)?
-            .checked_add(labels(kinds)?)?
-            .checked_add(labels(fields)?)?;
+    for rule in rules {
+        cost = cost.checked_add(fixed)?.checked_add(len(&rule.name)?)?.checked_add(1)?;
     }
     Some(cost)
 }
 
-/// The bytes `declared` holds beyond its fixed size: each part held in a box
-/// at its fixed size, plus its payload. `None` past a `u64`.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-pub(crate) fn declared_cost(declared: &Declared) -> Option<u64> {
+fn min_verdict(rule: &VerdictRule) -> Option<u64> {
+    let base = len(&rule.name)?.checked_add(min_fields(&rule.fields)?)?;
+    if rule.items.min == 0 {
+        return Some(base);
+    }
+    let fixed = u64::try_from(size_of::<Item>()).ok()?;
+    let mut smallest = None;
+    for kind in &rule.items.kinds {
+        let cost = fixed.checked_add(len(&kind.kind)?)?.checked_add(min_fields(&kind.fields)?)?;
+        smallest = Some(match smallest {
+            None => cost,
+            Some(previous) => cost.min(previous),
+        });
+    }
+    let cost = smallest?;
+    base.checked_add(cost.checked_mul(u64::from(rule.items.min))?)
+}
+
+/// Checked owned rule containers and names beyond the inline charter.
+/// Overflow refuses charter admission rather than truncating its charge.
+/// Contract: domain/run.md, sections 3.1 and 7.1; programming-model.md, section 6.3.
+pub(crate) fn cost(spec: &OutcomeSpec) -> Option<u64> {
+    let mut cost: u64 = 0;
+    if let Some(rule) = &spec.change {
+        cost = cost.checked_add(rule_fields_cost(&rule.fields)?)?;
+    }
+    for text in [&spec.report, &spec.failure] {
+        if let Some(rule) = text {
+            cost = cost.checked_add(rule_fields_cost(&rule.fields)?)?;
+        }
+    }
+    let verdict = u64::try_from(size_of::<VerdictRule>()).ok()?;
+    let kind = u64::try_from(size_of::<ItemRule>()).ok()?;
+    for rule in &spec.verdicts {
+        cost =
+            cost.checked_add(verdict)?.checked_add(len(&rule.name)?)?.checked_add(rule_fields_cost(&rule.fields)?)?;
+        for item in &rule.items.kinds {
+            cost =
+                cost.checked_add(kind)?.checked_add(len(&item.kind)?)?.checked_add(rule_fields_cost(&item.fields)?)?;
+        }
+    }
+    Some(cost)
+}
+
+fn rule_fields_cost(rules: &[FieldRule]) -> Option<u64> {
+    let fixed = u64::try_from(size_of::<FieldRule>()).ok()?;
+    let mut cost: u64 = 0;
+    for rule in rules {
+        cost = cost.checked_add(fixed)?.checked_add(len(&rule.name)?)?;
+    }
+    Some(cost)
+}
+
+/// Checked boxed-storage-plus-payload bytes retained beyond the inline
+/// declaration. Counts every result/item field, kind/label and text exactly
+/// once, excluding allocator overhead and the inline enum's fixed size.
+/// The run and its root both use this value for their respective admission
+/// and ownership checks. Overflow yields `None`, never an accepted charge.
+/// Contract: domain/run.md, sections 7.1 and 7.2; programming-model.md, section 6.3.
+#[must_use]
+pub fn owned_bytes(declared: &Declared) -> Option<u64> {
     match declared {
-        Declared::Change(Change { title, body }) => len(title)?.checked_add(len(body)?),
-        Declared::Verdict(Verdict { name, body, children }) => {
-            let child = u64::try_from(size_of::<Child>()).ok()?;
-            let field = u64::try_from(size_of::<Field>()).ok()?;
-            let mut cost = len(name)?.checked_add(len(body)?)?;
-            for Child { kind, fields } in children {
-                cost = cost.checked_add(child)?.checked_add(len(kind)?)?;
-                for Field { name, value } in fields {
-                    cost = cost.checked_add(field)?.checked_add(len(name)?)?.checked_add(len(value)?)?;
-                }
+        Declared::Change(change) => fields_cost(&change.fields),
+        Declared::Report(report) => len(&report.text)?.checked_add(fields_cost(&report.fields)?),
+        Declared::Failure(failure) => len(&failure.reason)?.checked_add(fields_cost(&failure.fields)?),
+        Declared::Verdict(verdict) => {
+            let fixed = u64::try_from(size_of::<Item>()).ok()?;
+            let mut cost =
+                len(&verdict.name)?.checked_add(len(&verdict.text)?)?.checked_add(fields_cost(&verdict.fields)?)?;
+            for item in &verdict.items {
+                cost =
+                    cost.checked_add(fixed)?.checked_add(len(&item.kind)?)?.checked_add(fields_cost(&item.fields)?)?;
             }
             Some(cost)
         }
     }
 }
 
-/// The problems of an outcome that holds more than `max` bytes.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-pub(crate) fn too_large(max: u64) -> Problems {
-    Problems { listed: Box::new([Problem::TooLarge { max }]), more: 0 }
-}
-
-fn labels(labels: &[Box<[u8]>]) -> Option<u64> {
-    let label = u64::try_from(size_of::<Box<[u8]>>()).ok()?;
+fn fields_cost(fields: &[Field]) -> Option<u64> {
+    let fixed = u64::try_from(size_of::<Field>()).ok()?;
     let mut cost: u64 = 0;
-    for name in labels {
-        cost = cost.checked_add(label)?.checked_add(len(name)?)?;
+    for field in fields {
+        cost = cost.checked_add(fixed)?.checked_add(len(&field.name)?)?.checked_add(len(&field.value)?)?;
     }
     Some(cost)
 }
 
+/// One bounded aggregate-ownership refusal for the supplied run byte cap.
+/// Contract: domain/run.md, sections 7.1 and 7.2.
+pub(crate) fn too_large(max: u64) -> Problems {
+    Problems { listed: Box::new([Problem::TooLarge { max }]), more: 0 }
+}
+
+fn past(length: usize, max: u32) -> bool {
+    match u32::try_from(length) {
+        Ok(length) => length > max,
+        Err(_) => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use alloc::boxed::Box;
-
-    use skein_lib::bytes::copy_of;
-
     use super::{
-        Change, ChangeSpec, Child, Children, Declared, Field, OutcomeSpec, Problem, Problems, Verdict, VerdictRule,
-        judge,
+        Change, ChangeSpec, Declared, DeclaredFailure, Field, FieldRule, Form, Item, ItemRule, ItemSpec, Limits,
+        OutcomeSpec, Problem, Report, TextSpec, Verdict, VerdictRule, is_valid, judge, owned_bytes,
     };
+    use crate::tests::LIMITS;
+    use alloc::{boxed::Box, vec};
+    use core::mem::size_of;
 
-    fn labels(names: &[&[u8]]) -> Box<[Box<[u8]>]> {
-        let mut labels = skein_lib::List::with_capacity(4);
-        for name in names {
-            labels.push(copy_of(name)).expect("a few labels");
-        }
-        labels.into_boxed()
+    fn rules(name: &[u8], max: u32) -> Box<[FieldRule]> {
+        Box::new([FieldRule { name: name.into(), max }])
     }
 
-    /// A review: approve with no children, or request changes with one to
-    /// three comments, each blocking or a nit, with a path and a body.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    fn review(change: bool) -> OutcomeSpec {
-        let approve = VerdictRule {
-            name: copy_of(b"approve"),
-            children: Children { min: 0, max: 0 },
-            kinds: labels(&[]),
-            fields: labels(&[]),
-        };
-        let request = VerdictRule {
-            name: copy_of(b"request-changes"),
-            children: Children { min: 1, max: 3 },
-            kinds: labels(&[b"blocking", b"nit"]),
-            fields: labels(&[b"path", b"body"]),
-        };
-        OutcomeSpec { change: change.then_some(ChangeSpec { checks: false }), verdicts: Box::new([approve, request]) }
+    fn fields(name: &[u8], value: &[u8]) -> Box<[Field]> {
+        Box::new([Field { name: name.into(), value: value.into() }])
     }
 
-    fn change() -> Declared {
-        Declared::Change(Change { title: copy_of(b"Fix the parser"), body: copy_of(b"It now accepts tabs.") })
-    }
-
-    fn verdict(name: &[u8], children: Box<[Child]>) -> Declared {
-        Declared::Verdict(Verdict { name: copy_of(name), body: copy_of(b"See the comments."), children })
-    }
-
-    fn child(kind: &[u8], fields: &[&[u8]]) -> Child {
-        let mut list = skein_lib::List::with_capacity(4);
-        for name in fields {
-            list.push(Field { name: copy_of(name), value: copy_of(b"...") }).expect("a few fields");
-        }
-        Child { kind: copy_of(kind), fields: list.into_boxed() }
-    }
-
-    fn comment() -> Child {
-        child(b"nit", &[b"path", b"body"])
-    }
-
-    /// A comment whose body is empty.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    fn empty() -> Child {
-        let fields = Box::new([
-            Field { name: copy_of(b"path"), value: copy_of(b"a.rs") },
-            Field { name: copy_of(b"body"), value: copy_of(b"") },
-        ]);
-        Child { kind: copy_of(b"nit"), fields }
-    }
-
-    /// A comment that gives its path twice, and its body once.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    fn twice() -> Child {
-        let fields = Box::new([
-            Field { name: copy_of(b"path"), value: copy_of(b"a.rs") },
-            Field { name: copy_of(b"body"), value: copy_of(b"Nit.") },
-            Field { name: copy_of(b"path"), value: copy_of(b"b.rs") },
-            Field { name: copy_of(b"path"), value: copy_of(b"c.rs") },
-        ]);
-        Child { kind: copy_of(b"nit"), fields }
-    }
-
-    fn problems(listed: Box<[Problem]>, more: u32) -> Result<(), Problems> {
-        Err(Problems { listed, more })
-    }
-
-    fn missing(child: u32, field: &[u8]) -> Problem {
-        Problem::MissingField { child, field: copy_of(field) }
-    }
-
-    #[test]
-    fn outcomes_are_judged_against_the_spec() {
-        let cases: [(OutcomeSpec, Declared, Result<(), Problems>); 15] = [
-            // What the spec allows.
-            (review(true), change(), Ok(())),
-            (OutcomeSpec { change: Some(ChangeSpec { checks: false }), verdicts: Box::new([]) }, change(), Ok(())),
-            (review(false), verdict(b"approve", Box::new([])), Ok(())),
-            (
-                review(false),
-                verdict(b"request-changes", Box::new([comment(), child(b"blocking", &[b"body", b"path", b"line"])])),
-                Ok(()),
-            ),
-            // What it does not.
-            (review(false), change(), problems(Box::new([Problem::ChangeNotAllowed]), 0)),
-            (
-                OutcomeSpec { change: Some(ChangeSpec { checks: false }), verdicts: Box::new([]) },
-                verdict(b"approve", Box::new([])),
-                problems(Box::new([Problem::VerdictNotAllowed]), 0),
-            ),
-            (review(false), verdict(b"reject", Box::new([])), problems(Box::new([Problem::UnknownVerdict]), 0)),
-            (
-                review(false),
-                verdict(b"request-changes", Box::new([])),
-                problems(Box::new([Problem::TooFewChildren { min: 1 }]), 0),
-            ),
-            (
-                review(false),
-                verdict(b"request-changes", Box::new([comment(), comment(), comment(), comment()])),
-                problems(Box::new([Problem::TooManyChildren { max: 3 }]), 0),
-            ),
-            (
-                review(false),
-                verdict(b"approve", Box::new([comment()])),
-                problems(Box::new([Problem::TooManyChildren { max: 0 }, Problem::KindNotAllowed { child: 0 }]), 0),
-            ),
-            (
-                review(false),
-                verdict(b"request-changes", Box::new([comment(), child(b"praise", &[b"path", b"body"])])),
-                problems(Box::new([Problem::KindNotAllowed { child: 1 }]), 0),
-            ),
-            (
-                review(false),
-                verdict(b"request-changes", Box::new([child(b"nit", &[b"body"]), child(b"blocking", &[])])),
-                problems(Box::new([missing(0, b"path"), missing(1, b"path"), missing(1, b"body")]), 0),
-            ),
-            // A change needs a title and a body; a required field, something
-            // in it; and no field may be given twice.
-            (
-                OutcomeSpec { change: Some(ChangeSpec { checks: false }), verdicts: Box::new([]) },
-                Declared::Change(Change { title: copy_of(b""), body: copy_of(b"") }),
-                problems(Box::new([Problem::EmptyTitle, Problem::EmptyBody]), 0),
-            ),
-            (
-                review(false),
-                verdict(b"request-changes", Box::new([empty(), twice()])),
-                problems(
-                    Box::new([
-                        Problem::EmptyField { child: 0, field: copy_of(b"body") },
-                        Problem::RepeatedField { child: 1, field: copy_of(b"path") },
+    fn specification() -> OutcomeSpec {
+        OutcomeSpec {
+            change: Some(ChangeSpec { checks: false, fields: rules(b"summary", 4) }),
+            report: Some(TextSpec { min: 0, max: 3, fields: rules(b"source", 3) }),
+            failure: Some(TextSpec { min: 1, max: 3, fields: rules(b"cause", 3) }),
+            verdicts: Box::new([VerdictRule {
+                name: b"assess".as_slice().into(),
+                text_max: 3,
+                fields: rules(b"scope", 3),
+                items: ItemSpec {
+                    min: 1,
+                    max: 2,
+                    kinds: Box::new([
+                        ItemRule { kind: b"line".as_slice().into(), fields: rules(b"path", 3) },
+                        ItemRule { kind: b"link".as_slice().into(), fields: rules(b"uri", 3) },
                     ]),
-                    0,
-                ),
-            ),
-            // Labels are compared byte for byte.
-            (
-                review(false),
-                verdict(b"request-changes", Box::new([child(b"Nit", &[b"path", b"body "])])),
-                problems(Box::new([Problem::KindNotAllowed { child: 0 }, missing(0, b"body")]), 0),
-            ),
-        ];
-        for (index, (spec, declared, judged)) in cases.into_iter().enumerate() {
-            assert_eq!(judge(&spec, &declared), judged, "case {index}");
+                },
+            }]),
+        }
+    }
+
+    fn verdict() -> Verdict {
+        Verdict {
+            name: b"assess".as_slice().into(),
+            text: Box::new([]),
+            fields: fields(b"scope", b"all"),
+            items: Box::new([Item { kind: b"link".as_slice().into(), fields: fields(b"uri", b"url") }]),
         }
     }
 
     #[test]
-    fn the_problems_listed_are_bounded_and_the_rest_counted() {
-        let mut children = skein_lib::List::with_capacity(5);
-        for _ in 0_u32..5 {
-            children.push(child(b"praise", &[])).expect("room for five");
-        }
-        let Err(problems) = judge(&review(false), &verdict(b"request-changes", children.into_boxed())) else {
-            panic!("five children of no kind, with no fields, against a contract of three");
-        };
-        let listed = [
-            Problem::TooManyChildren { max: 3 },
-            Problem::KindNotAllowed { child: 0 },
-            missing(0, b"path"),
-            missing(0, b"body"),
-            Problem::KindNotAllowed { child: 1 },
-            missing(1, b"path"),
-            missing(1, b"body"),
-            Problem::KindNotAllowed { child: 2 },
+    fn every_form_uses_host_fields_and_text_bounds() {
+        let spec = specification();
+        let outcomes = [
+            Declared::Change(Change { fields: fields(b"summary", b"done") }),
+            Declared::Report(Report { text: Box::new([]), fields: fields(b"source", b"ref") }),
+            Declared::Failure(DeclaredFailure { reason: b"no".as_slice().into(), fields: fields(b"cause", b"why") }),
+            Declared::Verdict(verdict()),
         ];
-        assert_eq!(&*problems.listed, &listed);
-        assert_eq!(u32::try_from(problems.listed.len()), Ok(Problems::LISTED));
-        // Three problems for each of the last two children, and one more for
-        // the third.
-        assert_eq!(problems.more, 2 + 3 + 3);
+        for outcome in outcomes {
+            assert_eq!(judge(&spec, &outcome), Ok(()), "{outcome:?}");
+        }
+        let outcome = Declared::Failure(DeclaredFailure { reason: Box::new([]), fields: fields(b"cause", b"why") });
+        assert_eq!(
+            judge(&spec, &outcome).unwrap_err().listed.as_ref(),
+            &[Problem::TextTooShort { form: Form::Failure, min: 1 }]
+        );
+        let outcome = Declared::Report(Report { text: b"long".as_slice().into(), fields: fields(b"source", b"ref") });
+        assert_eq!(
+            judge(&spec, &outcome).unwrap_err().listed.as_ref(),
+            &[Problem::TextTooLarge { form: Form::Report, max: 3 }]
+        );
+        let mut value = verdict();
+        value.text = b"long".as_slice().into();
+        assert_eq!(
+            judge(&spec, &Declared::Verdict(value)).unwrap_err().listed.as_ref(),
+            &[Problem::TextTooLarge { form: Form::Verdict, max: 3 }]
+        );
+    }
+
+    #[test]
+    fn each_item_kind_requires_its_own_fields() {
+        let mut value = verdict();
+        value.items[0].fields = fields(b"path", b"src");
+        assert_eq!(
+            judge(&specification(), &Declared::Verdict(value)).unwrap_err().listed.as_ref(),
+            &[Problem::MissingField { item: Some(0), field: b"uri".as_slice().into() }]
+        );
+        let mut value = verdict();
+        value.items[0].kind = b"other".as_slice().into();
+        assert_eq!(
+            judge(&specification(), &Declared::Verdict(value)).unwrap_err().listed.as_ref(),
+            &[Problem::KindNotAllowed { item: 0 }]
+        );
+        let mut value = verdict();
+        value.items = Box::new([]);
+        assert_eq!(
+            judge(&specification(), &Declared::Verdict(value)).unwrap_err().listed.as_ref(),
+            &[Problem::TooFewItems { min: 1 }]
+        );
+    }
+
+    #[test]
+    fn missing_empty_duplicate_and_oversized_fields_have_typed_feedback() {
+        let spec = specification();
+        let values = [
+            (Box::new([]) as Box<[Field]>, Problem::MissingField { item: None, field: b"summary".as_slice().into() }),
+            (fields(b"summary", b""), Problem::EmptyField { item: None, field: b"summary".as_slice().into() }),
+            (
+                fields(b"summary", b"large"),
+                Problem::FieldTooLarge { item: None, field: b"summary".as_slice().into(), max: 4 },
+            ),
+            (
+                Box::new([
+                    Field { name: b"summary".as_slice().into(), value: b"ok".as_slice().into() },
+                    Field { name: b"summary".as_slice().into(), value: b"ok".as_slice().into() },
+                ]) as Box<[Field]>,
+                Problem::RepeatedField { item: None, field: b"summary".as_slice().into() },
+            ),
+        ];
+        for (fields, problem) in values {
+            assert_eq!(judge(&spec, &Declared::Change(Change { fields })).unwrap_err().listed.as_ref(), &[problem]);
+        }
+    }
+
+    #[test]
+    fn extra_fields_are_allowed_but_all_their_storage_is_priced() {
+        let value = Declared::Report(Report {
+            text: Box::new([]),
+            fields: Box::new([
+                Field { name: b"source".as_slice().into(), value: b"ref".as_slice().into() },
+                Field { name: Box::new([]), value: Box::new([]) },
+                Field { name: b"opaque".as_slice().into(), value: b"extra".as_slice().into() },
+            ]),
+        });
+        assert_eq!(judge(&specification(), &value), Ok(()));
+        assert_eq!(owned_bytes(&value), Some(3 * u64::try_from(size_of::<Field>()).unwrap() + 6 + 3 + 6 + 5));
+    }
+
+    #[test]
+    fn ownership_counts_item_containers_and_every_payload() {
+        let value = Declared::Verdict(verdict());
+        let fields = 2 * u64::try_from(size_of::<Field>()).unwrap();
+        let items = u64::try_from(size_of::<Item>()).unwrap();
+        assert_eq!(owned_bytes(&value), Some(fields + items + 6 + 5 + 3 + 4 + 3 + 3));
+    }
+
+    #[test]
+    fn admission_prices_minimum_text_and_field_storage_at_the_exact_boundary() {
+        let spec = OutcomeSpec {
+            change: None,
+            verdicts: Box::new([]),
+            report: Some(TextSpec { min: 2, max: 4, fields: rules(b"x", 1) }),
+            failure: None,
+        };
+        let min = u64::try_from(size_of::<Field>()).unwrap() + 1 + 1 + 2;
+        assert!(is_valid(&spec, &Limits { outcome_bytes: min, ..LIMITS }));
+        assert!(!is_valid(&spec, &Limits { outcome_bytes: min - 1, ..LIMITS }));
+        let empty = OutcomeSpec { report: Some(TextSpec { min: 0, max: 0, fields: Box::new([]) }), ..spec.clone() };
+        assert!(is_valid(&empty, &Limits { outcome_bytes: 0, ..LIMITS }));
+        let reversed = OutcomeSpec { report: Some(TextSpec { min: 2, max: 1, fields: Box::new([]) }), ..spec };
+        assert!(!is_valid(&reversed, &LIMITS));
+    }
+
+    #[test]
+    fn admission_prices_minimum_item_storage_and_rejects_malformed_names() {
+        let mut spec = specification();
+        spec.change = None;
+        spec.report = None;
+        spec.failure = None;
+        let min = 6
+            + u64::try_from(size_of::<Field>()).unwrap()
+            + 5
+            + 1
+            + u64::try_from(size_of::<Item>()).unwrap()
+            + 4
+            + u64::try_from(size_of::<Field>()).unwrap()
+            + 3
+            + 1;
+        assert!(is_valid(&spec, &Limits { outcome_bytes: min, ..LIMITS }));
+        assert!(!is_valid(&spec, &Limits { outcome_bytes: min - 1, ..LIMITS }));
+        let repeated = spec.verdicts[0].clone();
+        spec.verdicts = Box::new([repeated.clone(), repeated]);
+        assert!(!is_valid(&spec, &LIMITS));
+        let mut spec = specification();
+        spec.report.as_mut().unwrap().fields = rules(b"", 1);
+        assert!(!is_valid(&spec, &LIMITS));
+        let mut spec = specification();
+        spec.report.as_mut().unwrap().fields = rules(b"name", 0);
+        assert!(!is_valid(&spec, &LIMITS));
+    }
+
+    #[test]
+    fn feedback_is_bounded_even_with_many_missing_fields() {
+        let rules = (0..20)
+            .map(|index| FieldRule { name: alloc::format!("field-{index}").into_bytes().into(), max: 1 })
+            .collect();
+        let spec = OutcomeSpec {
+            change: Some(ChangeSpec { checks: false, fields: rules }),
+            verdicts: Box::new([]),
+            report: None,
+            failure: None,
+        };
+        let problems = judge(&spec, &Declared::Change(Change { fields: Box::new([]) })).unwrap_err();
+        assert_eq!(problems.listed.len(), 8);
+        assert_eq!(problems.more, 12);
+    }
+
+    #[test]
+    fn forbidden_forms_unknown_labels_and_item_count_are_specific_feedback() {
+        let empty = OutcomeSpec { change: None, verdicts: Box::new([]), report: None, failure: None };
+        let cases = [
+            (Declared::Change(Change { fields: Box::new([]) }), Problem::ChangeNotAllowed),
+            (Declared::Report(Report { text: Box::new([]), fields: Box::new([]) }), Problem::ReportNotAllowed),
+            (
+                Declared::Failure(DeclaredFailure { reason: Box::new([]), fields: Box::new([]) }),
+                Problem::FailureNotAllowed,
+            ),
+            (Declared::Verdict(verdict()), Problem::VerdictNotAllowed),
+        ];
+        for (value, problem) in cases {
+            assert_eq!(judge(&empty, &value).unwrap_err().listed.as_ref(), &[problem]);
+        }
+        let mut value = verdict();
+        value.name = b"another".as_slice().into();
+        assert_eq!(
+            judge(&specification(), &Declared::Verdict(value)).unwrap_err().listed.as_ref(),
+            &[Problem::UnknownVerdict]
+        );
+        let mut value = verdict();
+        value.items = vec![value.items[0].clone(); 3].into();
+        assert_eq!(
+            judge(&specification(), &Declared::Verdict(value)).unwrap_err().listed.as_ref(),
+            &[Problem::TooManyItems { max: 2 }]
+        );
+    }
+
+    #[test]
+    fn invalid_kind_ranges_and_duplicate_declared_rules_are_refused() {
+        let mut spec = specification();
+        spec.verdicts[0].items.min = 3;
+        assert!(!is_valid(&spec, &LIMITS));
+        let mut spec = specification();
+        spec.verdicts[0].items.kinds = Box::new([]);
+        assert!(!is_valid(&spec, &LIMITS));
+        let mut spec = specification();
+        spec.verdicts[0].items.kinds[1].kind = spec.verdicts[0].items.kinds[0].kind.clone();
+        assert!(!is_valid(&spec, &LIMITS));
+        let mut spec = specification();
+        spec.report.as_mut().unwrap().fields = Box::new([
+            FieldRule { name: b"x".as_slice().into(), max: 1 },
+            FieldRule { name: b"x".as_slice().into(), max: 2 },
+        ]);
+        assert!(!is_valid(&spec, &LIMITS));
     }
 }

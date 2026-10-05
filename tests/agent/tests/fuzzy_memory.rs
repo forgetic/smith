@@ -10,7 +10,9 @@ use skein_world::domain::heap::{self, Meter};
 use smith_agent_world::TIGHT;
 use smith_domain::llm::{Completion, Decoded, Failure, Problem, Prompt, Said, Served, Stop, Usage};
 use smith_domain::run::charter::{Checkout, Endpoint, Families, Grants, Llm, Repository, Tools};
-use smith_domain::run::outcome::{Change, ChangeSpec, Child, Children, Declared, Field, OutcomeSpec};
+use smith_domain::run::outcome::{
+    Change, ChangeSpec, Declared, DeclaredFailure, Field, Item, OutcomeSpec, Report, TextSpec,
+};
 use smith_domain::run::outcome::{Verdict, VerdictRule};
 use smith_domain::run::{self, Ask, Charter};
 use smith_domain::tools::{Call, Done, Entry, Exit, Fault, Hit, Kind, Name, Op, Part, Path, Version};
@@ -83,15 +85,44 @@ fn charter(brief: u64) -> Charter {
     let all = Tools { inspect: true, modify: true, shell: true };
     let rule = VerdictRule {
         name: (*b"request-changes").into(),
-        children: Children { min: 1, max: 4 },
-        kinds: Box::new([(*b"nit").into()]),
-        fields: Box::new([(*b"path").into()]),
+        text_max: 1024,
+        fields: Box::new([]),
+        items: smith_domain::run::outcome::ItemSpec {
+            min: 1,
+            max: 4,
+            kinds: {
+                let required: Box<[Box<[u8]>]> = Box::new([(*b"path").into()]);
+                let kinds: Box<[Box<[u8]>]> = Box::new([(*b"nit").into()]);
+                kinds
+                    .into_vec()
+                    .into_iter()
+                    .map(|kind| smith_domain::run::outcome::ItemRule {
+                        kind,
+                        fields: required
+                            .iter()
+                            .map(|name| smith_domain::run::outcome::FieldRule { name: name.clone(), max: 1024 })
+                            .collect(),
+                    })
+                    .collect()
+            },
+        },
     };
     Charter {
         brief: bytes(brief),
         checkout: Checkout { repositories: Box::new([repository]) },
         grants: Grants { tools: all, forge: false, agents: true, outlets: Box::new([]) },
-        outcome: OutcomeSpec { change: Some(ChangeSpec { checks: true }), verdicts: Box::new([rule]) },
+        outcome: OutcomeSpec {
+            change: Some(ChangeSpec {
+                checks: true,
+                fields: Box::new([
+                    smith_domain::run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                    smith_domain::run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                ]),
+            }),
+            verdicts: Box::new([rule]),
+            report: Some(TextSpec { min: 0, max: 512, fields: Box::new([]) }),
+            failure: Some(TextSpec { min: 1, max: 512, fields: Box::new([]) }),
+        },
         budget: run::Budget { turns: 12, ..TIGHT.run.budget },
         llm: Llm { account: 0, endpoint: Endpoint(0), model: (*b"m").into(), max_tokens: 256 },
         models: Box::new([]),
@@ -344,19 +375,41 @@ impl Driver {
         Decoded::Owned { call }
     }
 
-    /// A finish with a change or a verdict, as large as an outcome may be.
+    /// A finish of every form, with ownership near or beyond the aggregate cap.
     fn finish(&mut self, limits: &Limits) -> Ask {
         let most = limits.run.outcome_bytes;
-        let outcome = if self.rng.chance(500) {
-            Declared::Change(Change { title: bytes(1), body: bytes(self.rng.below(most)) })
-        } else {
-            let child = || Child {
-                kind: (*b"nit").into(),
-                fields: Box::new([Field { name: (*b"path").into(), value: bytes(8) }]),
-            };
-            let children = (0..self.rng.below(3)).map(|_| child()).collect();
-            let name = (*b"request-changes").into();
-            Declared::Verdict(Verdict { name, body: bytes(self.rng.below(most / 2)), children })
+        let outcome = match self.rng.below(4) {
+            0 => Declared::Report(Report {
+                text: bytes(self.rng.below(most.saturating_add(1))),
+                fields: Box::new([Field { name: b"extra".as_slice().into(), value: bytes(self.rng.below(most)) }]),
+            }),
+            1 => Declared::Failure(DeclaredFailure {
+                reason: bytes(self.rng.below(most.saturating_add(1))),
+                fields: Box::new([]),
+            }),
+            2 => Declared::Change(Change {
+                fields: Box::new([
+                    smith_domain::run::outcome::Field { name: b"title".as_slice().into(), value: bytes(1) },
+                    smith_domain::run::outcome::Field {
+                        name: b"body".as_slice().into(),
+                        value: bytes(self.rng.below(most)),
+                    },
+                ]),
+            }),
+            _ => {
+                let child = || Item {
+                    kind: (*b"nit").into(),
+                    fields: Box::new([Field { name: (*b"path").into(), value: bytes(8) }]),
+                };
+                let children = (0..self.rng.below(3)).map(|_| child()).collect();
+                let name = (*b"request-changes").into();
+                Declared::Verdict(Verdict {
+                    name,
+                    text: bytes(self.rng.below(most / 2)),
+                    items: children,
+                    fields: Box::new([]),
+                })
+            }
         };
         Ask::Finish { outcome }
     }

@@ -294,10 +294,11 @@ pub enum Request {
         deadline: Time,
     },
     /// To the worker, a host call: commit what the checkout of the run it
-    /// names `worker` holds, exactly as it is, and push it, with `change`'s
-    /// title and body.
+    /// names `worker` holds, exactly as it is, and push it. `Change` carries
+    /// the validated generic fields unchanged; their meaning belongs to the
+    /// host. This retains the copied Push lifecycle until generic delivery.
     ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
+    /// Contract: domain/run.md, sections 7.1, 8 and 14; domain/host.md, section 2.
     Push {
         /// Scripted host or worker's opaque run name, echoed without interpretation.
         ///
@@ -307,9 +308,9 @@ pub enum Request {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         owner: Token,
-        /// Declared checkout change with bounded title and body, delivered as the host requested.
+        /// Declared checkout change with validated host-named fields and bounded aggregate ownership, forwarded unchanged.
         ///
-        /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
+        /// Contract: domain/run.md, sections 7.1, 8 and 14; domain/host.md, section 2.
         change: run::outcome::Change,
     },
     /// Abandon the host call in flight for `owner`. Its terminal still comes:
