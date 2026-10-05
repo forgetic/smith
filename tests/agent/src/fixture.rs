@@ -10,8 +10,6 @@ pub(crate) const CODE: &[u8] = b"src/lib.rs";
 
 pub(crate) const INITIAL: &[u8] = b"pub fn answer() -> u32 { 42 }\n";
 
-pub(crate) const FIXED: &[u8] = b"pub fn answer() -> u32 { 43 }\n";
-
 pub(crate) fn seed(disk: &mut Checkout) -> u64 {
     disk.mkdir(b"work");
     for (path, bytes) in [

@@ -14,17 +14,22 @@ use crate::limits::Limits;
 
 /// What a run may finish with: a change, a verdict from a closed list, or
 /// either.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct OutcomeSpec {
     /// Whether it may finish with a change, the diff of its checkout with a
     /// title and body for its pull request, and on what terms.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub change: Option<ChangeSpec>,
-    /// The verdicts it may finish with, each with its contract. `None`, if it
-    /// may only finish with a change.
+    /// Closed verdict rules supplied by the host. An empty slice permits no verdict;
+    /// admission bounds the rule count by `Limits.verdicts` and the aggregate
+    /// charter ownership by `Limits.run_bytes`.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub verdicts: Box<[VerdictRule]>,
 }
 
 /// The terms on which a run may finish with a change.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct ChangeSpec {
     /// Whether the checks of the repositories that have them must pass before
@@ -33,130 +38,195 @@ pub struct ChangeSpec {
 }
 
 /// A verdict a run may finish with, and its contract.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct VerdictRule {
     /// Boundary name, compared byte for byte; it carries no authority by itself.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub name: Box<[u8]>,
     /// How many children a verdict of this name has.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub children: Children,
     /// The kinds its children may be.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub kinds: Box<[Box<[u8]>]>,
     /// The fields each of its children must carry.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub fields: Box<[Box<[u8]>]>,
 }
 
 /// At least `min`, at most `max`.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Children {
     /// Inclusive minimum count required by this contract.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub min: u32,
     /// Inclusive maximum count allowed by this contract.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub max: u32,
 }
 
 /// An outcome an LLM declares when it finishes, typed by the protocol layer
 /// from the input it wrote.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum Declared {
     /// Declared copy-baseline checkout change with title and body.
-    Change(Change),
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Change(
+        /// Protocol-decoded change bytes; the run checks aggregate `Limits.outcome_bytes`
+        /// before shape judgement, then required checks and host delivery before acceptance.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+        Change,
+    ),
     /// Declared copy-baseline closed-list verdict and its contract items.
-    Verdict(Verdict),
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Verdict(
+        /// Protocol-decoded verdict and item bytes; the run checks aggregate
+        /// `Limits.outcome_bytes` before validating the host's closed verdict contract.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+        Verdict,
+    ),
 }
 
-/// A change: the diff of the checkout, with the title and body of its pull
-/// request.
+/// Protocol-decoded LLM declaration attached to the actual checkout change.
+/// Title and body must be nonempty. Before shape judgement, run finishing
+/// bounds their aggregate owned payload by `Limits.outcome_bytes`; successful
+/// host delivery, with required checks, precedes the accepted terminal.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Change {
-    /// Declared change title, checked for nonempty content and the outcome byte cap.
+    /// LLM-supplied nonempty delivery title; its owned bytes contribute to the aggregate outcome cap.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub title: Box<[u8]>,
-    /// Owned message or result body, bounded by the enclosing record's byte cap.
+    /// LLM-supplied nonempty delivery body; its owned bytes contribute to the aggregate outcome cap.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub body: Box<[u8]>,
 }
 
-/// Copy-baseline declared verdict, checked against the charter's closed verdict contract.
+/// Protocol-decoded LLM verdict, checked against the host's closed list and
+/// item contract. The run bounds all boxes and payload bytes together by
+/// `Limits.outcome_bytes` before shape judgement. An accepted verdict ends the run.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Verdict {
     /// Boundary name, compared byte for byte; it carries no authority by itself.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub name: Box<[u8]>,
     /// What the LLM says about it.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub body: Box<[u8]>,
     /// Declared result items, checked against the charter's count, kind and field rules.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub children: Box<[Child]>,
 }
 
 /// One of a verdict's children: a comment, an issue to open, whatever its
 /// kind names.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Child {
     /// Typed entry classification or byte label required by the enclosing contract.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub kind: Box<[u8]>,
     /// Named values of this result item; required names must occur exactly once.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub fields: Box<[Field]>,
 }
 
-/// One named result value, checked for required names, uniqueness and nonempty bytes.
+/// LLM-supplied named value in a verdict item. Repeated names are invalid;
+/// required names must exist with nonempty values. Extra fields are permitted
+/// and may be empty. Names and values contribute to the run's checked aggregate
+/// `Limits.outcome_bytes` bound, including the boxed `Field` storage.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Field {
     /// Boundary name, compared byte for byte; it carries no authority by itself.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub name: Box<[u8]>,
-    /// Owned field value or environment value, bounded by its enclosing record.
+    /// LLM-supplied result-field bytes; nonempty only when this name is required by the rule.
+    /// Counted with the name and box against the aggregate outcome ownership cap.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub value: Box<[u8]>,
 }
 
 /// Something wrong with a declared outcome, for the LLM to fix. Children are
 /// counted from zero, in the order the LLM gave them.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Problem {
     /// The outcome holds more than `max` bytes, as a run counts them.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     TooLarge {
         /// Inclusive maximum count allowed by this contract.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         max: u64,
     },
     /// The run may not finish with a change.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     ChangeNotAllowed,
     /// The run may not finish with a verdict.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     VerdictNotAllowed,
     /// No verdict the run may finish with has this name.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     UnknownVerdict,
     /// The verdict has fewer children than its contract requires.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     TooFewChildren {
         /// Inclusive minimum count required by this contract.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         min: u32,
     },
     /// The verdict has more children than its contract allows.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     TooManyChildren {
         /// Inclusive maximum count allowed by this contract.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         max: u32,
     },
     /// A child is of a kind its verdict does not allow.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     KindNotAllowed {
         /// Zero-based result-item index whose contract failed.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         child: u32,
     },
     /// A change with no title for its pull request.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     EmptyTitle,
     /// A change with no body for its pull request.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     EmptyBody,
     /// A child lacks `field`, which its verdict requires of every child.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     MissingField {
         /// Zero-based result-item index whose contract failed.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         child: u32,
         /// Name of the required input member which failed validation.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         field: Box<[u8]>,
     },
     /// A child has `field`, which its verdict requires, with nothing in it.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     EmptyField {
         /// Zero-based result-item index whose contract failed.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         child: u32,
         /// Name of the required input member which failed validation.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         field: Box<[u8]>,
     },
     /// A child has `field` more than once.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     RepeatedField {
         /// Zero-based result-item index whose contract failed.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         child: u32,
         /// Name of the required input member which failed validation.
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         field: Box<[u8]>,
     },
 }
@@ -164,22 +234,31 @@ pub enum Problem {
 /// What is wrong with a declared outcome: the first problems found, at most
 /// [`Problems::LISTED`] of them in the order they were found, and how many
 /// more there were.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Problems {
     /// First bounded outcome-validation problems, in validation order.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub listed: Box<[Problem]>,
     /// Problems or matches omitted after the retained bound.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub more: u32,
 }
 
 impl Problems {
     /// Enough for the LLM to see what is wrong, few enough to keep what it is
     /// told small.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub const LISTED: u32 = 8;
 }
 
-/// Whether a run whose outcome spec is `spec` may finish with `declared`, or
-/// what is wrong with it.
+/// Pure shape judgement of protocol-decoded `declared` against the host's
+/// `spec`: returns success or the first eight problems and a count of omissions.
+/// This function checks no byte cap. Run finishing first computes checked
+/// boxed-storage-plus-payload ownership and refuses values beyond
+/// `Limits.outcome_bytes`; callers invoking this helper alone supply their own
+/// ownership bounds.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub fn judge(spec: &OutcomeSpec, declared: &Declared) -> Result<(), Problems> {
     let mut found = Found { listed: List::with_capacity(Problems::LISTED), more: 0 };
     match declared {
@@ -203,6 +282,7 @@ pub fn judge(spec: &OutcomeSpec, declared: &Declared) -> Result<(), Problems> {
 }
 
 /// The problems found so far.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 struct Found {
     listed: List<Problem>,
     more: u32,
@@ -218,6 +298,7 @@ impl Found {
 
     /// Adds a problem about the child `child`'s field `field`, copying the
     /// field's name only if the problem is listed.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     fn add_field(&mut self, child: u32, field: &[u8], problem: FieldProblem) {
         if self.listed.room() == 0 {
             self.more = self.more.saturating_add(1);
@@ -233,6 +314,7 @@ impl Found {
 }
 
 /// What is wrong with one of a child's fields.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy)]
 enum FieldProblem {
     Missing,
@@ -290,6 +372,7 @@ fn judge_verdict(rules: &[VerdictRule], verdict: &Verdict, found: &mut Found) {
 }
 
 /// Where among `rules` the verdict named `name` is.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn rule_named(rules: &[VerdictRule], name: &[u8]) -> Option<usize> {
     for (index, rule) in rules.iter().enumerate() {
         if *rule.name == *name {
@@ -300,6 +383,7 @@ fn rule_named(rules: &[VerdictRule], name: &[u8]) -> Option<usize> {
 }
 
 /// Whether `labels` has `label` among them.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn names(labels: &[Box<[u8]>], label: &[u8]) -> bool {
     for candidate in labels {
         if **candidate == *label {
@@ -310,6 +394,7 @@ fn names(labels: &[Box<[u8]>], label: &[u8]) -> bool {
 }
 
 /// Where among `fields` the first named `name` is.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn field_named(fields: &[Field], name: &[u8]) -> Option<usize> {
     for (at, field) in fields.iter().enumerate() {
         if *field.name == *name {
@@ -323,6 +408,7 @@ fn field_named(fields: &[Field], name: &[u8]) -> Option<usize> {
 /// no more verdicts than a run may hold and no name twice, and each verdict's
 /// contract can be met, requiring no more children than it allows and giving
 /// a kind for children to be if it allows any.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn is_valid(spec: &OutcomeSpec, limits: &Limits) -> bool {
     let OutcomeSpec { change, verdicts } = spec;
     if change.is_none() && verdicts.is_empty() {
@@ -347,6 +433,7 @@ pub(crate) fn is_valid(spec: &OutcomeSpec, limits: &Limits) -> bool {
 
 /// The bytes `spec` holds beyond its fixed size, counted as the charter's are.
 /// `None` past a `u64`.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn cost(spec: &OutcomeSpec) -> Option<u64> {
     let rule = u64::try_from(size_of::<VerdictRule>()).ok()?;
     let mut cost: u64 = 0;
@@ -362,6 +449,7 @@ pub(crate) fn cost(spec: &OutcomeSpec) -> Option<u64> {
 
 /// The bytes `declared` holds beyond its fixed size: each part held in a box
 /// at its fixed size, plus its payload. `None` past a `u64`.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn declared_cost(declared: &Declared) -> Option<u64> {
     match declared {
         Declared::Change(Change { title, body }) => len(title)?.checked_add(len(body)?),
@@ -381,6 +469,7 @@ pub(crate) fn declared_cost(declared: &Declared) -> Option<u64> {
 }
 
 /// The problems of an outcome that holds more than `max` bytes.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn too_large(max: u64) -> Problems {
     Problems { listed: Box::new([Problem::TooLarge { max }]), more: 0 }
 }
@@ -415,6 +504,7 @@ mod tests {
 
     /// A review: approve with no children, or request changes with one to
     /// three comments, each blocking or a nit, with a path and a body.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     fn review(change: bool) -> OutcomeSpec {
         let approve = VerdictRule {
             name: copy_of(b"approve"),
@@ -452,6 +542,7 @@ mod tests {
     }
 
     /// A comment whose body is empty.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     fn empty() -> Child {
         let fields = Box::new([
             Field { name: copy_of(b"path"), value: copy_of(b"a.rs") },
@@ -461,6 +552,7 @@ mod tests {
     }
 
     /// A comment that gives its path twice, and its body once.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     fn twice() -> Child {
         let fields = Box::new([
             Field { name: copy_of(b"path"), value: copy_of(b"a.rs") },

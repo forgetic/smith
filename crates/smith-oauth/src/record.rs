@@ -8,6 +8,7 @@ use alloc::boxed::Box;
 use skein_lib::{Duration, Reader, Wall, Writer, bytes};
 
 /// Durable credential-record encoding version emitted by this codec.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub const RECORD_VERSION: u16 = 1;
 
 const MAGIC: &[u8] = b"TPOT";
@@ -15,54 +16,70 @@ const MAGIC: &[u8] = b"TPOT";
 const FIXED_BYTES: u32 = 38;
 
 /// Configured account identity requirements checked before accepting durable credentials.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum AccountKind {
     /// Configured bearer account without a provider-specific account ID requirement.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     Bearer,
     /// Configured account whose token metadata must include the `ChatGPT` account ID.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     ChatGpt,
 }
 
 /// Metadata needed for Starting or the next refresh; access tokens are optional
 /// in the owner's table and are not required to ask for the first refresh.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash)]
 #[expect(missing_debug_implementations, reason = "credential values must never occur in traces")]
 pub struct RefreshState {
     /// Configured credential account, compared as an opaque numeric name.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub account: u32,
     /// Credential generation, echoed unchanged so stale refreshes cannot replace newer credentials.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub generation: u64,
     /// Secret refresh credential; never included in debug output or observations.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub refresh_token: Box<[u8]>,
 }
 
 /// Kept as one versioned record before `Refreshed` crosses a domain boundary.
 /// `expires_at` is restart metadata, never a cross-host grant deadline.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash)]
 #[expect(missing_debug_implementations, reason = "credential values must never occur in traces")]
 pub struct SavedToken {
     /// Configured credential account, compared as an opaque numeric name.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub account: u32,
     /// Credential generation, echoed unchanged so stale refreshes cannot replace newer credentials.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub generation: u64,
     /// Secret access credential; never included in debug output or observations.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub access_token: Box<[u8]>,
     /// Secret refresh credential; never included in debug output or observations.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub refresh_token: Box<[u8]>,
     /// Provider account identity extracted from claims; it conveys no verified authentication.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub account_id: Option<Box<[u8]>>,
     /// Provider expiry timestamp, supplied or decoded without reading a clock.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub expires_at: Wall,
 }
 
 impl SavedToken {
     /// Copies only the bounded durable refresh metadata required by the next refresh; it never formats secret values.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     #[must_use]
     pub fn refresh_state(&self) -> RefreshState {
         RefreshState { account: self.account, generation: self.generation, refresh_token: self.refresh_token.clone() }
     }
 
     /// Call at grant encoding or durability completion, not at refresh start.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     #[must_use]
     pub fn remaining(&self, wall: Wall) -> Duration {
         Duration::from_nanos(self.expires_at.as_nanos().saturating_sub(wall.as_nanos()))
@@ -71,6 +88,7 @@ impl SavedToken {
 
 /// Builds the next candidate; its owner must keep it successfully before
 /// granting it. An omitted `refresh_token` preserves the previous token.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub fn rotate(
     previous: &RefreshState,
     response: &TokenResponse,
@@ -142,6 +160,7 @@ fn measured(record: &SavedToken, limits: &Limits) -> Result<u32, DecodeError> {
 }
 
 /// Encodes one versioned durable token record within the configured byte cap; it performs no store IO.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub fn encode_record(record: &SavedToken, limits: &Limits) -> Result<Box<[u8]>, DecodeError> {
     validate(record, limits)?;
     let len = measured(record, limits)?;
@@ -166,6 +185,7 @@ fn write_field(out: &mut Writer, value: &[u8]) {
 }
 
 /// Validates a complete versioned credential record before returning secret values; no partial record is accepted.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub fn decode_record(input: &[u8], limits: &Limits) -> Result<SavedToken, DecodeError> {
     if input.len() > usize::try_from(limits.record_bytes).expect("u32 fits usize") {
         return Err(DecodeError::TooLarge);

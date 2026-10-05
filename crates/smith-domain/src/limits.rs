@@ -15,15 +15,20 @@ use crate::peer::{self, Peer};
 /// The agent domain's limits (programming-model.md, sections 4.5 and 6.3), handed to every step read-only: its
 /// child domains', each handed down to the one it bounds. The session's include
 /// its tools'.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
     /// Maximum configured credential accounts retained by the root.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub accounts: u32,
     /// Safety margin subtracted from credential validity before use.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub skew: skein_lib::Duration,
-    /// The run child's limits or opaque run identity, according to the enclosing record.
+    /// Immutable run-child ownership and admission limits.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub run: run::Limits,
-    /// The session child's limits or opaque session identity, according to the enclosing record.
+    /// Immutable session-child ownership and admission limits.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub session: session::Limits,
 }
 
@@ -47,6 +52,7 @@ pub struct Limits {
 /// the batch it waits for, which it has not charged: on the ready list, or
 /// reaching it once it is closing or has no room for them. What the queued
 /// requests own is counted where they end up.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     let Limits { run: run_limits, session: session_limits, accounts: _, skew: _ } = limits;
@@ -99,33 +105,39 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
 /// `Return` until it reaches the session from the ready list, and for good
 /// once it reaches a session that is closing, or that has no room for it.
 /// The fixed size of their tickets is among a peer's answers.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn uncharged(limits: &Limits) -> Option<u64> {
     u64::from(limits.session.parallel_tools).checked_mul(peer::payload(&limits.run)?)
 }
 
 /// Delegated calls in flight at once: a batch of each session.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn flights(limits: &Limits) -> Option<u32> {
     limits.run.conversations.checked_mul(limits.session.parallel_tools)
 }
 
 /// Hand-offs on the ready list at once: a close of each conversation, and the
 /// answer to each delegated call.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn handoffs(limits: &Limits) -> Option<u32> {
     limits.run.conversations.checked_add(flights(limits)?)
 }
 
 /// Facts kept until the loop drains them: as many as both child domains keep.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn facts(limits: &Limits) -> Option<u32> {
     limits.run.facts.checked_add(limits.session.facts)
 }
 
 /// Room for what the run emits in an entry point: its most, for each step it
 /// takes (see the domain module).
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn run_out(limits: &Limits) -> u32 {
     run_steps(limits).saturating_mul(run::MAX_OUT)
 }
 
 /// Room for what the session child domain emits in an entry point.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn session_out(limits: &Limits) -> u32 {
     session_steps(limits).saturating_mul(session::max_out(&limits.session))
 }
@@ -135,6 +147,7 @@ pub(crate) const fn session_out(limits: &Limits) -> u32 {
 /// answer to what that step sent it (an `Open` or a `Say`: as many as the run
 /// emits requests in each of its steps). An entry point for the run takes no
 /// more: one hand-off for each request its step emits.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn session_steps(limits: &Limits) -> u32 {
     let sent = session::max_to_opener(&limits.session);
     1_u32.saturating_add(sent.saturating_mul(run::MAX_OUT))
@@ -151,6 +164,7 @@ pub(crate) const fn session_steps(limits: &Limits) -> u32 {
 /// It counts what a session step sends its opener, never what it sends its
 /// tools' io (a kit's close may cancel as many operations as the tools run),
 /// which goes out to the protocol layer and leads nowhere else.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn run_steps(limits: &Limits) -> u32 {
     let sent = session::max_to_opener(&limits.session);
     let at_once = sent.saturating_mul(run::MAX_OUT);

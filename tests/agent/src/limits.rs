@@ -6,6 +6,7 @@ use smith_domain::{Limits, run, session, tools};
 
 /// The most a charter may ask for in the calm world, which every session may
 /// take.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 pub const BUDGET: run::Budget = run::Budget {
     turns: 64,
     input: 1 << 24,
@@ -27,6 +28,7 @@ const CEILING: session::Budget = session::Budget {
 /// An agent process's limits in the calm world: room for the one run it
 /// carries, with a few conversations, sub-agents nested two deep beneath
 /// main.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 pub const LIMITS: Limits = Limits {
     accounts: 4,
     skew: Duration::ZERO,
@@ -92,6 +94,7 @@ pub const LIMITS: Limits = Limits {
 
 /// An agent process's limits in random worlds: room for fewer conversations,
 /// sessions and calls than its run may ask for, so that some are refused.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 pub const TIGHT: Limits = Limits {
     accounts: LIMITS.accounts,
     skew: LIMITS.skew,

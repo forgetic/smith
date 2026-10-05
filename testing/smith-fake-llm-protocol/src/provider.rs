@@ -14,9 +14,11 @@ use smith_llm_anthropic as anthropic;
 use smith_llm_openai as openai;
 
 /// Maximum owner-directed records emitted by one connection entry point.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const MAX_UP: u32 = 3;
 
 /// Maximum transport-directed records emitted by one connection entry point.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const MAX_DOWN: u32 = 18;
 
 const EVENTS: u32 = 4;
@@ -26,49 +28,66 @@ const REQUESTS: u32 = 4;
 const ROUTES: u32 = 8;
 
 /// Immutable ownership and document caps supplied by the caller to every entry point.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Limits {
     /// Maximum provider calls held at once.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub calls: u32,
     /// HTTP server bounds supplied by the byte world.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub http: http::Limits,
     /// SSE framing bounds supplied by the byte world.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub sse: sse::Limits,
     /// Document codec bounds for the selected fake provider.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub documents: documents::Limits,
 }
 
 /// Immutable scripted peer configuration supplied by the byte world; it contains no live IO.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[expect(missing_debug_implementations, reason = "configured header values must not enter traces")]
 pub struct Config {
     /// Provider dialect selected by this scripted service.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub provider: documents::Provider,
     /// Path relative to the named root, resolved and confined by the receiving IO layer.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub path: Box<[u8]>,
     /// Verified compatibility data chosen by the world/deployment; this fake
     /// does not certify historical identities as current provider identities.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub headers: Box<[Header]>,
 }
 
 /// Typed refusal or terminal failure of the fake peer, independent of the agent's policy.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Error {
     /// Configuration or constructor ownership caps cannot be honored.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Limits,
     /// Input has invalid syntax or violates the codec's structural contract.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Malformed,
     /// A configured ownership, count or encoded-byte cap would be exceeded.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     TooLarge,
 }
 
 /// Decoded provider or peer event; the enclosing entry point checks order and correlation.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(PartialEq, Eq, Debug)]
 pub enum Event {
     /// Typed request forwarded to the neutral fake provider domain.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Domain(domain::Event),
     /// The owner requests connection closure; the lower layer still supplies Closed.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Close,
     /// The lower layer has completed connection closure.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Closed,
 }
 
@@ -90,6 +109,7 @@ struct Call {
 }
 
 /// Bounded fake-provider service owning routing and pending calls across its connections.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[expect(missing_debug_implementations, reason = "configured headers remain protocol-only")]
 pub struct Service {
     config: Config,
@@ -99,6 +119,7 @@ pub struct Service {
 
 impl Service {
     /// Constructs empty bounded state under the supplied immutable limits; no IO or clocks are consulted.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub fn new(config: Config, limits: &Limits) -> Result<Service, Error> {
         if worst_case(limits).is_none() || config.path.first() != Some(&b'/') {
             return Err(Error::Limits);
@@ -148,12 +169,14 @@ impl Service {
     }
 
     /// Number of fake provider requests observed since service construction.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub const fn count(&self) -> u64 {
         self.count
     }
 
     /// Consumes a fake-domain reply right and resolves its pending HTTP connection, or `None` after a stale terminal.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub fn target(&self, to: ReplyTo) -> Option<Token> {
         let call = self.calls.get(Id::<Call>::from_token(to.into_token()))?;
@@ -161,12 +184,14 @@ impl Service {
     }
 
     /// Iteration-end reclamation of retired entries; it must follow delivery of owned outputs.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub fn reclaim(&mut self) {
         self.calls.reclaim();
     }
 }
 
 /// Bounded per-connection HTTP/SSE state driven by start, input, resume and close events.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[expect(missing_debug_implementations, reason = "HTTP input queues temporarily hold authorization values")]
 pub struct Server {
     owner: Token,
@@ -189,6 +214,7 @@ pub struct Server {
 
 impl Server {
     /// Constructs empty bounded state under the supplied immutable limits; no IO or clocks are consulted.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub fn new(owner: Token, limits: &Limits) -> Result<Server, Error> {
         if worst_case(limits).is_none() {
             return Err(Error::Limits);
@@ -215,6 +241,7 @@ impl Server {
     }
 
     /// Whether this peer can progress from its queued input or injected time without fresh transport input.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub fn has_work(&self) -> bool {
         !self.events.is_empty() || !self.writer_events.is_empty() || !self.requests.is_empty()
@@ -222,6 +249,7 @@ impl Server {
 }
 
 /// Starts this connection's bounded HTTP state; reserve the declared output maxima before calling.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn start(
     server: &mut Server,
     service: &mut Service,
@@ -239,6 +267,7 @@ pub fn start(
 }
 
 /// Consumes one lower transport event and routes bounded HTTP progress or terminals to the owner.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn up(
     server: &mut Server,
     service: &mut Service,
@@ -258,6 +287,7 @@ pub fn up(
 }
 
 /// Accepts one neutral fake-domain terminal and schedules its bounded HTTP/SSE response.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn down(
     server: &mut Server,
     service: &mut Service,
@@ -309,6 +339,7 @@ pub fn down(
 }
 
 /// Performs one bounded deferred HTTP/SSE handoff under backpressure; reserve output maxima first.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn resume(
     server: &mut Server,
     service: &mut Service,
@@ -338,6 +369,7 @@ pub fn resume(
 }
 
 /// Starts orderly connection closure; outstanding lower work still requires its terminal.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn close(
     server: &mut Server,
     service: &mut Service,
@@ -383,6 +415,7 @@ pub fn close(
 }
 
 /// Consumes the lower layer's close terminal and emits the owner's single Closed observation.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn closed(
     server: &mut Server,
     service: &mut Service,
@@ -761,6 +794,7 @@ fn answer_fits(answer: &api::Answer, limits: &documents::Limits) -> bool {
 }
 
 /// Checked maximum owned bytes under limits, or `None` when counters or containers cannot be bounded.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     let request = limits.documents.openai.request_bytes.max(limits.documents.anthropic.request_bytes);

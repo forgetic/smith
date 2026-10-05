@@ -1,45 +1,27 @@
-//! The copied smith agent domain (programming-model.md, section
-//! 4; domain/run.md, section 14): the agent loop's entry point.
+//! The copied agent root (domain/run.md, sections 2, 3, 10 and 14;
+//! programming-model.md, sections 4.4 and 4.5). It owns the run and session
+//! children, opaque credential names and validity, conversation bindings,
+//! tool tickets, deferred handoffs and bounded observation queues.
 //!
-//! Sans-io: [`step`], [`fire`] and [`resume`] turn events into requests and
-//! change nothing but the [`Domain`] they are given. Time and randomness are
-//! inputs; every effect, from calling an LLM to answering the worker, is a
-//! [`Request`] the layers below carry out, and its outcome comes back later
-//! as an [`Event`].
+//! [`step`], [`fire`] and [`resume`] accept typed host, provider and IO events
+//! with injected clocks and seed. They emit owned [`Request`] values within
+//! [`max_out`]; the caller reserves output room and returns each request's
+//! one typed terminal. Iteration-end reclamation follows output delivery.
+//! The root translates run conversations into sessions; siblings share no
+//! state or vocabulary, and tools remain beneath sessions.
 //!
-//! It is the root domain over a tree of child domains (programming-model.md, section 4.5), and the only one
-//! that faces the protocol layer:
+//! The host boundary retains the copied `worker` field names. They are opaque
+//! host request identities; a worker process or byte protocol is not required
+//! to call this typed domain. The domain never knows credential secrets,
+//! authentication, channel bytes, forge state, CI, posting or merge policy.
+//! IO owns confined paths and process effects; the host owns delivery.
+//! Content-free facts may be dropped and never decide behavior. Owned content
+//! observations are separately drained or discarded by the caller.
 //!
-//! ```text
-//! smith-domain                 faces the protocol; routes; translates run <-> session
-//! ├── smith-domain-run         one agent instance: charter, conversations, outcome
-//! └── smith-domain-session     one conversation with an LLM
-//!     └── smith-domain-tools   read, list, search, write, edit, shell
-//! ```
-//!
-//! It owns its children's state and routes each event to the child it is for
-//! and each child's requests out: the worker's records and the run's own io to
-//! and from the run, the LLM providers' and the tools' io to and from the
-//! sessions. The run and the sessions are siblings that share no types: the
-//! run opens conversations, and the top level opens a session for each,
-//! translating between the two vocabularies through small total functions,
-//! and keeping, for each conversation, the values its session carries as
-//! tickets. Hand-offs between them that could chain within a step wait on a
-//! ready list, which the loop drains with [`resume`] (the `domain` module).
-//!
-//! Its records toward the protocol layer ([`Event`], [`Request`]) carry the
-//! children's types where the children meet the protocol as they are (the
-//! worker's records and the run's io, the run's; the tools' io, the tools'),
-//! and its own conversation vocabulary ([`llm`]): the session's, with the
-//! run's typed values in place of tickets.
-//!
-//! What happens is also told as content-free [`Fact`]s, the child domains',
-//! gathered into one bounded queue the loop drains ([`Domain::pop_fact`]).
-
-//!
-//! Copy baseline: temper `25ac2ad`, migration 05s2 (domain/run.md, section 14; domain/session.md, section 12).
-//! The temper-specific charter, push, verdict and token-budget vocabulary
-//! is retained until 05s4; this copy does not yet implement the generic design.
+//! Copy baseline: temper `25ac2ad`, migration 05s2 (domain/run.md, section 14;
+//! domain/session.md, section 12). Charter, push, closed verdict and split
+//! token-budget vocabulary remains until 05s4; the generic design is not yet
+//! implemented.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]

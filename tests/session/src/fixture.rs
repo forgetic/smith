@@ -15,6 +15,7 @@ use smith_domain_tools::{Call, Exit, Outcome, Part, Path};
 
 /// The files each session's repository starts with: their content starts
 /// with their path.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 const FILES: [(&[u8], &[u8]); 3] = [
     (b"README.md", b"README.md: hello, world\n"),
     (b"src/lib.rs", b"src/lib.rs: pub fn answer() -> u32 { 42 }\n"),
@@ -22,17 +23,21 @@ const FILES: [(&[u8], &[u8]); 3] = [
 ];
 
 /// The directory on the menu, and an entry it always has.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 const DIRECTORY: (&[u8], &[u8]) = (b"docs", b"guide.md");
 
 /// The file on the menu that is missing until a write makes it.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 const MISSING: &[u8] = b"notes.md";
 
 /// The commands on the menu, and how each ends. What each writes starts with
 /// the command. (The world draws how long a command runs, as it does for every
 /// operation.)
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 const COMMANDS: [(&[u8], u8); 5] = [(b"cargo test", 0), (b"ls", 0), (b"true", 0), (b"cat README.md", 0), (b"false", 1)];
 
 /// Scripts the commands on the menu, once for the whole checkout.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub fn script(checkout: &mut Checkout) {
     for (command, code) in COMMANDS {
         let output = output(command);
@@ -43,12 +48,14 @@ pub fn script(checkout: &mut Checkout) {
 }
 
 /// What `command` writes.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 fn output(command: &[u8]) -> Vec<u8> {
     [command, b": done\n"].concat()
 }
 
 /// Seeds a repository at `at` in the checkout, and makes it a root: io's name
 /// for it.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub fn seed(checkout: &mut Checkout, at: &[u8]) -> u64 {
     checkout.mkdir(at);
     for (path, content) in FILES {
@@ -59,6 +66,7 @@ pub fn seed(checkout: &mut Checkout, at: &[u8]) -> u64 {
 
 /// Where `path` is, relative to the working directory at the repository's
 /// root, or `None` if it climbs out of it.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 fn place(path: &Path) -> Option<Vec<u8>> {
     let mut names: Vec<&[u8]> = Vec::new();
     for part in &path.parts {
@@ -76,6 +84,7 @@ fn place(path: &Path) -> Option<Vec<u8>> {
 /// Whether `outcome` may come of `call` on a session's tree, as it is or as
 /// the menu's writes and edits leave it. Failures any call may meet (a fault,
 /// a deadline, a cancel, a family not granted, a full kit) fit every call.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn fits(call: &Call, outcome: &Outcome) -> bool {
     if matches!(

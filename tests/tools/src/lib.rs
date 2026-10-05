@@ -1,5 +1,5 @@
 //! A domain world for the agent's tools child domain (programming-model.md,
-//! 4.5; testing-strategy.md, section 2.2): the tools, with the world as their parent,
+//! section 4.5; testing-strategy.md, section 2.2): the tools, with the world as their parent,
 //! over a fake checkout, driven by one loop, deterministically from a seed.
 //!
 //! The world owns the clock and the seed, and plays everything around the

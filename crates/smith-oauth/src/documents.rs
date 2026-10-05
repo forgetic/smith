@@ -9,37 +9,48 @@ use skein_json::writer::Encoder;
 use skein_lib::bytes;
 
 /// Typed OAuth refresh body supplied by the client; secret credentials are excluded from `Debug`.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash)]
 #[expect(missing_debug_implementations, reason = "credential values must never occur in traces")]
 pub struct RefreshRequest {
     /// OAuth client identifier; bounded before a refresh request is encoded.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub client_id: Box<[u8]>,
     /// Secret refresh credential; never included in debug output or observations.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub refresh_token: Box<[u8]>,
 }
 
 /// Typed OAuth refresh terminal; credentials remain secret and omitted refresh tokens retain the previous value.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash)]
 #[expect(missing_debug_implementations, reason = "credential values must never occur in traces")]
 pub struct TokenResponse {
     /// Secret access credential; never included in debug output or observations.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub access_token: Box<[u8]>,
     /// Secret refresh credential; never included in debug output or observations.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub refresh_token: Option<Box<[u8]>>,
     /// Provider-reported token lifetime in seconds.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub expires_in: u64,
 }
 
 /// Bounded OAuth error body; classification is returned separately from diagnostic text.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct OAuthError {
     /// Typed or byte-valued terminal classification in the enclosing boundary.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub code: Box<[u8]>,
     /// Bounded diagnostic text retained for this failure.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub detail: Box<[u8]>,
 }
 
 /// Validates the typed request before allocating its bounded encoded body; errors return no partial request.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub fn encode_request(request: &RefreshRequest, limits: &Limits) -> Result<Box<[u8]>, DecodeError> {
     validate_request(request, limits)?;
     let mut measure = Encoder::measure(&limits.writer_limits());
@@ -68,6 +79,7 @@ fn validate_request(request: &RefreshRequest, limits: &Limits) -> Result<(), Dec
 }
 
 /// Decodes one complete bounded request document for the fake peer; rejects malformed or oversized members.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub fn decode_request(value: &Json, limits: &Limits) -> Result<RefreshRequest, DecodeError> {
     value.admit(limits)?;
     let tokens = value.as_tokens();
@@ -82,6 +94,7 @@ pub fn decode_request(value: &Json, limits: &Limits) -> Result<RefreshRequest, D
 }
 
 /// Encodes the typed OAuth token response within limits; secret values remain excluded from diagnostics.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub fn encode_response(response: &TokenResponse, limits: &Limits) -> Result<Box<[u8]>, DecodeError> {
     validate_response(response, limits)?;
     let mut measure = Encoder::measure(&limits.writer_limits());
@@ -120,6 +133,7 @@ pub(crate) fn validate_response(response: &TokenResponse, limits: &Limits) -> Re
 }
 
 /// Decodes one bounded OAuth terminal, preserving optional refresh rotation and rejecting malformed lifetimes.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub fn decode_response(value: &Json, limits: &Limits) -> Result<TokenResponse, DecodeError> {
     value.admit(limits)?;
     let tokens = value.as_tokens();
@@ -148,6 +162,7 @@ pub fn decode_response(value: &Json, limits: &Limits) -> Result<TokenResponse, D
 }
 
 /// Encodes a bounded typed peer-error body; no network or retry policy is executed.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub fn encode_error(error: &OAuthError, limits: &Limits) -> Result<Box<[u8]>, DecodeError> {
     common::bounded(&error.code, limits.detail_bytes)?;
     if error.detail.len() > usize::try_from(limits.detail_bytes).expect("u32 fits usize") {
@@ -171,6 +186,7 @@ fn write_error(out: &mut Encoder, error: &OAuthError) {
 }
 
 /// Decodes bounded peer-error metadata; syntax, type and byte-cap failures remain typed.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 pub fn decode_error(value: &Json, limits: &Limits) -> Result<OAuthError, DecodeError> {
     value.admit(limits)?;
     let tokens = value.as_tokens();

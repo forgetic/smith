@@ -14,51 +14,67 @@ use crate::session::{Alarm, Ready, Run, Session};
 
 /// The most tool calls a session runs at once: what `Limits::parallel_tools`
 /// may be, and what bounds the requests a step emits.
+/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub const MAX_PARALLEL: u32 = 8;
 
 /// The session child domain's limits (programming-model.md, sections 4.5 and 6.3), handed by its parent to every
 /// step read-only.
+/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
     /// Sessions at once. An `Open` beyond them is refused as busy.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub sessions: u32,
     /// Largest version-two deployment-unit budget admitted. V1 does not use it.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub spend: u64,
     /// Messages a session's transcript holds, the spec's prompt included: at
     /// least two, the prompt and an answer.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub messages: u32,
     /// Bytes a session holds: its spec, its transcript and the tool results
     /// it is collecting, each block counted at its fixed size plus its payload.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub session_bytes: u64,
     /// The largest budget a spec may ask for, dimension by dimension. Its time
     /// is the longest a session may live.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub budget: Budget,
     /// Owned tool calls a session runs at once: adjacent calls that read run
     /// together, up to this many, and a call that writes runs alone. Between
     /// one and [`MAX_PARALLEL`].
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub parallel_tools: u32,
     /// The largest `max_tokens` a spec may ask for.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub max_tokens: u32,
     /// Retries of a call that failed transiently, after which the session
     /// fails.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub retries: u32,
     /// The wait before the first retry, doubled for each one after it, with
     /// jitter.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub backoff_base: Duration,
     /// The longest wait before a retry, unless the provider asks for longer.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub backoff_max: Duration,
     /// How long the protocol layer gives each call.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub call_timeout: Duration,
     /// How long a tool call may run, and no later than the session's time
     /// runs out. Its deadline goes with it, and a call that runs out of time
     /// is answered as such, to the LLM. A delegated call has no timeout here:
     /// the opener races it against the session's time.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub tool_timeout: Duration,
     /// Facts kept until the parent drains them, the tools' passed on among
     /// them. Beyond them, facts are dropped and counted.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub facts: u32,
     /// The tools child domain's, which the session owns: a kit for each
     /// session, with room for its widest batch.
+    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub tools: tools::Limits,
 }
 
@@ -73,6 +89,7 @@ pub struct Limits {
 /// included, and the payloads, not allocator overhead. The prompts of calls in
 /// flight are copies held by the protocol layer, and the texts of yields copies
 /// held by the opener, which count them. Facts own nothing beyond their queue.
+/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     let parallel = limits.parallel_tools;
@@ -112,11 +129,13 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
 /// started it goes on from the ready list, after the reclaim point (see the
 /// session module). So in one iteration a session holds the runs of at most
 /// two batches: one ending, and the next it starts.
+/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub(crate) fn runs(limits: &Limits) -> Option<u32> {
     limits.sessions.checked_mul(limits.parallel_tools)?.checked_mul(2)
 }
 
 /// The alarm table's capacity: every session may have two alarms armed.
+/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub(crate) fn alarms(limits: &Limits) -> Option<u32> {
     limits.sessions.checked_mul(2)
 }

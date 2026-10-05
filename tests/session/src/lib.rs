@@ -1,5 +1,5 @@
 //! A domain world for the agent's session child domain (programming-model.md,
-//! 4.5; testing-strategy.md, section 2.2): the sessions, with the world as their
+//! section 4.5; testing-strategy.md, section 2.2): the sessions, with the world as their
 //! parent, and a fake LLM provider's domain, driven by one loop,
 //! deterministically from a seed.
 //!

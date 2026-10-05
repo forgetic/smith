@@ -9,32 +9,42 @@ use smith_domain_tools::{Authority, Call, Done, Expect, Fault, Grants, Op, Outco
 use crate::translate;
 
 /// Immutable seeded peer behavior and component limits used to construct this world.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Settings {
     /// Seeds the world.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub seed: u64,
     /// Immutable checkout-tool limits for the real component under test.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub tools: tools::Limits,
     /// How long io takes to run an operation.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub io: Span,
     /// The chance, per mille, that an operation fails with a fault.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub faults: u32,
     /// The chance, per mille, that a cancel loses its race and the operation
     /// ends as it would have.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub late_cancels: u32,
     /// The chance, per mille, that an operation abandoned at its deadline had
     /// taken effect all the same.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub late_effects: u32,
     /// How long the session takes between one step of its script and the
     /// next.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub think: Span,
     /// How long the session gives each call.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub call_timeout: Duration,
 }
 
 impl Settings {
     /// A world where nothing goes wrong: no faults, io well within every
     /// deadline, room for a few kits.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub const fn calm(seed: u64) -> Settings {
         Settings {
@@ -71,109 +81,145 @@ impl Settings {
 }
 
 /// What a session does with its kit, one step at a time, before it closes it.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub enum Step {
     /// Sends the calls together, and waits for every answer.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Calls(Vec<Call>),
     /// Sends the calls, and goes on without waiting.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Send(Vec<Call>),
     /// Changes the checkout, as something other than the agent would.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Change(Box<dyn FnOnce(&mut Checkout)>),
     /// Waits.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Sleep(Duration),
     /// From now on io takes this long to run an operation, for every kit.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Latency(Span),
 }
 
 /// What the world counted.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Stats {
     /// Calls the sessions made.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub calls: u32,
     /// Facts the tools dropped for want of room.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub facts_lost: u64,
     /// Operations the tools asked of io, and the commands among them.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub ops: u32,
     /// Count of commands observed at this scripted boundary.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub commands: u32,
     /// Operations that failed with a fault.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub faults: u32,
     /// Operations that ran out of time, and those that took effect all the
     /// same.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub timeouts: u32,
     /// Count of late effects observed at this scripted boundary.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub late_effects: u32,
     /// Operations the tools cancelled, those whose cancel lost the race, and
     /// cancels that came after their operation had ended.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub cancels: u32,
     /// Count of late cancels observed at this scripted boundary.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub late_cancels: u32,
     /// Count of stale cancels observed at this scripted boundary.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub stale_cancels: u32,
 }
 
 /// Something on its way, delivered at its time.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 enum Delivery {
     /// A session opens its kit.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Open { session: u64 },
     /// A session takes the next step of its script.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Next { session: u64 },
     /// io has run the operation of `owner`.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Ran { owner: Token },
     /// The deadline of the operation of `owner` passes.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Deadline { owner: Token },
 }
 
 /// An operation in flight, as io keeps it.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 struct Pending {
     work: Work,
     /// When it started; when it ends, and when its deadline passes, as
     /// deliveries.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     since: Time,
     ran: Key,
     deadline: Key,
 }
 
 /// What io does for an operation in flight.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 enum Work {
     /// A file operation, run on the checkout when it is due.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     File(Op),
     /// A command, running since `since`.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Command { started: translate::Started, since: Time },
     /// An operation that ends in this terminal, as a command that could not
     /// start.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Ending(Done),
 }
 
 /// A session, as the world plays it.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 struct Session {
     authority: Option<Authority>,
     script: VecDeque<Step>,
     state: State,
     /// The calls it sent, in order.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     calls: Vec<u64>,
     /// The calls of its last `Calls` step not answered yet.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     awaited: BTreeSet<u64>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum State {
     /// Its open is on its way, or the tools have not answered it.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Opening,
     /// Running its script with its kit.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Running {
         kit: Token,
     },
     /// Waiting for the answers to its last `Calls` step.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Waiting {
         kit: Token,
     },
     /// Its close has been sent.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     Closing,
     Closed,
     Refused(Refusal),
 }
 
 /// Real domain plus scripted typed peers, pending terminals and external observations for this component story.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub struct World {
     now: Time,
     rng: Rng,
@@ -184,22 +230,29 @@ pub struct World {
     stage: Stage<tools::Limits, tools::Event, tools::Request>,
 
     /// Deliveries in flight, whose count names sessions and calls too.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     wire: Schedule<Delivery>,
     sessions: BTreeMap<u64, Session>,
     /// Every call made, by name: whose it is, and its answer once it came.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     calls: BTreeMap<u64, (u64, Option<Outcome>)>,
     /// io's operations in flight.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     ops: Ledger<Token, Pending>,
     /// The session whose kit each operation, and each kit, is for.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     owners: BTreeMap<Token, u64>,
     kits: BTreeMap<Token, u64>,
     /// The versions io has told each session's kit of, for each place (root,
     /// path): the only ones a store of that kit may expect there.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     versions: BTreeSet<(u64, u64, Vec<u8>, u64)>,
     /// The facts the tools told, by session.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     facts: BTreeMap<u64, Vec<tools::Fact>>,
     /// Whether some kit may write each root: those none may write change only
     /// by the world's own changes, which `untouched` follows.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     writable: BTreeMap<u64, bool>,
     untouched: Option<BTreeMap<Vec<u8>, Vec<u8>>>,
 
@@ -210,6 +263,7 @@ pub struct World {
 impl World {
     /// A world over `checkout`, whose roots name the repositories of the
     /// authorities its sessions open kits with.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn new(settings: Settings, checkout: Checkout) -> World {
         assert!(tools::worst_case(&settings.tools).is_some(), "the shell refuses limits it cannot provision");
@@ -237,24 +291,28 @@ impl World {
     }
 
     /// Current injected monotonic time in this world.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn now(&self) -> Time {
         self.now
     }
 
     /// Observed boundary counters, including dropped facts.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn stats(&self) -> Stats {
         Stats { facts_lost: self.tools.facts_lost(), ..self.stats }
     }
 
     /// Borrowed contained checkout after all effects delivered so far.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn checkout(&self) -> &Checkout {
         &self.checkout
     }
 
     /// What crossed between the tools and the world, in order, with times.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn trace(&self) -> &[String] {
         self.trace.lines()
@@ -262,6 +320,7 @@ impl World {
 
     /// A session that opens a kit with `authority` at `at`, runs `script`
     /// with it, and closes it. Returns the session's name.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub fn session(&mut self, at: Time, authority: Authority, script: Vec<Step>) -> u64 {
         // A kit writes, and its commands write, only with modify.
         for repo in &authority.repos {
@@ -277,6 +336,7 @@ impl World {
     }
 
     /// The answers to the calls `session` made, in the order it made them.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn answers(&self, session: u64) -> Vec<&Outcome> {
         let calls = &self.sessions.get(&session).expect("a session the world made").calls;
@@ -284,6 +344,7 @@ impl World {
     }
 
     /// Why the tools refused to open a kit for `session`, if they did.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn refusal(&self, session: u64) -> Option<Refusal> {
         match self.sessions.get(&session).expect("a session the world made").state {
@@ -293,12 +354,14 @@ impl World {
     }
 
     /// The names of every session.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub fn sessions(&self) -> impl Iterator<Item = u64> + '_ {
         self.sessions.keys().copied()
     }
 
     /// Runs until nothing is left to happen, then checks the invariants of a
     /// settled world. Panics if it takes more than `iterations`.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub fn run(&mut self, iterations: u32) {
         for _ in 0..iterations {
             self.iterate();
@@ -316,6 +379,7 @@ impl World {
     }
 
     /// One iteration of the loop, as the shell would run it.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn iterate(&mut self) {
         if self.untouched.is_none() {
             self.untouched = Some(self.read_only());
@@ -371,6 +435,7 @@ impl World {
     }
 
     /// The tools' requests, answered the way the session and io would.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn request(&mut self, request: tools::Request) {
         match request {
             tools::Request::Opened { session, kit } => {
@@ -444,6 +509,7 @@ impl World {
     }
 
     /// Hands every delivery that is due to its destination.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn deliver(&mut self) {
         while let Some(delivery) = self.wire.next(self.now) {
             match delivery {
@@ -515,6 +581,7 @@ impl World {
     }
 
     /// Starts `op` for `owner`, and says when it ends.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn start(&mut self, owner: Token, op: Op) -> (Work, Time) {
         let latency = self.now.saturating_add(self.settings.io.draw(&mut self.rng));
         match op {
@@ -553,6 +620,7 @@ impl World {
     /// Abandons `work`, at its deadline or for a cancel. What it did may
     /// have taken effect all the same: a store renamed into place, a command's
     /// changes made before it was killed.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn abandon(&mut self, work: Work) {
         if !self.rng.chance(self.settings.late_effects) {
             return;
@@ -568,6 +636,7 @@ impl World {
 
     /// Runs `op` on the checkout for `owner`, and notes the version it tells
     /// that kit of.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn perform(&mut self, owner: Token, op: Op) -> Done {
         let at = match &op {
             Op::Load { at, .. } | Op::Scan { at, .. } | Op::Store { at, .. } | Op::Search { at, .. } => at.clone(),
@@ -599,6 +668,7 @@ impl World {
 
     /// The session takes the next step of its script, or closes its kit once
     /// it has run out.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn step(&mut self, session: u64) {
         let entry = self.session_mut(session);
         let kit = match entry.state {
@@ -645,6 +715,7 @@ impl World {
     }
 
     /// Sends `calls` to `kit`, for `session`, and returns their names.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn send(&mut self, session: u64, kit: Token, calls: Vec<Call>) -> Vec<u64> {
         let mut names = Vec::new();
         for call in calls {
@@ -661,6 +732,7 @@ impl World {
     }
 
     /// Schedules the session's next step, after it has thought about it.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn next(&mut self, session: u64) {
         let at = self.now.saturating_add(self.settings.think.draw(&mut self.rng));
         self.wire.send(at, Delivery::Next { session });
@@ -675,6 +747,7 @@ impl World {
     }
 
     /// The invariants of a world where nothing is left to happen.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn assert_settled(&self) {
         assert_eq!(self.tools.kits(), 0, "every kit has closed and been reclaimed");
         assert_eq!(self.tools.jobs(), 0, "every job has ended and been reclaimed");
@@ -698,6 +771,7 @@ impl World {
     /// opened or was refused, closed once if it opened, and every call was
     /// answered once, having started or not. Facts may be lost: then at most
     /// as many were told.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn assert_told(&self) {
         let lossless = self.tools.facts_lost() == 0;
         for (name, session) in &self.sessions {
@@ -732,6 +806,7 @@ impl World {
     /// The files of the repositories no kit may write.
     /// The files nothing but the world may change: those of the repositories
     /// no kit may write, and those in any git directory.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn read_only(&self) -> BTreeMap<Vec<u8>, Vec<u8>> {
         let mut files = BTreeMap::new();
         for (path, content) in self.checkout.files() {
@@ -756,6 +831,7 @@ impl World {
 
     /// Read-only repositories and git directories change only by the world's
     /// own changes.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn assert_untouched(&self) {
         let untouched = self.untouched.as_ref().expect("taken at the first iteration");
         assert_eq!(&self.read_only(), untouched, "a read-only repository or a git directory changed");
@@ -779,6 +855,7 @@ impl World {
 }
 
 /// How many facts of each kind a session was told about.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 struct Told {
     opened: usize,
@@ -789,6 +866,7 @@ struct Told {
 }
 
 /// The session a fact is about.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 fn session_of(fact: &tools::Fact) -> Token {
     match fact {
         tools::Fact::Opened { session }
@@ -801,6 +879,7 @@ fn session_of(fact: &tools::Fact) -> Token {
 }
 
 /// A repository of `checkout` at `mount`, made a root.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub fn repo(checkout: &mut Checkout, mount: &[u8], writable: bool) -> Repo {
     let root = checkout.root(mount.strip_prefix(b"/").expect("a mount is absolute"));
     Repo { mount: translate::names(mount), root: translate::token(root), writable }
@@ -808,6 +887,7 @@ pub fn repo(checkout: &mut Checkout, mount: &[u8], writable: bool) -> Repo {
 
 /// An authority whose relative paths start at `cwd`, and whose commands run
 /// with a plain environment.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn authority(cwd: &[u8], repos: Vec<Repo>, grants: Grants) -> Authority {
     let var = |name: &[u8], value: &[u8]| Var { name: name.into(), value: value.into() };

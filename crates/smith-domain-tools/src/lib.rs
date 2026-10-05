@@ -29,6 +29,15 @@
 //! The temper-specific charter, push, verdict and token-budget vocabulary
 //! is retained until 05s4; this copy does not yet implement the generic design.
 
+//!
+//! It keeps bounded kits, per-kit observed file versions, active calls and
+//! pending IO terminals. It never knows model text, provider dialects, run
+//! results, authentication, forge state or CI. The parent reserves [`max_out`]
+//! output slots before every entrance and returns each started operation's
+//! one terminal, including a cancellation terminal when cancellation wins
+//! (domain/tools.md, sections 4, 5, 6 and 9; programming-model.md, sections 5.2
+//! and 7).
+
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 

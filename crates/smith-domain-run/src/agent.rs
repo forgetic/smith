@@ -48,20 +48,26 @@ use crate::limits::Limits;
 use crate::run::Conversation;
 
 /// A sub-agent's call.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) enum Child {
     /// The sub-agent `child` is at work.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Working { child: Id<Conversation> },
     /// It yielded `text`, the first of `cut` more bytes, for `stop`, and is
     /// being closed.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Answering { child: Id<Conversation>, text: Box<[u8]>, cut: u64, stop: Stop },
     /// The call was stopped for `why`, and the child is being closed.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Closing { child: Id<Conversation>, why: Withdrawal },
     /// Terminal: holds nothing.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Closed,
 }
 
 /// What a sub-agent is opened with, once its ask is granted.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) struct Plan {
     pub(crate) llm: Llm,
@@ -72,6 +78,7 @@ pub(crate) struct Plan {
 
 /// What a run has to open a sub-agent with: what it has spent, how many
 /// conversations it has, and the time it has left.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Means {
     pub(crate) spent: Spend,
@@ -82,6 +89,7 @@ pub(crate) struct Means {
 /// What a conversation with `families` at `depth` may be given when it asks
 /// for a sub-agent with `wanted` families, on the LLM named `llm`, with a
 /// share of at most `share`; or why not.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[expect(clippy::too_many_arguments, reason = "an ask is checked against everything it is about")]
 pub(crate) fn plan(
     charter: &Charter,
@@ -126,6 +134,7 @@ pub(crate) fn plan(
 }
 
 /// The child `child` of a call that just began.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn working(child: Id<Conversation>) -> Child {
     Child::Working { child }
 }
@@ -133,6 +142,7 @@ pub(crate) fn working(child: Id<Conversation>) -> Child {
 /// The child yielded `text` for `stop`: it is done, and its answer is kept,
 /// at most `answer_bytes` of it. The child to close, if it is not closing
 /// already.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn yielded(call: &mut Child, text: &[u8], stop: Stop, limits: &Limits) -> Option<Id<Conversation>> {
     let state = mem::replace(call, Child::Closed);
     let (next, close) = match state {
@@ -152,6 +162,7 @@ pub(crate) fn yielded(call: &mut Child, text: &[u8], stop: Stop, limits: &Limits
 
 /// The call is stopped for `why`: the child to close, if it is not closing
 /// already.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn withdraw(call: &mut Child, why: Withdrawal) -> Option<Id<Conversation>> {
     let state = mem::replace(call, Child::Closed);
     let (next, close) = match state {
@@ -170,6 +181,7 @@ pub(crate) fn withdraw(call: &mut Child, why: Withdrawal) -> Option<Id<Conversat
 }
 
 /// The child ended as `end`: what the call returns.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn ended(call: &mut Child, end: End) -> Returned {
     match mem::replace(call, Child::Closed) {
         Child::Working { child: _ } => Returned::Unanswered { end },
@@ -180,6 +192,7 @@ pub(crate) fn ended(call: &mut Child, end: End) -> Returned {
 }
 
 /// The LLM among `models` named `name`, if one is.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn model(models: &[Llm], name: &[u8]) -> Option<Llm> {
     let mut found = None;
     for (index, llm) in models.iter().enumerate() {

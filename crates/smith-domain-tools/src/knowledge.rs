@@ -17,6 +17,7 @@ use crate::path::Place;
 pub(crate) struct Knowledge {
     seen: Map<Place, Seen>,
     /// Ticks once per record, to tell which was read longest ago.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     clock: u64,
 }
 
@@ -24,16 +25,19 @@ pub(crate) struct Knowledge {
 pub(crate) struct Seen {
     version: Version,
     /// The clock when it was recorded.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     at: u64,
 }
 
 impl Knowledge {
     /// Room for `capacity` files.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub(crate) const fn new(capacity: u32) -> Knowledge {
         Knowledge { seen: Map::with_capacity(capacity), clock: 0 }
     }
 
     /// The version of the file at `place` the LLM knows, if it knows one.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub(crate) fn version(&self, place: &Place) -> Option<Version> {
         let seen = self.seen.get(place)?;
         Some(seen.version)
@@ -41,6 +45,7 @@ impl Knowledge {
 
     /// The LLM now knows the file at `place` at `version`, having read it or
     /// written it, forgetting the file read longest ago if there is no room.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub(crate) fn record(&mut self, place: Place, version: Version) {
         let seen = Seen { version, at: self.clock };
         self.clock = self.clock.saturating_add(1);
@@ -60,6 +65,7 @@ impl Knowledge {
     }
 
     /// The LLM knows there is no file at `place`.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub(crate) fn forget(&mut self, place: &Place) {
         let _: Option<Seen> = self.seen.remove(place);
     }

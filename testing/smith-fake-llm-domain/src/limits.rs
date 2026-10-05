@@ -80,6 +80,7 @@ pub(crate) fn answer(answer: &Answer) -> Option<u64> {
 }
 
 /// The bytes of a scripted answer before any payload is copied.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub(crate) fn scripted_answer(turn: &Turn) -> Option<u64> {
     let mut total = u64::try_from(turn.lines.len()).ok()?.checked_mul(u64::try_from(size_of::<Part>()).ok()?)?;
     for line in &turn.lines {
@@ -95,6 +96,7 @@ pub(crate) fn scripted_answer(turn: &Turn) -> Option<u64> {
 /// A bound before allocating random tool calls: any selected tool's name,
 /// a minted id and the fixed argument menu. No allocation depends on an
 /// unchecked query length or tool count.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub(crate) fn random_answer(query: &Query, count: u32) -> Option<u64> {
     let mut name = 0;
     for tool in &query.tools {
@@ -114,6 +116,7 @@ pub(crate) fn random_answer(query: &Query, count: u32) -> Option<u64> {
 /// array and payloads fit `script_bytes`; each line adds a generated id and
 /// a Part. Converting the temporary List into a boxed slice can hold both
 /// arrays at once, and the truncated answer can coexist with the full one.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[must_use]
 pub fn worst_case(config: &Config) -> Option<u64> {
     let query = u64::from(config.query_bytes);

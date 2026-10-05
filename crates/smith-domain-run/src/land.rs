@@ -58,9 +58,11 @@ use crate::prepare;
 use crate::run::Run;
 
 /// A finish call's change, landing.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) struct Landing {
     /// What is landing, kept for the outcome.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     change: Change,
     stage: Stage,
 }
@@ -68,45 +70,59 @@ pub(crate) struct Landing {
 #[derive(Debug)]
 enum Stage {
     /// The checks at `check` among the run's are running.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Checking { check: u32 },
     /// Stopped for `why` while its checks ran: they are being stopped.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Aborting { why: Withdrawal },
     /// The worker is pushing it.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Pushing,
     /// Stopped for `why` while the worker pushed it: the host call is being
     /// cancelled.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Unpushing { why: Withdrawal },
     /// Terminal: holds nothing.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Closed,
 }
 
 /// What became of a landing, for its run to act on.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Debug)]
 pub(crate) enum Settled {
     /// It goes on.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Going,
     /// The change is pushed, and the run finishes with it.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Pushed(Change),
     /// The change did not land: the LLM was told why.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Refused,
     /// The change cannot land: its branch moved since the run started.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Stale,
     /// The call returned with nothing decided.
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Cancelled,
 }
 
 /// `change`, to land once its call has a name.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn landing(change: Change) -> Landing {
     Landing { change, stage: Stage::Closed }
 }
 
 /// Starts landing the change of the call `id`: its first check, or the push.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn begin(landing: &mut Landing, id: Id<Call>, run: &Run, env: &Env<Limits>, out: &mut Queue<Request>) {
     landing.stage = next(landing, id, run, 0, env, out);
 }
 
 /// The checks of the call `id`, which its conversation names `owner`, ended as
 /// `ran`. `may_finish` says whether its run may still finish.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[expect(clippy::too_many_arguments, reason = "a cell handler takes the fields it touches")]
 pub(crate) fn checked(
     landing: &mut Landing,
@@ -147,6 +163,7 @@ pub(crate) fn aborted(landing: &mut Landing, owner: Token, out: &mut Queue<Reque
 }
 
 /// The push of a call its conversation names `owner` ended as `push`.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[expect(
     clippy::large_types_passed_by_value,
     reason = "owned terminal diagnostics pass through the step without allocation"
@@ -186,6 +203,7 @@ pub(crate) fn host_cancelled(landing: &mut Landing, owner: Token, out: &mut Queu
 }
 
 /// The call `id` is stopped for `why`: stop what is in flight.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn withdraw(landing: &mut Landing, id: Id<Call>, why: Withdrawal, out: &mut Queue<Request>) {
     let stage = mem::replace(&mut landing.stage, Stage::Closed);
     landing.stage = match stage {
@@ -212,6 +230,7 @@ pub(crate) fn withdraw(landing: &mut Landing, id: Id<Call>, why: Withdrawal, out
 
 /// The checks at `check` among the run's, or the push once there are none
 /// left.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn next(landing: &Landing, id: Id<Call>, run: &Run, check: u32, env: &Env<Limits>, out: &mut Queue<Request>) -> Stage {
     let Some(&index) = run.found.checks.get(check) else {
         out.push(Request::Push { worker: run.worker, owner: id.token(), change: landing.change.clone() });
@@ -226,12 +245,14 @@ fn next(landing: &Landing, id: Id<Call>, run: &Run, check: u32, env: &Env<Limits
 }
 
 /// Returns the call its conversation names `owner` with `result`.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn back(owner: Token, result: Returned, settled: Settled, out: &mut Queue<Request>) -> Settled {
     out.push(Request::Return { call: owner, result });
     settled
 }
 
 /// The repository whose checks are at `check` among the run's.
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn repository(run: &Run, check: u32) -> &Repository {
     let index = run.found.checks.get(check).expect("a check is of a repository with checks");
     repository_at(run, *index)

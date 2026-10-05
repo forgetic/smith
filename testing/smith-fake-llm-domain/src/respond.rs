@@ -111,6 +111,7 @@ pub(crate) fn respond(
 }
 
 /// What a text answer cut short says.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn cut_text() -> Box<[Part]> {
     Box::new([Part::Text { text: copy_of(b"do") }])
 }
@@ -120,6 +121,7 @@ fn cut_text() -> Box<[Part]> {
 /// checkout to suit: each path names something different (a file, another, a
 /// directory, one outside, one missing), so that what comes of a call tells
 /// which it was.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 const ARGUMENTS: [&[u8]; 5] = [
     br#"{"path":"src/lib.rs","content":"src/lib.rs: rewritten","command":"cargo test","old":"42","new":"43","pattern":"answer"}"#,
     br#"{"path":"./README.md","content":"README.md: rewritten","command":"ls","old":"hello","new":"goodbye","pattern":"hello"}"#,
@@ -129,6 +131,7 @@ const ARGUMENTS: [&[u8]; 5] = [
 ];
 
 /// A call to one of the query's tools, picked at random, or a malformed one.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn call(rng: &mut Rng, minted: &mut u64, config: &Config, query: &Query) -> Part {
     let tools = u64::try_from(query.tools.len()).expect("a usize fits in a u64");
     let index = usize::try_from(rng.below(tools)).expect("an index below a usize fits in one");
@@ -150,6 +153,7 @@ fn call(rng: &mut Rng, minted: &mut u64, config: &Config, query: &Query) -> Part
 
 /// The answer of `parts`, which take `tokens` to say; or, past the query's
 /// `max_tokens`, of `cut`, which takes them all.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn answer(query: &Query, parts: Box<[Part]>, finish: Finish, tokens: u64, cut: Box<[Part]>) -> Answer {
     let most = u64::from(query.max_tokens);
     if tokens > most {
@@ -160,6 +164,7 @@ fn answer(query: &Query, parts: Box<[Part]>, finish: Finish, tokens: u64, cut: B
 
 /// Which of `scripts` cues the conversation of `system`: the one whose cue
 /// comes first in it, the first listed of those that come at once.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn cued(scripts: &[Script], system: &[u8]) -> Option<usize> {
     // One pass, from each place in the text on, the scripts in order at each.
     // Bounded by the text: visit every byte suffix, including the empty one.
@@ -181,6 +186,7 @@ fn cued(scripts: &[Script], system: &[u8]) -> Option<usize> {
 /// The scripted answer `turn`, its calls named afresh; cut short past the
 /// query's `max_tokens` as any answer is, partway into its first call if it
 /// starts with one.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn scripted(minted: &mut u64, query: &Query, turn: &Turn) -> Answer {
     let count = u32::try_from(turn.lines.len()).expect("a script's answer fits a u32");
     let mut parts = List::with_capacity(count);
@@ -204,6 +210,7 @@ fn scripted(minted: &mut u64, query: &Query, turn: &Turn) -> Answer {
 }
 
 /// The assistant messages a conversation has had.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn said(messages: &[Message]) -> usize {
     let mut said: usize = 0;
     for message in messages {
@@ -218,6 +225,7 @@ fn said(messages: &[Message]) -> usize {
 /// What a call with `completion_tokens` in its answer took: all of the prompt
 /// but its last message from the cache, which the call before wrote, and the
 /// last message afresh, which this call writes for the next.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn usage(query: &Query, completion_tokens: u64) -> Usage {
     let mut cached = 0;
     let mut fresh = len(&query.system);
@@ -238,6 +246,7 @@ fn usage(query: &Query, completion_tokens: u64) -> Usage {
 /// Whether the conversation ends with a user message, and every user message's
 /// tool outputs answer exactly the tool calls of the assistant message before
 /// it: no call goes unanswered, and no output answers nothing.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn valid(messages: &[Message]) -> bool {
     match messages.last() {
         Some(last) => match last.role {
@@ -269,6 +278,7 @@ fn valid(messages: &[Message]) -> bool {
 
 /// Whether the tool outputs among `parts` answer exactly the tool calls among
 /// `calls`.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn answers(parts: &[Part], calls: &[Part]) -> bool {
     for part in parts {
         match part {
@@ -325,6 +335,7 @@ fn outputs_for(parts: &[Part], wanted: &[u8]) -> u32 {
 
 /// Assistant messages that call tools, since the last user message that the
 /// client wrote (one with text, not only tool outputs).
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn tool_rounds(messages: &[Message]) -> u32 {
     let mut rounds: u32 = 0;
     for message in messages {
@@ -365,6 +376,7 @@ fn calls_any(parts: &[Part]) -> bool {
 }
 
 /// The bytes of text in a message, which a rough count turns into tokens.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn text_of(message: &Message) -> u64 {
     let mut bytes: u64 = 0;
     for part in &message.parts {
@@ -384,6 +396,7 @@ fn len(bytes: &[u8]) -> u64 {
 }
 
 /// "call_" and sixteen hex digits of `n`.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 fn call_id(n: u64) -> Box<[u8]> {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut id = *b"call_0000000000000000";
@@ -474,6 +487,7 @@ mod tests {
     }
 
     /// The id and the name of the tool call `part`.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     fn called(part: Option<&Part>) -> (&[u8], &[u8], &[u8]) {
         let Some(Part::ToolCall { id, name, arguments }) = part else {
             panic!("expected a tool call, not {part:?}");

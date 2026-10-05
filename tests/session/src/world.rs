@@ -16,12 +16,15 @@ use crate::translate;
 /// Room in each domain's output queue beyond what one step may emit. Small, so
 /// the loop's flow control (take an event only while there is room for what
 /// it may produce) is exercised.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 const SLACK: u32 = 3;
 
 /// What the fake opener says when it nudges a session on.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 const NUDGE: &[u8] = b"You have not finished: carry on.";
 
 /// The budget [`spec`] asks for: what the calm limits allow at most.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub const BUDGET: agent::Budget = agent::Budget {
     turns: 16,
     input: 1 << 20,
@@ -33,6 +36,7 @@ pub const BUDGET: agent::Budget = agent::Budget {
 
 /// The tools' limits in the calm world: a kit for each session, as many calls
 /// a kit as the session runs at once, and room for the fixture's files.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub const TOOLS: tools::Limits = tools::Limits {
     kits: 4,
     calls: 4,
@@ -56,55 +60,74 @@ pub const TOOLS: tools::Limits = tools::Limits {
 };
 
 /// Counts drawn uniformly from `min..=max`.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Count {
     /// Inclusive minimum count required by this contract.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub min: u32,
     /// Inclusive maximum count allowed by this contract.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub max: u32,
 }
 
 /// Immutable seeded peer behavior and component limits used to construct this world.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Settings {
     /// Seeds the world, which seeds both domains.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub seed: u64,
     /// Immutable session limits for the real component under test.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub agent: agent::Limits,
     /// Neutral fake-provider behavior for this world.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub provider: provider::Config,
     /// One-way latency between the agent and the provider.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub network: Span,
     /// How long io takes over an operation of the tools, a command's
     /// included.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub tool: Span,
     /// The chance, per mille, that io fails an operation of the tools.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub tool_errors: u32,
     /// How many times the opener nudges a session that yields before it
     /// closes it, drawn for each session.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub nudges: Count,
     /// How long the opener takes to answer a yield.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub think: Span,
     /// The chance, per mille, that the opener closes a session at a moment of
     /// its own, whatever the session is doing then.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub abandon: u32,
     /// When such a close comes, after the session opens.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub abandon_after: Span,
     /// The chance, per mille, that a cancel loses its race: the call, the
     /// tools' operation or the delegated call it was for ends of itself, and
     /// that is its terminal event. A cancel that wins is told after a network
     /// draw.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub cancels_lost: u32,
     /// The chance, per mille, that the opener sends a close twice, the second
     /// a network draw after the first.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub double_close: u32,
     /// The chance, per mille, that the opener serves its own tools, a finish
     /// and a lookup, to a session it opens.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub serve: u32,
     /// How long the opener takes to answer a call it serves.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub serving: Span,
     /// The grid every delivery is rounded up to, so that some come at the
     /// same instant; zero for none.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub granule: Duration,
 }
 
@@ -112,6 +135,7 @@ impl Settings {
     /// A world where nothing goes wrong: no failures, answers well within
     /// every deadline, room for a few sessions, and an opener that closes a
     /// session when it first yields.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
     pub const fn calm(seed: u64) -> Settings {
         Settings {
@@ -172,6 +196,7 @@ impl Settings {
 /// writable repository at `/work`, also the working directory. The world
 /// gives each session a repository of its own, seeded with the fixture, and
 /// names it in the spec as io names its root.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn spec(prompt: &[u8]) -> agent::Spec {
     let repo = Repo { mount: io::names(b"/work"), root: Token::new(0), writable: true };
@@ -190,196 +215,273 @@ pub fn spec(prompt: &[u8]) -> agent::Spec {
 }
 
 /// What the world counted.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Stats {
     /// Calls the agent made.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub calls: u32,
     /// Calls that reached the provider.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub provider_calls: u32,
     /// Calls that ran out of time.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub timeouts: u32,
     /// Calls the agent cancelled.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub cancels: u32,
     /// Answers that arrived after their call had ended, and were dropped.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub late_answers: u32,
     /// Operations the tools asked of io; those a cancel ended; those that ran
     /// out of time; those io failed.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub ops: u32,
     /// Count of op cancels observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub op_cancels: u32,
     /// Count of op timeouts observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub op_timeouts: u32,
     /// Count of op faults observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub op_faults: u32,
     /// Results of calls to the tools that went back to the LLM, each checked
     /// against its call.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub results: u32,
     /// Tool calls the session answered as not run, as the LLM stopped
     /// before it could use them.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub not_run: u32,
     /// Times a session yielded.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub yields: u32,
     /// Messages the opener sent to yielded sessions.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub continues: u32,
     /// Closes the opener sent.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub closes: u32,
     /// Continues and closes that reached a session after it had ended.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub stale: u32,
     /// The most operations and delegated calls one session had in flight at
     /// once.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub most_parallel: u32,
     /// The most tool runs the sessions held at the end of an iteration,
     /// before its reclaim point.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub most_runs: u32,
     /// Cancels of calls and of operations that lost their race.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub cancels_lost: u32,
     /// Count of op cancels lost observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub op_cancels_lost: u32,
     /// What ended a call or an operation whose cancel lost: an answer, a
     /// failure (a deadline included), the operation's own end.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub answered_after_cancel: u32,
     /// Count of failed after cancel observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub failed_after_cancel: u32,
     /// Count of done after cancel observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub done_after_cancel: u32,
     /// Closes that reached a session already closing.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub closed_while_closing: u32,
     /// Cancels and withdraws for operations and delegated calls that ended in
     /// the iteration they were sent.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub cancels_crossed: u32,
     /// Calls delegated to the opener; withdrawn, or whose answer won the race
     /// with the withdraw; answered as timed out by the opener itself.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub delegates: u32,
     /// Count of withdraws observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub withdraws: u32,
     /// Count of withdraws lost observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub withdraws_lost: u32,
     /// Count of answered after withdraw observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub answered_after_withdraw: u32,
     /// Count of delegate timeouts observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub delegate_timeouts: u32,
     /// Finishes the opener refused, and accepted.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub finishes_refused: u32,
     /// Count of finishes accepted observed at this scripted boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub finishes_accepted: u32,
 }
 
 /// The facts the sessions told, by kind, as the loop drained them.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Told {
     /// Count of opened facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub opened: u32,
     /// Count of completions started facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completions_started: u32,
     /// Count of completions answered facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completions_answered: u32,
     /// Count of completions failed facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completions_failed: u32,
     /// Count of completions cancelled facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completions_cancelled: u32,
     /// Count of completions retried facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completions_retried: u32,
     /// What the session's tools told: kits opened and closed, calls started
     /// (those that asked io for something) and answered.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub kits_opened: u32,
     /// Count of kits closed facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub kits_closed: u32,
     /// Count of tools started facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub tools_started: u32,
     /// Count of tools answered facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub tools_answered: u32,
     /// Count of yielded facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub yielded: u32,
     /// Count of used facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub used: u32,
     /// Count of ended facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub ended: u32,
     /// Count of delegates started facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub delegates_started: u32,
     /// Count of delegates answered facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub delegates_answered: u32,
     /// Count of delegates cancelled facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub delegates_cancelled: u32,
     /// Tool calls the completions made, and those that could not be decoded.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub calls: u32,
     /// Count of invalid calls facts drained from the real component.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub invalid_calls: u32,
 }
 
 /// A session as its opener saw it.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[derive(Debug)]
 pub struct Session {
     /// The session's name, once it opened.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub session: Option<Token>,
     /// What it was opened with: its budget, and the most tokens an answer
     /// may take.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub budget: agent::Budget,
     /// Output-token cap supplied to each generated completion.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub max_tokens: u32,
     /// Each time it yielded: why, and what the LLM said.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub yields: Vec<(agent::Yield, Box<[u8]>)>,
     /// What its `Used` added up to: completions, and their tokens.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub turns: u32,
     /// Accepted token usage observed for this fixture session or its terminal.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub usage: Usage,
     /// When its time budget runs out, once it opened.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     expires: Option<Time>,
     /// How it ended, once it has.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub ended: Option<Ended>,
     /// Nudges the opener has left to give.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     nudges: u32,
     /// Whether the opener closes it at a moment of its own.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     abandon: bool,
     /// It yielded, and the opener has not continued it yet.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     waiting: bool,
     /// The opener has closed it.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     closed: bool,
     /// Finishes it has called.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     finishes: u32,
 }
 
 /// How a session ended.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Ended {
     /// The single settled session terminal, or none while work remains.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub end: agent::End,
     /// Concrete transcript turns emitted by the session, in order.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub turns: u32,
     /// Accepted token usage observed for this fixture session or its terminal.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub usage: Usage,
 }
 
 /// Something on its way, delivered at its time.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 enum Delivery {
     /// The opener opens a session.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Open {
         opener: u64,
         spec: agent::Spec,
     },
     /// The opener continues a yielded session.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Continue {
         opener: u64,
         content: Box<[u8]>,
     },
     /// The opener closes a session.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Close {
         opener: u64,
     },
     /// A call arrives at the provider.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Query {
         call: u64,
         query: provider::api::Query,
     },
     /// The provider's answer arrives back at the agent's side.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Answer {
         call: u64,
         result: Result<provider::api::Answer, provider::api::Error>,
     },
     /// The agent's side gives up on a call.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Deadline {
         call: u64,
     },
     /// A cancel that won its race is told.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Cancelled {
         owner: Token,
     },
@@ -387,60 +489,78 @@ enum Delivery {
         owner: Token,
     },
     /// The opener's answer to a delegated call arrives.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Answered {
         owner: Token,
         answer: Answer,
     },
     /// An operation of the tools ends.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Ran {
         owner: Token,
     },
 }
 
 /// A delegated call in flight, as the opener keeps it.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 struct Running {
     /// The answer's delivery, withdrawn if the call is withdrawn.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     delivery: Key,
     /// The session that started it.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     session: Token,
     effect: Effect,
     /// A finish the opener accepts, after which it closes the session.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     accepts: bool,
 }
 
 /// An operation of the tools in flight, as io keeps it.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 struct Pending {
     /// Its end's delivery, moved up when a cancel wins the race.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     delivery: Key,
     /// The session whose tools asked for it, by the repository it is in.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     session: Token,
     /// A store or a command, which only a call that writes asks for.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     writes: bool,
     work: Work,
 }
 
 /// What an operation does when it ends.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 enum Work {
     /// A file operation, run on the checkout then.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     File(Op),
     /// A command started, finished then.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Command(io::Started),
     /// Nothing more: it ends so (it failed to start, timed out, or was
     /// cancelled).
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Ending(Done),
 }
 
 /// A call of the agent in flight, as its protocol layer would keep it.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 struct Call {
     owner: Token,
     /// The deadline's delivery, withdrawn when the call ends first.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     deadline: Key,
     /// The session's opener, and the tools it served in the query.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     opener: u64,
     served: Box<[Descriptor]>,
 }
 
 /// Real domain plus scripted typed peers, pending terminals and external observations for this component story.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub struct World {
     now: Time,
     rng: Rng,
@@ -453,43 +573,54 @@ pub struct World {
     provider_stage: Stage<provider::Config, provider::Event, provider::Request>,
 
     /// Deliveries in flight, whose count names openers and calls too.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     wire: Schedule<Delivery>,
     /// The agent's calls in flight, and the call each session has in flight.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     calls: Ledger<u64, Call>,
     calling: BTreeMap<Token, u64>,
     /// The delegated calls in flight, by their tokens; and the session of
     /// each the agent has started or has yet to hear the end of.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     tools: Ledger<Token, Running>,
     runs: BTreeMap<Token, Token>,
     /// The checkout the sessions' tools work on, a repository for each
     /// session, and the opener of each by io's name for its root.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     checkout: Checkout,
     roots: BTreeMap<u64, u64>,
     /// The tools' operations in flight, by their tokens, and every token an
     /// operation has had (a call's, for each operation it asks for).
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     ops: Ledger<Token, Pending>,
     owners: BTreeSet<Token>,
     /// The tools of the calls each session's tools started, as they told,
     /// until their first operation; and whether the call of each operation's
     /// token writes (an edit loads before it stores).
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     starting: BTreeMap<Token, VecDeque<tools::Tool>>,
     writing: BTreeMap<Token, bool>,
     /// How many messages of each session's transcript have had their results
     /// counted.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     counted: BTreeMap<Token, usize>,
     /// The sessions whose call, and the delegated calls and operations, whose
     /// cancel lost its race; and the sessions the agent is closing, with a
     /// cancel sent and no end yet.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     cancel_lost: BTreeSet<Token>,
     run_cancel_lost: BTreeSet<Token>,
     op_cancel_lost: BTreeSet<Token>,
     closing: BTreeSet<Token>,
     /// The opener's tickets, as the top level would keep them.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     tickets: Tickets,
     /// Calls the provider has not answered yet.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     serving: Ledger<u64, ()>,
     /// The sessions opened, by the opener's name for each, and the opener's
     /// name for each session by the session's own while it lives.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     sessions: BTreeMap<u64, Session>,
     openers: BTreeMap<Token, u64>,
 
@@ -500,6 +631,7 @@ pub struct World {
 
 impl World {
     /// Constructs empty bounded state under the supplied immutable limits; no IO or clocks are consulted.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn new(settings: Settings) -> World {
         assert!(agent::worst_case(&settings.agent).is_some(), "the shell refuses limits it cannot provision");
@@ -544,12 +676,14 @@ impl World {
     }
 
     /// Current injected monotonic time in this world.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn now(&self) -> Time {
         self.now
     }
 
     /// Observed boundary counters, including dropped facts.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn stats(&self) -> Stats {
         self.stats
@@ -557,12 +691,14 @@ impl World {
 
     /// The facts the sessions told, and how many they dropped for want of
     /// room.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn told(&self) -> (Told, u64) {
         (self.told, self.agent.facts_lost())
     }
 
     /// What crossed between the domains and the world, in order, with times.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn trace(&self) -> &[String] {
         self.trace.lines()
@@ -570,6 +706,7 @@ impl World {
 
     /// Has the opener open a session for `spec` at `at`. Returns the opener's
     /// name for it.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub fn submit(&mut self, at: Time, mut spec: agent::Spec) -> u64 {
         let opener = self.wire.name();
         if self.rng.chance(self.settings.serve) {
@@ -585,18 +722,21 @@ impl World {
     }
 
     /// The session the opener named `opener`, once the open has been sent.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn session(&self, opener: u64) -> &Session {
         self.sessions.get(&opener).expect("the session was submitted and its open sent")
     }
 
     /// Every session opened so far, by the opener's name for it.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub fn sessions(&self) -> impl Iterator<Item = (u64, &Session)> {
         self.sessions.iter().map(|(opener, session)| (*opener, session))
     }
 
     /// Runs until nothing is left to happen, then checks the invariants of a
     /// settled world. Panics if it takes more than `iterations`.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub fn run(&mut self, iterations: u32) {
         for _ in 0..iterations {
             self.iterate();
@@ -614,6 +754,7 @@ impl World {
     }
 
     /// One iteration of the loop, as the shell would run it.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn iterate(&mut self) {
         self.agent_stage.tick(self.now);
         self.provider_stage.tick(self.now);
@@ -679,6 +820,7 @@ impl World {
     /// Checks what the entry point that emitted the requests past `from`
     /// sent the opener, which a parent counts on: the records that name it,
     /// and the delegated calls and their withdraws.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn check_sent(&self, from: u32) {
         let mut sent = 0;
         for request in self.agent_stage.out.iter().skip(usize::try_from(from).expect("small")) {
@@ -770,6 +912,7 @@ impl World {
 
     /// The opener learns its session's name, and plans a close of its own if
     /// it is to abandon the session.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn opened(&mut self, opener: u64, name: Token) {
         let session = self.sessions.get_mut(&opener).expect("a session opens for an open that was sent");
         assert!(session.session.is_none() && session.ended.is_none(), "a session opens once, before it ends");
@@ -784,6 +927,7 @@ impl World {
 
     /// The opener answers a yield: it nudges the session on while it has
     /// nudges left, and closes it after.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn yielded(&mut self, opener: u64, stop: agent::Yield, text: Box<[u8]>) {
         let session = self.sessions.get_mut(&opener).expect("a session yields to its opener");
         let name = session.session.expect("a session yields once it has opened");
@@ -809,6 +953,7 @@ impl World {
     }
 
     /// A completion came back: the opener adds up what it used.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn used(&mut self, opener: u64, usage: Usage) {
         let session = self.sessions.get_mut(&opener).expect("a session reports to its opener");
         assert!(session.session.is_some() && session.ended.is_none(), "a session uses tokens while it lives");
@@ -819,6 +964,7 @@ impl World {
     /// The session that owns `owner` starts a completion: it must have turns,
     /// input and output tokens and time left, no tokens past their budget,
     /// and an answer that may take no more than the output budget left.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn affordable(&self, owner: Token, prompt: &Prompt) {
         let opener = self.openers.get(&owner).expect("a session calls the LLM while it lives");
         let session = &self.sessions[opener];
@@ -866,6 +1012,7 @@ impl World {
 
     /// Whether `session` has run out of its budget in `dimension` now: used it
     /// up, for what gates a completion; gone past it, for the cache.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn spent(&self, session: &Session, dimension: agent::Dimension) -> bool {
         let (budget, usage) = (&session.budget, &session.usage);
         match dimension {
@@ -883,6 +1030,7 @@ impl World {
     /// by `deadline`: a finish it refuses the first time, as its tests fail,
     /// and accepts after; a lookup, which is slow. It runs the race with the
     /// deadline itself.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn serve(&mut self, owner: Token, opener: u64, call: Token, deadline: Time) {
         let session = *self.runs.get(&owner).expect("a run is worked out from the step that started it");
         let Ticketed::Call { tool, arguments: _ } = self.tickets.resolve(call).clone() else {
@@ -923,6 +1071,7 @@ impl World {
 
     /// io starts the tools' operation `op` for `owner`, to end by
     /// `deadline`: after a draw, or at the deadline if that comes first.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn start_op(&mut self, owner: Token, op: Op, deadline: Time) {
         // A call's operations, one after another, carry its token.
         self.owners.insert(owner);
@@ -969,6 +1118,7 @@ impl World {
 
     /// io is asked to cancel the operation of `owner`: it ends cancelled
     /// after a network draw, unless it ends of itself first.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn cancel_op(&mut self, owner: Token) {
         assert!(self.owners.contains(&owner), "a cancel names an operation io was asked for");
         let Some(pending) = self.ops.get(owner) else {
@@ -991,6 +1141,7 @@ impl World {
     }
 
     /// The operation of `owner` ends, and io tells the tools how.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn ran(&mut self, owner: Token) {
         let pending = self.ops.end(owner);
         let done = match pending.work {
@@ -1010,6 +1161,7 @@ impl World {
 
     /// Checks every result of the session's own tools in `prompt` against
     /// the call it answers, and counts those of its last message once.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn check_results(&mut self, owner: Token, prompt: &Prompt) {
         for pair in prompt.messages.windows(2) {
             let calls = pair[0].content.iter().filter_map(|block| {
@@ -1041,6 +1193,7 @@ impl World {
     }
 
     /// Whether the session `name` has nothing in flight.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn idle(&self, name: Token) -> bool {
         !self.calling.contains_key(&name)
             && self.tools.values().all(|run| run.session != name)
@@ -1051,6 +1204,7 @@ impl World {
     /// writes: as the tools told when it started, matched with its first
     /// operation, so that an edit writes as it loads. Once facts have been
     /// lost, the start may not have been told: the operation's own effect.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn writes(&mut self, owner: Token, session: Token, op: &Op) -> bool {
         let stores = matches!(op, Op::Store { .. } | Op::Spawn { .. });
         if let Some(&writes) = self.writing.get(&owner) {
@@ -1078,6 +1232,7 @@ impl World {
     /// reads run together, as many as the limits allow. (The tools ask io for
     /// one operation at a time for each call, and only a call that writes
     /// stores or runs a command.)
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn batched(&mut self, session: Token, writes: bool) {
         let runs = self.tools.values().filter(|run| run.session == session).map(|run| run.effect == Effect::Write);
         let ops = self.ops.values().filter(|op| op.session == session).map(|op| op.writes);
@@ -1092,6 +1247,7 @@ impl World {
     }
 
     /// The provider's requests, carried back the way its protocol layer would.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn provider_request(&mut self, request: provider::Request) {
         match request {
             provider::Request::Reply { to, result } => {
@@ -1103,6 +1259,7 @@ impl World {
     }
 
     /// Hands every delivery that is due to its destination.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn deliver(&mut self) {
         while let Some(delivery) = self.wire.next(self.now) {
             match delivery {
@@ -1192,6 +1349,7 @@ impl World {
     }
 
     /// The opener opens a session, deciding how it will treat it.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn open(&mut self, opener: u64, spec: agent::Spec) {
         let Count { min, max } = self.settings.nudges;
         let nudges = u32::try_from(self.rng.between(min.into(), max.into())).expect("drawn between two u32s");
@@ -1224,6 +1382,7 @@ impl World {
 
     /// Ends the agent's call `call` if it is still in flight, withdrawing its
     /// deadline, and returns its owner.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn end_call(&mut self, call: u64) -> Option<Call> {
         let ended = self.calls.take(call)?;
         self.calling.remove(&ended.owner);
@@ -1291,6 +1450,7 @@ impl World {
 
     /// What the facts must add up to when none were dropped: what the world
     /// saw cross the boundary.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn assert_told(&self) {
         let (told, stats) = (&self.told, &self.stats);
         let count = |n: usize| u32::try_from(n).expect("a small world");
@@ -1314,6 +1474,7 @@ impl World {
     }
 
     /// The invariants of a world where nothing is left to happen.
+    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     fn assert_settled(&self) {
         assert_eq!(self.agent.sessions(), 0, "every session has ended and been reclaimed");
         assert_eq!(self.agent.runs(), 0, "every run has ended and been reclaimed");
@@ -1361,6 +1522,7 @@ impl World {
 }
 
 /// The delegated call whose end `event` is, if it is one.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 fn ended_run(event: &agent::Event) -> Option<Token> {
     match event {
         agent::Event::Answered { owner, .. }
@@ -1430,6 +1592,7 @@ fn describe_agent_request(request: &agent::Request) -> String {
 }
 
 /// The results answered as not run in the last message of `prompt`.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 fn not_run(prompt: &Prompt) -> u32 {
     let Some(last) = prompt.messages.last() else { return 0 };
     let unrun = last.content.iter().filter(|block| matches!(block, Block::ToolResult { result: Returned::NotRun, .. }));
@@ -1438,6 +1601,7 @@ fn not_run(prompt: &Prompt) -> u32 {
 
 /// Checks that the results at the end of `prompt` answer the calls of the
 /// message before them, in their order.
+/// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 fn in_call_order(prompt: &Prompt) {
     let [.., asked, answered] = &*prompt.messages else { return };
     let calls: Vec<&[u8]> = asked

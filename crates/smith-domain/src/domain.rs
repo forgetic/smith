@@ -40,6 +40,7 @@ use crate::route;
 /// child domains emit in the most steps it takes of each (see the module), as
 /// each of their requests is one of ours or a hand-off. The loop reserves this
 /// much room in `out` before calling it.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[must_use]
 pub const fn max_out(limits: &Limits) -> u32 {
     limits::run_out(limits).saturating_add(limits::session_out(limits)).saturating_add(1)
@@ -47,27 +48,33 @@ pub const fn max_out(limits: &Limits) -> u32 {
 
 /// The agent domain's state: its child domains', what it keeps of each
 /// conversation between them, and room for what they emit within a step.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Debug)]
 pub struct Domain {
     pub(crate) run: run::Domain,
     pub(crate) session: session::Domain,
     /// The conversations the run opened, until their sessions end.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) peers: Slab<Peer>,
     /// Peers by the run's token for their conversation, which is their
     /// session's opener, and by their session's own.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) conversations: Map<Token, Id<Peer>>,
     pub(crate) sessions: Map<Token, Id<Peer>>,
     /// Delegated calls between a session's `Delegate` and its answer, by the
     /// session's token for them.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) flights: Map<Token, Flight>,
     pub(crate) grants: Map<u32, Credential>,
     pub(crate) completions: Map<Token, GrantName>,
     pub(crate) notices: Queue<Request>,
     pub(crate) ready: Ready,
     /// Tickets the peers hold.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) tickets: u32,
     /// What each child domain emits in a step, until it is routed. Empty
     /// between steps.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) run_out: Queue<run::Request>,
     pub(crate) session_out: Queue<session::Request>,
     facts: Queue<Fact>,
@@ -85,37 +92,47 @@ pub(crate) struct Credential {
 
 /// A delegated call in flight: the run serves it, and the peer's session
 /// waits for its answer.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Flight {
     pub(crate) peer: Id<Peer>,
     /// The session withdrew it.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) withdrawn: bool,
     pub(crate) answer: Due,
 }
 
 /// What a delegated call's session is answered.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Due {
     /// The run has not returned it.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     Waiting,
     /// The run's answer, kept under a ticket, waiting on the ready list.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     Answered { answer: sllm::Answer },
     /// The run returned it cancelled, after the session withdrew it.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     Cancelled,
 }
 
 /// A hand-off from the run to a session, held by what it is about.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Handoff {
     /// The run closed the peer's conversation.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     Close { peer: Id<Peer> },
     /// The run answered the delegated call the session names `owner`.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     Answer { owner: Token },
 }
 
 /// The hand-offs waiting for a later iteration, each at most once: those made
 /// before the last reclaim point, which [`resume`] delivers, and those made
 /// since, which wait for the next.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Debug)]
 pub(crate) struct Ready {
     now: Set<Handoff>,
@@ -138,6 +155,7 @@ impl Ready {
     }
 
     /// Holds `handoff` until the next iteration.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) fn defer(&mut self, handoff: Handoff) {
         if !self.now.contains(&handoff) {
             self.next.insert(handoff).expect("room on the ready list for every hand-off");
@@ -145,6 +163,7 @@ impl Ready {
     }
 
     /// Forgets `handoff`, which is moot.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) fn forget(&mut self, handoff: Handoff) {
         self.now.remove(&handoff);
         self.next.remove(&handoff);
@@ -152,6 +171,7 @@ impl Ready {
 
     /// The reclaim point: what was deferred in this iteration may be delivered
     /// in the next.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     fn promote(&mut self) {
         for _ in 0..self.next.capacity() {
             let Some(handoff) = self.next.first().copied() else {
@@ -167,6 +187,7 @@ impl Domain {
     /// A domain with room for `limits`, which [`crate::worst_case`] accepts,
     /// drawing randomness from `seed`: each child domain's seed is drawn from
     /// it.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     #[must_use]
     pub fn new(limits: &Limits, seed: u64) -> Domain {
         let mut rng = Rng::new(seed);
@@ -196,12 +217,14 @@ impl Domain {
     }
 
     /// The run child domain, for a world to look at.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     #[must_use]
     pub const fn run(&self) -> &run::Domain {
         &self.run
     }
 
     /// The session child domain, for a world to look at.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     #[must_use]
     pub const fn session(&self) -> &session::Domain {
         &self.session
@@ -209,12 +232,14 @@ impl Domain {
 
     /// Conversations the run opened whose sessions have not ended, ended ones
     /// included until they are reclaimed.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     #[must_use]
     pub const fn peers(&self) -> u32 {
         self.peers.len()
     }
 
     /// Delegated calls whose sessions have not been answered.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     #[must_use]
     pub fn flights(&self) -> u32 {
         self.flights.len()
@@ -222,12 +247,14 @@ impl Domain {
 
     /// Tickets held for the sessions: the asks of calls not dispatched yet,
     /// and the run's answers.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     #[must_use]
     pub const fn tickets(&self) -> u32 {
         self.tickets
     }
 
     /// When the earliest alarm falls due.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     #[must_use]
     pub fn next_deadline(&self) -> Option<Time> {
         let session = self.session.next_deadline();
@@ -241,6 +268,7 @@ impl Domain {
     }
 
     /// Whether an alarm is due at `now`. The loop calls [`fire`] while one is.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     #[must_use]
     pub fn is_due(&self, now: Time) -> bool {
         self.run.is_due(now) || self.session.is_due(now)
@@ -250,6 +278,7 @@ impl Domain {
     /// answered at once, or a hand-off from the run. While one does, the loop
     /// calls [`resume`] at the start of the domain's stage, before its input
     /// events.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     #[must_use]
     pub fn is_ready(&self) -> bool {
         self.session.is_ready() || self.ready.is_ready()
@@ -257,17 +286,20 @@ impl Domain {
 
     /// The oldest fact not drained yet, the run's or the sessions' (which the
     /// tools' are among).
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub fn pop_fact(&mut self) -> Option<Fact> {
         self.facts.pop()
     }
 
     /// Channel facts with content; capture policy remains the engine's.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub fn pop_content(&mut self) -> Option<crate::Content> {
         self.content.pop()
     }
 
     /// How many facts were dropped for want of room, the child domains'
     /// included.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     #[must_use]
     pub fn facts_lost(&self) -> u64 {
         self.lost
@@ -277,6 +309,7 @@ impl Domain {
     }
 
     /// The reclaim point: frees what closed in this iteration.
+    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub fn reclaim(&mut self) {
         self.run.reclaim();
         self.session.reclaim();
@@ -286,6 +319,7 @@ impl Domain {
 }
 
 /// Handles one event, emitting at most [`max_out`] requests.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     route::event(domain, env, event);
     settle(domain, env, out);
@@ -296,6 +330,7 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
 /// goes first. A stage fires its alarms after its input events, so progress
 /// that arrived in the same iteration wins over a deadline that passed while
 /// the loop waited.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     let run_due = domain.run.is_due(env.now);
     let session_due = domain.session.is_due(env.now);
@@ -311,6 +346,7 @@ pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
 /// [`max_out`] requests: a session after a batch its tools answered within
 /// the step that started it, or a hand-off from the run deferred in an earlier
 /// iteration.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub fn resume(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     if domain.session.is_ready() {
         session::resume(&mut domain.session, &route::session_env(env), &mut domain.session_out);
@@ -321,6 +357,7 @@ pub fn resume(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) 
 }
 
 /// Completes the hand-offs, then gathers the facts.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn settle(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     route::hand_off(domain, env, out);
     gather(domain, &env.limits);
@@ -328,6 +365,7 @@ fn settle(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
 
 /// Drains the child domains' facts into the domain's own queue, counting what
 /// does not fit.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn gather(domain: &mut Domain, limits: &Limits) {
     for _ in 0..limits.run.facts {
         let Some(fact) = domain.run.pop_fact() else {

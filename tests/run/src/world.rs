@@ -9,56 +9,76 @@ use crate::partner::{Out, Partner, Script, Tally};
 
 /// Room in each domain's output queue. Small, so the loop's flow control (take
 /// an event only while there is room for what it may produce) is exercised.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 const OUT: u32 = 4;
 
 /// Immutable seeded peer behavior and component limits used to construct this world.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Settings {
     /// Seeds the world, which seeds the host and the partner.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub seed: u64,
     /// Immutable run limits for the real component under test.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub run: run::Limits,
     /// Seeded host behavior for this world.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub host: host::Script,
     /// Seeded conversation-peer behavior for this world.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub partner: Script,
     /// One-way latency between the host and the agent.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub network: Span,
     /// One-way latency between the run and its conversations. Within the
     /// agent, the top level hands records over in the step that makes them;
     /// a latency here lets them cross in every order.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub hop: Span,
     /// What the checkouts hold, and how io works on them.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub checkout: Checkouts,
     /// The chance, per mille, that a check in flight wins the race with its
     /// abort. A push's race with its cancel is the host's.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub races: u32,
     /// The chance, per mille, that as the run is handed an event, the host's
     /// cancel of that event's run comes right before it or right after it.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub inject: u32,
 }
 
 /// The checkouts the world makes for runs, and io's way with them.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Checkouts {
     /// The chance, per mille, that a repository has an `AGENTS.md`, of a
     /// length drawn from `1..=guide_max`.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub guides: u32,
     /// Inclusive largest generated guide byte length.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub guide_max: u32,
     /// The chance, per mille, that a repository has checks, and how many
     /// times they fail before they pass: drawn from `0..=check_failures`.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub checks: u32,
     /// Chance per mille that a scripted check process exits unsuccessfully.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub check_failures: u32,
     /// The chance, per mille, that a guide is not UTF-8 text.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub not_text: u32,
     /// How long io takes for each read or probe, and the chance, per mille,
     /// that it fails.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub io: Span,
     /// Chance per mille that a scripted IO request fails.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub io_failures: u32,
     /// How long checks run.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub check: Span,
 }
 
@@ -66,6 +86,7 @@ impl Settings {
     /// A world where nothing goes wrong at the agent's side: room for every
     /// run, charters well within the limits, an LLM that works and yields now
     /// and then but never finishes, and no cancels.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     #[must_use]
     pub const fn calm(seed: u64) -> Settings {
         Settings {
@@ -162,56 +183,77 @@ impl Settings {
 }
 
 /// What the world counted.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Stats {
     /// Runs the host started, and cancels it sent.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub starts: u32,
     /// Count of cancels observed at this scripted boundary.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub cancels: u32,
     /// Reads, probes and checks the run asked io for, and checks it aborted.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub reads: u32,
     /// Count of probes observed at this scripted boundary.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub probes: u32,
     /// Count of checks observed at this scripted boundary.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub checks: u32,
     /// Count of aborts observed at this scripted boundary.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub aborts: u32,
     /// Pushes the run asked the host for, and host calls it cancelled.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub pushes: u32,
     /// Count of host cancels observed at this scripted boundary.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub host_cancels: u32,
     /// Conversations the run opened, sub-agents among them, nudges it said,
     /// and closes it sent.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub opens: u32,
     /// Count of children observed at this scripted boundary.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub children: u32,
     /// Count of says observed at this scripted boundary.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub says: u32,
     /// Count of closes observed at this scripted boundary.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub closes: u32,
     /// The most conversations a run had live at once.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub peak: u32,
     /// What the host and the partner counted.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub host: host::Tally,
     /// Observed partner counters collected by this world.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub partner: Tally,
 }
 
 /// Something on its way, delivered at its time.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 enum Delivery {
     /// The host's start reaches the agent.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Start {
         reply_to: ReplyTo,
         worker: Token,
         charter: run::Charter,
     },
     /// The host's cancel reaches the agent.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Cancel {
         run: Token,
     },
     /// The end of a host call reaches the run.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Host(run::Event),
     /// The run's word reaches the host.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Admitted {
         worker: Token,
         run: Token,
@@ -230,6 +272,7 @@ enum Delivery {
         owner: Token,
     },
     /// The run's requests reach its conversations.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Open {
         conversation: Token,
         opening: run::Opening,
@@ -245,10 +288,13 @@ enum Delivery {
         result: run::Returned,
     },
     /// A conversation's event reaches the run.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Event(run::Event),
     /// io's answer reaches the run.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Io(run::Event),
     /// The partner's own timer.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Wake {
         peer: Token,
         wake: u64,
@@ -257,6 +303,7 @@ enum Delivery {
 
 /// The four one-way channels, named by where they lead, each delivering in the
 /// order it was given.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Lane {
     Agent,
@@ -267,14 +314,17 @@ enum Lane {
 
 /// A start, as the world tracks it: the budget its run keeps to, and the
 /// answer once it has come.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 struct Start {
     budget: run::Budget,
     /// The roots whose checks a change must pass, once its checkout is made.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     checks: BTreeSet<Token>,
     answer: Option<run::Answer>,
 }
 
 /// An open, as the world tracks it.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 #[derive(Default)]
 struct Open {
     started: bool,
@@ -283,51 +333,62 @@ struct Open {
 
 /// A run as the world sees it from outside, to tell what state a cancel finds
 /// it in.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 struct RunView {
     budget: run::Budget,
     deadline: Time,
     /// Its main conversation, once opened.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     main: Option<Token>,
     started: bool,
     /// Whether it decided how it ends: it closed main, or a cancel or its
     /// deadline came while it prepared or worked.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     decided: bool,
     spent: run::Spend,
     /// Its conversations opened and not ended, and the most it had at once.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     live: u32,
     peak: u32,
     /// The roots whose checks a change must pass before it is pushed: of the
     /// writable repositories, when the spec wants checks, those with checks,
     /// less those io failed to look in.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     checks: BTreeSet<Token>,
     /// The iteration it answered in.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     answered: Option<u64>,
 }
 
 /// What one step or alarm of the run made, for the world to attribute: the run
 /// it was about, if known, how many requests it made, and the state a cancel
 /// it took found the run in.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 struct Made {
     run: Option<Token>,
     requests: u32,
     cancel: Option<(Token, &'static str)>,
     /// The call, if the step took an ask for a sub-agent, and what its run had
     /// left as it took it.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     asked: Option<(Token, run::Budget)>,
 }
 
 /// A conversation's call, as the world tracks it.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 struct Call {
     conversation: Token,
     returned: bool,
 }
 
 /// A push, as the world tracks it: for which job.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 struct Pushing {
     job: Token,
 }
 
 /// Real domain plus scripted typed peers, pending terminals and external observations for this component story.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 pub struct World {
     now: Time,
     rng: Rng,
@@ -340,16 +401,20 @@ pub struct World {
     partner: Partner,
 
     /// Deliveries in flight.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     wire: Schedule<Delivery>,
     /// When each lane delivers its latest, which the next may not overtake.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     lanes: [Time; 4],
     /// Every start, by the host's name for it; every open, by the run's
     /// name for the conversation; every conversation's call, by its own name.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     starts: BTreeMap<Token, Start>,
     opens: BTreeMap<Token, Open>,
     calls: BTreeMap<Token, Call>,
     /// The checkouts' files, by their roots and paths, which of them are
     /// executable, and how many more times each repository's checks fail.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     files: BTreeMap<(Token, Vec<u8>), Vec<u8>>,
     executables: BTreeSet<(Token, Vec<u8>)>,
     failures: BTreeMap<Token, u64>,
@@ -357,20 +422,24 @@ pub struct World {
     /// calls' checks (with the root each runs in), apart, as their tokens are
     /// of different kinds; and where the result of each check in flight is on
     /// the wire.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     looks: BTreeSet<Token>,
     checking: BTreeMap<Token, Token>,
     checks: BTreeMap<Token, Key>,
     /// Pushes in flight, by the run's owner; and the jobs whose runs pushed a
     /// change.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pushes: Ledger<Token, Pushing>,
     pushed: BTreeSet<Token>,
     /// The roots whose checks passed, for each landing call, until it pushes
     /// or its run answers.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     passed: BTreeMap<Token, BTreeSet<Token>>,
     /// The runs as the world sees them, by the run's names for them; which run
     /// each host name, conversation and landing call is of; the
     /// conversation each peer is; and the landing calls with a check or push
     /// in flight.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     views: BTreeMap<Token, RunView>,
     run_of_owner: BTreeMap<Token, Token>,
     run_of_conversation: BTreeMap<Token, Token>,
@@ -378,8 +447,10 @@ pub struct World {
     conversation_of_peer: BTreeMap<Token, Token>,
     landing: BTreeSet<Token>,
     /// The states cancels and deadlines found runs in, and how many times.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     cancel_cells: BTreeMap<&'static str, u32>,
     /// The facts the run told, by kind.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     facts: BTreeMap<&'static str, u32>,
     deadline_cells: BTreeMap<&'static str, u32>,
     iteration: u64,
@@ -387,6 +458,7 @@ pub struct World {
     /// the call the step being attributed took, if it asked for a sub-agent,
     /// with what its run had left then; and the sub-agent each such call
     /// opened, until it returns.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     just_answered: Option<Token>,
     asked: Option<(Token, run::Budget)>,
     child_of_call: BTreeMap<Token, Token>,
@@ -397,6 +469,7 @@ pub struct World {
 
 impl World {
     /// Constructs empty bounded state under the supplied immutable limits; no IO or clocks are consulted.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn new(settings: Settings) -> World {
         assert!(run::worst_case(&settings.run).is_some(), "the shell refuses limits it cannot provision");
@@ -444,18 +517,21 @@ impl World {
     }
 
     /// Current injected monotonic time in this world.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn now(&self) -> Time {
         self.now
     }
 
     /// Observed boundary counters, including dropped facts.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn stats(&self) -> Stats {
         Stats { host: self.host.tally(), partner: self.partner.tally(), ..self.stats }
     }
 
     /// What crossed between the domains and the world, in order, with times.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn trace(&self) -> &[String] {
         self.trace.lines()
@@ -464,24 +540,28 @@ impl World {
     /// The states cancels found runs in: preparing, stopping, opening,
     /// working, landing, over (its budget), winding, answered (earlier in the
     /// same iteration) or gone; and how many times each.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn cancel_cells(&self) -> &BTreeMap<&'static str, u32> {
         &self.cancel_cells
     }
 
     /// The states runs' deadlines found them in, as for cancels.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn deadline_cells(&self) -> &BTreeMap<&'static str, u32> {
         &self.deadline_cells
     }
 
     /// Every run started, with the run's answer once it has come.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub fn answers(&self) -> impl Iterator<Item = Option<&run::Answer>> {
         self.starts.values().map(|start| start.answer.as_ref())
     }
 
     /// Runs until nothing is left to happen, then checks the invariants of a
     /// settled world. Panics if it takes more than `iterations`.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub fn run(&mut self, iterations: u32) {
         for _ in 0..iterations {
             self.iterate();
@@ -499,6 +579,7 @@ impl World {
     }
 
     /// One iteration of the loop, as the shell would run it.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn iterate(&mut self) {
         self.run_stage.tick(self.now);
         self.deliver();
@@ -578,6 +659,7 @@ impl World {
     /// layer, io and the conversations would. `current` is the run the step
     /// that made it was about, if known; what it is after the request is
     /// returned.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn run_request(&mut self, request: run::Request, current: Option<Token>) -> Option<Token> {
         self.log(&format!("run -> {request:?}"));
         let mut current = current;
@@ -669,6 +751,7 @@ impl World {
     }
 
     /// The run's reads, probes and aborts, carried out the way io would.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn io_request(&mut self, request: run::Request) {
         match request {
             run::Request::Read { owner, at, max, deadline } => {
@@ -732,6 +815,7 @@ impl World {
     }
 
     /// The run an event is about, if the world knows it yet.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn run_of(&self, event: &run::Event) -> Option<Token> {
         match event {
             run::Event::Start { .. } => None,
@@ -752,6 +836,7 @@ impl World {
 
     /// What an event the run is about to take tells the world of it; for a
     /// cancel, the state it finds the run in.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn note(&mut self, event: &run::Event, run: Option<Token>) -> Option<(Token, &'static str)> {
         let view = self.views.get_mut(&run?)?;
         match event {
@@ -786,6 +871,7 @@ impl World {
     }
 
     /// The state the world sees the run `run` in.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn cell(&self, run: Token) -> &'static str {
         let view = &self.views[&run];
         let landing = self.landing.iter().any(|owner| self.run_of_call.get(owner) == Some(&run));
@@ -805,6 +891,7 @@ impl World {
 
     /// The run whose deadline the run's alarm is about to fire, if one alone
     /// is due; its state, counted.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn deadline_due(&mut self) -> Option<Token> {
         let mut due =
             self.views.iter().filter(|(_, view)| view.answered.is_none() && !view.decided && view.deadline <= self.now);
@@ -826,6 +913,7 @@ impl World {
 
     /// The run opens a conversation: main, or the sub-agent of the call the
     /// step took.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn open(&mut self, conversation: Token, opening: run::Opening, current: Option<Token>) {
         let fresh = self.opens.insert(conversation, Open::default()).is_none();
         assert!(fresh, "conversations have distinct names");
@@ -867,6 +955,7 @@ impl World {
 
     /// Checked is pushed: from a run's first check to its push, nothing but
     /// main is live in it, so nothing else may write to the checkout.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn assert_alone(&self, run: Token) {
         let view = &self.views[&run];
         assert_eq!(view.live, 1, "main is its run's only conversation while its change is checked and pushed");
@@ -874,6 +963,7 @@ impl World {
 
     /// The run's answer, checked against its budget and what it did: the
     /// host's name for the run.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn answer(&mut self, to: ReplyTo, answer: run::Answer) -> Token {
         let owner = to.into_token();
         let start = self.starts.get_mut(&owner).expect("an answer is to a start that was made");
@@ -898,6 +988,7 @@ impl World {
 
     /// Runs the checks at `program` as io would: they fail as many times as
     /// their repository was given, then pass, unless they outlast `deadline`.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn check(&mut self, owner: Token, program: &run::Place, deadline: Time, tail: u32) {
         assert!(self.checking.insert(owner, program.root).is_none(), "a call has one check in flight at a time");
         assert!(self.executables.contains(&(program.root, program.path.to_vec())), "checks are run where found");
@@ -923,6 +1014,7 @@ impl World {
 
     /// When io answers a read or a probe of `owner`'s due by `deadline`, or
     /// `None` if it fails or runs out of time.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn io_result(&mut self, owner: Token, deadline: Time) -> Option<Time> {
         assert!(self.looks.insert(owner), "a run has one look in flight at a time");
         let at = self.now.saturating_add(self.draw(self.settings.checkout.io));
@@ -932,6 +1024,7 @@ impl World {
 
     /// Lays out what each repository of a checkout the host made holds, as
     /// io finds it.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn checkout(&mut self, repositories: &[run::charter::Repository]) {
         let settings = self.settings.checkout;
         for &run::charter::Repository { root, .. } in repositories {
@@ -960,6 +1053,7 @@ impl World {
     }
 
     /// What the host asked for: events on their way to the agent.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn host_out(&mut self, out: Vec<run::Event>) {
         for event in out {
             match event {
@@ -999,6 +1093,7 @@ impl World {
     }
 
     /// Hands every delivery that is due to its destination.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn deliver(&mut self) {
         while let Some(delivery) = self.wire.next(self.now) {
             match delivery {
@@ -1092,6 +1187,7 @@ impl World {
 
     /// A fact the run told: of a run it admitted, and a conversation it
     /// opened.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn fact(&mut self, fact: &run::facts::Fact) {
         use run::facts::Fact;
         let (Fact::Admitted { run }
@@ -1112,6 +1208,7 @@ impl World {
     }
 
     /// The facts the run told, by kind, and how many it dropped.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn facts(&self) -> (&BTreeMap<&'static str, u32>, u64) {
         (&self.facts, self.run.facts_lost())
@@ -1119,6 +1216,7 @@ impl World {
 
     /// Hands the run `event`, and with the configured chance, the host's
     /// cancel of its run right before or right after it.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn hand(&mut self, event: run::Event) {
         let run = self.run_of(&event);
         let inject = match run {
@@ -1136,6 +1234,7 @@ impl World {
     }
 
     /// What the partner asked for: events on their way to the run, and wakes.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn partner_out(&mut self, out: Vec<Out>) {
         for item in out {
             match item {
@@ -1150,6 +1249,7 @@ impl World {
     /// The conversations' contract, as the run receives it: `Started` at most
     /// once and first, one `Ended` per open once every call it made has
     /// returned, nothing after it; a withdraw only of a call it made.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn check_conversation(&mut self, event: &run::Event) {
         let (conversation, started, ended) = match event {
             run::Event::Started { conversation, .. } => (conversation, true, false),
@@ -1210,6 +1310,7 @@ impl World {
     }
 
     /// The invariants of a world where nothing is left to happen.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn assert_settled(&self) {
         assert_eq!(self.run.runs(), 0, "every run has answered and been reclaimed");
         assert_eq!(self.run.conversations(), 0, "every conversation has ended and been reclaimed");
@@ -1246,6 +1347,7 @@ impl World {
 
     /// Sends on `lane`, after its latency, and after whatever it carries
     /// already.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn send(&mut self, lane: Lane, delivery: Delivery) {
         let span = match lane {
             Lane::Agent | Lane::Host => self.settings.network,
@@ -1272,6 +1374,7 @@ impl World {
 }
 
 /// A fact's kind, to count it by.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 fn kind(fact: &run::facts::Fact) -> &'static str {
     use run::facts::Fact;
     match fact {
@@ -1290,6 +1393,7 @@ fn kind(fact: &run::facts::Fact) -> &'static str {
 
 impl RunView {
     /// What the run has left of its budget at `now`.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn budget_left(&self, now: Time) -> run::Budget {
         let (spent, budget) = (self.spent, self.budget);
         run::Budget {
@@ -1303,6 +1407,7 @@ impl RunView {
     }
 
     /// Whether its conversations spent past any part of its budget.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn budget_spent(&self) -> bool {
         let (spent, budget) = (self.spent, self.budget);
         spent.turns > budget.turns
@@ -1325,6 +1430,7 @@ impl RunView {
 /// has in flight when its close comes, one that wins the race with it: the
 /// partner starts a turn the moment one ends, so a close always finds one in
 /// flight, where a session would run its completion's calls first.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 fn assert_within(budget: &run::Budget, answer: &run::Answer, turn: run::Spend, peak: u32) {
     let (run::Answer::Failed { spent, .. } | run::Answer::Accepted { spent, .. }) = answer else { return };
     let turns = u64::from(peak) + 2;

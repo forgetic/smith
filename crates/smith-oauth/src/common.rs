@@ -11,31 +11,41 @@ use skein_lib::{Duration, List, bytes};
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
     /// Maximum complete JSON document bytes admitted by the codec.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub document_bytes: u32,
     /// Maximum decoded JSON string bytes.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub string_bytes: u32,
     /// Maximum credential-token bytes; tokens never appear in debug output.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub token_bytes: u32,
     /// Maximum OAuth client-identifier bytes.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub client_bytes: u32,
     /// Maximum retained provider-error detail bytes.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub detail_bytes: u32,
     /// Maximum durable token-record bytes.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub record_bytes: u32,
     /// Nesting or JSON depth, bounded by the enclosing immutable limits.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub depth: u32,
-    /// Maximum JSON tokens or scripted output tokens, as named by the enclosing record.
+    /// Maximum tokenizer records retained from one bounded JSON document.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     pub tokens: u32,
 }
 
 impl Limits {
     /// Projects the caller's depth and document-byte caps into the bounded JSON writer.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     #[must_use]
     pub const fn writer_limits(&self) -> writer::Limits {
         writer::Limits { depth: self.depth, length: self.document_bytes }
     }
 
     /// Projects the caller's token, string and nesting caps into the JSON tokenizer.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     #[must_use]
     pub const fn tokenizer_limits(&self) -> tokenizer::Limits {
         tokenizer::Limits {
@@ -49,38 +59,51 @@ impl Limits {
 }
 
 /// Document admission failure; the codec returns no partial accepted document.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum DecodeError {
     /// Input has invalid syntax or violates the codec's structural contract.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     Malformed,
     /// A required member is absent.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     Missing,
     /// A member has a JSON type the contract does not permit.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     WrongType,
     /// A configured ownership, count or encoded-byte cap would be exceeded.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     TooLarge,
     /// The durable format version is unsupported.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     Version,
 }
 
 /// The accounts-domain failures, without secret-bearing transport details.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Failure {
     /// The provider could not be reached or returned an unusable terminal.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     Unavailable,
     /// The injected operation deadline won the race.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     TimedOut,
     /// The provider asks the client to wait before retrying.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     RateLimited {
         /// Optional provider cooldown, retained in the representation of this boundary.
+        /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
         retry_after: Duration,
     },
     /// The entrance or operation was refused with the enclosing typed reason.
+    /// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
     Refused,
 }
 
 /// Classifies an answered refresh. Server failures are ambiguous after sending;
 /// only a transport that proves nothing was sent may use `Unavailable`.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[must_use]
 pub fn classify(status: u16, error: Option<&crate::OAuthError>, retry_after: Duration) -> Failure {
     let code = match error {
@@ -104,6 +127,7 @@ pub fn classify(status: u16, error: Option<&crate::OAuthError>, retry_after: Dur
 
 /// Includes an exchange, tokenized JWT payload, two saved generations and a
 /// candidate/record being handed to the durability owner. Checked on startup.
+/// Contract: domain/host.md, sections 7 and 11; programming-model.md, section 4.4.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     List::<Token>::worst_case(limits.tokens)?

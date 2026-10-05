@@ -15,6 +15,15 @@
 //!
 //! It follows the programming model as any other step crate does.
 
+//!
+//! It keeps bounded pending calls, reply rights, scripts, RNG state and due
+//! alarms, never agent state, credential secrets, tool authority, checkout
+//! effects or live network behavior. [`step`] accepts calls/cancels and [`fire`]
+//! settles due work under injected time; callers reserve [`MAX_OUT`] output
+//! slots and receive one reply per accepted call, including cancellation
+//! when it wins (domain/session.md, sections 4 and 12; programming-model.md,
+//! sections 4.4, 5.3 and 7; testing-strategy.md, section 4).
+
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 

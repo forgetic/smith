@@ -11,9 +11,11 @@ use skein_lib::{Duration, Env, List, Queue, Time, bytes};
 use smith_oauth as documents;
 
 /// Maximum owner-directed records emitted by one connection entry point.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const MAX_UP: u32 = 3;
 
 /// Maximum transport-directed records emitted by one connection entry point.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub const MAX_DOWN: u32 = 18;
 
 const EVENTS: u32 = 4;
@@ -23,52 +25,71 @@ const REQUESTS: u32 = 4;
 const ROUTES: u32 = 8;
 
 /// Immutable ownership and document caps supplied by the caller to every entry point.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Limits {
     /// HTTP server bounds supplied by the byte world.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub http: http::Limits,
     /// Document codec bounds for the selected fake provider.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub documents: documents::Limits,
     /// Maximum scripted issuer responses queued at once.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub plans: u32,
     /// Spent refresh-token values retained across all served connections.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub rotations: u32,
 }
 
 /// Immutable scripted peer configuration supplied by the byte world; it contains no live IO.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[expect(missing_debug_implementations, reason = "issuer refresh tokens must never occur in traces")]
 pub struct Config {
     /// Path relative to the named root, resolved and confined by the receiving IO layer.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub path: Box<[u8]>,
     /// OAuth client identifier; bounded before a refresh request is encoded.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub client_id: Box<[u8]>,
     /// Secret refresh credential; never included in debug output or observations.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub refresh_token: Box<[u8]>,
 }
 
 /// Scripted OAuth response body; raw bytes deliberately exercise malformed-peer documents.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[expect(missing_debug_implementations, reason = "issuer responses contain credential values")]
 pub enum Body {
     /// Scripted successful OAuth token body, with secret values excluded from observations.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Token(documents::TokenResponse),
     /// Provider or scripted peer error body.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Error(documents::OAuthError),
     /// Deliberately malformed documents and claim metadata are byte faults.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Raw(Box<[u8]>),
 }
 
 /// One bounded scripted OAuth response with explicit status, body and injected latency.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[expect(missing_debug_implementations, reason = "issuer response controls contain credential values")]
 pub struct Plan {
     /// HTTP status of the scripted response.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub status: u16,
     /// Owned message or result body, bounded by the enclosing record's byte cap.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub body: Body,
     /// Optional provider cooldown, retained in the representation of this boundary.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub retry_after: Option<Box<[u8]>>,
     /// Injected latency before sending the response head.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub head_delay: Duration,
     /// Injected latency before sending the response body.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub body_delay: Duration,
 }
 
@@ -104,33 +125,44 @@ enum State {
 }
 
 /// Decoded provider or peer event; the enclosing entry point checks order and correlation.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Event {
     /// No client id or token crosses this testing control boundary.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Requested {
         /// Monotonic request number issued by the fake peer.
+        /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         number: u64,
         /// Whether the scripted peer admitted this request under its configuration.
+        /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         accepted: bool,
     },
     /// The owner requests connection closure; the lower layer still supplies Closed.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Close,
     /// The lower layer has completed connection closure.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Closed,
 }
 
 /// Typed refusal or terminal failure of the fake peer, independent of the agent's policy.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Error {
     /// Configuration or constructor ownership caps cannot be honored.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Limits,
     /// A scripted response cannot be encoded within its configured caps.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Plan,
     /// The fake has no capacity for another scripted plan.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Full,
 }
 
 /// Bounded per-connection HTTP/SSE state driven by start, input, resume and close events.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[expect(missing_debug_implementations, reason = "issuer current and response token values are secret")]
 pub struct Server {
     state: State,
@@ -146,6 +178,7 @@ pub struct Server {
 }
 
 /// Bounded persistent fake credential generations and scripted plans, shared across connections.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[expect(missing_debug_implementations, reason = "issuer refresh tokens persist across connection loss")]
 pub struct Issuer {
     config: Config,
@@ -164,6 +197,7 @@ struct Issued {
 
 impl Issuer {
     /// Constructs empty bounded state under the supplied immutable limits; no IO or clocks are consulted.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub fn new(config: Config, limits: &Limits) -> Result<Issuer, Error> {
         if worst_case(limits).is_none()
             || config.path.first() != Some(&b'/')
@@ -201,6 +235,7 @@ impl Issuer {
     /// Validates/encodes one bounded response control. A successful rotation
     /// consumes the current refresh token when its request is handled, before
     /// the response is delivered. Losing the response does not undo rotation.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub fn queue(&mut self, plan: Plan, limits: &Limits) -> Result<(), Error> {
         if self.plans.room() == 0 {
             return Err(Error::Full);
@@ -255,12 +290,14 @@ impl Issuer {
     }
 
     /// Number of OAuth refresh requests observed since issuer construction.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub const fn posts(&self) -> u64 {
         self.posts
     }
 
     /// Checks a supplied access token against the fake issuer's retained generations and injected monotonic time.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub fn authorize(&self, token: &[u8], now: Time) -> bool {
         for issued in self.issued.as_slice() {
@@ -273,6 +310,7 @@ impl Issuer {
 
     /// Account metadata is read once at issuing, never in an LLM request's
     /// domain translation. Invalid JWT controls intentionally yield none.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub fn account_id(&self, token: &[u8], now: Time) -> Option<&[u8]> {
         for issued in self.issued.as_slice() {
@@ -286,6 +324,7 @@ impl Issuer {
 
 impl Server {
     /// Constructs empty bounded state under the supplied immutable limits; no IO or clocks are consulted.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub fn new(limits: &Limits) -> Result<Server, Error> {
         if worst_case(limits).is_none() {
             return Err(Error::Limits);
@@ -305,6 +344,7 @@ impl Server {
     }
 
     /// Whether this peer can progress from its queued input or injected time without fresh transport input.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub fn has_work(&self, issuer: &Issuer, now: Time) -> bool {
         if !self.events.is_empty() || !self.requests.is_empty() {
@@ -328,6 +368,7 @@ impl Server {
     }
 
     /// Earliest injected deadline still pending, or `None` when no timed work remains.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     #[must_use]
     pub fn next_deadline(&self) -> Option<Time> {
         let reply = self.reply.as_ref()?;
@@ -346,6 +387,7 @@ impl Server {
 }
 
 /// Starts this connection's bounded HTTP state; reserve the declared output maxima before calling.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn start(
     server: &mut Server,
     issuer: &mut Issuer,
@@ -362,6 +404,7 @@ pub fn start(
 }
 
 /// Consumes one lower transport event and routes bounded HTTP progress or terminals to the owner.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn up(
     server: &mut Server,
     issuer: &mut Issuer,
@@ -380,6 +423,7 @@ pub fn up(
 }
 
 /// Performs one bounded deferred HTTP/SSE handoff under backpressure; reserve output maxima first.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn resume(
     server: &mut Server,
     issuer: &mut Issuer,
@@ -456,6 +500,7 @@ pub fn resume(
 }
 
 /// Advances timed peer work at the supplied time, emitting only within the declared output maxima.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn fire(
     server: &mut Server,
     issuer: &mut Issuer,
@@ -467,6 +512,7 @@ pub fn fire(
 }
 
 /// Starts orderly connection closure; outstanding lower work still requires its terminal.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn close(server: &mut Server, env: &Env<Limits>, above: &mut Queue<Event>, below: &mut Queue<Down>) {
     if server.state == State::Closing || server.state == State::Closed {
         return;
@@ -489,6 +535,7 @@ pub fn close(server: &mut Server, env: &Env<Limits>, above: &mut Queue<Event>, b
 }
 
 /// Consumes the lower layer's close terminal and emits the owner's single Closed observation.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn closed(server: &mut Server, env: &Env<Limits>, above: &mut Queue<Event>, below: &mut Queue<Down>) {
     if server.state == State::Closed {
         return;
@@ -644,6 +691,7 @@ fn refused(server: &mut Server, env: &Env<Limits>) {
 }
 
 /// Checked maximum owned bytes under limits, or `None` when counters or containers cannot be bounded.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     if limits.http.body < u64::from(limits.documents.document_bytes) || limits.http.send == 0 || limits.http.read == 0 {

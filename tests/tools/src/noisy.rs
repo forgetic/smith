@@ -37,15 +37,18 @@ const PATHS: [&[u8]; 22] = [
 const HOT: [&[u8]; 3] = [b"src/lib.rs", b"Cargo.toml", b"src/new.rs"];
 
 /// What commands the LLM runs.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 const COMMANDS: [&[u8]; 7] =
     [b"cargo test", b"cargo fmt", b"env", b"sleep 600", b"kill -9 $$", b"vendor update", b"install hooks"];
 
 /// What edits replace: in every file, in some, in one line of one, nowhere.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 const SNIPPETS: [&[u8]; 5] = [b"\n", b"pub", b"fn one", b"written", b"nowhere"];
 
 /// A world drawn from `seed`: small limits, faults, latencies that race the
 /// deadlines, and up to five sessions with random scripts, some changing the
 /// checkout as they go.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn noisy_world(seed: u64) -> World {
     let mut rng = Rng::new(seed);

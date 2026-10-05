@@ -16,16 +16,19 @@ use crate::peer::Peer;
 use crate::translate;
 
 /// What the run reads: this iteration's times, and its own limits.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn run_env(env: &Env<Limits>) -> Env<run::Limits> {
     Env { now: env.now, wall: env.wall, limits: env.limits.run }
 }
 
 /// What the session child domain reads.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn session_env(env: &Env<Limits>) -> Env<session::Limits> {
     Env { now: env.now, wall: env.wall, limits: env.limits.session }
 }
 
 /// Hands one of the protocol's events to the child domain it is for.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
     let event = match event {
         Event::Start { reply_to, worker, charter, grants } => {
@@ -99,6 +102,7 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
 }
 
 /// Delivers a hand-off from the run that waited on the ready list.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn deliver(domain: &mut Domain, env: &Env<Limits>, handoff: Handoff) {
     let event = match handoff {
         Handoff::Close { peer } => {
@@ -120,6 +124,7 @@ pub(crate) fn deliver(domain: &mut Domain, env: &Env<Limits>, handoff: Handoff) 
 
 /// Routes what the child domains emitted, and what that leads to, until both
 /// have emitted all they will in this entry point.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn hand_off(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     if let Some(notice) = domain.notices.pop() {
         out.push(notice);
@@ -152,6 +157,7 @@ fn session_step(domain: &mut Domain, env: &Env<Limits>, event: session::Event) {
 }
 
 /// One of the sessions' requests: out to the protocol layer, or to the run.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Request, out: &mut Queue<Request>) {
     let event = match request {
         session::Request::Turn { .. } | session::Request::Priced { .. } => {
@@ -232,6 +238,7 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
 }
 
 /// One of the run's requests: out to the protocol layer, or to the sessions.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: &mut Queue<Request>) {
     let event = match request {
         run::Request::Admitted { worker, run } => return out.push(Request::Admitted { worker, run }),
@@ -282,12 +289,14 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
 }
 
 /// The peer whose session's opener is `conversation`.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn peer(domain: &Domain, conversation: Token) -> Id<Peer> {
     *domain.conversations.get(&conversation).expect("a session's opener is a conversation the run opened")
 }
 
 /// Frees a peer whose session has ended, and its tickets: its calls have all
 /// been answered.
+/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn free(domain: &mut Domain, id: Id<Peer>) {
     let peer = domain.peers.get(id).expect("a peer lives as its session");
     domain.tickets = domain.tickets.checked_sub(peer.tickets()).expect("the peers' tickets are counted");

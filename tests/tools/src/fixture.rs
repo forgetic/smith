@@ -8,21 +8,26 @@ use smith_domain_tools::{Authority, Grants, Repo};
 use crate::{authority, repo};
 
 /// Initial library bytes in the contained checkout fixture.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub const LIB: &[u8] = b"pub fn one() {}\npub fn two() {}\npub fn three() {}\n";
 
 /// A checkout at /work: temper, where relative paths start and which may be
 /// written, with its .git and links of every kind, a library vendored in it,
 /// which may not be written, and the docs beside it; and, outside it all,
 /// /etc.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub struct Fixture {
     /// Prepared repository roots and effective write authority supplied by the host.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub checkout: Checkout,
     /// Prepared repository mounts and their effective write permissions.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub repos: Vec<Repo>,
 }
 
 impl Fixture {
     /// Builds the fixed contained repositories, protected paths and scripted commands; performs no live IO.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn new() -> Fixture {
         let mut checkout = Checkout::new();
@@ -69,6 +74,7 @@ impl Fixture {
     }
 
     /// Builds the fixture authority with the supplied explicit grants.
+    /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn authority(&self, grants: Grants) -> Authority {
         authority(b"/work/temper", self.repos.clone(), grants)
@@ -82,10 +88,12 @@ impl Default for Fixture {
 }
 
 /// Expected library bytes after the scripted formatter finishes.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub const FORMATTED: &[u8] = b"pub fn one() {}\n\npub fn two() {}\n\npub fn three() {}\n";
 
 /// A scripted command: it runs for `millis`, writes `output`, ends with
 /// `exit`, and makes `changes` (absolute paths, new content or removed).
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn program(millis: u64, output: &[u8], exit: Exit, changes: &[(&[u8], Option<&[u8]>)]) -> Program {
     let changes = changes.iter().map(|(path, content)| (path.to_vec(), content.map(<[u8]>::to_vec))).collect();
@@ -93,6 +101,7 @@ pub fn program(millis: u64, output: &[u8], exit: Exit, changes: &[(&[u8], Option
 }
 
 /// What a failing test run writes: a hundred lines, and the result.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn test_log() -> Vec<u8> {
     let mut log: Vec<u8> = (0..100).flat_map(|test| format!("test case_{test:03} ... ok\n").into_bytes()).collect();
@@ -101,6 +110,7 @@ pub fn test_log() -> Vec<u8> {
 }
 
 /// A hundred lines of twenty bytes.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn long() -> Vec<u8> {
     (0..100).flat_map(|line| format!("line {line:03} ..........\n").into_bytes()).collect()

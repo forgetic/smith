@@ -24,6 +24,16 @@
 //! The temper-specific charter, push, verdict and token-budget vocabulary
 //! is retained until 05s4; this copy does not yet implement the generic design.
 
+//!
+//! The retained state is each admitted charter, conversation binding, shared
+//! usage, preparation/check/delivery phase and its pending terminal rights.
+//! The copied worker wording names a typed host; it does not require a process
+//! or channel. The run never knows authentication, provider dialect bytes,
+//! credential secrets, forge state, CI or the host's delivery policy. Entrances
+//! reserve [`MAX_OUT`] output slots, and the caller delivers pending terminals
+//! even while cancellation is settling (domain/run.md, sections 2, 10 and 14;
+//! programming-model.md, sections 5.2, 5.3 and 7).
+
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 

@@ -9,89 +9,122 @@ use skein_json::{Token, writer::Encoder};
 use skein_lib::{List, bytes};
 
 /// Sender of one provider conversation message.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Role {
     /// User or tool-result side of the conversation.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     User,
     /// Provider-produced assistant side of the conversation.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Assistant,
 }
 
 /// One provider-native conversation block, including opaque replay data and tool-call pairing.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Block {
     /// Owned bounded text in its original provider position.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Text {
         /// Owned UTF-8 text, bounded by the enclosing message or output cap.
+        /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         text: Box<[u8]>,
     },
     /// The provider asks for tool execution.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     ToolUse {
         /// Provider-issued tool-call identifier, preserved verbatim in its result.
+        /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         id: Box<[u8]>,
         /// Boundary name, compared byte for byte; it carries no authority by itself.
+        /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         name: Box<[u8]>,
-        /// Provider-written tool arguments or token allowance, according to the enclosing record.
+        /// Provider-native validated JSON tool arguments, bounded by document limits.
+        /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         input: Json,
     },
     /// Result for the provider call identity, echoed exactly once.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     ToolResult {
         /// Provider-issued tool-call identifier, preserved verbatim in its result.
+        /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         id: Box<[u8]>,
-        /// Owned content blocks or file bytes, bounded by the enclosing record's byte cap.
+        /// Ordered message content retained under request and document limits.
+        /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         content: Box<[u8]>,
         /// Whether the returned tool result represents a failure.
+        /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         error: bool,
     },
     /// Provider-owned replay data, preserved verbatim and never interpreted by the domain.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     Opaque {
-        /// Owned field value or environment value, bounded by its enclosing record.
+        /// Provider-owned JSON replay value, bounded by document limits and preserved without interpretation.
+        /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
         value: Json,
     },
 }
 
 /// One ordered conversation message, with sender and owned bounded content.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Message {
     /// Sender of this message in the provider-neutral conversation.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub role: Role,
-    /// Owned content blocks or file bytes, bounded by the enclosing record's byte cap.
+    /// Ordered message content retained under request and document limits.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub content: Box<[Block]>,
 }
 
 /// One offered provider tool with its bounded name, description and validated schema.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Tool {
     /// Boundary name, compared byte for byte; it carries no authority by itself.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub name: Box<[u8]>,
     /// Owned display text for the offered tool; the model alone interprets it.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub description: Box<[u8]>,
     /// Validated bounded JSON schema supplied for the offered tool.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub schema: Json,
 }
 
 /// Complete typed provider request; the encoder validates it before allocating a bounded body.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Request {
     /// Provider model name, treated as bytes by the domain.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub model: Box<[u8]>,
     /// Complete ordered system blocks, including the deployment's identity.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub system: Box<[Box<[u8]>]>,
     /// Tools offered or granted by this record; their names confer no additional authority.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub tools: Box<[Tool]>,
     /// Oldest-first conversation messages, with provider call/result pairing preserved.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub messages: Box<[Message]>,
     /// Maximum output tokens requested for one completion.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub max_tokens: u32,
     /// Optional provider thinking-token allowance.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub thinking_budget: Option<u32>,
     /// Optional bounded provider metadata object, preserved by the dialect codec.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub metadata: Option<Json>,
     /// Optional bounded provider context-management object.
+    /// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
     pub context_management: Option<Json>,
 }
 
 /// Validates the typed request before allocating its bounded encoded body; errors return no partial request.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn encode_request(request: &Request, limits: &Limits) -> Result<Box<[u8]>, DecodeError> {
     let len = measure_request(request, limits)?;
     let bounded = skein_json::writer::Limits { depth: limits.depth, length: limits.request_bytes };
@@ -101,6 +134,7 @@ pub fn encode_request(request: &Request, limits: &Limits) -> Result<Box<[u8]>, D
 }
 
 /// Validates and measures without allocating the request's body.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn measure_request(request: &Request, limits: &Limits) -> Result<u32, DecodeError> {
     validate(request, limits)?;
     let bounded = skein_json::writer::Limits { depth: limits.depth, length: limits.request_bytes };
@@ -307,6 +341,7 @@ pub(crate) fn write_block(out: &mut Encoder, block: &Block, mark: bool) {
 }
 
 /// Decodes one complete bounded request document for the fake peer; rejects malformed or oversized members.
+/// Contract: domain/session.md, sections 4, 9 and 12; programming-model.md, section 4.4.
 pub fn decode_request(value: &Json, limits: &Limits) -> Result<Request, DecodeError> {
     let mut admission =
         Encoder::measure(&skein_json::writer::Limits { depth: limits.depth, length: limits.request_bytes });

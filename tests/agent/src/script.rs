@@ -11,31 +11,40 @@
 use smith_fake_llm_domain::api::{Finish, Line, Script, Turn};
 
 /// What a run is for, which picks the script of its main conversation.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Job {
     /// Reads, edits, runs a command, finishes with a change whose checks
     /// fail, fixes it, and finishes again; and once more if the push fails.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Coding,
     /// Reads and searches, finishes with a verdict the run rejects, then
     /// with one it takes: changes asked for.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Review,
     /// Reads, and finishes with a report.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Reporting,
     /// Asks two read-only sub-agents side by side, then a writable one that
     /// fixes the code and asks one of its own (and tries to finish, which it
     /// may not), then finishes with a change.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Delegating,
     /// Asks two sub-agents that read on and on, spending the run's turns
     /// between them.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Spending,
     /// Played at random.
+    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     Wandering,
 }
 
 /// Every job, for worlds that draw them.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 pub const JOBS: [Job; 6] = [Job::Coding, Job::Review, Job::Reporting, Job::Delegating, Job::Spending, Job::Wandering];
 
 /// The word that cues the script of `job`'s main conversation, if it has one.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[must_use]
 pub const fn cue(job: Job) -> Option<&'static [u8]> {
     match job {
@@ -49,6 +58,7 @@ pub const fn cue(job: Job) -> Option<&'static [u8]> {
 }
 
 /// Every script, for the provider.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[must_use]
 pub fn all() -> Box<[Script]> {
     Box::new([
@@ -64,6 +74,7 @@ pub fn all() -> Box<[Script]> {
 }
 
 /// The change every finishing script declares.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 pub const TITLE: &[u8] = b"Make the answer 43";
 
 fn script(cue: &[u8], turns: Vec<Turn>) -> Script {
@@ -79,11 +90,13 @@ fn text(text: &str) -> Line {
 }
 
 /// An answer that calls tools.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 fn calls(lines: Vec<Line>) -> Turn {
     Turn { lines: lines.into(), finish: Finish::ToolCalls, tokens: 40 }
 }
 
 /// An answer that ends the turn saying `said`.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 fn says(said: &str) -> Turn {
     Turn { lines: Box::new([text(said)]), finish: Finish::Stop, tokens: 20 }
 }

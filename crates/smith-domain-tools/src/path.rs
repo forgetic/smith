@@ -20,11 +20,13 @@ use skein_lib::{List, Token, Writer};
 /// One component of a path: the name of a file or a directory. Never empty,
 /// `.` or `..`, and free of `/` and NUL, so names joined by `/` read back as
 /// the same names.
+/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Name(Box<[u8]>);
 
 impl Name {
     /// `bytes` as a name, or `None` if they cannot be one.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     #[must_use]
     pub fn new(bytes: Box<[u8]>) -> Option<Name> {
         if bytes.is_empty() || *bytes == *b"." || *bytes == *b".." {
@@ -39,6 +41,7 @@ impl Name {
     }
 
     /// The validated name bytes, borrowed without allocating or changing the name.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
@@ -46,43 +49,55 @@ impl Name {
 }
 
 /// A path as the LLM wrote it, split at its slashes by the protocol layer.
+/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Path {
     /// It starts at the root, rather than at the kit's working directory.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub absolute: bool,
     /// What is between the slashes, in order, without the empty parts that
     /// doubled slashes leave.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub parts: Box<[Part]>,
 }
 
 /// One bounded block accepted from the provider stream or neutral fake API.
+/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Part {
     /// A file or a directory.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Name {
         /// Boundary name, compared byte for byte; it carries no authority by itself.
+        /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
         name: Name,
     },
     /// `.`
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Current,
     /// `..`
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Parent,
 }
 
 /// Where a file is: a repository's root, as io names it, and the path beneath
 /// it, names joined by `/`, empty for the root itself. Made by the domain from
 /// a [`Path`]; io resolves it beneath the root.
+/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Place {
     /// IO-issued repository root token, stored and echoed without interpreting it.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub root: Token,
     /// Path relative to the named root, resolved and confined by the receiving IO layer.
+    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub path: Box<[u8]>,
 }
 
 /// The absolute path `path` names, read from `cwd` when it is relative, as
 /// names joined by `/` with no leading one (empty for the root); or `None` if
 /// that is longer than `max` bytes.
+/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn normalise(cwd: &[Name], path: &Path, max: u32) -> Option<Box<[u8]>> {
     // Which parts are kept, found from the last: each `..` takes out the
     // nearest name before it that is still kept.
@@ -133,6 +148,7 @@ pub(crate) fn normalise(cwd: &[Name], path: &Path, max: u32) -> Option<Box<[u8]>
 }
 
 /// `names` joined by `/`, or `None` if that is longer than `max` bytes.
+/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn join(names: &[&Name], max: u32) -> Option<Box<[u8]>> {
     let len = joined(names)?;
     if len > usize::try_from(max).ok()? {
@@ -149,6 +165,7 @@ pub(crate) fn join(names: &[&Name], max: u32) -> Option<Box<[u8]>> {
 }
 
 /// The length of `names` joined by `/`, or `None` past a `usize`.
+/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn joined(names: &[&Name]) -> Option<usize> {
     let mut len: usize = 0;
     for name in names {
@@ -161,6 +178,7 @@ pub(crate) fn joined(names: &[&Name]) -> Option<usize> {
 /// Whether `path`, names joined by `/`, has a git directory among its names:
 /// `.git`, in any ASCII case, for a file system that folds case would take
 /// `.GIT` for it.
+/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn in_git(path: &[u8]) -> bool {
     let mut start: usize = 0;
     for (index, byte) in path.iter().enumerate() {
@@ -182,6 +200,7 @@ fn is_git(name: Option<&[u8]>) -> bool {
 }
 
 /// References to each of `names`, to join them.
+/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn refs(names: &[Name]) -> Option<List<&Name>> {
     let mut refs = List::with_capacity(u32::try_from(names.len()).ok()?);
     for name in names {

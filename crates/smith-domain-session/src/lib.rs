@@ -30,6 +30,16 @@
 //! The temper-specific charter, push, verdict and token-budget vocabulary
 //! is retained until 05s4; this copy does not yet implement the generic design.
 
+//!
+//! It keeps bounded concrete messages, opaque tickets, completion/retry state,
+//! outstanding tool terminals, injected deadlines and accepted usage/pricing.
+//! It never knows the host's charter, outcome meanings, credential secrets,
+//! provider wire grammar, forge state or CI. [`resume`] drains bounded deferred
+//! tool handoffs; every entrance reserves [`max_out`] slots, then the caller
+//! delivers or discards owned records before reclaiming at iteration end
+//! (domain/session.md, sections 3, 4, 5, 6 and 12; programming-model.md, sections
+//! 4.5 and 7).
+
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 

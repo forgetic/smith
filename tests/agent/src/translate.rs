@@ -71,7 +71,10 @@ fn part(block: agent::Block) -> provider::Part {
                     failure.diagnostic.output().into()
                 }
                 agent::Returned::Served { returned: run::Returned::Answered { text, .. }, .. } => text.clone(),
-                _ => format!("{result:?}").into_bytes().into(),
+                agent::Returned::Owned { .. }
+                | agent::Returned::Served { .. }
+                | agent::Returned::Invalid { .. }
+                | agent::Returned::NotRun => format!("{result:?}").into_bytes().into(),
             };
             provider::Part::ToolOutput { id, output, is_error: error }
         }
@@ -184,6 +187,7 @@ fn finish(arguments: &[u8]) -> Option<run::outcome::Declared> {
 
 /// The copied scripts use unescaped string fields. This recognizes that finite
 /// fixture language, never arbitrary JSON or production provider documents.
+/// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 fn field(arguments: &[u8], name: &[u8]) -> Option<Box<[u8]>> {
     let prefix = [b"\"", name, b"\":\""].concat();
     let start = arguments.windows(prefix.len()).position(|part| part == prefix)? + prefix.len();

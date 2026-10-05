@@ -6,6 +6,7 @@ use skein_lib::{Duration, Token};
 use smith_domain_tools::{Authority, Call, Grants, Limits, Name, Part, Path, Repo, Var};
 
 /// Small bounded checkout-tool limits used to exercise the memory envelope.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub const LIMITS: Limits = Limits {
     kits: 2,
     calls: 3,
@@ -29,9 +30,11 @@ pub const LIMITS: Limits = Limits {
 };
 
 /// Explicit inspect, modify and shell grants for the memory fixture.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 pub const GRANTS: Grants = Grants { inspect: true, modify: true, shell: true };
 
 /// Builds a validated path component from fixture bytes, which must already satisfy name constraints.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn name(bytes: &[u8]) -> Name {
     Name::new(bytes.into()).expect("a test name")
@@ -40,6 +43,7 @@ pub fn name(bytes: &[u8]) -> Name {
 /// The longest authority `limits` take: a working directory of as many names
 /// as fit, a repository at the root, so that a place's path is as long as an
 /// absolute one, and the others at mounts as long as they may be.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn authority(limits: &Limits) -> Authority {
     let len = usize::try_from(limits.path_bytes).expect("a small limit");
@@ -59,6 +63,7 @@ pub fn authority(limits: &Limits) -> Authority {
 
 /// The path of a file whose absolute path is exactly `path_bytes` long,
 /// distinct for each `file`.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn path(limits: &Limits, file: u64) -> Path {
     let len = usize::try_from(limits.path_bytes - 1).expect("a small limit");
@@ -68,18 +73,21 @@ pub fn path(limits: &Limits, file: u64) -> Path {
 }
 
 /// Builds a read for the fixture file under the supplied path limits.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn read(limits: &Limits, file: u64) -> Call {
     Call::Read { path: path(limits, file), skip: 0, lines: None }
 }
 
 /// The most a file holds.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn full(limits: &Limits, byte: u8) -> Box<[u8]> {
     vec![byte; usize::try_from(limits.file_bytes).expect("a small limit")].into()
 }
 
 /// A write of a file the kit read, so that it has a version to expect.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn write(limits: &Limits, file: u64) -> Call {
     Call::Write { path: path(limits, file), content: full(limits, b'x') }
@@ -87,6 +95,7 @@ pub fn write(limits: &Limits, file: u64) -> Call {
 
 /// An edit of a file the kit read, with snippets as long as they may be,
 /// which the job holds while it loads the file.
+/// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 #[must_use]
 pub fn edit(limits: &Limits, file: u64) -> Call {
     Call::Edit { path: path(limits, file), old: full(limits, b'x'), new: full(limits, b'y'), all: true }
