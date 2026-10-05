@@ -1,7 +1,8 @@
 //! Typed fixture wiring between the copied scripts and the agent conversation
 //! (domain/session.md, section 12; domain/run.md, section 14). This test-only
 //! adapter recognizes the scripts' finite arguments. It owns no production
-//! schema or protocol parser; migration 05s5 supplies those. Tool results keep
+//! provider schema adapter; migration 05s5 supplies those. Opaque host inputs
+//! use the real skein JSON tokenizer to attest complete object syntax. Tool results keep
 //! call IDs and diagnostic bytes, allowing the provider to check transcript
 //! pairing and the tests to inspect feedback on subsequent requests.
 
@@ -9,6 +10,7 @@ use smith_domain::{llm as agent, run, tools};
 use smith_fake_llm_domain::api as provider;
 
 pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
+    let mut tools = Vec::new();
     let mut names = Vec::new();
     if prompt.tools.inspect {
         names.extend([b"read".as_slice(), b"list", b"search"]);
@@ -19,21 +21,24 @@ pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
     if prompt.tools.shell {
         names.push(b"shell");
     }
-    for served in prompt.served {
-        names.push(match served {
-            agent::Served::Deliver => b"deliver",
-            agent::Served::Finish => b"finish",
-            agent::Served::SubAgent => b"subagent",
-        });
-    }
-    let tools = names
-        .into_iter()
-        .map(|name| provider::ToolSpec {
+    for name in names {
+        tools.push(provider::ToolSpec {
             name: name.into(),
             description: b"Scripted domain tool.".as_slice().into(),
             parameters: b"{}".as_slice().into(),
-        })
-        .collect();
+        });
+    }
+    for served in prompt.served {
+        let specification = match served {
+            agent::Served::Host(tool) => {
+                provider::ToolSpec { name: tool.name, description: tool.description, parameters: tool.schema }
+            }
+            agent::Served::Deliver => fixed(b"deliver"),
+            agent::Served::Finish => fixed(b"finish"),
+            agent::Served::SubAgent => fixed(b"subagent"),
+        };
+        tools.push(specification);
+    }
     let messages = prompt
         .messages
         .into_iter()
@@ -45,7 +50,21 @@ pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
             parts: message.content.into_iter().map(part).collect(),
         })
         .collect();
-    provider::Query { model: prompt.model, system: prompt.system, tools, messages, max_tokens: prompt.max_tokens }
+    provider::Query {
+        model: prompt.model,
+        system: prompt.system,
+        tools: tools.into(),
+        messages,
+        max_tokens: prompt.max_tokens,
+    }
+}
+
+fn fixed(name: &[u8]) -> provider::ToolSpec {
+    provider::ToolSpec {
+        name: name.into(),
+        description: b"Scripted domain tool.".as_slice().into(),
+        parameters: b"{}".as_slice().into(),
+    }
 }
 
 fn part(block: agent::Block) -> provider::Part {
@@ -72,6 +91,7 @@ fn part(block: agent::Block) -> provider::Part {
                     failure.diagnostic.output().into()
                 }
                 agent::Returned::Served { returned: run::Returned::Answered { text, .. }, .. } => text.clone(),
+                agent::Returned::Served { returned: run::Returned::HostAnswered(answer), .. } => answer.text().into(),
                 agent::Returned::Owned { .. }
                 | agent::Returned::Served { .. }
                 | agent::Returned::Invalid { .. }
@@ -117,6 +137,19 @@ pub(crate) fn completion(
 
 fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent::Served]) -> agent::Decoded {
     let invalid = || agent::Decoded::Invalid { problem: agent::Problem::UnknownTool };
+    for tool in served {
+        match tool {
+            agent::Served::Host(tool) if tool.name.as_ref() == name => {
+                return object(arguments).and_then(|()| run::HostInput::attested(arguments.into())).map_or_else(
+                    invalid,
+                    |input| agent::Decoded::Served {
+                        ask: run::Ask::Host { tool: name.into(), effect: tool.effect, input },
+                    },
+                );
+            }
+            agent::Served::Host(_) | agent::Served::Deliver | agent::Served::Finish | agent::Served::SubAgent => {}
+        }
+    }
     if name == b"deliver" && served.contains(&agent::Served::Deliver) {
         let Some(value) = field(arguments, b"ticket") else {
             return invalid();
@@ -142,7 +175,7 @@ fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent:
                 modify: has(b"\"modify\""),
                 shell: has(b"\"shell\""),
             },
-            forge: false,
+
             agents: has(b"\"agents\":true"),
         };
         return agent::Decoded::Served {
@@ -238,5 +271,87 @@ pub(crate) fn failure(error: provider::Error) -> agent::Failure {
         provider::Error::Unauthorized => agent::Failure::Unauthorized,
         provider::Error::Exhausted { retry_after } => agent::Failure::Exhausted { retry_after },
         provider::Error::InvalidRequest => agent::Failure::Invalid,
+    }
+}
+
+/// This protocol face uses the real JSON tokenizer for syntax and object shape;
+/// the domain receives exactly the original bytes, without field extraction.
+fn object(document: &[u8]) -> Option<()> {
+    use skein_json::{Token, tokenizer as json};
+    use skein_lib::{
+        Env, Intake, Queue, Time, Wall,
+        stream::{Down, Up},
+    };
+    let length = u32::try_from(document.len()).ok()?;
+    if document.len() > run::HostInput::CAPACITY {
+        return None;
+    }
+    let limits = json::Limits { depth: 32, string: length, number: length, chunk: 1024, length };
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut tokenizer = json::Tokenizer::new(&limits);
+    let mut above = Queue::with_capacity(json::UP_MAX_OUT.above.max(json::DOWN_MAX_OUT.above));
+    let mut below = Queue::with_capacity(json::UP_MAX_OUT.below.max(json::DOWN_MAX_OUT.below));
+    let mut intake = Intake::with_capacity(length.max(json::largest_demand(&limits)));
+    intake.append(document).ok()?;
+    let mut demand = None;
+    let mut first = true;
+    for _ in 0..document.len().checked_mul(4)?.checked_add(8)? {
+        match demand.take() {
+            None => json::down(&mut tokenizer, &env, json::Request::Next, &mut above, &mut below),
+            Some(read) => {
+                let event = intake.meet(read).map_or(Up::End, Up::Bytes);
+                json::up(&mut tokenizer, &env, event, &mut above, &mut below);
+            }
+        }
+        match below.pop() {
+            Some(Down::Demand { read, room: 0 }) => demand = Some(read),
+            None => {}
+            Some(Down::Demand { .. } | Down::Send(_) | Down::Finish) => {
+                panic!("JSON tokenizer only demands bounded reads")
+            }
+        }
+        match above.pop() {
+            Some(json::Event::Token(token)) => {
+                if first && token != Token::ObjectStart {
+                    return None;
+                }
+                first = false;
+            }
+            Some(json::Event::Done) => return (!first).then_some(()),
+            Some(json::Event::Failed(_)) => return None,
+            Some(json::Event::Closed) => panic!("parser is not closed by this translator"),
+            None => {}
+        }
+        assert!(above.is_empty() && below.is_empty());
+    }
+    panic!("bounded JSON completes within linear steps");
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::*;
+    #[test]
+    fn only_a_complete_json_object_is_attested_and_bytes_are_opaque() {
+        let tool = agent::Served::Host(run::HostTool {
+            name: b"opaque".as_slice().into(),
+            description: b"Opaque operation".as_slice().into(),
+            schema: b"{}".as_slice().into(),
+            effect: run::HostEffect::Write,
+            timeout: skein_lib::Duration::from_secs(1),
+        });
+        let granted = tools::Grants { inspect: false, modify: false, shell: false };
+        let raw = br#" {"nested":[1,true,{"unchanged":"\u0041"}],"policy":"unknown"} "#;
+        let decoded = decode(b"opaque", raw, granted, std::slice::from_ref(&tool));
+        let agent::Decoded::Served { ask: run::Ask::Host { input, effect, .. } } = decoded else {
+            panic!("valid opaque object is relayed");
+        };
+        assert_eq!(input.bytes(), raw);
+        assert_eq!(effect, run::HostEffect::Write);
+        for malformed in [b"{bad}".as_slice(), b"{}{}", b"[]", b"{\"key\":}", b"{\"key\":NaN}", b"{\"key\":\"\xff\"}"] {
+            assert!(matches!(
+                decode(b"opaque", malformed, granted, std::slice::from_ref(&tool)),
+                agent::Decoded::Invalid { .. }
+            ));
+        }
     }
 }

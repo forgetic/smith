@@ -49,6 +49,7 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
         }
         Event::Grant { grant } => return granted(domain, env, grant),
         Event::Cancel { run } => run::Event::Cancel { run },
+        Event::HostReturned { relay, reply } => run::Event::HostReturned { relay, reply },
         Event::Delivered { owner, push } => run::Event::Delivered { owner, push },
         Event::Read { owner, read } => run::Event::Read { owner, read },
         Event::Probed { owner, executable } => run::Event::Probed { owner, executable },
@@ -253,6 +254,10 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: &mut Queue<Request>) {
     let event = match request {
+        run::Request::HostCall { worker, relay, name, tool, effect, input, deadline } => {
+            return out.push(Request::HostCall { worker, relay, name, tool, effect, input, deadline });
+        }
+        run::Request::WithdrawHost { relay } => return out.push(Request::WithdrawHost { relay }),
         run::Request::Admitted { worker, run } => return out.push(Request::Admitted { worker, run }),
         run::Request::Answer { to, answer } => return out.push(Request::Answer { to, answer }),
         run::Request::Checking { worker, deadline } => return out.push(Request::Checking { worker, deadline }),

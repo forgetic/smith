@@ -35,8 +35,9 @@ pub(crate) const FIRST: u64 = 3;
 /// The tools the run serves a conversation.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Offered {
+    pub(crate) host_tools: Box<[run::HostTool]>,
     pub(crate) finish: bool,
     pub(crate) deliver: bool,
     pub(crate) agents: bool,
@@ -56,10 +57,16 @@ pub(crate) struct Offered {
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn spec(opening: Opening) -> Option<(Spec, Offered)> {
-    let Opening { llm, system, prompt, tools, checkout, budget, finish, deliver, families } = opening;
+    let Opening { host_tools, llm, system, prompt, tools, checkout, budget, finish, deliver, families } = opening;
     let authority = authority(&checkout, tools)?;
-    let offered = Offered { finish, deliver, agents: families.agents };
-    let mut delegated = List::with_capacity(3);
+    let offered = Offered { host_tools: host_tools.clone(), finish, deliver, agents: families.agents };
+    let capacity = u32::try_from(host_tools.len()).ok()?.checked_add(3)?;
+    let mut delegated = List::with_capacity(capacity);
+    for (index, tool) in host_tools.iter().enumerate() {
+        let ticket = FIRST.checked_add(u64::try_from(index).ok()?)?;
+        let effect = host_effect(tool.effect);
+        delegated.push(llm::Descriptor { ticket: Token::new(ticket), effect }).expect("bounded declaration inventory");
+    }
     if finish {
         delegated.push(llm::Descriptor { ticket: FINISH, effect: Effect::Write }).expect("room for both");
     }
@@ -122,6 +129,7 @@ fn writes(families: Families) -> Effect {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn effect(ask: &Ask) -> Effect {
     match ask {
+        Ask::Host { effect, .. } => host_effect(*effect),
         Ask::Finish { .. } | Ask::Deliver { .. } => Effect::Write,
         Ask::SubAgent { families, .. } => writes(*families),
     }
@@ -199,8 +207,11 @@ fn exhausted(spent: Dimension) -> run::Exhausted {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn failed(returned: &run::Returned) -> bool {
     match returned {
+        run::Returned::HostAnswered(answer) => answer.error(),
         run::Returned::Accepted | run::Returned::Delivered(_) | run::Returned::Answered { .. } => false,
-        run::Returned::Nothing
+        run::Returned::HostUnknown
+        | run::Returned::HostRejected(_)
+        | run::Returned::Nothing
         | run::Returned::DeliveryRefused(_)
         | run::Returned::Rejected { .. }
         | run::Returned::ChecksFailed { .. }
@@ -219,6 +230,9 @@ pub(crate) const fn failed(returned: &run::Returned) -> bool {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn copy(returned: &run::Returned) -> run::Returned {
     match returned {
+        run::Returned::HostAnswered(answer) => run::Returned::HostAnswered(answer.clone()),
+        run::Returned::HostUnknown => run::Returned::HostUnknown,
+        run::Returned::HostRejected(problem) => run::Returned::HostRejected(*problem),
         run::Returned::Delivered(receipts) => run::Returned::Delivered(receipts.clone()),
         run::Returned::Nothing => run::Returned::Nothing,
         run::Returned::DeliveryRefused(refusal) => run::Returned::DeliveryRefused(refusal.clone()),
@@ -239,5 +253,12 @@ pub(crate) fn copy(returned: &run::Returned) -> run::Returned {
         }
         run::Returned::Unanswered { end } => run::Returned::Unanswered { end: *end },
         run::Returned::Refused { refusal } => run::Returned::Refused { refusal: *refusal },
+    }
+}
+
+pub(crate) const fn host_effect(effect: run::HostEffect) -> Effect {
+    match effect {
+        run::HostEffect::Read => Effect::Read,
+        run::HostEffect::Write => Effect::Write,
     }
 }

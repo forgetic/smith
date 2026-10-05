@@ -83,6 +83,14 @@ pub struct Grant {
     reason = "fixed diagnostic tails keep boundary records bounded without allocation"
 )]
 pub enum Event {
+    /// Actual terminal for one host relay attempt; old callbacks are inert.
+    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
+    HostReturned {
+        /// Live attempt identity, distinct from durable operation scope. Contract: domain/run.md, section 5.2.
+        relay: run::RelayName,
+        /// Bounded host text or actual settled retry classification. Contract: domain/run.md, section 5.2.
+        reply: run::HostReply,
+    },
     /// From the worker, a call: start a run on `charter`, and answer once it
     /// has ended. `worker` is the worker's name for the run, echoed on
     /// `Admitted`.
@@ -93,7 +101,9 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         reply_to: ReplyTo,
-        /// Scripted host or worker's opaque run name, echoed without interpretation.
+        /// Parent-supplied stable logical host-run scope, preserved across relay
+        /// recovery and restarted activations; distinct from live run/callback tokens.
+        /// Contract: domain/run.md, sections 3.2 and 5.2; domain/host.md, section 2.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         worker: Token,
@@ -248,6 +258,34 @@ pub enum Event {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(PartialEq, Eq, Debug)]
 pub enum Request {
+    /// Opaque declared main host tool, forwarded without interpreting its input.
+    /// One actual terminal is owed per attempt; durable decisions replay by name.
+    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
+    HostCall {
+        /// Stable logical run scope supplied by Start. Contract: domain/host.md, section 2.
+        worker: Token,
+        /// One live relay attempt. Contract: domain/run.md, section 5.2.
+        relay: run::RelayName,
+        /// Immutable accepted-transcript operation name. Contract: domain/run.md, section 5.2.
+        name: run::CallName,
+        /// Exact declared tool name. Contract: domain/run.md, section 5.2.
+        tool: Box<[u8]>,
+        /// Checked declaration effect, used for session scheduling. Contract: domain/session.md, section 5.
+        effect: run::HostEffect,
+        /// Complete bounded attested object bytes, unchanged. Contract: domain/run.md, sections 5.2 and 12.
+        input: run::HostInput,
+        /// Per-relay bounded deadline; withdrawal still owes its actual terminal.
+        /// Contract: domain/run.md, section 5.2.
+        deadline: Time,
+    },
+    /// Ask the host to settle its live relay, retaining the original terminal.
+    /// Submitted delivery has no such cancellation operation.
+    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
+    WithdrawHost {
+        /// The live relay attempt, echoed by its actual `HostReturned` terminal.
+        /// Contract: domain/run.md, section 5.2.
+        relay: run::RelayName,
+    },
     /// To the worker: the run it names `worker` was admitted, and is `run`
     /// from now on.
     ///

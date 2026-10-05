@@ -107,6 +107,15 @@ impl Peer {
         sllm::Completion { content: blocks.into_boxed(), stop, usage }
     }
 
+    fn host_offered(&self, name: &[u8], effect: run::HostEffect) -> bool {
+        for declaration in &self.offered.host_tools {
+            if declaration.name.as_ref() == name {
+                return declaration.effect == effect;
+            }
+        }
+        false
+    }
+
     fn decoded(&mut self, call: Decoded, limit: u64) -> sllm::Decoded {
         let ask = match call {
             Decoded::Owned { call } => return sllm::Decoded::Owned { call },
@@ -114,6 +123,7 @@ impl Peer {
             Decoded::Served { ask } => ask,
         };
         let offered = match &ask {
+            Ask::Host { tool, effect, .. } => self.host_offered(tool, *effect),
             Ask::Finish { .. } => self.offered.finish,
             Ask::Deliver { .. } => self.offered.deliver,
             Ask::SubAgent { .. } => self.offered.agents,
@@ -173,13 +183,19 @@ impl Peer {
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) fn prompt(&self, prompt: sllm::Prompt) -> Prompt {
         let sllm::Prompt { endpoint, model, system, tools, delegated, messages, max_tokens } = prompt;
-        let mut served = List::with_capacity(u32::try_from(delegated.len()).expect("three at most"));
+        let mut served = List::with_capacity(u32::try_from(delegated.len()).expect("bounded declaration inventory"));
         for descriptor in &delegated {
             let tool = match descriptor.ticket {
                 DELIVER => Served::Deliver,
                 FINISH => Served::Finish,
                 SUB_AGENT => Served::SubAgent,
-                _ => unreachable!("a session's descriptors are the ones it was given"),
+                ticket => {
+                    let index = usize::try_from(ticket.raw().checked_sub(FIRST).expect("host descriptor range"))
+                        .expect("bounded host descriptor");
+                    Served::Host(
+                        self.offered.host_tools.get(index).expect("descriptor names admitted declaration").clone(),
+                    )
+                }
             };
             served.push(tool).expect("room for every descriptor");
         }
@@ -260,6 +276,7 @@ fn per(bytes: u64, size: usize) -> u32 {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn ask_cost(ask: &Ask) -> Option<u64> {
     let payload = match ask {
+        Ask::Host { tool, input, .. } => size(tool.len())?.checked_add(size(input.bytes().len())?)?,
         Ask::Deliver { change } => change.owned_bytes()?,
         Ask::Finish { outcome } => run::outcome::owned_bytes(outcome)?,
         Ask::SubAgent { brief, families: _, llm, share: _ } => {
@@ -287,7 +304,14 @@ pub(crate) fn payload(limits: &run::Limits) -> Option<u64> {
     let rejected = u64::from(run::outcome::Problems::LISTED).checked_mul(problem)?;
     let refused =
         u64::try_from(run::Marker::CAPACITY).ok()?.checked_add(u64::try_from(run::DeliveryRefusal::CAPACITY).ok()?)?;
-    Some(answered.max(failed).max(rejected).max(run::Delivered::worst_case()).max(refused))
+    Some(
+        answered
+            .max(failed)
+            .max(rejected)
+            .max(run::Delivered::worst_case())
+            .max(refused)
+            .max(u64::from(limits.host_reply_bytes)),
+    )
 }
 
 /// What an answer holds, as the session is charged for it: its fixed size,
@@ -296,9 +320,12 @@ pub(crate) fn payload(limits: &run::Limits) -> Option<u64> {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn returned_cost(returned: &run::Returned) -> Option<u64> {
     let payload = match returned {
+        run::Returned::HostAnswered(answer) => size(answer.text().len())?,
         run::Returned::Delivered(receipts) => receipts.owned_bytes(),
         run::Returned::DeliveryRefused(refusal) => refusal.owned_bytes(),
-        run::Returned::Nothing
+        run::Returned::HostUnknown
+        | run::Returned::HostRejected(_)
+        | run::Returned::Nothing
         | run::Returned::Accepted
         | run::Returned::Stale
         | run::Returned::DeliveryFailed { .. }

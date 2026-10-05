@@ -42,7 +42,12 @@ const LIMITS: Limits = Limits {
         conversations: 4,
         run_bytes: 4096,
         repositories: 2,
-        outlets: 2,
+        host_tools: 2,
+        host_input_bytes: 65_536,
+        host_reply_bytes: 65_536,
+        host_timeout: Duration::from_secs(60),
+        host_backoff: Duration::from_millis(50),
+        host_attempts: 3,
         verdicts: 2,
         calls: 4,
         budget: run::Budget {
@@ -218,7 +223,7 @@ fn charter() -> Charter {
         checkout: Checkout {
             repositories: Box::new([Repository { name: bytes(b"temper"), root: Token::new(900), writable: true }]),
         },
-        grants: Grants { deliver: None, tools: TOOLS, forge: false, agents: true, outlets: Box::new([]) },
+        grants: Grants { deliver: None, tools: TOOLS, agents: true, host_tools: Box::new([]) },
         outcome: OutcomeSpec { change: None, verdicts: Box::new([rule(b"approve")]), report: None, failure: None },
         budget: BUDGET,
         llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 512 },
@@ -250,7 +255,7 @@ fn verdict(name: &[u8]) -> Ask {
 
 /// A sub-agent that may only read, and itself ask for sub-agents.
 fn sub_agent(brief: &[u8]) -> Ask {
-    let families = Families { tools: Tools { inspect: true, modify: false, shell: false }, forge: false, agents: true };
+    let families = Families { tools: Tools { inspect: true, modify: false, shell: false }, agents: true };
     Ask::SubAgent { brief: bytes(brief), families, llm: None, share: None }
 }
 
@@ -530,7 +535,10 @@ fn a_finish_the_run_rejects_at_once_comes_back_from_the_ready_list_as_the_sessio
 fn matches_rejected(returned: &run::Returned) -> bool {
     match returned {
         run::Returned::Rejected { problems } => !problems.listed.is_empty(),
-        run::Returned::Delivered(_)
+        run::Returned::HostAnswered(_)
+        | run::Returned::HostUnknown
+        | run::Returned::HostRejected(_)
+        | run::Returned::Delivered(_)
         | run::Returned::Nothing
         | run::Returned::DeliveryRefused(_)
         | run::Returned::Accepted
@@ -781,12 +789,7 @@ fn an_ask_larger_than_the_session_may_hold_is_too_large() {
         brief.push(b'x').expect("room for the brief");
     }
     let brief = brief.into_boxed();
-    let ask = Ask::SubAgent {
-        brief,
-        families: Families { tools: TOOLS, forge: false, agents: false },
-        llm: None,
-        share: None,
-    };
+    let ask = Ask::SubAgent { brief, families: Families { tools: TOOLS, agents: false }, llm: None, share: None };
     let (_, prompt) = completing(h.answer(main, Box::new([served(b"a1", ask)])));
     let [Block::ToolResult { id: _, result: Returned::Invalid { problem: Problem::TooLarge } }] = last(&prompt) else {
         panic!("expected the call too large, got {:?}", last(&prompt));
@@ -836,4 +839,85 @@ fn delivered() -> run::Delivery {
         ]))
         .expect("one writable mount"),
     )
+}
+
+fn opaque_tool(name: &[u8], effect: run::HostEffect) -> run::HostTool {
+    run::HostTool {
+        name: bytes(name),
+        description: bytes(b"Uninterpreted host operation"),
+        schema: bytes(br#"{"type":"object"}"#),
+        effect,
+        timeout: Duration::from_secs(2),
+    }
+}
+
+fn opaque_call(id: &[u8], tool: &[u8], effect: run::HostEffect) -> Said {
+    let input = bytes(br#" {"whole":[true,{"external":"policy"}]} "#);
+    Said::ToolCall {
+        id: bytes(id),
+        name: bytes(tool),
+        input: input.clone(),
+        call: Decoded::Served {
+            ask: Ask::Host {
+                tool: bytes(tool),
+                effect,
+                input: run::HostInput::attested(input).expect("typed protocol attestation"),
+            },
+        },
+    }
+}
+
+#[test]
+fn declared_host_reads_run_together_write_waits_and_mismatched_effect_never_relays() {
+    let mut h = Harness::new();
+    let mut charter = charter();
+    let read = opaque_tool(b"outside_read", run::HostEffect::Read);
+    let write = opaque_tool(b"outside_write", run::HostEffect::Write);
+    charter.grants.host_tools = Box::new([read.clone(), write.clone()]);
+    let (_, owner, prompt) = h.admit(71, charter);
+    assert!(prompt.served.contains(&Served::Host(read)) && prompt.served.contains(&Served::Host(write)));
+    let emitted = h.answer(
+        owner,
+        Box::new([
+            opaque_call(b"one", b"outside_read", run::HostEffect::Read),
+            opaque_call(b"two", b"outside_read", run::HostEffect::Read),
+            opaque_call(b"three", b"outside_write", run::HostEffect::Write),
+        ]),
+    );
+    let [
+        Request::HostCall { relay: first, effect: run::HostEffect::Read, name: first_name, .. },
+        Request::HostCall { relay: second, effect: run::HostEffect::Read, name: second_name, .. },
+    ] = &*emitted
+    else {
+        panic!("adjacent host reads are concurrent, got {emitted:?}");
+    };
+    assert_ne!(first_name, second_name);
+    let first = *first;
+    let second = *second;
+    let answer = run::HostAnswer::new(bytes(b"exact external error"), true).expect("bounded text");
+    assert!(h.step(Event::HostReturned { relay: first, reply: run::HostReply::Answered(answer.clone()) }).is_empty());
+    assert!(h.next().is_empty(), "one pending read prevents exclusive write");
+    assert!(h.step(Event::HostReturned { relay: second, reply: run::HostReply::Answered(answer.clone()) }).is_empty());
+    let emitted = h.next();
+    let [Request::HostCall { relay, effect: run::HostEffect::Write, .. }] = &*emitted else {
+        panic!("write follows settled reads, got {emitted:?}");
+    };
+    assert!(h.step(Event::HostReturned { relay: *relay, reply: run::HostReply::Answered(answer.clone()) }).is_empty());
+    let (owner, prompt) = completing(h.next());
+    let [
+        Block::ToolResult {
+            result: Returned::Served { returned: run::Returned::HostAnswered(actual), error: true },
+            ..
+        },
+        ..,
+    ] = last(&prompt)
+    else {
+        panic!("exact error reaches next completion");
+    };
+    assert_eq!(actual, &answer);
+    let emitted = h.answer(owner, Box::new([opaque_call(b"bad", b"outside_write", run::HostEffect::Read)]));
+    let (_, prompt) = completing(emitted);
+    let [Block::ToolResult { result: Returned::Invalid { problem: Problem::UnknownTool }, .. }] = last(&prompt) else {
+        panic!("effect mismatch is rejected before session scheduling");
+    };
 }

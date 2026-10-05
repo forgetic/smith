@@ -6,7 +6,8 @@
 //! It calls the real agent's step, fire and resume entrances under bounded
 //! output pressure. Its host starts one charter, receives one answer and
 //! supplies typed push replies. No engine, worker, forge, channel or agent
-//! protocol is linked: schemas, byte decoding, transport and deployment
+//! protocol is linked. Opaque host objects are attested by the real skein JSON
+//! parser in the test protocol face; provider schemas, transport and deployment
 //! decisions remain in temper's legacy worlds or await migration 05s5.
 //!
 //! A fixture translator recognizes the copied scripts, not arbitrary provider
@@ -15,6 +16,7 @@
 //! the host. Replay and memory use skein's shared kit, with no local allocator.
 
 mod fixture;
+pub mod host_referee;
 mod limits;
 pub mod referee;
 pub mod script;
@@ -23,4 +25,4 @@ mod world;
 
 pub use limits::{BUDGET, LIMITS, TIGHT};
 pub use script::{JOBS, Job};
-pub use world::{HostReply, Settings, World, delivered};
+pub use world::{HostReply, HostSchedule, Settings, World, delivered};

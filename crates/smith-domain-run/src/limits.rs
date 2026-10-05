@@ -40,10 +40,30 @@ pub struct Limits {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub repositories: u32,
-    /// Outlets a charter may grant.
+    /// Host tool declarations a charter may grant.
     ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub outlets: u32,
+    /// Contract: domain/run.md, sections 3, 5.2, 13 and 14.
+    pub host_tools: u32,
+
+    /// Maximum immutable protocol-attested host input bytes per call, at most the vocabulary cap.
+    /// Contract: domain/run.md, sections 5.2 and 12.
+    pub host_input_bytes: u32,
+
+    /// Maximum host answer text bytes accepted and retained per call.
+    /// Contract: domain/run.md, sections 5.2 and 12.
+    pub host_reply_bytes: u32,
+
+    /// Receiving ceiling for each relay timeout; caller and run expiry may be earlier.
+    /// Contract: domain/run.md, section 5.2.
+    pub host_timeout: Duration,
+
+    /// Positive deterministic backoff between settled retryable relays.
+    /// Contract: domain/run.md, section 5.2.
+    pub host_backoff: Duration,
+
+    /// Maximum actual relay attempts per durable operation, including the first.
+    /// Contract: domain/run.md, section 5.2.
+    pub host_attempts: u32,
     /// Verdicts an outcome spec may list.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -126,8 +146,8 @@ pub struct Limits {
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     let runs = Slab::<Run>::worst_case(limits.runs)?;
     let conversations = Slab::<Conversation>::worst_case(limits.conversations)?;
-    // A deadline per run, and one per call.
-    let alarms = Deadlines::<Alarm>::worst_case(limits.runs.checked_add(limits.calls)?)?;
+    // A deadline per run, and two per call.
+    let alarms = Deadlines::<Alarm>::worst_case(limits.runs.checked_add(limits.calls.checked_mul(2)?)?)?;
     // Each run holds its charter, up to its byte limit, and what it found in
     // its checkout: a guide and a mark for checks per repository.
     let guides = List::<Guide>::worst_case(limits.repositories)?
@@ -141,7 +161,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(limits.outcome_bytes.max(crate::Delivered::worst_case()))?;
     let held = u64::from(limits.runs).checked_mul(run)?;
     // A call landing a change holds it; a sub-agent's call, its answer.
-    let call = limits.outcome_bytes.max(u64::from(limits.answer_bytes));
+    let host = limits.run_bytes.checked_add(u64::from(limits.host_input_bytes))?;
+    let call = limits.outcome_bytes.max(u64::from(limits.answer_bytes)).max(host);
     let calls = Calls::worst_case(limits.calls)?.checked_add(u64::from(limits.calls).checked_mul(call)?)?;
     let facts = Queue::<Fact>::worst_case(limits.facts)?;
     runs.checked_add(conversations)?.checked_add(alarms)?.checked_add(held)?.checked_add(calls)?.checked_add(facts)

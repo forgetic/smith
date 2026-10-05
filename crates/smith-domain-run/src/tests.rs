@@ -4,7 +4,7 @@ use alloc::boxed::Box;
 
 use skein_lib::{Duration, Env, List, Queue, ReplyTo, Time, Token, Wall};
 
-use crate::charter::{Checkout, Endpoint, Grants, Llm, Outlet, Repository, Tools};
+use crate::charter::{Checkout, Endpoint, Grants, HostTool, Llm, Repository, Tools};
 use crate::facts::{Answered, Asked, Fact, Return};
 use crate::outcome::{
     Change, ChangeSpec, Declared, Field, FieldRule, Item, OutcomeSpec, Problem, Problems, Verdict, VerdictRule,
@@ -32,7 +32,12 @@ pub(crate) const LIMITS: Limits = Limits {
     conversations: 4,
     run_bytes: 4096,
     repositories: 2,
-    outlets: 2,
+    host_tools: 2,
+    host_input_bytes: 65_536,
+    host_reply_bytes: 65_536,
+    host_timeout: Duration::from_secs(60),
+    host_backoff: Duration::from_millis(50),
+    host_attempts: 3,
     verdicts: 2,
     calls: 2,
     budget: Budget {
@@ -178,9 +183,15 @@ pub(crate) fn charter() -> Charter {
         grants: Grants {
             deliver: None,
             tools: Tools { inspect: true, modify: false, shell: true },
-            forge: true,
+
             agents: false,
-            outlets: Box::new([Outlet { name: bytes(b"comment") }]),
+            host_tools: Box::new([HostTool {
+                name: bytes(b"comment"),
+                description: b"Host action".as_slice().into(),
+                schema: b"{}".as_slice().into(),
+                effect: crate::HostEffect::Read,
+                timeout: Duration::from_secs(5),
+            }]),
         },
         outcome: OutcomeSpec {
             change: None,
@@ -233,6 +244,7 @@ fn an_admitted_run_reads_its_checkout_then_opens_main_with_the_whole_budget() {
     let mut found = Found::with_capacity(1);
     found.guides.push(Guide { repository: 0, text: bytes(b"Run the tests."), whole: true }).expect("room");
     let expected = Opening {
+        host_tools: charter().grants.host_tools,
         deliver: false,
         llm: charter().llm,
         system: super::prompt::system(&charter(), &found),
@@ -241,7 +253,7 @@ fn an_admitted_run_reads_its_checkout_then_opens_main_with_the_whole_budget() {
         checkout: charter().checkout,
         budget: BUDGET,
         finish: true,
-        families: crate::charter::Families { tools: charter().grants.tools, forge: true, agents: false },
+        families: crate::charter::Families { tools: charter().grants.tools, agents: false },
     };
     assert_eq!(opening, &expected);
     assert_eq!(h.domain.next_deadline(), Some(Time::ZERO.saturating_add(BUDGET.time)));
@@ -322,7 +334,22 @@ fn starts_beyond_the_run_or_conversation_slots_are_refused_as_busy() {
 fn charters_beyond_the_limits_are_refused_as_invalid() {
     let three = Box::new([repository(b"a"), repository(b"b"), repository(b"c")]);
     let twins = Box::new([repository(b"a"), repository(b"a")]);
-    let outlets = Box::new([Outlet { name: bytes(b"reply") }, Outlet { name: bytes(b"reply") }]);
+    let host_tools = Box::new([
+        HostTool {
+            name: bytes(b"reply"),
+            description: b"Host action".as_slice().into(),
+            schema: b"{}".as_slice().into(),
+            effect: crate::HostEffect::Read,
+            timeout: Duration::from_secs(5),
+        },
+        HostTool {
+            name: bytes(b"reply"),
+            description: b"Host action".as_slice().into(),
+            schema: b"{}".as_slice().into(),
+            effect: crate::HostEffect::Read,
+            timeout: Duration::from_secs(5),
+        },
+    ]);
     let llm = Llm { account: 0, endpoint: Endpoint(2), model: bytes(b"model-b"), max_tokens: 512 };
     let models = Box::new([llm.clone(), Llm { endpoint: Endpoint(3), ..llm }]);
     let cases = [
@@ -336,7 +363,7 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
         (Charter { brief: Box::from([b'x'; 4096].as_slice()), ..charter() }, Invalid::TooLarge),
         (Charter { checkout: Checkout { repositories: three }, ..charter() }, Invalid::Checkout),
         (Charter { checkout: Checkout { repositories: twins }, ..charter() }, Invalid::Checkout),
-        (Charter { grants: Grants { outlets, ..charter().grants }, ..charter() }, Invalid::Grants),
+        (Charter { grants: Grants { host_tools, ..charter().grants }, ..charter() }, Invalid::Grants),
         (Charter { outcome: spec(Box::new([])), ..charter() }, Invalid::Outcome),
         (Charter { outcome: spec(Box::new([rule(b"a", 0, 0), rule(b"a", 1, 1)])), ..charter() }, Invalid::Outcome),
         (
@@ -1087,7 +1114,7 @@ fn refused(refusal: AskRefusal) -> Returned {
 }
 
 fn families(inspect: bool, modify: bool, agents: bool) -> crate::charter::Families {
-    crate::charter::Families { tools: Tools { inspect, modify, shell: false }, forge: false, agents }
+    crate::charter::Families { tools: Tools { inspect, modify, shell: false }, agents }
 }
 
 /// The test charter, granting sub-agents and listing one LLM for them.
@@ -1807,4 +1834,202 @@ fn caller_only_stop_keeps_submitted_mid_delivery_and_ordinary_continuation() {
             );
         }
     }
+}
+
+fn host_ask(conversation: Token, call: u64, deadline: Time) -> Event {
+    Event::Delegated {
+        conversation,
+        call: Token::new(call),
+        name: crate::CallName { completion: 7, position: 3 },
+        ask: Ask::Host {
+            tool: bytes(b"comment"),
+            effect: crate::HostEffect::Read,
+            input: crate::HostInput::attested(bytes(br#" {"whole":{"opaque":[true,1]},"verbatim":"\u0041"} "#))
+                .expect("protocol-attested fixture"),
+        },
+        deadline,
+    }
+}
+
+fn host_submission(emitted: &[Request]) -> crate::RelayName {
+    let [Request::HostCall { relay, worker, name, input, deadline, tool, effect }] = emitted else {
+        panic!("one opaque relay, got {emitted:?}");
+    };
+    assert_eq!(*worker, Token::new(71));
+    assert_eq!(*name, crate::CallName { completion: 7, position: 3 });
+    assert_eq!(tool.as_ref(), b"comment");
+    assert_eq!(*effect, crate::HostEffect::Read);
+    assert_eq!(input.bytes(), br#" {"whole":{"opaque":[true,1]},"verbatim":"\u0041"} "#);
+    assert!(*deadline > Time::ZERO);
+    *relay
+}
+
+#[test]
+fn host_busy_and_lost_recover_only_after_actual_terminal_with_same_name_and_bytes() {
+    let mut h = Harness::new(LIMITS);
+    let (_, conversation) = h.running(71, 99);
+    let deadline = h.env.now.saturating_add(Duration::from_secs(30));
+    let first = host_submission(&h.step(host_ask(conversation, 41, deadline)));
+    assert_eq!(first.attempt, 1);
+    assert!(h.step(Event::HostReturned { relay: first, reply: crate::HostReply::Busy }).is_empty());
+    h.after(LIMITS.host_backoff);
+    let second = host_submission(&h.fire());
+    assert_eq!((second.owner, second.attempt), (first.owner, 2));
+    assert!(
+        h.step(Event::HostReturned {
+            relay: first,
+            reply: crate::HostReply::Answered(crate::HostAnswer::new(bytes(b"stale"), false).expect("small answer"))
+        })
+        .is_empty(),
+        "stale attempt cannot resolve current attempt"
+    );
+    assert!(
+        h.step(Event::HostReturned { relay: second, reply: crate::HostReply::Unanswered(crate::Unanswered::Lost) })
+            .is_empty()
+    );
+    h.after(LIMITS.host_backoff);
+    let third = host_submission(&h.fire());
+    assert_eq!(third.attempt, 3);
+    let actual = crate::HostAnswer::new(bytes(b"recorded first decision"), true).expect("bounded exact error");
+    assert_eq!(
+        &*h.step(Event::HostReturned { relay: third, reply: crate::HostReply::Answered(actual.clone()) }),
+        &[Request::Return { call: Token::new(41), result: Returned::HostAnswered(actual) }]
+    );
+    assert!(
+        h.step(Event::HostReturned { relay: third, reply: crate::HostReply::Busy }).is_empty(),
+        "one logical feedback"
+    );
+    assert_eq!(h.domain.next_deadline(), Some(Time::ZERO.saturating_add(BUDGET.time)));
+}
+
+#[test]
+fn host_uncertainty_survives_busy_until_cap_withdrawal_and_caller_expiry() {
+    for stop in 0_u32..3 {
+        let mut h = Harness::new(LIMITS);
+        let (_, conversation) = h.running(71, 99);
+        let deadline = h.env.now.saturating_add(Duration::from_secs(30));
+        let first = host_submission(&h.step(host_ask(conversation, 41, deadline)));
+        assert!(
+            h.step(Event::HostReturned { relay: first, reply: crate::HostReply::Unanswered(crate::Unanswered::Lost) })
+                .is_empty()
+        );
+        h.after(LIMITS.host_backoff);
+        let second = host_submission(&h.fire());
+        assert!(h.step(Event::HostReturned { relay: second, reply: crate::HostReply::Busy }).is_empty());
+        let emitted = if stop == 0 {
+            h.after(LIMITS.host_backoff);
+            let third = host_submission(&h.fire());
+            h.step(Event::HostReturned { relay: third, reply: crate::HostReply::Busy })
+        } else if stop == 1 {
+            h.step(Event::Withdraw { conversation, call: Token::new(41) })
+        } else {
+            h.env.now = deadline;
+            h.fire()
+        };
+        assert_eq!(&*emitted, &[Request::Return { call: Token::new(41), result: Returned::HostUnknown }]);
+        assert_eq!((h.domain.runs(), h.domain.conversations()), (1, 1), "call-only stop retains ordinary run");
+    }
+}
+
+#[test]
+fn host_withdrawal_and_timeout_retain_relay_until_terminal_answer_wins() {
+    for stop in 0_u32..3 {
+        let mut h = Harness::new(LIMITS);
+        let (run, conversation) = h.running(71, 99);
+        let deadline = h.env.now.saturating_add(Duration::from_secs(30));
+        let relay = host_submission(&h.step(host_ask(conversation, 41, deadline)));
+        if stop == 0 {
+            assert_eq!(
+                &*h.step(Event::Withdraw { conversation, call: Token::new(41) }),
+                &[Request::WithdrawHost { relay }]
+            );
+        } else if stop == 1 {
+            h.after(Duration::from_secs(5));
+            assert_eq!(&*h.fire(), &[Request::WithdrawHost { relay }]);
+        } else {
+            assert_eq!(&*h.step(Event::Cancel { run }), &[Request::Close { peer: Token::new(99) }]);
+            assert_eq!(
+                &*h.step(Event::Withdraw { conversation, call: Token::new(41) }),
+                &[Request::WithdrawHost { relay }]
+            );
+        }
+        assert!(h.step(Event::Withdraw { conversation, call: Token::new(41) }).is_empty());
+        assert_eq!(h.domain.calls(), 1, "withdrawal did not fabricate terminal");
+        let actual = crate::HostAnswer::new(bytes(b"already recorded"), false).expect("small answer");
+        assert_eq!(
+            &*h.step(Event::HostReturned { relay, reply: crate::HostReply::Answered(actual.clone()) }),
+            &[Request::Return { call: Token::new(41), result: Returned::HostAnswered(actual) }]
+        );
+        if stop == 2 {
+            let (_, answer) = answered(h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO }));
+            assert_eq!(answer, failed(Failure::Cancelled, Spend::ZERO));
+        }
+    }
+}
+
+#[test]
+fn host_unknown_is_conveyed_after_actual_withdrawn_terminal_when_shutdown_disallows_recovery() {
+    let mut h = Harness::new(LIMITS);
+    let (_, conversation) = h.running(71, 99);
+    let deadline = h.env.now.saturating_add(Duration::from_secs(30));
+    let relay = host_submission(&h.step(host_ask(conversation, 41, deadline)));
+    assert_eq!(&*h.step(Event::Withdraw { conversation, call: Token::new(41) }), &[Request::WithdrawHost { relay }]);
+    assert_eq!(
+        &*h.step(Event::HostReturned { relay, reply: crate::HostReply::Unanswered(crate::Unanswered::Withdrawn) }),
+        &[Request::Return { call: Token::new(41), result: Returned::HostUnknown }]
+    );
+}
+
+#[test]
+fn host_declarations_are_admitted_as_bounded_unique_contracts_before_io() {
+    let baseline = charter();
+    assert_eq!(crate::charter::check(&baseline, &LIMITS), Ok(()));
+    for invalid in 0_u32..5 {
+        let mut declared = charter();
+        match invalid {
+            0 => declared.grants.host_tools[0].name = bytes(b"finish"),
+            1 => {
+                declared.grants.host_tools =
+                    Box::new([declared.grants.host_tools[0].clone(), declared.grants.host_tools[0].clone()]);
+            }
+            2 => declared.grants.host_tools[0].timeout = Duration::ZERO,
+            3 => declared.grants.host_tools[0].description = Box::new([]),
+            4 => declared.grants.host_tools[0].schema = Box::new([]),
+            _ => unreachable!("five concrete refusals"),
+        }
+        let mut h = Harness::new(LIMITS);
+        let (_, answer) = answered(h.start(71, declared));
+        assert_eq!(answer, Answer::Refused(Refusal::Invalid(Invalid::Grants)));
+        assert_eq!((h.domain.runs(), h.domain.conversations(), h.domain.calls()), (0, 0, 0));
+    }
+    let mut h = Harness::new(Limits { host_attempts: 0, ..LIMITS });
+    let (_, answer) = answered(h.start(71, baseline));
+    assert_eq!(answer, Answer::Refused(Refusal::Invalid(Invalid::Grants)));
+}
+
+#[test]
+fn undeclared_host_and_effect_mismatch_are_refused_before_relay() {
+    let mut h = Harness::new(LIMITS);
+    let (_, conversation) = h.running(71, 99);
+    for (tool, effect, problem) in [
+        (b"absent".as_slice(), crate::HostEffect::Read, crate::HostProblem::Undeclared),
+        (b"comment".as_slice(), crate::HostEffect::Write, crate::HostProblem::Effect),
+    ] {
+        let event = Event::Delegated {
+            conversation,
+            call: Token::new(101),
+            name: crate::CallName { completion: 1, position: 0 },
+            ask: Ask::Host {
+                tool: bytes(tool),
+                effect,
+                input: crate::HostInput::attested(bytes(b"{}")).expect("attested empty object"),
+            },
+            deadline: Time::ZERO.saturating_add(Duration::from_secs(30)),
+        };
+        assert_eq!(
+            &*h.step(event),
+            &[Request::Return { call: Token::new(101), result: Returned::HostRejected(problem) }]
+        );
+    }
+    assert_eq!(h.domain.calls(), 0);
 }

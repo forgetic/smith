@@ -80,6 +80,8 @@ impl HostReply {
 /// Contract: domain/run.md, sections 8 and 13; testing-strategy.md, section 7.
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
+    /// Generic-host recovery schedule. Contract: domain/run.md, sections 5.2 and 13.
+    pub host: HostSchedule,
     /// Replay seed for the host, agent and provider, independently derived.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
@@ -147,11 +149,28 @@ impl Settings {
             network: Span::millis(1, 20),
             check: Span::millis(100, 500),
             push: HostReply::Delivered,
+            host: HostSchedule::Answer,
             cancel_at: None,
             races: 0,
             drain_facts: true,
         }
     }
+}
+
+/// Finite typed host choices; responses settle actual attempts before recovery.
+/// Contract: domain/run.md, sections 5.2 and 13.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum HostSchedule {
+    /// Immediate first recorded answer. Contract: domain/run.md, section 5.2.
+    Answer,
+    /// Busy, lost committed answer, then replay first recorded answer. Contract: domain/run.md, section 5.2.
+    Replay,
+    /// Lost then Busy until receiving cap. Contract: domain/run.md, section 5.2.
+    Unknown,
+    /// Wait beyond declared deadline, settle withdrawn, then recover. Contract: domain/run.md, section 5.2.
+    Withdraw,
+    /// Wait for withdrawal, but replay actual recorded answer. Contract: domain/run.md, section 5.2.
+    LateAnswer,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -174,6 +193,7 @@ enum Delivery {
     Io { owner: Token, op: tools::Op, deadline: Time },
     Command { owner: Token, process: skein_fake_checkout::Process, head: u32, tail: u32, timed_out: bool },
     Check { owner: Token, passed: bool, output: Vec<u8>, timed_out: bool, tail: u32 },
+    Host { relay: run::RelayName, reply: run::HostReply },
     Cancel,
 }
 
@@ -207,6 +227,11 @@ pub struct World {
     checked: Vec<bool>,
     pushes: Vec<run::Delivery>,
     delivery_names: Vec<(run::CallName, Time)>,
+    host_history: crate::host_referee::History,
+    host_pending: BTreeMap<(u64, u32), Key>,
+    host_decision: Option<run::HostAnswer>,
+    host_decisions: u32,
+    host_terminals: Vec<(run::RelayName, Time, run::HostReply)>,
     snapshots: BTreeMap<Token, Vec<u8>>,
     landed: Vec<u8>,
     prompts: Vec<provider::api::Query>,
@@ -279,6 +304,11 @@ impl World {
             checked: Vec::new(),
             pushes: Vec::new(),
             delivery_names: Vec::new(),
+            host_history: crate::host_referee::History::default(),
+            host_pending: BTreeMap::new(),
+            host_decision: None,
+            host_decisions: 0,
+            host_terminals: Vec::new(),
             snapshots: BTreeMap::new(),
             landed: Vec::new(),
             prompts: Vec::new(),
@@ -403,8 +433,14 @@ impl World {
                 assert!(self.admitted.replace(run).is_none(), "a start is admitted at most once");
             }
             Request::Answer { to, answer } => {
+                if matches!(&answer, run::Answer::Failed { .. }) {
+                    self.host_history.shutdown(self.now);
+                }
                 assert_eq!(to, ReplyTo::new(Token::new(1)), "the host receives its own answer");
-                self.observe(Seen::Answered { answer: copy_answer(&answer), pending: self.flights.keys().count() });
+                self.observe(Seen::Answered {
+                    answer: copy_answer(&answer),
+                    pending: self.flights.keys().count() + self.host_pending.len(),
+                });
                 assert!(self.answer.replace(answer).is_none(), "one answer per host start");
                 self.answered = Some(self.now);
             }
@@ -412,6 +448,7 @@ impl World {
                 assert_eq!(worker, Token::new(1), "checking notice echoes the host identity");
             }
             Request::Complete { owner, prompt, .. } => {
+                self.host_history.prompt(&prompt).expect("exact feedback for observed provider host call");
                 self.observe(Seen::Completing { owner });
                 self.flights.open((Family::Completion, owner), Flight { key: None, cancelled: false });
                 self.provider_calls.open(owner, (prompt.tools, prompt.served.clone()));
@@ -554,8 +591,85 @@ impl World {
                 );
                 self.flights.get_mut((Family::Delivery, owner)).expect("submitted delivery").key = Some(key);
             }
+            Request::HostCall { worker, relay, name, tool, effect, input, deadline } => {
+                self.host_history
+                    .submit(crate::host_referee::Submission {
+                        worker,
+                        relay,
+                        name,
+                        tool,
+                        effect,
+                        input,
+                        at: self.now,
+                        deadline,
+                    })
+                    .expect("valid recovery history");
+                let answer = run::HostAnswer::new(b"opaque host answer: first decision".as_slice().into(), false)
+                    .expect("bounded host text");
+                let reply = match self.settings.host {
+                    HostSchedule::Answer | HostSchedule::LateAnswer => run::HostReply::Answered(answer),
+                    HostSchedule::Replay => match relay.attempt {
+                        1 => run::HostReply::Busy,
+                        2 => run::HostReply::Unanswered(run::Unanswered::Lost),
+                        _ => run::HostReply::Answered(answer),
+                    },
+                    HostSchedule::Unknown => {
+                        if relay.attempt == 1 {
+                            run::HostReply::Unanswered(run::Unanswered::Lost)
+                        } else {
+                            run::HostReply::Busy
+                        }
+                    }
+                    HostSchedule::Withdraw => {
+                        if relay.attempt == 1 {
+                            run::HostReply::Unanswered(run::Unanswered::Withdrawn)
+                        } else {
+                            run::HostReply::Answered(answer)
+                        }
+                    }
+                };
+                let reply = match reply {
+                    run::HostReply::Answered(answer) => {
+                        let recorded = self.record_host(answer);
+                        run::HostReply::Answered(recorded)
+                    }
+                    run::HostReply::Unanswered(run::Unanswered::Lost) => {
+                        self.record_host(
+                            run::HostAnswer::new(b"opaque host answer: first decision".as_slice().into(), false)
+                                .expect("bounded first record"),
+                        );
+                        run::HostReply::Unanswered(run::Unanswered::Lost)
+                    }
+                    run::HostReply::Busy => run::HostReply::Busy,
+                    run::HostReply::Unanswered(run::Unanswered::Withdrawn) => {
+                        run::HostReply::Unanswered(run::Unanswered::Withdrawn)
+                    }
+                };
+                let at = if matches!(self.settings.host, HostSchedule::LateAnswer | HostSchedule::Withdraw)
+                    && relay.attempt == 1
+                {
+                    deadline.saturating_add(Duration::from_millis(20))
+                } else {
+                    self.now.saturating_add(self.settings.network.draw(&mut self.rng))
+                };
+                let key = self.schedule.send(at, Delivery::Host { relay, reply });
+                assert!(self.host_pending.insert((relay.owner.raw(), relay.attempt), key).is_none());
+            }
+            Request::WithdrawHost { relay } => {
+                self.host_history.withdraw(relay).expect("withdraw retains actual terminal");
+                assert!(self.host_pending.contains_key(&(relay.owner.raw(), relay.attempt)));
+            }
             Request::Rejected { .. } | Request::Exhausted { .. } => {}
         }
+    }
+
+    fn record_host(&mut self, answer: run::HostAnswer) -> run::HostAnswer {
+        if let Some(recorded) = &self.host_decision {
+            return recorded.clone();
+        }
+        self.host_decisions = self.host_decisions.checked_add(1).expect("one immutable host decision");
+        self.host_decision = Some(answer.clone());
+        answer
     }
 
     fn send(&mut self, family: Family, owner: Token, event: Event) {
@@ -585,9 +699,17 @@ impl World {
 
     fn deliver(&mut self, delivery: Delivery) {
         match delivery {
+            Delivery::Host { relay, reply } => {
+                self.host_terminals.push((relay, self.now, reply.clone()));
+                self.host_history.terminal(self.now, relay, &reply).expect("one actual host terminal");
+                self.host_pending.remove(&(relay.owner.raw(), relay.attempt)).expect("host relay pending");
+                self.stage.push(Event::HostReturned { relay, reply });
+                self.terminals += 1;
+            }
             Delivery::Cancel => {
                 self.observe(Seen::Stopped { failure: run::Failure::Cancelled });
                 if let Some(run) = self.admitted {
+                    self.host_history.shutdown(self.now);
                     self.stage.push(Event::Cancel { run });
                 }
             }
@@ -622,16 +744,26 @@ impl World {
         self.flights.end((family, owner));
         self.terminals += 1;
         match &event {
-            Event::Completed { completion, .. } => self.observe(Seen::Completed {
-                owner,
-                spent: run::Spend {
-                    turns: 1,
-                    input: completion.usage.input_tokens,
-                    output: completion.usage.output_tokens,
-                    cache_read: completion.usage.cache_read_tokens,
-                    cache_write: completion.usage.cache_write_tokens,
-                },
-            }),
+            Event::Completed { completion, .. } => {
+                for part in &completion.content {
+                    match part {
+                        llm::Said::ToolCall { id, name, .. } if name.as_ref() == b"host_action" => {
+                            self.host_history.called(id.clone()).expect("observed single provider host operation");
+                        }
+                        llm::Said::Text { .. } | llm::Said::Opaque { .. } | llm::Said::ToolCall { .. } => {}
+                    }
+                }
+                self.observe(Seen::Completed {
+                    owner,
+                    spent: run::Spend {
+                        turns: 1,
+                        input: completion.usage.input_tokens,
+                        output: completion.usage.output_tokens,
+                        cache_read: completion.usage.cache_read_tokens,
+                        cache_write: completion.usage.cache_write_tokens,
+                    },
+                });
+            }
             Event::Failed { .. } | Event::Cancelled { .. } => self.observe(Seen::CompletionEnded { owner }),
             Event::Checked { ran, .. } => {
                 self.checked.push(ran.exit == (run::Exit::Code { code: 0 }));
@@ -647,7 +779,8 @@ impl World {
                 self.observe(Seen::Delivered { owner, push: push.clone(), tree: landed });
             }
             Event::Aborted { .. } => self.observe(Seen::Checked { owner, exit: run::Exit::Signalled }),
-            Event::Start { .. }
+            Event::HostReturned { .. }
+            | Event::Start { .. }
             | Event::Grant { .. }
             | Event::Cancel { .. }
             | Event::Done { .. }
@@ -658,6 +791,10 @@ impl World {
     }
 
     fn settled(&self) {
+        self.host_history
+            .finish(matches!(self.answer(), run::Answer::Accepted { .. }))
+            .expect("normal continuation owes exact host feedback; shutdown settles actual relays");
+        assert!(self.host_pending.is_empty());
         self.flights.assert_settled();
         self.provider_calls.assert_settled();
         self.referee.assert_passed(self.settings.seed);
@@ -782,8 +919,35 @@ impl World {
         &self.prompts
     }
 
-    /// Stable host names and submission times observed from actual delivery
-    /// requests, separate from callbacks; used to choose public cancellation cuts.
+    /// Host-owned recorded decisions, distinct from relay attempts.
+    /// Contract: domain/run.md, sections 5.2 and 13.
+    #[must_use]
+    pub const fn host_decisions(&self) -> u32 {
+        self.host_decisions
+    }
+
+    /// Actual host relay terminals, retained only by this outside world.
+    /// Contract: domain/run.md, sections 5.2 and 13.
+    #[must_use]
+    pub fn host_terminals(&self) -> &[(run::RelayName, Time, run::HostReply)] {
+        &self.host_terminals
+    }
+
+    /// Actual observed cancellation/failed-run boundary time.
+    /// Contract: domain/run.md, sections 5.2 and 10.
+    #[must_use]
+    pub const fn host_shutdown_at(&self) -> Option<Time> {
+        self.host_history.shutdown_at()
+    }
+
+    /// Immutable opaque relay observations for replay and recovery checks.
+    /// Contract: domain/run.md, sections 5.2 and 14.
+    #[must_use]
+    pub fn host_submissions(&self) -> &[crate::host_referee::Submission] {
+        self.host_history.submissions()
+    }
+
+    /// Stable host names and submission times observed from actual delivery.
     /// Contract: domain/run.md, sections 8.2 and 13; testing-strategy.md, section 7.
     #[must_use]
     pub fn delivery_names(&self) -> &[(run::CallName, Time)] {
@@ -853,9 +1017,19 @@ fn charter(settings: &Settings, root: u64) -> run::Charter {
                 None
             },
             tools: Tools { inspect: true, modify: settings.writable, shell: settings.writable },
-            forge: false,
+
             agents: true,
-            outlets: Box::new([]),
+            host_tools: if settings.job == Job::HostTools {
+                Box::new([run::HostTool {
+                    name: b"host_action".as_slice().into(),
+                    description: b"Opaque host write".as_slice().into(),
+                    schema: br#"{"type":"object"}"#.as_slice().into(),
+                    effect: run::HostEffect::Write,
+                    timeout: Duration::from_millis(300),
+                }])
+            } else {
+                Box::new([])
+            },
         },
         outcome: OutcomeSpec {
             change: if change {

@@ -1,0 +1,274 @@
+//! Outside relay history judge: immutable operations, settled recovery and exact
+//! first-decision feedback (domain/run.md, section 5.2; testing-strategy.md, section 7).
+
+use skein_lib::{Time, Token};
+use smith_domain::{llm, run};
+
+/// Public observations retained independently of the implementation.
+/// Contract: domain/run.md, sections 5.2 and 13.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Submission {
+    /// Parent-supplied logical scope. Contract: domain/run.md, section 5.2.
+    pub worker: Token,
+    /// Actual callback generation and attempt. Contract: domain/run.md, section 5.2.
+    pub relay: run::RelayName,
+    /// Immutable durable transcript name. Contract: domain/run.md, section 5.2.
+    pub name: run::CallName,
+    /// Whole opaque tool identifier. Contract: domain/run.md, section 5.2.
+    pub tool: Box<[u8]>,
+    /// Declared scheduling effect. Contract: domain/run.md, section 5.2.
+    pub effect: run::HostEffect,
+    /// Whole protocol-attested input. Contract: domain/run.md, section 5.2.
+    pub input: run::HostInput,
+    /// Actual admission time. Contract: domain/run.md, section 5.2.
+    pub at: Time,
+    /// Effective bounded relay deadline. Contract: domain/run.md, section 5.2.
+    pub deadline: Time,
+}
+
+/// Judge knows public submissions and terminals, never domain state.
+/// Contract: domain/run.md, sections 5.2, 13 and 14.
+#[derive(Debug, Default)]
+pub struct History {
+    submissions: Vec<Submission>,
+    live: Option<run::RelayName>,
+    previous_terminal: Option<Time>,
+    answered: Option<run::HostAnswer>,
+    uncertain: bool,
+    feedback: bool,
+    provider_call: Option<Box<[u8]>>,
+    shutdown: Option<Time>,
+}
+
+impl History {
+    /// Admission rejects live duplicates and mutable recovery input.
+    /// Contract: domain/run.md, section 5.2.
+    ///
+    /// # Errors
+    /// Rejects duplicate live relays, recovery after answer/feedback/shutdown,
+    /// expired deadlines, mutated input or nonsequential callbacks and chronology.
+    pub fn submit(&mut self, submission: Submission) -> Result<(), &'static str> {
+        if self.live.is_some() {
+            return Err("duplicate live relay");
+        }
+        if self.feedback {
+            return Err("recovery after logical feedback");
+        }
+        if self.shutdown.is_some() {
+            return Err("recovery after observed shutdown");
+        }
+        if self.answered.is_some() {
+            return Err("recovery after actual answer");
+        }
+        if submission.at >= submission.deadline {
+            return Err("unbounded or expired relay");
+        }
+        if let Some(first) = self.submissions.first() {
+            if (first.worker, first.name, &first.tool, first.effect, &first.input)
+                != (submission.worker, submission.name, &submission.tool, submission.effect, &submission.input)
+            {
+                return Err("recovery changed immutable operation");
+            }
+            let prior = self.submissions.last().expect("first exists");
+            if submission.relay == prior.relay
+                || submission.relay.attempt != prior.relay.attempt.checked_add(1).expect("bounded attempts")
+            {
+                return Err("recovery callback is not a new attempt");
+            }
+            if self.previous_terminal.is_none_or(|at| submission.at <= at) {
+                return Err("recovery precedes terminal/backoff");
+            }
+        } else if submission.relay.attempt != 1 {
+            return Err("first attempt is not one");
+        }
+        self.live = Some(submission.relay);
+        self.submissions.push(submission);
+        Ok(())
+    }
+
+    /// Withdrawal is only a request; it retains the live obligation.
+    /// Contract: domain/run.md, section 5.2.
+    ///
+    /// # Errors
+    /// Rejects a withdrawal naming an attempt that is not currently live.
+    pub fn withdraw(&self, relay: run::RelayName) -> Result<(), &'static str> {
+        if self.live == Some(relay) { Ok(()) } else { Err("withdrawal names no live relay") }
+    }
+
+    /// Actual terminal closes this attempt and preserves any first decision.
+    /// Contract: domain/run.md, section 5.2.
+    ///
+    /// # Errors
+    /// Rejects unmatched callbacks, terminals before admission, and changed
+    /// recorded answers for the same durable operation.
+    pub fn terminal(&mut self, at: Time, relay: run::RelayName, reply: &run::HostReply) -> Result<(), &'static str> {
+        if self.live != Some(relay) {
+            return Err("terminal names no live relay");
+        }
+        if at < self.submissions.last().expect("live relay has an observed submission").at {
+            return Err("terminal precedes live admission");
+        }
+        match reply {
+            run::HostReply::Answered(answer) => {
+                if self.answered.as_ref().is_some_and(|first| first != answer) {
+                    return Err("second decision for durable name");
+                }
+                self.answered = Some(answer.clone());
+                self.uncertain = false;
+            }
+            run::HostReply::Unanswered(_) => self.uncertain = true,
+            run::HostReply::Busy => {}
+        }
+        self.live = None;
+        self.previous_terminal = Some(at);
+        Ok(())
+    }
+
+    /// Conversation feedback must wait for actual terminal and preserve text.
+    /// Contract: domain/run.md, section 5.2.
+    ///
+    /// # Errors
+    /// Rejects early/duplicate feedback or evidence differing from the actual
+    /// terminal, including erasing uncertain effects into known predecision results.
+    pub fn feedback(&mut self, result: &run::Returned) -> Result<(), &'static str> {
+        if self.live.is_some() || self.feedback {
+            return Err("feedback before terminal or twice");
+        }
+        let valid = match result {
+            run::Returned::HostAnswered(answer) => self.answered.as_ref() == Some(answer),
+            run::Returned::HostUnknown => self.answered.is_none() && self.uncertain,
+            run::Returned::Busy | run::Returned::Cancelled | run::Returned::TimedOut => {
+                self.answered.is_none() && !self.uncertain
+            }
+            run::Returned::HostRejected(_)
+            | run::Returned::Delivered(_)
+            | run::Returned::Nothing
+            | run::Returned::DeliveryRefused(_)
+            | run::Returned::Accepted
+            | run::Returned::Rejected { .. }
+            | run::Returned::ChecksFailed { .. }
+            | run::Returned::Stale
+            | run::Returned::DeliveryFailed { .. }
+            | run::Returned::Answered { .. }
+            | run::Returned::Unanswered { .. }
+            | run::Returned::Refused { .. } => false,
+        };
+        if !valid {
+            return Err("feedback erased or fabricated host evidence");
+        }
+        self.feedback = true;
+        Ok(())
+    }
+
+    /// Bind the provider's public tool-call ID before the domain relays it.
+    /// Contract: domain/run.md, section 5.2; domain/session.md, section 3.
+    ///
+    /// # Errors
+    /// Rejects a second provider host-tool call in this single-operation story.
+    pub fn called(&mut self, provider_id: Box<[u8]>) -> Result<(), &'static str> {
+        if self.provider_call.replace(provider_id).is_some() {
+            return Err("second provider host call");
+        }
+        Ok(())
+    }
+
+    /// Observe next provider prompt and require exact paired host feedback.
+    /// Contract: domain/run.md, section 5.2; domain/session.md, section 3.
+    ///
+    /// # Errors
+    /// Rejects missing/duplicate paired feedback, wrong result variants,
+    /// changed text/error classification or feedback before the actual terminal.
+    pub fn prompt(&mut self, prompt: &llm::Prompt) -> Result<(), &'static str> {
+        if self.feedback || self.provider_call.is_none() {
+            return Ok(());
+        }
+        let mut result = None;
+        for message in &prompt.messages {
+            for block in &message.content {
+                match block {
+                    llm::Block::ToolResult { id, result: returned } if self.provider_call.as_ref() == Some(id) => {
+                        if result.is_some() {
+                            return Err("duplicate host feedback ID");
+                        }
+                        result = Some(returned);
+                    }
+                    llm::Block::Text { .. }
+                    | llm::Block::Opaque { .. }
+                    | llm::Block::ToolCall { .. }
+                    | llm::Block::ToolResult { .. } => {}
+                }
+            }
+        }
+        match result {
+            Some(llm::Returned::Served { returned, error }) => {
+                let expected_error = match returned {
+                    run::Returned::HostAnswered(answer) => answer.error(),
+                    run::Returned::HostUnknown
+                    | run::Returned::Busy
+                    | run::Returned::Cancelled
+                    | run::Returned::TimedOut => true,
+                    run::Returned::HostRejected(_)
+                    | run::Returned::Delivered(_)
+                    | run::Returned::Nothing
+                    | run::Returned::DeliveryRefused(_)
+                    | run::Returned::Accepted
+                    | run::Returned::Rejected { .. }
+                    | run::Returned::ChecksFailed { .. }
+                    | run::Returned::Stale
+                    | run::Returned::DeliveryFailed { .. }
+                    | run::Returned::Answered { .. }
+                    | run::Returned::Unanswered { .. }
+                    | run::Returned::Refused { .. } => return Err("host feedback was rewritten"),
+                };
+                if *error != expected_error {
+                    return Err("host feedback error bit changed");
+                }
+                self.feedback(returned)
+            }
+            Some(llm::Returned::Owned { .. } | llm::Returned::Invalid { .. } | llm::Returned::NotRun) => {
+                Err("host feedback was rewritten")
+            }
+            None => Err("continuation omitted host feedback"),
+        }
+    }
+
+    /// Record actual outside cancellation or final failed-run shutdown evidence.
+    /// Contract: domain/run.md, sections 5.2 and 10.
+    pub fn shutdown(&mut self, at: Time) {
+        self.shutdown = self.shutdown.or(Some(at));
+    }
+
+    /// Actual outside shutdown time for chronology controls.
+    /// Contract: domain/run.md, sections 5.2 and 10.
+    #[must_use]
+    pub const fn shutdown_at(&self) -> Option<Time> {
+        self.shutdown
+    }
+
+    /// A normal continuation owes exact feedback; observed shutdown may have
+    /// no next provider prompt, but it still owes every actual relay terminal.
+    /// Contract: domain/run.md, sections 5.2 and 10.
+    ///
+    /// # Errors
+    /// Rejects an outstanding actual relay, missing ordinary continuation
+    /// feedback or a claimed shutdown that was never observed.
+    pub fn finish(&self, continuation: bool) -> Result<(), &'static str> {
+        if self.live.is_some() {
+            return Err("shutdown abandoned actual relay terminal");
+        }
+        if !continuation && !self.submissions.is_empty() && self.shutdown.is_none() {
+            return Err("shutdown was not observed");
+        }
+        if continuation && !self.submissions.is_empty() && !self.feedback {
+            return Err("continuation omitted host feedback");
+        }
+        Ok(())
+    }
+
+    /// Exact observed operations for replay and immutable recovery assertions.
+    /// Contract: domain/run.md, sections 5.2 and 14.
+    #[must_use]
+    pub fn submissions(&self) -> &[Submission] {
+        &self.submissions
+    }
+}

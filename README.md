@@ -14,8 +14,11 @@ source and the preserved stories. The first 05s4 increment adds
 including real reports and declared failures. The next increment adds
 [generic checked delivery](docs/development/migration-05s4-delivery.md),
 including mid-run delivery and actual host evidence during shutdown.
-Further generic host changes, live channel and protocol integration, host
-domains and the executable remain later
+[Declared opaque host tools](docs/development/migration-05s4-host-tools.md)
+now carry bounded schemas, effects and exact input/result bytes through stable
+operation names and settled bounded recovery, retaining actual terminal rights
+during withdrawal and shutdown. Further generic host changes, live channel and
+provider protocol integration, host domains and the executable remain later
 increments of temper's `05s-smith.md` migration plan.
 
 ## Layout

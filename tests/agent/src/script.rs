@@ -15,6 +15,8 @@ use smith_fake_llm_domain::api::{Finish, Line, Script, Turn};
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Job {
+    /// Calls an opaque host write and finishes a Report. Contract: domain/run.md, section 5.2.
+    HostTools,
     /// Fixes code, delivers opaque ticket metadata under a separate grant, then
     /// continues and finishes Report. No final Change is allowed.
     /// Contract: domain/run.md, sections 8.4 and 13.
@@ -65,7 +67,8 @@ pub enum Job {
 /// Every job, for worlds that draw them.
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
-pub const JOBS: [Job; 10] = [
+pub const JOBS: [Job; 11] = [
+    Job::HostTools,
     Job::MidReport,
     Job::MidChange,
     Job::MarkerReport,
@@ -84,6 +87,7 @@ pub const JOBS: [Job; 10] = [
 #[must_use]
 pub const fn cue(job: Job) -> Option<&'static [u8]> {
     match job {
+        Job::HostTools => Some(b"@hosttools"),
         Job::MidChange => Some(b"@midchange"),
         Job::MidReport => Some(b"@midreport"),
         Job::MarkerReport => Some(b"@markerreport"),
@@ -103,6 +107,16 @@ pub const fn cue(job: Job) -> Option<&'static [u8]> {
 #[must_use]
 pub fn all() -> Box<[Script]> {
     Box::new([
+        script(
+            b"@hosttools",
+            vec![
+                calls(vec![call(
+                    "host_action",
+                    r#" {"opaque":{"policy":"outside","numbers":[1,2]},"unchanged":"\u0041"} "#,
+                )]),
+                calls(vec![call("finish", r#"{"report":"Host completed.","source":"host"}"#)]),
+            ],
+        ),
         script(b"@midreport", mid_report()),
         script(b"@midchange", mid_change()),
         script(b"@markerreport", marker_report()),

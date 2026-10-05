@@ -110,7 +110,7 @@ fn charter(brief: u64) -> Charter {
     Charter {
         brief: bytes(brief),
         checkout: Checkout { repositories: Box::new([repository]) },
-        grants: Grants { deliver: None, tools: all, forge: false, agents: true, outlets: Box::new([]) },
+        grants: Grants { deliver: None, tools: all, agents: true, host_tools: Box::new([]) },
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
                 fields: Box::new([
@@ -197,6 +197,9 @@ impl Driver {
     fn drain(&mut self, out: &mut Queue<Request>) {
         while let Some(request) = out.pop() {
             match request {
+                Request::HostCall { .. } | Request::WithdrawHost { .. } => {
+                    panic!("random legacy driver has no host declarations")
+                }
                 Request::Admitted { worker: _, run } => self.runs.push(run),
                 Request::Answer { .. } => self.seen[5] += 1,
                 Request::Checking { .. } | Request::Rejected { .. } | Request::Exhausted { .. } => {}
@@ -363,7 +366,7 @@ impl Driver {
             7 if agents => {
                 let families = Families {
                     tools: Tools { inspect: true, modify: self.rng.chance(500), shell: false },
-                    forge: false,
+
                     agents: self.rng.chance(500),
                 };
                 return Decoded::Served { ask: Ask::SubAgent { brief: bytes(size), families, llm: None, share: None } };
@@ -445,6 +448,7 @@ fn served(prompt: &Prompt) -> (bool, bool) {
     let mut offered = (false, false);
     for tool in &prompt.served {
         match tool {
+            Served::Host(_) => panic!("random legacy driver has no host declarations"),
             Served::Deliver => {}
             Served::Finish => offered.0 = true,
             Served::SubAgent => offered.1 = true,

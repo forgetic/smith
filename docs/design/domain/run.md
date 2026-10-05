@@ -193,6 +193,59 @@ connector's system.
   is answered as an error saying what it lacked, and the LLM may act on
   that, by asking otherwise if the host offers a way.
 
+The typed 05s4 boundary makes the lifecycle explicit. `HostTool` carries bounded
+name, description and schema bytes, `HostEffect` and a positive per-relay
+`timeout`. `Grants.host_tools` and `Opening.host_tools` carry those declarations;
+children receive none. Count and aggregate charter bytes are admitted before
+IO; reserved and repeated names, empty declaration fields, zero timeouts, and invalid
+receiving bounds are refused. The root also refuses undeclared names or effect
+mismatches before scheduling a completion's calls. The protocol face parses the
+complete JSON document and attests that it is an object; `HostInput::attested`
+checks only its fixed storage cap and object exterior. Text fields are
+protocol-attested UTF-8; the domain never validates their encoding. This constructor
+is not a general JSON parser. JSON-object parsing/attestation and provider wire formats
+remain the protocol's responsibility (section 12).
+
+`Start.worker` is a parent-supplied stable logical scope, retained across relay
+recovery and restarted activations. It is distinct from the live admitted run
+and callback slab tokens. `HostCall` forwards this scope, transcript-derived
+`CallName`, immutable tool/effect/input, a separate `RelayName { owner, attempt }`
+and the effective deadline. The deadline is the minimum of declared timeout,
+receiving `Limits.host_timeout` and remaining caller/run time. Every emitted
+attempt is owed exactly one actual `HostReturned` terminal. The host bounds the
+text by `Limits.host_reply_bytes`; `HostAnswer` preserves text and the error bit.
+A decided logical scope/name must replay exactly its first recorded answer:
+recovery does not authorize another decision or effect.
+
+`HostReply::Busy` means this attempt made no decision. `Unanswered(Lost)` and
+`Unanswered(Withdrawn)` are actual settled attempts whose outcome cannot yet be
+learned. They permit recovery, while the run is working, only after the previous
+actual terminal and the positive `Limits.host_backoff`, up to
+`Limits.host_attempts` including the first. The next relay uses the same logical
+scope/name/tool/effect/input and a new attempt-qualified callback. There is never
+a second live relay for that operation. A stale callback cannot answer a later
+attempt. `WithdrawHost` requests settlement; it does not supply a terminal,
+release original ownership, or permit an early retry. Declared relay expiry
+requests withdrawal and waits for the actual terminal before recovery.
+
+Caller expiry and run shutdown forbid fresh recovery. An actual `Answered`
+always wins, including after withdrawal: its exact result or error reaches the
+conversation once. Exhausted or stopped recovery after any unresolved
+`Unanswered` returns `HostUnknown`; later `Busy` cannot erase that uncertainty.
+Pure Busy exhaustion remains Busy, and a caller stop between only known
+predecision attempts may return Cancelled/TimedOut. The unknown answer does not
+claim that nothing happened. Submitted delivery ownership follows section 8
+unchanged. Full transcript restart integration remains a later increment; the
+typed recovery boundary already requires the stable logical scope.
+
+Retained memory is bounded by declaration count and aggregate charter bytes,
+call slots, one immutable name/tool/effect/body per logical call, fixed attempt
+state and receiving input/reply caps. Recovery retains no attempt history.
+Each emitted input/result/declaration copy belongs to its receiver; the root
+counts retained declaration and feedback copies in its own bound. Worlds reach
+full declaration/input/reply storage and actual recovery paths with measured
+ownership, and replay observed inputs, callback attempts and exact answers.
+
 ### 5.3 Sub-agents
 
 A sub-agent is a served call that the run answers by opening another
@@ -527,9 +580,12 @@ name.
 The first 05s4 RESULTS and DELIVERY increments implement generic final forms,
 separately granted main delivery, all discovered writable checks, sealed actual
 host terminals and stable transcript-derived naming. The copied token-split
-budget, fixed `.temper/pre-pr` discovery convention, charter and outlets remain
-until subsequent increments. Optional workspaces/conventions, conflict files in
-Start, open host tools, messages and root transcript restart are still pending;
+budget, fixed `.temper/pre-pr` discovery convention and charter remain
+until subsequent increments. The HOST TOOLS increment replaces closed forge
+and outlet grants with bounded declarations and opaque durable relays, settled
+recovery and exact first-record answers. Optional workspaces/conventions, conflict
+files in Start, provider schema integration, messages and root transcript restart
+are still pending;
 the marker-refusal correction world exercises an actual host route without
 claiming those later admission or restart features.
 

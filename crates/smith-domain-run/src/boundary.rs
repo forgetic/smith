@@ -51,6 +51,14 @@ use crate::outcome::{Change, Declared, Problems};
 #[derive(PartialEq, Eq, Debug)]
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Event {
+    /// Actual terminal of one host relay; old attempts and callback generations are inert.
+    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
+    HostReturned {
+        /// Live attempt identity, distinct from durable `CallName`. Contract: domain/run.md, section 5.2.
+        relay: crate::RelayName,
+        /// Bounded actual answer or settled retry classification. Contract: domain/run.md, section 5.2.
+        reply: crate::HostReply,
+    },
     /// From the worker, a call: start a run on `charter`, and answer once it
     /// has ended. `worker` is the worker's name for the run, echoed on
     /// `Admitted`.
@@ -61,7 +69,10 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         reply_to: ReplyTo,
-        /// Scripted host or worker's opaque run name, echoed without interpretation.
+        /// Parent-supplied stable logical host-run scope, preserved across relay
+        /// recovery and restarted activations. Distinct from the returned live run
+        /// token and every callback slab generation; echoed without interpretation.
+        /// Contract: domain/run.md, sections 3.2 and 5.2; domain/host.md, section 2.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         worker: Token,
@@ -259,6 +270,36 @@ pub enum Event {
 #[derive(PartialEq, Eq, Debug)]
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Request {
+    /// Relay an admitted main host-tool call without interpreting its bytes. Each
+    /// actual attempt gets exactly one terminal; a durable name is decided once.
+    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
+    HostCall {
+        /// Host logical run identity, preserved across restart. Contract: domain/host.md, section 2.
+        worker: Token,
+        /// Live relay attempt, never the durable operation name. Contract: domain/run.md, section 5.2.
+        relay: crate::RelayName,
+        /// Immutable transcript-derived name, identical on every recovery attempt.
+        /// Contract: domain/run.md, section 5.2.
+        name: CallName,
+        /// Exact declared tool name. Contract: domain/run.md, section 5.2.
+        tool: Box<[u8]>,
+        /// Declared scheduling effect, identical across attempts. Contract: domain/run.md, section 5.2.
+        effect: crate::HostEffect,
+        /// Complete immutable protocol-attested JSON object, including whitespace.
+        /// Contract: domain/run.md, sections 5.2 and 12.
+        input: crate::HostInput,
+        /// This relay's bounded deadline; a timeout requests withdrawal and waits for the actual terminal.
+        /// Contract: domain/run.md, section 5.2.
+        deadline: Time,
+    },
+    /// Request settlement of a host relay, retaining its actual terminal right.
+    /// This is transport withdrawal, never cancellation of submitted Delivery.
+    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
+    WithdrawHost {
+        /// The one live attempt to withdraw, answered by `HostReturned` exactly once.
+        /// Contract: domain/run.md, section 5.2.
+        relay: crate::RelayName,
+    },
     /// To the worker: the run it names `worker` was admitted, and is `run` to
     /// the run child domain from now on.
     ///
@@ -462,6 +503,18 @@ pub enum Request {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum Ask {
+    /// Invoke a host-declared tool. Main-only declaration and effect are checked
+    /// before effects; provider-written JSON bytes are relayed unchanged.
+    /// Contract: domain/run.md, sections 5.1, 5.2 and 12.
+    Host {
+        /// Exact declaration name, not interpreted as host policy. Contract: domain/run.md, section 5.2.
+        tool: Box<[u8]>,
+        /// Protocol-selected effect; must equal the admitted declaration.
+        /// Contract: domain/run.md, section 5.2; domain/session.md, section 5.
+        effect: crate::HostEffect,
+        /// Complete protocol-attested bounded object input. Contract: domain/run.md, sections 5.2 and 12.
+        input: crate::HostInput,
+    },
     /// Main-only, separately granted mid-run delivery. Fields use that grant's
     /// required-name caps; every extra value counts toward `Limits::outcome_bytes`.
     /// It takes the same exclusive checked snapshot as finishing Change, then
@@ -515,6 +568,23 @@ pub enum Ask {
 #[derive(PartialEq, Eq, Hash, Debug)]
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Returned {
+    /// Actual host result/error text; the host's error is forwarded, never retried.
+    /// Contract: domain/run.md, section 5.2.
+    HostAnswered(
+        /// Exact constructor-bounded host text and error bit, at most receiving reply cap.
+        /// Contract: domain/run.md, section 5.2.
+        crate::HostAnswer,
+    ),
+    /// No permissible recovery remains after the earlier relay settled. This
+    /// means outcome unknown, never evidence of failure or permission to decide twice.
+    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
+    HostUnknown,
+    /// Host-tool declaration or owned input was refused before any relay.
+    /// Contract: domain/run.md, sections 5.1, 5.2 and 12.
+    HostRejected(
+        /// Typed pre-relay semantic admission failure. Contract: domain/run.md, sections 5.2 and 12.
+        crate::HostProblem,
+    ),
     /// Actual host landing evidence. A mid-run call continues normally; a finish
     /// call ends with its admitted Change. Receipt constructors cap each copy.
     /// Contract: domain/run.md, sections 8.2 and 8.4.
@@ -770,6 +840,9 @@ pub enum Read {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Opening {
+    /// Main's bounded host declarations, copied whole; every child receives none.
+    /// Contract: domain/run.md, sections 5.1–5.3 and 12.
+    pub host_tools: Box<[crate::HostTool]>,
     /// Whether the parent offers main the separately granted delivery tool.
     /// It is false for every child; this descriptor grants no final outcome form.
     /// Contract: domain/run.md, section 8.4.
@@ -989,7 +1062,8 @@ pub enum Invalid {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Checkout,
-    /// The grants list more outlets than a run may hold, or one name twice.
+    /// The host declarations exceed count/storage bounds, repeat/reserve a name,
+    /// have empty opaque fields or a zero deadline, or the receiving retry limits are invalid.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Grants,

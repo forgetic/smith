@@ -2,7 +2,7 @@
 //! starts it, most of it from the engine's assignment.
 //!
 //! It is policy as data. The run interprets no workflow vocabulary: the names
-//! in a charter (of repositories, outlets, verdicts, kinds and fields) are
+//! in a charter (of repositories, host declarations, verdicts, kinds and fields) are
 //! labels, compared byte for byte, and text is the LLM's to read.
 
 use alloc::boxed::Box;
@@ -14,6 +14,8 @@ use crate::boundary::Invalid;
 use crate::budget::Budget;
 use crate::limits::Limits;
 use crate::outcome::{self, OutcomeSpec};
+
+pub use crate::host::{HostEffect, HostTool};
 
 /// What a run is given when it starts.
 ///
@@ -98,22 +100,18 @@ pub struct Grants {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub tools: Tools,
-    /// Reading the forge, relayed by the worker.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub forge: bool,
     /// Asking for sub-agents: conversations of the LLM's own, opened by the run.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub agents: bool,
-    /// What the LLM may act on the world through, besides finishing.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub outlets: Box<[Outlet]>,
+    /// Host-declared main-only tools. Names, descriptions, schemas, effects and
+    /// relay deadlines are admitted as bounded data before session or IO.
+    /// Contract: domain/run.md, sections 3, 5.1, 5.2 and 12.
+    pub host_tools: Box<[HostTool]>,
 }
 
 /// The families of tools a conversation has: those it runs on the checkout,
-/// and those the run serves. Outlets stay with main for now.
+/// and those the run serves. Host declarations stay with main.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -122,10 +120,6 @@ pub struct Families {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub tools: Tools,
-    /// Retained copy-baseline forge-reading grant; generic host tools replace it in 05s4.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub forge: bool,
     /// Whether this conversation may ask its run to open sub-agents.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -137,7 +131,7 @@ impl Families {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn of(grants: &Grants) -> Families {
-        Families { tools: grants.tools, forge: grants.forge, agents: grants.agents }
+        Families { tools: grants.tools, agents: grants.agents }
     }
 
     /// Whether these families are among `wider`'s.
@@ -148,7 +142,6 @@ impl Families {
         (!inspect || wide.inspect)
             && (!modify || wide.modify)
             && (!shell || wide.shell)
-            && (!self.forge || wider.forge)
             && (!self.agents || wider.agents)
     }
 }
@@ -170,17 +163,6 @@ pub struct Tools {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub shell: bool,
-}
-
-/// A delegated tool that acts through the worker, and through the engine where
-/// it touches the forge (domain/run.md, section 14). What it does is theirs: the run
-/// knows it by its name.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Outlet {
-    /// Boundary name, compared byte for byte; it carries no authority by itself.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub name: Box<[u8]>,
 }
 
 /// An LLM to talk to.
@@ -244,7 +226,10 @@ pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
     if count(checkout.repositories.len()) > limits.repositories || repeated_repository(&checkout.repositories) {
         return Err(Invalid::Checkout);
     }
-    if count(grants.outlets.len()) > limits.outlets || repeated_outlet(&grants.outlets) {
+    if count(grants.host_tools.len()) > limits.host_tools
+        || repeated_host_tool(&grants.host_tools)
+        || !valid_host_tools(&grants.host_tools, limits)
+    {
         return Err(Invalid::Grants);
     }
     if !outcome::is_valid(outcome, limits) {
@@ -278,9 +263,13 @@ pub(crate) fn cost(charter: &Charter) -> Option<u64> {
     for Repository { name, root: _, writable: _ } in &charter.checkout.repositories {
         cost = cost.checked_add(repository)?.checked_add(len(name)?)?;
     }
-    let outlet = u64::try_from(size_of::<Outlet>()).ok()?;
-    for Outlet { name } in &charter.grants.outlets {
-        cost = cost.checked_add(outlet)?.checked_add(len(name)?)?;
+    let host_tool = u64::try_from(size_of::<HostTool>()).ok()?;
+    for tool in &charter.grants.host_tools {
+        cost = cost
+            .checked_add(host_tool)?
+            .checked_add(len(&tool.name)?)?
+            .checked_add(len(&tool.description)?)?
+            .checked_add(len(&tool.schema)?)?;
     }
     if let Some(spec) = &charter.grants.deliver {
         cost = cost.checked_add(outcome::change_cost(spec)?)?;
@@ -317,10 +306,10 @@ fn repeated_repository(repositories: &[Repository]) -> bool {
     false
 }
 
-fn repeated_outlet(outlets: &[Outlet]) -> bool {
-    for (index, outlet) in outlets.iter().enumerate() {
-        for other in outlets.get(index.saturating_add(1)..).unwrap_or_default() {
-            if other.name == outlet.name {
+fn repeated_host_tool(host_tools: &[HostTool]) -> bool {
+    for (index, host_tool) in host_tools.iter().enumerate() {
+        for other in host_tools.get(index.saturating_add(1)..).unwrap_or_default() {
+            if other.name == host_tool.name {
                 return true;
             }
         }
@@ -337,4 +326,49 @@ pub(crate) fn count(len: usize) -> u32 {
 
 pub(crate) fn len(bytes: &[u8]) -> Option<u64> {
     u64::try_from(bytes.len()).ok()
+}
+
+fn valid_host_tools(tools: &[HostTool], limits: &Limits) -> bool {
+    if !tools.is_empty()
+        && (limits.host_attempts == 0
+            || limits.host_timeout == skein_lib::Duration::ZERO
+            || limits.host_backoff == skein_lib::Duration::ZERO
+            || limits.host_input_bytes < 2
+            || limits.host_input_bytes > u32::try_from(crate::HostInput::CAPACITY).expect("fixed input cap")
+            || limits.host_reply_bytes > u32::try_from(crate::HostAnswer::CAPACITY).expect("fixed answer cap"))
+    {
+        return false;
+    }
+    for tool in tools {
+        if tool.name.is_empty()
+            || tool.description.is_empty()
+            || tool.schema.is_empty()
+            || tool.timeout == skein_lib::Duration::ZERO
+        {
+            return false;
+        }
+        for reserved in [
+            b"finish".as_slice(),
+            b"deliver",
+            b"wait",
+            b"subagent",
+            b"sub_agent",
+            b"read",
+            b"list",
+            b"search",
+            b"write",
+            b"edit",
+            b"shell",
+            b"read_file",
+            b"list_dir",
+            b"write_file",
+            b"edit_file",
+            b"run_shell",
+        ] {
+            if tool.name.as_ref() == reserved {
+                return false;
+            }
+        }
+    }
+    true
 }

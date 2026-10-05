@@ -174,6 +174,9 @@ pub(crate) enum Alarm {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Call { call: Id<Call> },
+    /// Per-relay timeout or retry backoff, independent of caller expiry.
+    /// Contract: domain/run.md, section 5.2.
+    Host { call: Id<Call> },
 }
 
 // Entry points, one per event or alarm: look the conversation or run up, take
@@ -329,7 +332,7 @@ pub(crate) fn yielded(
         let call = calls.get_mut(asker).expect("a sub-agent's call lives until it has ended");
         let close_child = match &mut call.work {
             Work::Child(child) => agent::yielded(child, text, stop, &env.limits),
-            Work::Landing(_) => unreachable!("a sub-agent serves a sub-agent's call"),
+            Work::Landing(_) | Work::Host(_) => unreachable!("a sub-agent serves a sub-agent's call"),
         };
         if let Some(child) = close_child {
             close(conversations, child, out);
@@ -423,6 +426,7 @@ pub(crate) fn delegated(
     let run_id = conversation.run;
     facts.about(run_id.token());
     let asked = match &ask {
+        Ask::Host { .. } => Asked::Host,
         Ask::Deliver { .. } => Asked::Deliver,
         Ask::Finish { .. } => Asked::Finish,
         Ask::SubAgent { .. } => Asked::SubAgent,
@@ -442,6 +446,11 @@ pub(crate) fn delegated(
             State::Winding { reply_to, ending }
         }
         State::Working { reply_to, main } => match ask {
+            Ask::Host { tool, effect, input } => {
+                let made = Asking { name, call, deadline };
+                host_call(run, run_id, conversations, calls, alarms, id, made, tool, effect, input, env, out);
+                State::Working { reply_to, main }
+            }
             Ask::Deliver { change } => {
                 assert!(main == id, "only main is offered delivery");
                 let made = Asking { name, call, deadline };
@@ -468,7 +477,7 @@ pub(crate) fn delegated(
                 finish(run, run_id, conversations, calls, alarms, reply_to, main, over, made, outcome, env, out)
             }
             // Past the budget, nothing new is opened.
-            Ask::Deliver { .. } | Ask::SubAgent { .. } => {
+            Ask::Host { .. } | Ask::Deliver { .. } | Ask::SubAgent { .. } => {
                 out.push(Request::Return { call, result: Returned::Refused { refusal: AskRefusal::Over } });
                 State::Over { reply_to, main, exhausted }
             }
@@ -507,7 +516,7 @@ pub(crate) fn checked(domain: &mut Domain, env: &Env<Limits>, owner: Token, ran:
     domain.facts.push(Fact::CheckFinished { run: call.run.token(), exit: ran.exit });
     let settled = match &mut call.work {
         Work::Landing(landing) => land::checked(landing, id, call.owner, run, may_finish(&run.state), ran, env, out),
-        Work::Child(_) => unreachable!("io and the worker answer only a landing's requests"),
+        Work::Child(_) | Work::Host(_) => unreachable!("io and the worker answer only a landing's requests"),
     };
     settle(domain, id, settled, out);
 }
@@ -518,7 +527,7 @@ pub(crate) fn aborted(domain: &mut Domain, owner: Token, out: &mut Queue<Request
     domain.facts.about(call.run.token());
     let settled = match &mut call.work {
         Work::Landing(landing) => land::aborted(landing, call.owner, out),
-        Work::Child(_) => unreachable!("io and the worker answer only a landing's requests"),
+        Work::Child(_) | Work::Host(_) => unreachable!("io and the worker answer only a landing's requests"),
     };
     settle(domain, id, settled, out);
 }
@@ -537,7 +546,7 @@ pub(crate) fn delivered(domain: &mut Domain, owner: Token, delivery: Delivery, o
     domain.facts.push(Fact::Delivered { run: call.run.token(), push: delivery.status() });
     let settled = match &mut call.work {
         Work::Landing(landing) => land::delivered(landing, call.owner, delivery, run, out),
-        Work::Child(_) => unreachable!("host answers a delivery call"),
+        Work::Child(_) | Work::Host(_) => unreachable!("host answers a delivery call"),
     };
     settle(domain, id, settled, out);
 }
@@ -567,7 +576,7 @@ pub(crate) fn ended(domain: &mut Domain, conversation: Token, end: End, spend: S
         let call = calls.get_mut(asker).expect("a sub-agent's call lives until it has ended");
         let result = match &mut call.work {
             Work::Child(child) => agent::ended(child, end),
-            Work::Landing(_) => unreachable!("a sub-agent serves a sub-agent's call"),
+            Work::Landing(_) | Work::Host(_) => unreachable!("a sub-agent serves a sub-agent's call"),
         };
         out.push(Request::Return { call: call.owner, result });
         retire_call(calls, alarms, conversations, asker);
@@ -888,7 +897,7 @@ fn finish(
             let id = begin_call(calls, alarms, Call { run: run_id, conversation: main, owner: call, work }, deadline);
             match &mut calls.get_mut(id).expect("inserted above").work {
                 Work::Landing(landing) => land::begin(landing, id, run, env, out),
-                Work::Child(_) => unreachable!("inserted as a landing"),
+                Work::Child(_) | Work::Host(_) => unreachable!("inserted as a landing"),
             }
             let conversation = conversations.get_mut(main).expect("main lives while its run works");
             conversation.calls = conversation.calls.saturating_add(1);
@@ -944,7 +953,7 @@ fn deliver(
     let id = begin_call(calls, alarms, Call { run: run_id, conversation: main, owner: call, work }, deadline);
     match &mut calls.get_mut(id).expect("inserted above").work {
         Work::Landing(landing) => land::begin(landing, id, run, env, out),
-        Work::Child(_) => unreachable!("inserted as delivery"),
+        Work::Child(_) | Work::Host(_) => unreachable!("inserted as delivery"),
     }
     let main = conversations.get_mut(main).expect("main lives");
     main.calls = main.calls.checked_add(1).expect("bounded exclusive call");
@@ -1030,6 +1039,7 @@ fn sub_agent(
     asking.calls = asking.calls.saturating_add(1);
     run.conversations = run.conversations.saturating_add(1);
     let opening = Opening {
+        host_tools: Box::new([]),
         deliver: false,
         system: prompt::child(&run.charter, &run.found, &wanted.brief, plan.families),
         prompt: copy_of(prompt::BEGIN),
@@ -1057,9 +1067,18 @@ fn begin_call(calls: &mut Calls, alarms: &mut Deadlines<Alarm>, call: Call, dead
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn stop_call(domain: &mut Domain, id: Id<Call>, why: Withdrawal, out: &mut Queue<Request>) {
+    let host = match &domain.calls.get(id).expect("live call").work {
+        Work::Host(_) => true,
+        Work::Child(_) | Work::Landing(_) => false,
+    };
+    if host {
+        host_stop(domain, id, why, out);
+        return;
+    }
     let call = domain.calls.get_mut(id).expect("a call lives until it returns, and its alarm with it");
     domain.facts.about(call.run.token());
     match &mut call.work {
+        Work::Host(_) => unreachable!("host stop dispatched above"),
         Work::Landing(landing) => land::withdraw(landing, id, why, out),
         Work::Child(child) => {
             if let Some(child) = agent::withdraw(child, why) {
@@ -1083,6 +1102,7 @@ fn retire_call(
     let (run, conversation) = (call.run, call.conversation);
     calls.retire(id);
     alarms.cancel(Alarm::Call { call: id });
+    alarms.cancel(Alarm::Host { call: id });
     let conversation = conversations.get_mut(conversation).expect("a conversation outlives its calls");
     conversation.calls = conversation.calls.checked_sub(1).expect("a conversation counts its calls");
     run
@@ -1150,6 +1170,7 @@ fn answer(reply_to: ReplyTo, answer: Answer, out: &mut Queue<Request>) -> State 
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn opening(charter: &Charter, found: &Found, spent: Spend, left: Duration) -> Opening {
     Opening {
+        host_tools: charter.grants.host_tools.clone(),
         deliver: charter.grants.deliver.is_some(),
         llm: charter.llm.clone(),
         system: prompt::system(charter, found),
@@ -1225,4 +1246,271 @@ fn unfinished(stop: Stop, nudges: u32, rejected: u32) -> Failure {
         Stop::Refusal => Failure::Model(Fault::Refused),
         Stop::NoCalls => Failure::Model(Fault::Malformed),
     }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "host admission checks the owning conversation and immutable call fields"
+)]
+fn host_call(
+    run: &Run,
+    run_id: Id<Run>,
+    conversations: &mut Slab<Conversation>,
+    calls: &mut Calls,
+    alarms: &mut Deadlines<Alarm>,
+    conversation: Id<Conversation>,
+    made: Asking,
+    tool: Box<[u8]>,
+    effect: crate::HostEffect,
+    input: crate::HostInput,
+    env: &Env<Limits>,
+    out: &mut Queue<Request>,
+) {
+    let Asking { name, call, deadline } = made;
+    if conversations.get(conversation).expect("caller lives").asker.is_some() {
+        out.push(Request::Return { call, result: Returned::HostRejected(crate::HostProblem::Undeclared) });
+        return;
+    }
+    let mut timeout = None;
+    for declaration in &run.charter.grants.host_tools {
+        if declaration.name == tool {
+            if declaration.effect != effect {
+                out.push(Request::Return { call, result: Returned::HostRejected(crate::HostProblem::Effect) });
+                return;
+            }
+            timeout = Some(declaration.timeout.min(env.limits.host_timeout));
+        }
+    }
+    let Some(timeout) = timeout else {
+        out.push(Request::Return { call, result: Returned::HostRejected(crate::HostProblem::Undeclared) });
+        return;
+    };
+    if input.bytes().len() > usize::try_from(env.limits.host_input_bytes).expect("byte cap fits") {
+        out.push(Request::Return { call, result: Returned::HostRejected(crate::HostProblem::TooLarge) });
+        return;
+    }
+    if name.completion == 0 {
+        out.push(Request::Return { call, result: Returned::Refused { refusal: AskRefusal::Name } });
+        return;
+    }
+    if env.now >= deadline || env.now >= run.deadline {
+        out.push(Request::Return { call, result: Returned::TimedOut });
+        return;
+    }
+    if calls.is_full() {
+        out.push(Request::Return { call, result: Returned::Busy });
+        return;
+    }
+    let relay = crate::host::Relay {
+        name,
+        tool,
+        effect,
+        input,
+        timeout,
+        caller_deadline: deadline.min(run.deadline),
+        stopped: None,
+        unknown: false,
+        stage: crate::host::Stage::Closed,
+    };
+    let work = Work::Host(relay);
+    let id = begin_call(calls, alarms, Call { run: run_id, conversation, owner: call, work }, deadline);
+    match &mut calls.get_mut(id).expect("inserted above").work {
+        Work::Host(relay) => host_send(relay, id, run.worker, 1, env.now, out),
+        Work::Child(_) | Work::Landing(_) => unreachable!("inserted as host relay"),
+    }
+    let caller = conversations.get_mut(conversation).expect("caller lives");
+    caller.calls = caller.calls.checked_add(1).expect("bounded calls");
+    host_follow(calls, alarms, id);
+}
+
+fn host_send(
+    relay: &mut crate::host::Relay,
+    id: Id<Call>,
+    worker: Token,
+    attempt: u32,
+    now: Time,
+    out: &mut Queue<Request>,
+) {
+    let deadline = now.saturating_add(relay.timeout).min(relay.caller_deadline);
+    assert!(now < deadline, "admission and recovery refuse expired relays");
+    out.push(Request::HostCall {
+        worker,
+        relay: crate::RelayName { owner: id.token(), attempt },
+        name: relay.name,
+        tool: relay.tool.clone(),
+        effect: relay.effect,
+        input: relay.input.clone(),
+        deadline,
+    });
+    relay.stage = crate::host::Stage::Sending { attempt, deadline };
+}
+
+fn host_follow(calls: &Calls, alarms: &mut Deadlines<Alarm>, id: Id<Call>) {
+    let relay = match &calls.get(id).expect("host call lives").work {
+        Work::Host(relay) => relay,
+        Work::Child(_) | Work::Landing(_) => unreachable!("host handler owns its call"),
+    };
+    let at = match relay.stage {
+        crate::host::Stage::Sending { deadline, .. } => Some(deadline),
+        crate::host::Stage::Backoff { at, .. } => Some(at),
+        crate::host::Stage::Withdrawing { .. } | crate::host::Stage::Closed => None,
+    };
+    if let Some(at) = at {
+        alarms.arm(Alarm::Host { call: id }, at).expect("two alarm slots per call");
+    } else {
+        alarms.cancel(Alarm::Host { call: id });
+    }
+}
+
+fn host_return(domain: &mut Domain, id: Id<Call>, result: Returned, out: &mut Queue<Request>) {
+    let call = domain.calls.get(id).expect("host call lives");
+    domain.facts.about(call.run.token());
+    let owner = call.owner;
+    out.push(Request::Return { call: owner, result });
+    retire_call(&mut domain.calls, &mut domain.alarms, &mut domain.conversations, id);
+}
+
+fn host_stop(domain: &mut Domain, id: Id<Call>, why: Withdrawal, out: &mut Queue<Request>) {
+    let call = domain.calls.get_mut(id).expect("caller lives until relay settles");
+    let relay = match &mut call.work {
+        Work::Host(relay) => relay,
+        Work::Child(_) | Work::Landing(_) => unreachable!("host stop dispatched by work kind"),
+    };
+    relay.stopped = relay.stopped.or(Some(why));
+    let stage = mem::replace(&mut relay.stage, crate::host::Stage::Closed);
+    let result = match stage {
+        crate::host::Stage::Sending { attempt, .. } => {
+            out.push(Request::WithdrawHost { relay: crate::RelayName { owner: id.token(), attempt } });
+            relay.stage = crate::host::Stage::Withdrawing { attempt };
+            None
+        }
+        crate::host::Stage::Withdrawing { attempt } => {
+            relay.stage = crate::host::Stage::Withdrawing { attempt };
+            None
+        }
+        crate::host::Stage::Backoff { .. } => {
+            Some(if relay.unknown { Returned::HostUnknown } else { crate::call::stopped(why) })
+        }
+        crate::host::Stage::Closed => unreachable!("only a live call stops"),
+    };
+    if let Some(result) = result {
+        host_return(domain, id, result, out);
+    } else {
+        host_follow(&domain.calls, &mut domain.alarms, id);
+    }
+}
+
+pub(crate) fn host_alarm(domain: &mut Domain, env: &Env<Limits>, id: Id<Call>, out: &mut Queue<Request>) {
+    let call = domain.calls.get_mut(id).expect("alarm belongs to live host call");
+    let run = domain.runs.get(call.run).expect("run waits for calls");
+    let active = host_active(&run.state);
+    let relay = match &mut call.work {
+        Work::Host(relay) => relay,
+        Work::Child(_) | Work::Landing(_) => unreachable!("host alarm belongs to host work"),
+    };
+    let stage = mem::replace(&mut relay.stage, crate::host::Stage::Closed);
+    let result = match stage {
+        crate::host::Stage::Sending { attempt, .. } => {
+            out.push(Request::WithdrawHost { relay: crate::RelayName { owner: id.token(), attempt } });
+            relay.stage = crate::host::Stage::Withdrawing { attempt };
+            None
+        }
+        crate::host::Stage::Backoff { attempt, .. } => {
+            if active && relay.stopped.is_none() && env.now < relay.caller_deadline {
+                host_send(relay, id, run.worker, attempt, env.now, out);
+                None
+            } else {
+                Some(if relay.unknown { Returned::HostUnknown } else { Returned::Busy })
+            }
+        }
+        crate::host::Stage::Withdrawing { .. } | crate::host::Stage::Closed => unreachable!("non-timed host stage"),
+    };
+    if let Some(result) = result {
+        host_return(domain, id, result, out);
+    } else {
+        host_follow(&domain.calls, &mut domain.alarms, id);
+    }
+}
+
+fn host_active(state: &State) -> bool {
+    match state {
+        State::Working { .. } => true,
+        State::Preparing { .. }
+        | State::Stopping { .. }
+        | State::Over { .. }
+        | State::Winding { .. }
+        | State::Closed => false,
+    }
+}
+
+pub(crate) fn host_returned(
+    domain: &mut Domain,
+    env: &Env<Limits>,
+    name: crate::RelayName,
+    reply: crate::HostReply,
+    out: &mut Queue<Request>,
+) {
+    let id = Id::<Call>::from_token(name.owner);
+    let Some(call) = domain.calls.get(id) else {
+        return;
+    };
+    if domain.calls.find(call.conversation, call.owner) != Some(id) {
+        return;
+    }
+    let relay = match &call.work {
+        Work::Host(relay) => relay,
+        Work::Child(_) | Work::Landing(_) => return,
+    };
+    let expected = match relay.stage {
+        crate::host::Stage::Sending { attempt, .. } | crate::host::Stage::Withdrawing { attempt } => Some(attempt),
+        crate::host::Stage::Backoff { .. } | crate::host::Stage::Closed => None,
+    };
+    if expected != Some(name.attempt) {
+        return;
+    }
+    let call = domain.calls.get_mut(id).expect("named call is live");
+    let run = domain.runs.get(call.run).expect("run waits for relay terminal");
+    let active = host_active(&run.state);
+    let relay = match &mut call.work {
+        Work::Host(relay) => relay,
+        Work::Child(_) | Work::Landing(_) => unreachable!("verified host work"),
+    };
+    relay.stage = crate::host::Stage::Closed;
+    let result = match reply {
+        crate::HostReply::Answered(answer) => {
+            Some(if answer.text().len() <= usize::try_from(env.limits.host_reply_bytes).expect("cap fits") {
+                Returned::HostAnswered(answer)
+            } else {
+                Returned::HostUnknown
+            })
+        }
+        crate::HostReply::Busy => {
+            let exhausted = if relay.unknown { Returned::HostUnknown } else { Returned::Busy };
+            host_recover(relay, name.attempt, active, env, exhausted)
+        }
+        crate::HostReply::Unanswered(_) => {
+            relay.unknown = true;
+            host_recover(relay, name.attempt, active, env, Returned::HostUnknown)
+        }
+    };
+    if let Some(result) = result {
+        host_return(domain, id, result, out);
+    } else {
+        host_follow(&domain.calls, &mut domain.alarms, id);
+    }
+}
+
+fn host_recover(
+    relay: &mut crate::host::Relay,
+    attempt: u32,
+    active: bool,
+    env: &Env<Limits>,
+    exhausted: Returned,
+) -> Option<Returned> {
+    let at = env.now.saturating_add(env.limits.host_backoff);
+    if !active || relay.stopped.is_some() || attempt >= env.limits.host_attempts || at >= relay.caller_deadline {
+        return Some(exhausted);
+    }
+    relay.stage = crate::host::Stage::Backoff { attempt: attempt.checked_add(1).expect("bounded attempts"), at };
+    None
 }

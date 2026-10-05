@@ -184,6 +184,8 @@ pub enum Fact {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Asked {
+    /// An opaque declared host-tool call. Contract: domain/run.md, sections 5.2 and 11.
+    Host,
     /// Main requested separately granted delivery. Contract: domain/run.md, sections 8.4 and 12.
     Deliver,
     /// The LLM declared a run result.
@@ -201,6 +203,12 @@ pub enum Asked {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Return {
+    /// Actual bounded host text reached the caller. Contract: domain/run.md, sections 5.2 and 11.
+    HostAnswered,
+    /// Relay settled but no permitted recovery can learn its outcome. Contract: domain/run.md, sections 5.2 and 11.
+    HostUnknown,
+    /// Host declaration/input refused before effects. Contract: domain/run.md, sections 5.2 and 11.
+    HostRejected,
     /// Actual host delivery evidence. Contract: domain/run.md, sections 8.2 and 12.
     Delivered,
     /// No changed directory. Contract: domain/run.md, sections 8.2 and 12.
@@ -358,7 +366,9 @@ pub(crate) fn tell(
                 Fact::CheckStarted { run, deadline: *deadline }
             }
             Request::Answer { to: _, answer } => Fact::Answered { run, answer: answered(answer) },
-            Request::Say { .. }
+            Request::HostCall { .. }
+            | Request::WithdrawHost { .. }
+            | Request::Say { .. }
             | Request::Close { .. }
             | Request::Read { .. }
             | Request::Probe { .. }
@@ -372,6 +382,9 @@ pub(crate) fn tell(
 
 fn result_of(result: &Returned) -> Return {
     match result {
+        Returned::HostAnswered(_) => Return::HostAnswered,
+        Returned::HostUnknown => Return::HostUnknown,
+        Returned::HostRejected(_) => Return::HostRejected,
         Returned::Delivered(_) => Return::Delivered,
         Returned::Nothing => Return::Nothing,
         Returned::DeliveryRefused(_) => Return::DeliveryRefused,

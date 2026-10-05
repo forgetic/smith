@@ -22,7 +22,8 @@
 //!
 //! Copy baseline: temper `25ac2ad`, migration 05s2 (domain/run.md, section 14).
 //! Generic result contracts implement domain/run.md, section 7 in 05s4.
-//! Generic delivery implements domain/run.md, section 8. The copied charter,
+//! Generic delivery implements domain/run.md, section 8; opaque host tools and
+//! bounded settled recovery implement section 5.2. The copied charter,
 //! fixed check convention and split token budget remain for subsequent increments (domain/run.md, section 14).
 
 //!
@@ -48,6 +49,7 @@ pub mod charter;
 mod delivery;
 mod domain;
 pub mod facts;
+mod host;
 mod land;
 mod limits;
 pub mod outcome;
@@ -70,3 +72,5 @@ pub use delivery::{
     CallName, Delivered, Delivery, DeliveryFailure, DeliveryReason, DeliveryRefusal, DeliveryStatus, Diagnostic,
     MAX_DIRECTORIES, Marker, Receipt,
 };
+
+pub use host::{HostAnswer, HostEffect, HostInput, HostProblem, HostReply, HostTool, RelayName, Unanswered};

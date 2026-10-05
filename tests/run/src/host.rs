@@ -45,7 +45,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use skein_lib::{Duration, ReplyTo, Rng, Time, Token};
-use smith_domain_run::charter::{Checkout, Endpoint, Grants, Llm, Outlet, Repository, Tools};
+use smith_domain_run::charter::{Checkout, Endpoint, Grants, HostTool, Llm, Repository, Tools};
 use smith_domain_run::outcome::{ChangeSpec, FieldRule, OutcomeSpec, TextSpec, VerdictRule};
 use smith_domain_run::{Budget, Charter, Delivery, Event};
 
@@ -485,7 +485,7 @@ impl Host {
     /// - The checkout is one or two repositories, the first writable with the
     ///   configured chance.
     /// - Reading is always granted; writing, the shell, forge reads and a
-    ///   "comment" outlet each at random; sub-agents with the configured
+    ///   "comment" host tool each at random; sub-agents with the configured
     ///   chance, with two more models listed for them.
     /// - Result permissions include change, the closed verdicts "approve"
     ///   and "request-changes", report and declared failure, at the configured
@@ -505,8 +505,18 @@ impl Host {
             repositories.push(Repository { name: Box::from(&b"docs"[..]), root: self.name(), writable: false });
         }
         let tools = Tools { inspect: true, modify: self.rng.chance(500), shell: self.rng.chance(500) };
-        let forge = self.rng.chance(500);
-        let outlets = if self.rng.chance(500) { vec![Outlet { name: Box::from(&b"comment"[..]) }] } else { Vec::new() };
+        let _retired_forge_draw = self.rng.chance(500);
+        let host_tools = if self.rng.chance(500) {
+            vec![HostTool {
+                name: Box::from(&b"comment"[..]),
+                description: b"Host action".as_slice().into(),
+                schema: b"{}".as_slice().into(),
+                effect: smith_domain_run::HostEffect::Read,
+                timeout: Duration::from_secs(5),
+            }]
+        } else {
+            Vec::new()
+        };
         let verdicts = if self.rng.chance(script.verdicts) { verdicts() } else { Vec::new() };
         let report = script.reports > 0 && self.rng.chance(script.reports);
         let failure = script.failures > 0 && self.rng.chance(script.failures);
@@ -531,7 +541,7 @@ impl Host {
         Charter {
             brief,
             checkout: Checkout { repositories: repositories.into() },
-            grants: Grants { deliver: None, tools, forge, agents, outlets: outlets.into() },
+            grants: Grants { deliver: None, tools, agents, host_tools: host_tools.into() },
             outcome: OutcomeSpec {
                 change: change.then_some(ChangeSpec {
                     fields: Box::new([

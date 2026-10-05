@@ -60,8 +60,15 @@ pub struct Prompt {
 /// protocol layer decodes into a [`run::Ask`].
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Served {
+    /// Main-only host declaration, handed unchanged to the provider schema layer.
+    /// Contract: domain/run.md, sections 3, 5.1, 5.2 and 12.
+    Host(
+        /// Whole admitted bounded declaration, copied without schema or policy interpretation.
+        /// Contract: domain/run.md, sections 3, 5.2 and 12.
+        run::HostTool,
+    ),
     /// Main-only mid-run delivery descriptor, offered only by a separate grant.
     /// This fixed descriptor names a tool; operation names come from transcript origin.
     /// Contract: domain/run.md, sections 8.2 and 8.4; domain/host.md, section 2.

@@ -6,7 +6,7 @@ use std::mem::size_of;
 
 use skein_lib::{Duration, Env, Queue, ReplyTo, Time, Token, Wall};
 use skein_world::domain::heap::{self, Meter};
-use smith_domain_run::charter::{Checkout, Endpoint, Families, Grants, Llm, Outlet, Repository, Tools};
+use smith_domain_run::charter::{Checkout, Endpoint, Families, Grants, HostTool, Llm, Repository, Tools};
 use smith_domain_run::outcome::{Change, ChangeSpec, Declared, Field, FieldRule, ItemRule, OutcomeSpec, VerdictRule};
 use smith_domain_run::{
     Answer, Ask, Budget, Charter, Domain, End, Event, Exit, Invalid, Limits, MAX_OUT, Ran, Read, Refusal, Request,
@@ -38,7 +38,12 @@ const LIMITS: Limits = Limits {
     conversations: 2,
     run_bytes: 1024,
     repositories: 1,
-    outlets: 1,
+    host_tools: 1,
+    host_input_bytes: 65_536,
+    host_reply_bytes: 65_536,
+    host_timeout: Duration::from_secs(60),
+    host_backoff: Duration::from_millis(50),
+    host_attempts: 3,
     verdicts: 1,
     calls: 2,
     budget: BUDGET,
@@ -62,7 +67,7 @@ const LIMITS: Limits = Limits {
 /// and a brief of the rest.
 fn charter(held: u64) -> Charter {
     let parts =
-        (size(size_of::<Repository>()) + 1) + (size(size_of::<Outlet>()) + 1) + 1 + (size(size_of::<Llm>()) + 1);
+        (size(size_of::<Repository>()) + 1) + (size(size_of::<HostTool>()) + 14) + 1 + (size(size_of::<Llm>()) + 1);
     let rule = size(size_of::<VerdictRule>()) + 1 + size(size_of::<ItemRule>()) + 1 + size(size_of::<FieldRule>()) + 1;
     let change_rules = 2 * size(size_of::<FieldRule>()) + 5 + 4;
     Charter {
@@ -73,9 +78,15 @@ fn charter(held: u64) -> Charter {
         grants: Grants {
             deliver: None,
             tools: Tools { inspect: true, modify: true, shell: true },
-            forge: true,
+
             agents: true,
-            outlets: Box::new([Outlet { name: bytes(1) }]),
+            host_tools: Box::new([HostTool {
+                name: bytes(1),
+                description: b"Host action".as_slice().into(),
+                schema: b"{}".as_slice().into(),
+                effect: smith_domain_run::HostEffect::Read,
+                timeout: Duration::from_secs(5),
+            }]),
         },
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
@@ -159,7 +170,9 @@ fn fill(limits: Limits) {
                 Request::Probe { owner, .. } => Asked::Probe { owner },
                 Request::Check { owner, .. } => Asked::Check { owner },
                 Request::Answer { answer, to: _ } => Asked::Answer { answer },
-                Request::Admitted { .. }
+                Request::HostCall { .. }
+                | Request::WithdrawHost { .. }
+                | Request::Admitted { .. }
                 | Request::Say { .. }
                 | Request::Close { .. }
                 | Request::Abort { .. }
@@ -190,8 +203,7 @@ fn fill(limits: Limits) {
         assert!(step(Event::Used { conversation, spend }).is_empty(), "within the budget");
         let yielded = Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(100) };
         assert_eq!(step(yielded), [Asked::Other], "nudged");
-        let families =
-            Families { tools: Tools { inspect: true, modify: false, shell: false }, forge: false, agents: false };
+        let families = Families { tools: Tools { inspect: true, modify: false, shell: false }, agents: false };
         let ask = Ask::SubAgent { brief: bytes(10), families, llm: Some(bytes(1)), share: None };
         let delegated = Event::Delegated {
             name: smith_domain_run::CallName { completion: 1, position: 0 },
@@ -339,7 +351,9 @@ fn delivery_memory_step(
                 answered = true;
             }
             Request::Admitted { .. } | Request::Checking { .. } | Request::Close { .. } => {}
-            unexpected @ (Request::Answer { .. }
+            unexpected @ (Request::HostCall { .. }
+            | Request::WithdrawHost { .. }
+            | Request::Answer { .. }
             | Request::Return { .. }
             | Request::Say { .. }
             | Request::Abort { .. }) => panic!("unexpected delivery fixture output {unexpected:?}"),
@@ -370,9 +384,9 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
         grants: Grants {
             deliver: Some(ChangeSpec { fields: Box::new([]) }),
             tools: Tools { inspect: true, modify: true, shell: true },
-            forge: false,
+
             agents: false,
-            outlets: Box::new([]),
+            host_tools: Box::new([]),
         },
         outcome: OutcomeSpec {
             change: None,
@@ -451,4 +465,129 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
         Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO },
     );
     assert!(answered, "one typed interrupted-landing answer carries every receipt");
+}
+
+fn host_memory_take(
+    domain: &mut Domain,
+    env: &Env<Limits>,
+    out: &mut Queue<Request>,
+    meter: &Meter,
+    event: Option<Event>,
+) -> (Option<Token>, Option<smith_domain_run::RelayName>) {
+    meter.start();
+    match event {
+        Some(event) => smith_domain_run::step(domain, env, event, out),
+        None => smith_domain_run::fire(domain, env, out),
+    }
+    let measured = meter.end();
+    let mut token = None;
+    let mut relay = None;
+    while let Some(request) = out.pop() {
+        match request {
+            Request::HostCall { relay: name, input, tool, .. } => {
+                assert_eq!(input.bytes().len(), usize::try_from(env.limits.host_input_bytes).expect("cap fits"));
+                assert_eq!(tool.len(), 1);
+                relay = Some(name);
+            }
+            Request::Return { result: smith_domain_run::Returned::HostAnswered(answer), .. } => {
+                assert_eq!(answer.text().len(), usize::try_from(env.limits.host_reply_bytes).expect("cap fits"));
+            }
+            Request::Read { owner, .. } => token = Some(owner),
+            Request::Open { conversation, opening } => {
+                assert_eq!(opening.host_tools.len(), 1);
+                token = Some(conversation);
+            }
+            Request::Admitted { .. }
+            | Request::WithdrawHost { .. }
+            | Request::Close { .. }
+            | Request::Answer { .. } => {}
+            unexpected @ (Request::Return { .. }
+            | Request::Say { .. }
+            | Request::Probe { .. }
+            | Request::Abort { .. }
+            | Request::Check { .. }
+            | Request::Checking { .. }
+            | Request::Deliver { .. }) => panic!("unexpected host memory output {unexpected:?}"),
+        }
+    }
+    meter.check(measured, worst_case(&env.limits).expect("bounded limits"), &"full immutable host relay path");
+    (token, relay)
+}
+
+#[test]
+fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measured_ownership_bound() {
+    let limits = Limits { run_bytes: 4096, ..LIMITS };
+    let mut env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut out = Queue::with_capacity(MAX_OUT);
+    let meter = Meter::new();
+    let mut domain = Domain::new(&limits);
+    let mut charter = charter(limits.run_bytes);
+    charter.checkout.repositories[0].writable = false;
+    // Move the brief budget into opaque schema storage, retaining exact aggregate charge.
+    let tool = &mut charter.grants.host_tools[0];
+    tool.schema = bytes(u64::try_from(tool.schema.len() + charter.brief.len()).expect("bounded declaration"));
+    charter.brief = Box::new([]);
+    let (run, _) = host_memory_take(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Some(Event::Start { reply_to: ReplyTo::new(Token::new(88)), worker: Token::new(91), charter }),
+    );
+    let run = run.expect("real admitted run reads");
+    let (conversation, _) = host_memory_take(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Some(Event::Read { owner: run, read: smith_domain_run::Read::Missing }),
+    );
+    let conversation = conversation.expect("main opens with complete declaration");
+    host_memory_take(&mut domain, &env, &mut out, &meter, Some(Event::Started { conversation, peer: Token::new(99) }));
+    let mut input = vec![b' '; usize::try_from(limits.host_input_bytes).expect("cap fits")];
+    input[0] = b'{';
+    let last = input.len() - 1;
+    input[last] = b'}';
+    let input = smith_domain_run::HostInput::attested(input.into()).expect("maximum protocol-attested object");
+    let (_, relay) = host_memory_take(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Some(Event::Delegated {
+            conversation,
+            call: Token::new(101),
+            name: smith_domain_run::CallName { completion: 1, position: 0 },
+            ask: smith_domain_run::Ask::Host { tool: bytes(1), effect: smith_domain_run::HostEffect::Read, input },
+            deadline: Time::ZERO.saturating_add(Duration::from_secs(30)),
+        }),
+    );
+    let mut relay = relay.expect("maximum body relayed");
+    for reply in
+        [smith_domain_run::HostReply::Unanswered(smith_domain_run::Unanswered::Lost), smith_domain_run::HostReply::Busy]
+    {
+        host_memory_take(&mut domain, &env, &mut out, &meter, Some(Event::HostReturned { relay, reply }));
+        env.now = env.now.saturating_add(limits.host_backoff);
+        let (_, recovered) = host_memory_take(&mut domain, &env, &mut out, &meter, None);
+        relay = recovered.expect("retained maximum body is copied into retry output");
+    }
+    let answer =
+        smith_domain_run::HostAnswer::new(bytes(u64::from(limits.host_reply_bytes)), false).expect("maximum answer");
+    host_memory_take(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Some(Event::HostReturned { relay, reply: smith_domain_run::HostReply::Answered(answer) }),
+    );
+    host_memory_take(&mut domain, &env, &mut out, &meter, Some(Event::Cancel { run }));
+    host_memory_take(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Some(Event::Ended { conversation, end: smith_domain_run::End::Closed, spend: smith_domain_run::Spend::ZERO }),
+    );
+    domain.reclaim();
+    assert_eq!((domain.runs(), domain.conversations(), domain.calls()), (0, 0, 0));
 }

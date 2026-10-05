@@ -129,3 +129,14 @@ the run world has 32 focused tests / 0.549 seconds and one fuzzy test /
 0.264 seconds. Shares sum rounded individual PASS durations. The additional
 mid-delivery schedule sweep retains all five actual host outcomes; the
 existing memory and replay sweeps remain. Workspace budgets are unchanged.
+
+05s4 HOST TOOLS was measured serially on 2026-10-05 from `2a621a5`
+plus the independently reviewed host-tools increment. The commands in section 2
+passed 411 focused tests in 4.764 seconds and nine fuzzy tests in 15.212
+seconds, with no skips. The affected agent world has 49 focused tests /
+0.324 seconds and three fuzzy tests / 6.508 seconds; the run world has
+33 focused tests / 0.566 seconds and one fuzzy test / 0.314 seconds.
+Shares sum rounded individual PASS durations. Full opaque inputs and replies,
+settled recovery, actual shutdown and the existing memory/replay sweeps remain.
+Workspace budgets are unchanged. Exact source-commit gate results are recorded
+in the migration evidence companion after validation.

@@ -117,7 +117,12 @@ impl Settings {
                 conversations: 16,
                 run_bytes: 1 << 16,
                 repositories: 4,
-                outlets: 4,
+                host_tools: 4,
+                host_input_bytes: 65_536,
+                host_reply_bytes: 65_536,
+                host_timeout: Duration::from_secs(60),
+                host_backoff: Duration::from_millis(50),
+                host_attempts: 3,
                 verdicts: 4,
                 calls: 16,
                 budget: run::Budget {
@@ -744,6 +749,9 @@ impl World {
         self.log(&format!("run -> {request:?}"));
         let mut current = current;
         match request {
+            run::Request::HostCall { .. } | run::Request::WithdrawHost { .. } => {
+                panic!("legacy run scripts do not invoke generic host tools")
+            }
             run::Request::Admitted { worker, run } => {
                 let Start { budget, checks, .. } = &self.starts[&worker];
                 let view = RunView {
@@ -874,7 +882,9 @@ impl World {
                     self.schedule(at, Delivery::Io(run::Event::Aborted { owner }));
                 }
             }
-            run::Request::Admitted { .. }
+            run::Request::HostCall { .. }
+            | run::Request::WithdrawHost { .. }
+            | run::Request::Admitted { .. }
             | run::Request::Answer { .. }
             | run::Request::Open { .. }
             | run::Request::Say { .. }
@@ -891,6 +901,7 @@ impl World {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn run_of(&self, event: &run::Event) -> Option<Token> {
         match event {
+            run::Event::HostReturned { .. } => panic!("generic-host terminals are driven by the focused agent world"),
             run::Event::Start { .. } => None,
             run::Event::Cancel { run } => Some(*run),
             run::Event::Read { owner, .. } | run::Event::Probed { owner, .. } => Some(*owner),
@@ -929,7 +940,8 @@ impl World {
                 }
                 return Some((*run, cell));
             }
-            run::Event::Start { .. }
+            run::Event::HostReturned { .. }
+            | run::Event::Start { .. }
             | run::Event::Yielded { .. }
             | run::Event::Ended { .. }
             | run::Event::Delegated { .. }
@@ -1153,7 +1165,8 @@ impl World {
                     }
                     self.send(Lane::Agent, Delivery::Host(run::Event::Delivered { owner, push }));
                 }
-                run::Event::Started { .. }
+                run::Event::HostReturned { .. }
+                | run::Event::Started { .. }
                 | run::Event::Yielded { .. }
                 | run::Event::Used { .. }
                 | run::Event::Ended { .. }
@@ -1238,7 +1251,8 @@ impl World {
                             self.checks.remove(owner);
                             self.checking.remove(owner).is_some()
                         }
-                        run::Event::Start { .. }
+                        run::Event::HostReturned { .. }
+                        | run::Event::Start { .. }
                         | run::Event::Cancel { .. }
                         | run::Event::Started { .. }
                         | run::Event::Yielded { .. }
@@ -1342,7 +1356,8 @@ impl World {
                 assert_eq!(ledger.conversation, *conversation, "a conversation withdraws its own calls");
                 (conversation, false, false)
             }
-            run::Event::Start { .. }
+            run::Event::HostReturned { .. }
+            | run::Event::Start { .. }
             | run::Event::Cancel { .. }
             | run::Event::Read { .. }
             | run::Event::Probed { .. }

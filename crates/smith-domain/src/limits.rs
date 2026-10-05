@@ -79,7 +79,9 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     }
     let children = run::worst_case(run_limits)?.checked_add(session::worst_case(session_limits)?)?;
     let peers = run_limits.conversations;
-    let tickets = Map::<u64, Ask>::worst_case(peer::asks(session_limits))?
+    let tickets = run_limits
+        .run_bytes
+        .checked_add(Map::<u64, Ask>::worst_case(peer::asks(session_limits))?)?
         .checked_add(session_limits.session_bytes)?
         .checked_add(Map::<u64, run::Returned>::worst_case(peer::answers(session_limits))?)?
         .checked_add(uncharged(limits)?)?;
@@ -93,7 +95,10 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     // Each queued run output can independently own a receipt copy, fields,
     // returned feedback or the final interrupted-delivery evidence. Inline
     // request storage is counted by Queue; this is its owned payload.
-    let payload = peer::payload(run_limits)?.max(run_limits.outcome_bytes).max(run::Delivered::worst_case());
+    let payload = peer::payload(run_limits)?
+        .max(run_limits.outcome_bytes)
+        .max(run::Delivered::worst_case())
+        .max(run_limits.run_bytes.checked_add(u64::from(run_limits.host_input_bytes))?);
     let run_out = Queue::<run::Request>::worst_case(run_out(limits))?
         .checked_add(u64::from(run_out(limits)).checked_mul(payload)?)?;
     let session_out = Queue::<session::Request>::worst_case(session_out(limits))?;

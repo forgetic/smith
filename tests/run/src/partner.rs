@@ -486,6 +486,9 @@ impl Partner {
     pub fn returned(&mut self, now: Time, call: Token, result: &Returned, out: &mut Vec<Out>) {
         let peer = self.calls.remove(&call).expect("a return names a call in flight");
         match result {
+            Returned::HostAnswered(_) | Returned::HostUnknown | Returned::HostRejected(_) => {
+                panic!("legacy partner never calls a generic host tool")
+            }
             Returned::Accepted | Returned::Delivered(_) => self.tally.accepted += 1,
             Returned::Nothing | Returned::DeliveryRefused(_) | Returned::DeliveryFailed { .. } => {
                 self.tally.unpushed += 1;

@@ -107,6 +107,7 @@ name = "smith-agent-world"
 version = "0.0.0"
 dependencies = [
  "skein-fake-checkout",
+ "skein-json",
  "skein-lib",
  "skein-world",
  "smith-domain",

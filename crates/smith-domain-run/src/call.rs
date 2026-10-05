@@ -43,6 +43,7 @@ pub(crate) struct Call {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) enum Work {
+    Host(crate::host::Relay),
     /// A finish, landing its change.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
