@@ -848,8 +848,8 @@ mod tests {
     #[test]
     fn missing_empty_duplicate_and_oversized_fields_have_typed_feedback() {
         let spec = specification();
-        let values = [
-            (Box::new([]) as Box<[Field]>, Problem::MissingField { item: None, field: b"summary".as_slice().into() }),
+        let values: [(Box<[Field]>, Problem); 4] = [
+            (Box::new([]), Problem::MissingField { item: None, field: b"summary".as_slice().into() }),
             (fields(b"summary", b""), Problem::EmptyField { item: None, field: b"summary".as_slice().into() }),
             (
                 fields(b"summary", b"large"),
@@ -859,7 +859,7 @@ mod tests {
                 Box::new([
                     Field { name: b"summary".as_slice().into(), value: b"ok".as_slice().into() },
                     Field { name: b"summary".as_slice().into(), value: b"ok".as_slice().into() },
-                ]) as Box<[Field]>,
+                ]),
                 Problem::RepeatedField { item: None, field: b"summary".as_slice().into() },
             ),
         ];
