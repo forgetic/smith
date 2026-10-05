@@ -17,6 +17,10 @@ skein-io = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-http = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-json = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-fake-checkout = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-llm = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-fake-llm-domain = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-fake-llm-protocol = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-llm-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
 smith-host-domain = { path = "crates/smith-host-domain" }
 smith-host-world = { path = "tests/host" }
 smith-agent-world = { path = "tests/agent" }
