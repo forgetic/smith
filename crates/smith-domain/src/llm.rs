@@ -264,7 +264,8 @@ pub enum Said {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         input: Box<[u8]>,
-        /// Typed checkout-tool call decoded below the domain.
+        /// Full decoded classification: owned checkout call, run-served ask,
+        /// or invalid-input problem; the domain executes only admitted classifications.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         call: Decoded,

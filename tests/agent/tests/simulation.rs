@@ -14,8 +14,8 @@ const ITERATIONS: u32 = 20_000;
 
 const FIXED: &[u8] = b"pub fn answer() -> u32 { 43 }\n";
 
-fn settled(settings: Settings) -> World {
-    let mut world = World::new(settings);
+fn settled(settings: &Settings) -> World {
+    let mut world = World::new(*settings);
     world.run(ITERATIONS);
     assert_eq!(world.judged().1, 1, "the referee met the host's one answer obligation");
     world
@@ -34,7 +34,7 @@ fn count(world: &World, predicate: impl Fn(&run::facts::Fact) -> bool) -> usize 
 
 #[test]
 fn a_coding_run_fails_checks_then_fixes_and_lands_the_exact_tree() {
-    let world = settled(Settings::calm(1));
+    let world = settled(&Settings::calm(1));
     assert!(matches!(world.answer(), Answer::Accepted { outcome: Declared::Change(_), .. }));
     assert_eq!(world.checked(), [false, true]);
     assert_eq!(world.pushes(), [Push::Done]);
@@ -49,7 +49,7 @@ fn a_coding_run_fails_checks_then_fixes_and_lands_the_exact_tree() {
 
 #[test]
 fn a_review_retries_the_verdict_its_charter_rejected() {
-    let world = settled(Settings { job: Job::Review, writable: false, ..Settings::calm(2) });
+    let world = settled(&Settings { job: Job::Review, writable: false, ..Settings::calm(2) });
     let Answer::Accepted { outcome: Declared::Verdict(verdict), .. } = world.answer() else {
         panic!("a review answers its verdict")
     };
@@ -64,14 +64,14 @@ fn a_review_retries_the_verdict_its_charter_rejected() {
 
 #[test]
 fn a_writable_review_still_lands_only_its_verdict() {
-    let world = settled(Settings { job: Job::Review, ..Settings::calm(2) });
+    let world = settled(&Settings { job: Job::Review, ..Settings::calm(2) });
     assert!(matches!(world.answer(), Answer::Accepted { outcome: Declared::Verdict(_), .. }));
     assert!(world.landed().is_empty() && world.checked().is_empty() && world.pushes().is_empty());
 }
 
 #[test]
 fn a_report_answers_the_host_without_checks_or_pushes() {
-    let world = settled(Settings { job: Job::Reporting, writable: false, ..Settings::calm(10) });
+    let world = settled(&Settings { job: Job::Reporting, writable: false, ..Settings::calm(10) });
     let Answer::Accepted { outcome: Declared::Verdict(verdict), .. } = world.answer() else {
         panic!("a report answers a verdict")
     };
@@ -81,7 +81,7 @@ fn a_report_answers_the_host_without_checks_or_pushes() {
 
 #[test]
 fn sub_agents_nest_and_return_results_to_their_askers() {
-    let world = settled(Settings { job: Job::Delegating, ..Settings::calm(3) });
+    let world = settled(&Settings { job: Job::Delegating, ..Settings::calm(3) });
     assert!(matches!(world.answer(), Answer::Accepted { outcome: Declared::Change(_), .. }));
     assert_eq!(world.checked(), [true]);
     assert_eq!(world.landed(), FIXED);
@@ -105,7 +105,7 @@ fn sub_agents_nest_and_return_results_to_their_askers() {
 #[test]
 fn the_shared_budget_ends_the_run_after_every_conversation_settles() {
     let world =
-        settled(Settings { job: Job::Spending, budget: run::Budget { turns: 8, ..BUDGET }, ..Settings::calm(4) });
+        settled(&Settings { job: Job::Spending, budget: run::Budget { turns: 8, ..BUDGET }, ..Settings::calm(4) });
     let Answer::Failed { failure: Failure::Budget(Exhausted::Turns), spent } = world.answer() else {
         panic!("the run spends its shared turns")
     };
@@ -116,7 +116,7 @@ fn the_shared_budget_ends_the_run_after_every_conversation_settles() {
 
 #[test]
 fn a_push_on_a_moved_branch_answers_stale_and_lands_nothing() {
-    let world = settled(Settings { push: Push::Moved, ..Settings::calm(5) });
+    let world = settled(&Settings { push: Push::Moved, ..Settings::calm(5) });
     assert!(matches!(world.answer(), Answer::Failed { failure: Failure::Stale, .. }));
     assert_eq!(world.checked(), [false, true]);
     assert_eq!(world.pushes(), [Push::Moved]);
@@ -130,7 +130,7 @@ fn refused_push_feedback_reaches_the_llm_and_is_retried() {
         reason: run::PushReason::Refused,
         diagnostic: run::PushDiagnostic::new(b"remote: push refused", 0),
     };
-    let world = settled(Settings { push: Push::Failed { failure }, ..Settings::calm(9) });
+    let world = settled(&Settings { push: Push::Failed { failure }, ..Settings::calm(9) });
     assert!(matches!(world.answer(), Answer::Failed { failure: Failure::Policy(_), .. }));
     assert_eq!(world.checked(), [false, true, true]);
     assert_eq!(world.pushes(), [Push::Failed { failure }, Push::Failed { failure }]);
@@ -155,7 +155,7 @@ fn host_cancellation_at_many_moments_closes_the_whole_tree() {
             races: 500,
             ..Settings::calm(600 + seed)
         };
-        let world = settled(settings);
+        let world = settled(&settings);
         match world.answer() {
             Answer::Failed { failure: Failure::Cancelled, .. } => {
                 cancelled += 1;
@@ -163,7 +163,9 @@ fn host_cancellation_at_many_moments_closes_the_whole_tree() {
                     usize::from(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { depth: 1, .. })) > 0);
             }
             Answer::Accepted { .. } => done += 1,
-            answer => panic!("seed {seed}: expected cancelled or already finished, got {answer:?}"),
+            answer @ (Answer::Refused(_) | Answer::Failed { .. }) => {
+                panic!("seed {seed}: expected cancelled or already finished, got {answer:?}")
+            }
         }
     }
     assert!(
@@ -176,7 +178,7 @@ fn host_cancellation_at_many_moments_closes_the_whole_tree() {
 fn a_deadline_mid_tree_answers_only_after_the_tree_settles() {
     let mut nested = 0;
     for seed in 0..10 {
-        let world = settled(Settings {
+        let world = settled(&Settings {
             job: Job::Delegating,
             budget: run::Budget { time: Duration::from_secs(4), ..BUDGET },
             ..Settings::calm(700 + seed)
@@ -190,7 +192,7 @@ fn a_deadline_mid_tree_answers_only_after_the_tree_settles() {
 
 #[test]
 fn checks_past_their_deadline_fail_and_are_not_pushed() {
-    let world = settled(Settings { check: skein_world::domain::Span::millis(90_000, 120_000), ..Settings::calm(8) });
+    let world = settled(&Settings { check: skein_world::domain::Span::millis(90_000, 120_000), ..Settings::calm(8) });
     assert!(matches!(world.answer(), Answer::Failed { failure: Failure::Policy(_), .. }));
     assert_eq!(world.checked(), [false, false, false]);
     assert!(world.pushes().is_empty());
@@ -200,7 +202,7 @@ fn checks_past_their_deadline_fail_and_are_not_pushed() {
 fn a_host_start_beyond_run_capacity_is_answered_busy_without_work() {
     let calm = Settings::calm(11);
     let limits = smith_domain::Limits { run: run::Limits { runs: 0, ..calm.limits.run }, ..calm.limits };
-    let world = settled(Settings { limits, ..calm });
+    let world = settled(&Settings { limits, ..calm });
     assert_eq!(world.answer(), &Answer::Refused(run::Refusal::Busy));
     assert!(world.prompts().is_empty() && world.checked().is_empty() && world.pushes().is_empty());
 }
@@ -208,9 +210,9 @@ fn a_host_start_beyond_run_capacity_is_answered_busy_without_work() {
 #[test]
 fn a_scripted_host_retries_a_failed_request_with_a_fresh_agent() {
     // This models a new host start, not a forge merge or an engine plan.
-    let failed = settled(Settings { push: Push::Moved, ..Settings::calm(12) });
+    let failed = settled(&Settings { push: Push::Moved, ..Settings::calm(12) });
     assert!(matches!(failed.answer(), Answer::Failed { failure: Failure::Stale, .. }));
-    let retried = settled(Settings::calm(13));
+    let retried = settled(&Settings::calm(13));
     assert_eq!(retried.landed(), FIXED);
     assert!(matches!(retried.answer(), Answer::Accepted { .. }));
 }
@@ -218,14 +220,14 @@ fn a_scripted_host_retries_a_failed_request_with_a_fresh_agent() {
 #[test]
 fn a_world_replays_its_boundaries_and_answer_from_its_seed() {
     assert_replays(42, 43, |seed| {
-        let world = settled(Settings { job: Job::Delegating, ..Settings::calm(seed) });
+        let world = settled(&Settings { job: Job::Delegating, ..Settings::calm(seed) });
         (world.trace().to_vec(), (format!("{:?}", world.answer()), world.answered_at(), world.landed().to_vec()))
     });
 }
 
 #[test]
 fn dropping_facts_changes_no_agent_decision_or_host_boundary() {
-    let kept = settled(Settings::calm(44));
+    let kept = settled(&Settings::calm(44));
     let calm = Settings::calm(44);
     let limits = smith_domain::Limits {
         run: run::Limits { facts: 0, ..calm.limits.run },
@@ -236,7 +238,7 @@ fn dropping_facts_changes_no_agent_decision_or_host_boundary() {
         },
         ..calm.limits
     };
-    let silent = settled(Settings { limits, drain_facts: false, ..calm });
+    let silent = settled(&Settings { limits, drain_facts: false, ..calm });
     assert_eq!(silent.answer(), kept.answer());
     assert_eq!(silent.trace(), kept.trace());
     assert_eq!(silent.landed(), kept.landed());

@@ -86,7 +86,8 @@ pub enum Block {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         input: Box<[u8]>,
-        /// Typed checkout-tool call decoded below the domain.
+        /// Full decoded classification: owned tool call, opener-served ticket,
+        /// invalid-input problem, or non-executable concrete-history replay marker.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         call: Decoded,
