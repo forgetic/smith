@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use skein_fake_checkout::Checkout;
+use skein_fake_llm_domain as provider;
 use skein_lib::{Duration, ReplyTo, Rng, Time, Token};
 use skein_world::domain::{Key, Ledger, Schedule, Span, Stage, Trace};
 use smith_domain_session as agent;
 use smith_domain_session::llm::{Answer, Block, Decoded, Descriptor, Endpoint, Failure, Prompt, Returned, Usage};
 use smith_domain_tools::{self as tools, Authority, Done, Effect, Fault, Grants, Op, Repo};
-use smith_fake_llm_domain as provider;
 use smith_tools_world::translate as io;
 
 use crate::fixture;
@@ -50,6 +50,7 @@ pub const TOOLS: tools::Limits = tools::Limits {
     file_bytes: 1 << 16,
     read_bytes: 4096,
     list_entries: 64,
+    list_bytes: 4096,
     match_lines: 8,
     file_timeout: Duration::from_secs(30),
     env_bytes: 256,
@@ -169,6 +170,10 @@ impl Settings {
                 spend: 0,
                 messages: 32,
                 session_bytes: 1 << 20,
+                completion_bytes: 4096,
+                completion_blocks: 16,
+                failure_bytes: 512,
+                delegated_result_bytes: 16_384,
                 budget: BUDGET,
                 max_tokens: 4096,
                 retries: 3,
@@ -769,7 +774,9 @@ impl World {
         assert!(agent::worst_case(&settings.agent).is_some(), "the shell refuses limits it cannot provision");
         let mut rng = Rng::new(settings.seed);
         let agent = agent::Domain::new(&settings.agent, rng.next_u64());
-        let provider = provider::Domain::new(&settings.provider, rng.next_u64());
+        let provider =
+            provider::Domain::configured(&settings.provider, rng.next_u64(), Box::new([]), crate::provider::menu())
+                .expect("application menu obeys provider admission");
         let max_out = agent::max_out(&settings.agent);
         let mut checkout = Checkout::new();
         fixture::script(&mut checkout);
@@ -995,7 +1002,7 @@ impl World {
             agent::Request::Ended { opener, end, turns, usage } => {
                 self.ended(opener.raw(), Ended { end, turns, usage });
             }
-            agent::Request::Complete { owner, prompt, timeout } => {
+            agent::Request::Complete { owner, prompt, timeout, .. } => {
                 self.affordable(owner, &prompt);
                 in_call_order(&prompt);
                 self.check_results(owner, &prompt);
@@ -1481,7 +1488,12 @@ impl World {
                     if self.cancel_lost.remove(&owner) {
                         self.stats.failed_after_cancel += 1;
                     }
-                    self.agent_stage.push(agent::Event::Failed { owner, failure: Failure::TimedOut });
+                    self.agent_stage.push(agent::Event::Failed {
+                        owner,
+                        failure: Failure::TimedOut,
+                        evidence: smith_domain_session::llm::Evidence::Unknown,
+                        detail: Default::default(),
+                    });
                     self.stats.timeouts += 1;
                 }
                 Delivery::Cancelled { owner } => self.agent_stage.push(agent::Event::Cancelled { owner }),
@@ -1719,7 +1731,7 @@ fn describe_agent_event(event: &agent::Event) -> String {
         agent::Event::Completed { owner, completion } => {
             format!("completed {} {:?} with {} blocks", owner.raw(), completion.stop, completion.content.len())
         }
-        agent::Event::Failed { owner, failure } => format!("failed {} {failure:?}", owner.raw()),
+        agent::Event::Failed { owner, failure, .. } => format!("failed {} {failure:?}", owner.raw()),
         agent::Event::Cancelled { owner } => format!("cancelled {}", owner.raw()),
         agent::Event::Done { owner, done } => format!("done {} {done:?}", owner.raw()),
         agent::Event::Answered { owner, answer } => format!("answered {} {answer:?}", owner.raw()),
@@ -1739,7 +1751,7 @@ fn describe_agent_request(request: &agent::Request) -> String {
         agent::Request::Ended { opener, end, turns, usage } => {
             format!("ended {} {end:?} after {turns} turns, {usage:?}", opener.raw())
         }
-        agent::Request::Complete { owner, prompt, timeout } => {
+        agent::Request::Complete { owner, prompt, timeout, .. } => {
             let (messages, most) = (prompt.messages.len(), prompt.max_tokens);
             format!("complete {} with {messages} messages, at most {most} tokens, within {timeout:?}", owner.raw())
         }

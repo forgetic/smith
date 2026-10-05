@@ -146,6 +146,9 @@ impl Settings {
                 check_timeout: Duration::from_secs(600),
                 check_tail: 256,
                 facts: 64,
+                messages: 8,
+                message_bytes: 4096,
+                waiting: skein_lib::Duration::from_secs(300),
             },
             host: host::Script {
                 jobs: 4,
@@ -749,6 +752,9 @@ impl World {
         self.log(&format!("run -> {request:?}"));
         let mut current = current;
         match request {
+            run::Request::Turn { .. } | run::Request::Waiting { .. } | run::Request::MessageBounced { .. } => {
+                panic!("source partner sends no V2 turn, wait or parent message")
+            }
             run::Request::HostCall { .. } | run::Request::WithdrawHost { .. } => {
                 panic!("legacy run scripts do not invoke generic host tools")
             }
@@ -884,6 +890,9 @@ impl World {
             }
             run::Request::HostCall { .. }
             | run::Request::WithdrawHost { .. }
+            | run::Request::Turn { .. }
+            | run::Request::Waiting { .. }
+            | run::Request::MessageBounced { .. }
             | run::Request::Admitted { .. }
             | run::Request::Answer { .. }
             | run::Request::Open { .. }
@@ -1148,7 +1157,7 @@ impl World {
     fn host_out(&mut self, out: Vec<run::Event>) {
         for event in out {
             match event {
-                run::Event::Start { reply_to, worker, charter } => {
+                run::Event::Start { reply_to, worker, charter, .. } => {
                     let start = Start { budget: charter.budget, checks: BTreeSet::new(), answer: None };
                     assert!(self.starts.insert(worker, start).is_none(), "jobs have distinct names");
                     self.stats.starts += 1;
@@ -1197,7 +1206,7 @@ impl World {
                         }
                     }
                     self.starts.get_mut(&worker).expect("a start is tracked").checks = checks;
-                    self.run_stage.push(run::Event::Start { reply_to, worker, charter });
+                    self.run_stage.push(run::Event::Start { reply_to, worker, charter, transcript: None });
                 }
                 Delivery::Cancel { run } => self.run_stage.push(run::Event::Cancel { run }),
                 Delivery::Host(event) => self.hand(event),
@@ -1420,7 +1429,8 @@ impl World {
         for (owner, start) in &self.starts {
             let answer = start.answer.as_ref().unwrap_or_else(|| panic!("start {owner:?} was answered"));
             match answer {
-                run::Answer::Delivered { spent, .. }
+                run::Answer::Parked { spent, .. }
+                | run::Answer::Delivered { spent, .. }
                 | run::Answer::Failed { spent, .. }
                 | run::Answer::Accepted { spent, .. } => {
                     answered = answered.saturating_add(*spent);
@@ -1529,7 +1539,8 @@ impl RunView {
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 fn assert_within(budget: &run::Budget, answer: &run::Answer, turn: run::Spend, peak: u32) {
-    let (run::Answer::Delivered { spent, .. }
+    let (run::Answer::Parked { spent, .. }
+    | run::Answer::Delivered { spent, .. }
     | run::Answer::Failed { spent, .. }
     | run::Answer::Accepted { spent, .. }) = answer
     else {

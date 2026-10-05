@@ -26,9 +26,9 @@
 //! what those emitted; [`max_out`] follows from the child domains' along that
 //! chain.
 
-use skein_lib::{Env, Id, Map, Queue, Rng, Set, Slab, Time, Token};
+use skein_lib::{Env, Id, Map, Queue, ReplyTo, Rng, Set, Slab, Time, Token};
 use smith_domain_run as run;
-use smith_domain_session::{self as session, llm as sllm};
+use smith_domain_session::{self as session};
 
 use crate::boundary::{Event, GrantName, Request};
 use crate::facts::Fact;
@@ -59,6 +59,8 @@ pub struct Domain {
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) peers: Slab<Peer>,
+    pub(crate) starts: Slab<StartContext>,
+    pub(crate) turns: Slab<TurnHandoff>,
     /// Peers by the run's token for their conversation, which is their
     /// session's opener, and by their session's own.
     ///
@@ -90,6 +92,24 @@ pub struct Domain {
     lost: u64,
 }
 
+/// Original parent right and optional history survive run admission/preparation.
+/// The main takes history once; the terminal alone consumes the right.
+/// Contract: domain/run.md, sections 3, 10 and 13.
+#[derive(Debug)]
+pub(crate) struct StartContext {
+    pub(crate) reply_to: Option<ReplyTo>,
+    pub(crate) transcript: Option<session::record::Transcript>,
+    pub(crate) refused: Option<run::TranscriptRefusal>,
+}
+
+/// Single-use ownership while a main turn crosses the sibling seam. Both
+/// queues can coexist; capacity and complete envelope/payload costs are priced.
+/// Contract: domain/run.md, section 13; programming-model.md, section 6.3.
+#[derive(Debug)]
+pub(crate) struct TurnHandoff {
+    pub(crate) turn: Option<session::record::Turn>,
+}
+
 #[derive(Debug)]
 pub(crate) struct Credential {
     pub(crate) name: GrantName,
@@ -101,7 +121,7 @@ pub(crate) struct Credential {
 /// waits for its answer.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Debug)]
 pub(crate) struct Flight {
     pub(crate) peer: Id<Peer>,
     /// The session withdrew it.
@@ -114,7 +134,7 @@ pub(crate) struct Flight {
 /// What a delegated call's session is answered.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Debug)]
 pub(crate) enum Due {
     /// The run has not returned it.
     ///
@@ -123,7 +143,7 @@ pub(crate) enum Due {
     /// The run's answer, kept under a ticket, waiting on the ready list.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-    Answered { answer: sllm::Answer },
+    Answered { feedback: crate::Feedback },
     /// The run returned it cancelled, after the session withdrew it.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -220,6 +240,8 @@ impl Domain {
             run: run::Domain::new(&limits.run),
             session: session::Domain::new(&limits.session, rng.next_u64()),
             peers: Slab::with_capacity(peers),
+            starts: Slab::with_capacity(limits.run.runs),
+            turns: Slab::with_capacity(limits::session_out(limits)),
             conversations: Map::with_capacity(peers),
             sessions: Map::with_capacity(peers),
             flights: Map::with_capacity(flights),
@@ -347,6 +369,8 @@ impl Domain {
         self.run.reclaim();
         self.session.reclaim();
         self.peers.reclaim();
+        self.starts.reclaim();
+        self.turns.reclaim();
         self.ready.promote();
     }
 }

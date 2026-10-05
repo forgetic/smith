@@ -26,6 +26,7 @@ const LIMITS: Limits = Limits {
     file_bytes: 1024,
     read_bytes: 256,
     list_entries: 16,
+    list_bytes: 4096,
     match_lines: 4,
     file_timeout: Duration::from_secs(10),
     env_bytes: 256,
@@ -566,7 +567,7 @@ fn a_listing_scans_the_directory() {
     let mut h = Harness::new(LIMITS);
     let kit = h.open(1, authority(ALL));
     let (owner, op) = h.start(kit, 1, Call::List { path: path(b"vendor/lib") });
-    assert_eq!(op, Op::Scan { at: place(2, b""), max: LIMITS.list_entries });
+    assert_eq!(op, Op::Scan { at: place(2, b""), max: LIMITS.list_entries, max_bytes: LIMITS.list_bytes });
     let entries: Box<[Entry]> = Box::new([entry(b"Cargo.toml", Kind::File), entry(b"src", Kind::Directory)]);
     let (_, outcome) = h.end(owner, Done::Scanned { entries: entries.clone(), more: 3 });
     assert_eq!(outcome, Outcome::Listed { entries, more: 3 });

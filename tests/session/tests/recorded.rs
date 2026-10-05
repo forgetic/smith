@@ -15,10 +15,10 @@ fn concrete_turns_resume_verbatim_without_local_tickets() {
     assert_eq!(prompt.messages[2].content[0], old.turns[0].messages[2].content[0]);
     assert_eq!(
         prompt.messages.last().expect("the scenario supplied a value").content[0],
-        llm::Block::Text { text: b"wake".as_slice().into() }
+        llm::Block::Text { text: b"wake".as_slice().into(), replay: None }
     );
     resumed.complete(
-        Box::new([llm::Block::Text { text: b"resumed".as_slice().into() }]),
+        Box::new([llm::Block::Text { text: b"resumed".as_slice().into(), replay: None }]),
         llm::Stop::EndTurn,
         llm::Usage::ZERO,
     );
@@ -142,7 +142,7 @@ fn pricing_rounds_the_combined_completion_and_rejects_overflow() {
     spec.prices = record::Prices { input: u64::MAX, cached: 0, output: 0, unit: 1 };
     world.open(spec);
     world.complete(
-        Box::new([llm::Block::Text { text: b"done".as_slice().into() }]),
+        Box::new([llm::Block::Text { text: b"done".as_slice().into(), replay: None }]),
         llm::Stop::EndTurn,
         llm::Usage { input_tokens: 2, ..llm::Usage::ZERO },
     );
@@ -202,7 +202,7 @@ fn committed_call_results_after_a_yield_are_restored_without_tickets() {
         role: llm::Role::User,
         content: Box::new([llm::Block::ToolResult {
             id: b"provider-call".as_slice().into(),
-            result: llm::Returned::Text { text: b"committed answer".as_slice().into(), error: false },
+            result: llm::Returned::Text { text: b"committed answer".as_slice().into(), error: false, replay: None },
         }]),
     }]);
     let mut resumed = World::new(7, 256);
@@ -212,7 +212,7 @@ fn committed_call_results_after_a_yield_are_restored_without_tickets() {
         resumed.prompts[0].messages[2].content[0],
         llm::Block::ToolResult {
             id: b"provider-call".as_slice().into(),
-            result: llm::Returned::Text { text: b"committed answer".as_slice().into(), error: false }
+            result: llm::Returned::Text { text: b"committed answer".as_slice().into(), error: false, replay: None }
         }
     );
     resumed.close();
@@ -261,6 +261,7 @@ fn closing_a_resting_batch_keeps_its_real_result_and_marks_only_unstarted_calls(
                     lines: None,
                 },
             },
+            replay: None,
         },
     );
     world.complete(blocks.into(), llm::Stop::ToolUse, recorded::USAGE);
@@ -331,6 +332,7 @@ fn owned_io_cancellation_keeps_actual_terminal_results_in_the_turn() {
                             lines: None,
                         },
                     },
+                    replay: None,
                 },
             ]),
             llm::Stop::ToolUse,
@@ -403,4 +405,336 @@ fn repeated_provider_ids_keep_distinct_origins_and_restore_includes_history_pref
     let owner = resumed.delegated[0];
     resumed.step(session::Event::AnsweredV2 { owner, text: b"third".as_slice().into(), error: false, spent: 0 });
     resumed.close();
+}
+
+// Receiving-credit controls use the actual V2 domain and its observed turns,
+// rather than supplied answers as evidence. Contract: domain/session.md, 3/5.
+fn initial_owned(opening: &record::Opening) -> u64 {
+    let spec = &opening.spec;
+    u64::try_from(spec.model.len() + spec.system.len() + spec.prompt.len()).expect("small fixture")
+        + u64::try_from(core::mem::size_of::<llm::Block>()).expect("block size")
+        + u64::try_from(spec.delegated.len() * core::mem::size_of::<llm::Descriptor>()).expect("descriptors")
+}
+
+fn fill_initial(spec: &mut record::Opening, total: u64) {
+    let current = initial_owned(spec);
+    assert!(total >= current);
+    let add = usize::try_from(total - current).expect("small fixture");
+    let mut system = spec.spec.system.clone().into_vec();
+    system.extend(vec![b's'; add]);
+    spec.spec.system = system.into();
+    assert_eq!(initial_owned(spec), total);
+}
+
+#[test]
+fn cap_filled_provider_credit_preserves_actual_replay_completion_that_wins_cancel() {
+    let mut world = World::new(101, 0);
+    world.env.limits.session_bytes = 16_384;
+    world.env.limits.completion_bytes = 2048;
+    world.env.limits.completion_blocks = 3;
+    let reserve = session::completion_reserve(&world.env.limits).expect("bounded caps");
+    let mut spec = opening(None, u64::MAX);
+    fill_initial(&mut spec, world.env.limits.session_bytes - reserve);
+    world.open(spec);
+    assert_eq!(world.prompts.len(), 1);
+    let call = recorded::called().into_vec().remove(0);
+    let fixed = 3 * core::mem::size_of::<llm::Block>()
+        + b"provider-call".len()
+        + b"finish".len()
+        + b"{}".len()
+        + b"refused".len()
+        + 8;
+    // called() names its descriptor below; use its actual preserved bytes.
+    let call_payload = match &call {
+        llm::Block::ToolCall { id, name, input, .. } => id.len() + name.len() + input.len(),
+        llm::Block::Text { .. }
+        | llm::Block::Refusal { .. }
+        | llm::Block::Opaque { .. }
+        | llm::Block::ToolResult { .. } => panic!("fixture call"),
+    };
+    let fixed = fixed - b"provider-call".len() - b"finish".len() - b"{}".len() + call_payload;
+    let opaque = vec![0xff; 2048 - fixed].into_boxed_slice();
+    let completion: Box<[llm::Block]> = Box::new([
+        llm::Block::Opaque { bytes: opaque },
+        llm::Block::Refusal {
+            text: b"refused".as_slice().into(),
+            replay: Some(llm::Replay { bytes: b"\0tag\xffext".as_slice().into() }),
+        },
+        call,
+    ]);
+    // The replay envelope is eight bytes and the full owned content reaches C.
+    assert_eq!(b"\0tag\xffext".len(), 8);
+    world.step(session::Event::Close { session: world.session.expect("admitted") });
+    assert!(world.end.is_none(), "Cancel emission does not surrender receiving credit");
+    world.complete(completion.clone(), llm::Stop::ToolUse, recorded::USAGE);
+    assert_eq!(world.end, Some(session::End::Closed));
+    assert_eq!(world.turns.len(), 1);
+    assert_eq!(world.turns[0].usage, recorded::USAGE);
+    let mut expected = completion.into_vec();
+    match &mut expected[2] {
+        llm::Block::ToolCall { call, .. } => *call = llm::Decoded::Historical,
+        llm::Block::Text { .. }
+        | llm::Block::Refusal { .. }
+        | llm::Block::Opaque { .. }
+        | llm::Block::ToolResult { .. } => panic!("fixture call"),
+    }
+    assert_eq!(world.turns[0].messages[1].content.as_ref(), expected.as_slice());
+    assert_eq!(
+        world.turns[0].messages[2].content.as_ref(),
+        &[llm::Block::ToolResult { id: b"provider-call".as_slice().into(), result: llm::Returned::NotRun }]
+    );
+    world.close();
+}
+
+#[test]
+fn one_byte_or_one_message_less_refuses_before_provider_and_tools() {
+    for short_slot in [false, true] {
+        let mut world = World::new(102, 0);
+        world.env.limits.session_bytes = 16_384;
+        world.env.limits.completion_bytes = 256;
+        world.env.limits.completion_blocks = 1;
+        let reserve = session::completion_reserve(&world.env.limits).expect("bounded caps");
+        let mut spec = opening(None, u64::MAX);
+        let extra = u64::from(!short_slot);
+        fill_initial(&mut spec, world.env.limits.session_bytes - reserve + extra);
+        if short_slot {
+            world.env.limits.messages = 2;
+        }
+        world.open(spec);
+        assert_eq!(world.end, Some(session::End::TranscriptRefused { reason: record::Refusal::TooLarge }));
+        assert!(world.prompts.is_empty() && world.operations.is_empty() && world.delegated.is_empty());
+        assert_eq!(world.domain.kits(), 0);
+    }
+}
+
+#[test]
+fn full_history_batch_credit_keeps_maximum_actual_late_results_or_prevents_every_effect() {
+    use smith_domain_tools::Effect;
+    for short in [false, true] {
+        let mut world = World::new(103, 0);
+        world.env.limits.session_bytes = 16_384;
+        world.env.limits.completion_bytes = 512;
+        world.env.limits.completion_blocks = 2;
+        world.env.limits.delegated_result_bytes = 2048;
+        world.env.limits.parallel_tools = 2;
+        let mut spec = opening(None, u64::MAX);
+        spec.spec.delegated[0].effect = Effect::Read;
+        let mut calls = vec![];
+        let mut held = 0_u64;
+        for id in [b"first".as_slice(), b"second".as_slice()] {
+            calls.push(llm::Block::ToolCall {
+                id: id.into(),
+                name: b"served".as_slice().into(),
+                input: b"{}".as_slice().into(),
+                call: llm::Decoded::Delegated { ticket: Token::new(19), effect: Effect::Read },
+                replay: Some(llm::Replay { bytes: b"\0token\xff".as_slice().into() }),
+            });
+            held += u64::try_from(
+                2 * core::mem::size_of::<llm::Block>()
+                    + 2 * id.len()
+                    + b"served".len()
+                    + b"{}".len()
+                    + b"\0token\xff".len(),
+            )
+            .expect("small fixture");
+        }
+        fill_initial(&mut spec, world.env.limits.session_bytes - held - 4096 + u64::from(short));
+        world.open(spec);
+        assert_eq!(world.prompts.len(), 1);
+        world.complete(calls.into(), llm::Stop::ToolUse, llm::Usage::ZERO);
+        if short {
+            assert!(world.delegated.is_empty(), "whole batch refused before its first effect");
+            assert_eq!(world.end, Some(session::End::TranscriptFull));
+        } else {
+            assert_eq!(world.delegated.len(), 2);
+            world.step(session::Event::Close { session: world.session.expect("admitted") });
+            assert!(world.end.is_none());
+            for byte in [b'a', b'b'] {
+                let owner = world.delegated[0];
+                world.step(session::Event::AnsweredV2 {
+                    owner,
+                    text: vec![byte; 2048].into(),
+                    error: byte == b'b',
+                    spent: 0,
+                });
+            }
+            assert_eq!(world.end, Some(session::End::Closed));
+        }
+        let turn = world.turns.last().expect("actual final turn survives full history");
+        for (index, id) in [b"first".as_slice(), b"second".as_slice()].into_iter().enumerate() {
+            let result = if short {
+                llm::Returned::NotRun
+            } else {
+                llm::Returned::Text {
+                    text: vec![if index == 0 { b'a' } else { b'b' }; 2048].into(),
+                    error: index == 1,
+                    replay: None,
+                }
+            };
+            assert_eq!(turn.messages[2].content[index], llm::Block::ToolResult { id: id.into(), result });
+        }
+        world.close();
+    }
+}
+
+#[test]
+fn exact_failure_classes_and_transport_evidence_survive_policy_without_diagnostic_retention() {
+    for failure in [llm::Failure::Limit, llm::Failure::Protocol, llm::Failure::Cancelled] {
+        for evidence in [llm::Evidence::Unsent, llm::Evidence::Unknown, llm::Evidence::Response] {
+            for closing in [false, true] {
+                let mut world = World::new(104, 256);
+                world.env.limits.session_bytes = 16_384;
+                world.env.limits.completion_bytes = 128;
+                world.env.limits.completion_blocks = 1;
+                world.env.limits.failure_bytes = 512;
+                let reserve = session::completion_reserve(&world.env.limits).expect("bounded terminal cap");
+                let mut spec = opening(None, u64::MAX);
+                fill_initial(&mut spec, world.env.limits.session_bytes - reserve);
+                world.open(spec);
+                assert_eq!(world.prompts.len(), 1);
+                if closing {
+                    world.step(session::Event::Close { session: world.session.expect("admitted") });
+                    assert!(world.end.is_none());
+                }
+                world.step(session::Event::Failed {
+                    owner: world.completing.expect("one actual provider terminal"),
+                    failure,
+                    evidence,
+                    detail: vec![0xff; 512].into(),
+                });
+                let expected = if closing { session::End::Closed } else { session::End::Failed { failure, evidence } };
+                assert_eq!(world.end, Some(expected));
+                assert_eq!(world.prompts.len(), 1, "new classes cannot start retry");
+                assert!(world.turns.is_empty(), "failure does not fabricate assistant content");
+                assert!(!format!("{:?}", world.domain).contains("255, 255"), "policy drops actual detail");
+                world.close();
+            }
+        }
+    }
+}
+
+#[test]
+fn fullest_history_keeps_maximum_actual_owned_read_list_search_and_shell_after_cancel() {
+    use smith_domain_tools::{
+        self as tools, Authority, Call, Done, Entry, Exit, Grants, Hit, Kind, Name, Outcome, Part, Path, Repo, Version,
+    };
+    for kind in 0..4 {
+        for short in [false, true] {
+            let mut world = World::new(110 + kind, 0);
+            world.env.limits.session_bytes = 16_384;
+            world.env.limits.completion_bytes = 512;
+            world.env.limits.completion_blocks = 1;
+            world.env.limits.tools.read_bytes = 4096;
+            world.env.limits.tools.list_entries = 8;
+            world.env.limits.tools.list_bytes = 4096;
+            world.env.limits.tools.search_hits = 4;
+            world.env.limits.tools.search_bytes = 4096;
+            world.env.limits.tools.shell_head = 2048;
+            world.env.limits.tools.shell_tail = 2048;
+            let path = || Path {
+                absolute: false,
+                parts: Box::new([Part::Name { name: Name::new(b"file".as_slice().into()).expect("file name") }]),
+            };
+            let (call, done, expected) = match kind {
+                0 => (
+                    Call::Read { path: path(), skip: 0, lines: None },
+                    Done::Loaded { content: vec![b'r'; 4096].into(), version: Version::new([1; 4]) },
+                    Outcome::Read { content: vec![b'r'; 4096].into(), skipped: 0, lines: 1, total: 1, cut: false },
+                ),
+                1 => {
+                    let each = (4096 - 8 * core::mem::size_of::<Entry>()) / 8;
+                    let entries: Box<[Entry]> = (0..8)
+                        .map(|index| Entry {
+                            name: Name::new(vec![b'a' + index; each].into()).expect("nonempty bounded name"),
+                            kind: Kind::File,
+                        })
+                        .collect();
+                    assert_eq!(8 * core::mem::size_of::<Entry>() + 8 * each, 4096);
+                    (
+                        Call::List { path: path() },
+                        Done::Scanned { entries: entries.clone(), more: 17 },
+                        Outcome::Listed { entries, more: 17 },
+                    )
+                }
+                2 => {
+                    let hits: Box<[Hit]> = (0..4)
+                        .map(|line| Hit { path: b"f".as_slice().into(), line: line + 1, text: vec![b's'; 1023].into() })
+                        .collect();
+                    (
+                        Call::Search { path: path(), pattern: b"s".as_slice().into(), glob: None },
+                        Done::Found { hits: hits.clone(), more: 19, timed_out: true },
+                        Outcome::Found { hits, more: 19, timed_out: true },
+                    )
+                }
+                3 => (
+                    Call::Shell { command: b"echo owned".as_slice().into(), timeout: None },
+                    Done::Exited {
+                        exit: Exit::Code { code: 7 },
+                        head: vec![b'h'; 2048].into(),
+                        tail: vec![b't'; 2048].into(),
+                        dropped: 23,
+                    },
+                    Outcome::Exited {
+                        exit: Exit::Code { code: 7 },
+                        head: vec![b'h'; 2048].into(),
+                        tail: vec![b't'; 2048].into(),
+                        dropped: 23,
+                    },
+                ),
+                _ => unreachable!("four owning result kinds"),
+            };
+            let credit = tools::result_worst_case(&call, &world.env.limits.tools).expect("checked complete result cap");
+            let id = b"actual-owned".as_slice();
+            let name = b"owned".as_slice();
+            let input = b"{}".as_slice();
+            let skeleton =
+                u64::try_from(2 * core::mem::size_of::<llm::Block>() + 2 * id.len() + name.len() + input.len())
+                    .expect("bounded cells")
+                    + call.owned_bytes().expect("checked complete call")
+                    - u64::try_from(core::mem::size_of::<Call>()).expect("inline call");
+            let mut spec = opening(None, u64::MAX);
+            let mount = || Name::new(b"repo".as_slice().into()).expect("mount");
+            spec.spec.authority = Authority {
+                cwd: Box::new([mount()]),
+                repos: Box::new([Repo { mount: Box::new([mount()]), root: Token::new(7), writable: true }]),
+                grants: Grants { inspect: true, modify: true, shell: true },
+                env: Box::new([]),
+            };
+            fill_initial(&mut spec, world.env.limits.session_bytes - skeleton - credit + u64::from(short));
+            world.open(spec);
+            assert_eq!(world.prompts.len(), 1, "provider credit secured before actual call");
+            world.complete(
+                Box::new([llm::Block::ToolCall {
+                    id: id.into(),
+                    name: name.into(),
+                    input: input.into(),
+                    call: llm::Decoded::Owned { call },
+                    replay: None,
+                }]),
+                llm::Stop::ToolUse,
+                llm::Usage::ZERO,
+            );
+            if short {
+                assert!(world.operations.is_empty(), "one-byte tight result cap refuses before any IO effect");
+                assert_eq!(world.end, Some(session::End::TranscriptFull));
+                assert_eq!(
+                    world.turns[0].messages[2].content[0],
+                    llm::Block::ToolResult { id: id.into(), result: llm::Returned::NotRun }
+                );
+            } else {
+                assert_eq!(world.operations.len(), 1);
+                let owner = world.operations[0].0;
+                world.step(session::Event::Close { session: world.session.expect("actual admitted handle") });
+                assert_eq!(world.cancelled_operations, [owner]);
+                assert!(world.turns.is_empty(), "close retains the actual pending IO/result right");
+                world.step(session::Event::Done { owner, done });
+                assert_eq!(world.end, Some(session::End::Closed));
+                assert_eq!(
+                    world.turns[0].messages[2].content[0],
+                    llm::Block::ToolResult { id: id.into(), result: llm::Returned::Owned { outcome: expected } }
+                );
+            }
+            world.close();
+        }
+    }
 }

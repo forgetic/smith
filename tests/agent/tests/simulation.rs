@@ -108,7 +108,7 @@ fn sub_agents_nest_and_return_results_to_their_askers() {
 fn the_shared_budget_ends_the_run_after_every_conversation_settles() {
     let world =
         settled(&Settings { job: Job::Spending, budget: run::Budget { turns: 8, ..BUDGET }, ..Settings::calm(4) });
-    let Answer::Failed { failure: Failure::Budget(Exhausted::Turns), spent } = world.answer() else {
+    let Answer::Failed { failure: Failure::Budget(Exhausted::Turns), spent, .. } = world.answer() else {
         panic!("the run spends its shared turns")
     };
     assert!(spent.turns > 8 && spent.turns <= 12, "only in-flight completions can finish past the shared ceiling");
@@ -137,8 +137,8 @@ fn refused_push_feedback_reaches_the_llm_and_is_retried() {
     assert_eq!(world.pushes(), [Delivery::Failed(failure), Delivery::Failed(failure)]);
     let feedback =
         world.prompts().iter().flat_map(|prompt| &prompt.messages).flat_map(|message| &message.parts).any(|part| {
-            matches!(part, smith_fake_llm_domain::api::Part::ToolOutput { output, is_error: true, .. }
-            if &**output == b"remote: push refused")
+            matches!(part, skein_fake_llm_domain::api::Part::ToolOutput { output, is_error: true, .. }
+            if output.windows(b"remote: push refused".len()).any(|part| part == b"remote: push refused"))
         });
     assert!(feedback, "the host's exact bounded diagnostic returned to the provider");
     assert!(world.landed().is_empty());
@@ -164,7 +164,8 @@ fn host_cancellation_at_many_moments_closes_the_whole_tree() {
                     usize::from(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { depth: 1, .. })) > 0);
             }
             Answer::Accepted { .. } => done += 1,
-            answer @ (Answer::Refused(_) | Answer::Failed { .. } | Answer::Delivered { .. }) => {
+            answer
+            @ (Answer::Parked { .. } | Answer::Refused(_) | Answer::Failed { .. } | Answer::Delivered { .. }) => {
                 panic!("seed {seed}: expected cancelled or already finished, got {answer:?}")
             }
         }
@@ -275,22 +276,12 @@ fn separately_granted_mid_delivery_continues_to_a_real_report() {
     assert_eq!(world.checked(), [true]);
     assert_eq!(world.pushes(), [smith_agent_world::delivered()]);
     assert_eq!(world.landed(), FIXED);
-    let Delivery::Delivered(receipts) = smith_agent_world::delivered() else {
-        unreachable!("the host fixture returns sealed receipts")
-    };
-    // This world renders ordinary served results with Debug; opaque byte arrays
-    // therefore appear as decimal bytes, not their UTF-8 spelling. Compare the
-    // complete expected feedback, including mount ordinal and actual receipt bytes.
-    let expected_feedback = format!(
-        "{:?}",
-        smith_domain::llm::Returned::Served { returned: run::Returned::Delivered(receipts), error: false }
-    )
-    .into_bytes();
+    let expected_feedback = b"delivered\nreceipt directory=0 text=\"scripted receipt\"";
     let receipt_reached_llm =
         world.prompts().iter().flat_map(|prompt| &prompt.messages).flat_map(|message| &message.parts).any(|part| {
             matches!(part,
-            smith_fake_llm_domain::api::Part::ToolOutput { output, is_error: false, .. }
-            if output.as_ref() == expected_feedback.as_slice())
+            skein_fake_llm_domain::api::Part::ToolOutput { output, is_error: false, .. }
+            if output.as_ref() == expected_feedback)
         });
     assert!(receipt_reached_llm, "actual receipts are continuation feedback");
 }

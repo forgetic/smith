@@ -13,7 +13,7 @@ use alloc::boxed::Box;
 
 use skein_lib::Duration;
 
-use crate::path::{Name, Path};
+use crate::path::{Name, Part, Path};
 
 /// A call the LLM made to one of the tools.
 ///
@@ -522,4 +522,46 @@ pub enum Fault {
     ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Other,
+}
+
+impl Call {
+    /// Checked complete ownership of this decoded call: inline cell plus every
+    /// Path/Part/Name wrapper and byte payload, content, pattern, glob or command.
+    /// The protocol/root reuse this before effects; None is arithmetic overflow.
+    /// Contract: domain/tools.md, sections 4, 5 and 9.
+    #[must_use]
+    pub fn owned_bytes(&self) -> Option<u64> {
+        let payload = match self {
+            Call::Read { path, skip: _, lines: _ } | Call::List { path } => owned_path(path),
+            Call::Search { path, pattern, glob } => {
+                let glob = match glob {
+                    Some(glob) => owned_len(glob)?,
+                    None => 0,
+                };
+                owned_path(path)?.checked_add(owned_len(pattern)?)?.checked_add(glob)
+            }
+            Call::Write { path, content } => owned_path(path)?.checked_add(owned_len(content)?),
+            Call::Edit { path, old, new, all: _ } => {
+                owned_path(path)?.checked_add(owned_len(old)?)?.checked_add(owned_len(new)?)
+            }
+            Call::Shell { command, timeout: _ } => owned_len(command),
+        };
+        u64::try_from(core::mem::size_of::<Self>()).ok()?.checked_add(payload?)
+    }
+}
+
+fn owned_path(path: &Path) -> Option<u64> {
+    let parts = u64::try_from(core::mem::size_of::<Part>()).ok()?.checked_mul(u64::try_from(path.parts.len()).ok()?)?;
+    let mut cost = parts;
+    for part in &path.parts {
+        match part {
+            Part::Name { name } => cost = cost.checked_add(owned_len(name.as_bytes())?)?,
+            Part::Current | Part::Parent => {}
+        }
+    }
+    Some(cost)
+}
+
+fn owned_len(bytes: &[u8]) -> Option<u64> {
+    u64::try_from(bytes.len()).ok()
 }

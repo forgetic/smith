@@ -38,6 +38,7 @@ const TOOLS: tools::Limits = tools::Limits {
     file_bytes: 65_536,
     read_bytes: 4096,
     list_entries: 16,
+    list_bytes: 4096,
     match_lines: 4,
     file_timeout: Duration::from_secs(60),
     env_bytes: 64,
@@ -56,6 +57,10 @@ const LIMITS: Limits = Limits {
     spend: 0,
     messages: 8,
     session_bytes: 65_536,
+    completion_bytes: 4096,
+    completion_blocks: 16,
+    failure_bytes: 512,
+    delegated_result_bytes: 16_384,
     budget: BUDGET,
     max_tokens: 1024,
     retries: 2,
@@ -272,7 +277,7 @@ fn budget(budget: Budget) -> Spec {
 }
 
 fn text(text: &[u8]) -> Block {
-    Block::Text { text: bytes(text) }
+    Block::Text { text: bytes(text), replay: None }
 }
 
 /// A relative path of one name.
@@ -297,12 +302,24 @@ fn cat(name: &[u8]) -> Call {
 
 /// The LLM's call `id` of `call`, as the protocol layer decoded it.
 fn tool_call(id: &[u8], call: Call) -> Block {
-    Block::ToolCall { id: bytes(id), name: bytes(b"tool"), input: bytes(b"{}"), call: Decoded::Owned { call } }
+    Block::ToolCall {
+        id: bytes(id),
+        name: bytes(b"tool"),
+        input: bytes(b"{}"),
+        call: Decoded::Owned { call },
+        replay: None,
+    }
 }
 
 /// The LLM's call `id`, which the protocol layer could not decode.
 fn invalid(id: &[u8], problem: Problem) -> Block {
-    Block::ToolCall { id: bytes(id), name: bytes(b"tool"), input: bytes(b"{"), call: Decoded::Invalid { problem } }
+    Block::ToolCall {
+        id: bytes(id),
+        name: bytes(b"tool"),
+        input: bytes(b"{"),
+        call: Decoded::Invalid { problem },
+        replay: None,
+    }
 }
 
 /// Writes `name`.
@@ -316,7 +333,7 @@ const FINISH: Descriptor = Descriptor { ticket: Token::new(7), effect: Effect::W
 /// The LLM's call `id` to a tool the opener serves, kept under `ticket`.
 fn delegated(id: &[u8], ticket: u64, effect: Effect) -> Block {
     let call = Decoded::Delegated { ticket: Token::new(ticket), effect };
-    Block::ToolCall { id: bytes(id), name: bytes(b"finish"), input: bytes(b"{}"), call }
+    Block::ToolCall { id: bytes(id), name: bytes(b"finish"), input: bytes(b"{}"), call, replay: None }
 }
 
 /// The opener's answer, kept under `ticket`.
@@ -365,7 +382,7 @@ fn reading() -> Completion {
 }
 
 fn calling(request: Option<Request>) -> (Token, Prompt) {
-    let Some(Request::Complete { owner, prompt, timeout }) = request else {
+    let Some(Request::Complete { owner, prompt, timeout, .. }) = request else {
         panic!("expected a call, not {request:?}");
     };
     assert_eq!(timeout, LIMITS.call_timeout);
@@ -877,14 +894,30 @@ fn transient_failures_are_retried_after_a_backoff_until_the_retries_run_out() {
     let mut h = Harness::new(LIMITS);
     let (owner, _) = h.open(1);
     for _ in 0..LIMITS.retries {
-        assert_eq!(h.step(Event::Failed { owner, failure: Failure::Overloaded }), None);
+        assert_eq!(
+            h.step(Event::Failed {
+                owner,
+                failure: Failure::Overloaded,
+                evidence: crate::llm::Evidence::Unknown,
+                detail: Default::default()
+            }),
+            None
+        );
         let retry = h.domain.next_deadline().expect("a retry is armed");
         assert!(retry <= h.env.now.saturating_add(LIMITS.backoff_max), "the backoff is capped");
         h.env.now = retry;
         drop(calling(h.fire()));
     }
-    let end = h.step(Event::Failed { owner, failure: Failure::Overloaded });
-    assert_eq!(end, Some(ended(End::Failed { failure: Failure::Overloaded }, 0)));
+    let end = h.step(Event::Failed {
+        owner,
+        failure: Failure::Overloaded,
+        evidence: crate::llm::Evidence::Unknown,
+        detail: Default::default(),
+    });
+    assert_eq!(
+        end,
+        Some(ended(End::Failed { failure: Failure::Overloaded, evidence: crate::llm::Evidence::Unknown }, 0))
+    );
 }
 
 #[test]
@@ -892,12 +925,20 @@ fn a_rate_limit_is_waited_out_and_lasting_failures_are_not_retried() {
     let mut h = Harness::new(LIMITS);
     let (owner, _) = h.open(2);
     let failure = Failure::RateLimited { retry_after: Duration::from_secs(5) };
-    assert_eq!(h.step(Event::Failed { owner, failure }), None);
+    assert_eq!(
+        h.step(Event::Failed { owner, failure, evidence: crate::llm::Evidence::Unknown, detail: Default::default() }),
+        None
+    );
     assert_eq!(h.domain.next_deadline(), Some(Time::ZERO.saturating_add(Duration::from_secs(5))));
 
     let (owner, _) = h.open(1);
-    let end = h.step(Event::Failed { owner, failure: Failure::Invalid });
-    assert_eq!(end, Some(ended(End::Failed { failure: Failure::Invalid }, 0)));
+    let end = h.step(Event::Failed {
+        owner,
+        failure: Failure::Invalid,
+        evidence: crate::llm::Evidence::Unknown,
+        detail: Default::default(),
+    });
+    assert_eq!(end, Some(ended(End::Failed { failure: Failure::Invalid, evidence: crate::llm::Evidence::Unknown }, 0)));
 }
 
 #[test]
@@ -920,7 +961,15 @@ fn a_completion_that_wins_the_race_with_a_close_still_ends_the_session() {
 
     let (owner, _) = h.open(1);
     assert_eq!(h.step(Event::Close { session: owner }), Some(Request::Cancel { owner }));
-    assert_eq!(h.step(Event::Failed { owner, failure: Failure::Overloaded }), Some(ended(End::Closed, 0)));
+    assert_eq!(
+        h.step(Event::Failed {
+            owner,
+            failure: Failure::Overloaded,
+            evidence: crate::llm::Evidence::Unknown,
+            detail: Default::default()
+        }),
+        Some(ended(End::Closed, 0))
+    );
 }
 
 #[test]
@@ -948,7 +997,15 @@ fn closing_a_session_with_nothing_in_flight_ends_it_at_once() {
     assert_eq!(h.domain.next_deadline(), None);
 
     let (owner, _) = h.open(1);
-    assert_eq!(h.step(Event::Failed { owner, failure: Failure::Unavailable }), None);
+    assert_eq!(
+        h.step(Event::Failed {
+            owner,
+            failure: Failure::Unavailable,
+            evidence: crate::llm::Evidence::Unknown,
+            detail: Default::default()
+        }),
+        None
+    );
     assert_eq!(h.step(Event::Close { session: owner }), Some(ended(End::Closed, 0)));
     assert_eq!(h.domain.next_deadline(), None, "the retry is called off");
 }
@@ -1010,7 +1067,15 @@ fn an_expiring_session_in_backoff_or_yielded_ends_at_once() {
         ..LIMITS
     });
     let (owner, _) = h.open(1);
-    assert_eq!(h.step(Event::Failed { owner, failure: Failure::Unavailable }), None);
+    assert_eq!(
+        h.step(Event::Failed {
+            owner,
+            failure: Failure::Unavailable,
+            evidence: crate::llm::Evidence::Unknown,
+            detail: Default::default()
+        }),
+        None
+    );
     h.after(BUDGET.time);
     assert_eq!(h.fire(), Some(ended(OUT_OF_TIME, 0)));
     assert_eq!(h.domain.next_deadline(), None);
@@ -1217,7 +1282,7 @@ fn a_conversation_that_outgrows_its_bytes_ends_the_session() {
 
     h.domain.reclaim();
     let (owner, _) = h.open(1);
-    let huge = Box::new([Block::Text { text: Box::from([b'x'; 2048].as_slice()) }]);
+    let huge = Box::new([Block::Text { text: Box::from([b'x'; 2048].as_slice()), replay: None }]);
     let end = h.step(Event::Completed { owner, completion: completion(huge, Stop::EndTurn) });
     assert_eq!(end, Some(ended(End::TranscriptFull, 1)), "a yield the session could not continue from ends it");
 }
@@ -1281,7 +1346,15 @@ fn retries_cancels_and_refusals_are_told_too() {
     let mut h = Harness::new(Limits { sessions: 1, spend: 0, ..LIMITS });
     let opener = Token::new(1);
     let (owner, _) = h.open(1);
-    assert_eq!(h.step(Event::Failed { owner, failure: Failure::Overloaded }), None);
+    assert_eq!(
+        h.step(Event::Failed {
+            owner,
+            failure: Failure::Overloaded,
+            evidence: crate::llm::Evidence::Unknown,
+            detail: Default::default()
+        }),
+        None
+    );
     let retry = h.domain.next_deadline().expect("a retry is armed");
     let started = Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 };
     let delay = retry.saturating_since(Time::ZERO);
@@ -1289,7 +1362,7 @@ fn retries_cancels_and_refusals_are_told_too() {
         Fact::Opened { opener },
         started,
         Fact::Tools { opener, fact: tools::Fact::Opened { session: owner } },
-        Fact::CompletionFailed { opener, failure: Failure::Overloaded },
+        Fact::CompletionFailed { opener, failure: Failure::Overloaded, evidence: crate::llm::Evidence::Unknown },
         Fact::CompletionRetried { opener, attempt: 1, delay },
     ]);
     h.env.now = retry;

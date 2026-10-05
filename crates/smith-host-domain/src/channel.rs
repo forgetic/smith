@@ -127,11 +127,100 @@ pub enum Reply {
     TooLarge,
 }
 
+/// Exact neutral completion failure after retries or nonretryable refusal.
+/// Diagnostic bytes were consumed by session policy; this record remains content-free.
+/// Contract: domain/host.md, sections 2, 5 and 10.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CompletionFailure {
+    /// Shared-client receiving allowance exceeded.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Limit,
+
+    /// Shared protocol response contract violated.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Protocol,
+
+    /// Unsolicited actual lower cancellation.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Cancelled,
+
+    /// Provider capacity refused the request.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Overloaded,
+
+    /// Provider could not be reached or failed.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Unavailable,
+
+    /// The actual completion deadline elapsed.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    TimedOut,
+
+    /// Provider context allowance was exceeded.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    ContextTooLong,
+
+    /// Provider rejected the request shape.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Invalid,
+
+    /// Provider rejected the credential.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Unauthorized,
+
+    /// Provider rate allowance requires the retained cooldown.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    RateLimited {
+        /// Exact lower cooldown, without scheduling or recovery policy.
+        /// Contract: domain/host.md, sections 2, 5 and 10.
+        retry_after: skein_lib::Duration,
+    },
+
+    /// Provider account allowance requires the retained cooldown.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Exhausted {
+        /// Exact lower cooldown, without scheduling or recovery policy.
+        /// Contract: domain/host.md, sections 2, 5 and 10.
+        retry_after: skein_lib::Duration,
+    },
+}
+
+/// Actual transport evidence retained alongside a neutral completion failure.
+/// No domain infers this from an error label or from requested cancellation.
+/// Contract: domain/host.md, sections 2, 5 and 10.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CompletionEvidence {
+    /// The lower proves no request bytes were sent.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Unsent,
+
+    /// The request may have reached the peer; outcome is unknown.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Unknown,
+
+    /// An actual peer response, including a refusal, was received.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Response,
+}
+
 /// What kept an LLM from going on.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ModelFault {
+    /// Full neutral actual failure and evidence after session retry policy.
+    /// This is distinct from local model stopping rules and requested run Cancel.
+    /// Contract: domain/host.md, sections 2, 5 and 10.
+    Completion {
+        /// Exact content-free shared-client classification and cooldown.
+        /// Contract: domain/host.md, sections 2, 5 and 10.
+        failure: CompletionFailure,
+
+        /// Exact actual transport evidence, including across interrupted Delivery.
+        /// Contract: domain/host.md, sections 2, 5 and 10.
+        evidence: CompletionEvidence,
+    },
+
     /// The account spent its provider allowance. The host decides whether to retry after cooldown.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -191,11 +280,40 @@ pub enum Exhausted {
     Time,
 }
 
+/// Exact transient V2 history admission refusal, without provider effects or
+/// silent fresh-start fallback. The host decides whether a later activation
+/// receives corrected history. Contract: domain/host.md, sections 2 and 9;
+/// domain/run.md, sections 3, 6 and 10.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum TranscriptRefusal {
+    /// Unsupported durable record version. Contract: domain/run.md, section 6.
+    Version,
+
+    /// Configured endpoint differs. Contract: domain/run.md, section 6.
+    Endpoint,
+
+    /// Opaque replay dialect differs. Contract: domain/run.md, section 6.
+    Dialect,
+
+    /// Invalid sequence, structure or call/result pairing. Contract: domain/run.md, section 6.
+    Malformed,
+
+    /// A local live ticket survives in durable history. Contract: domain/run.md, section 6.
+    Unresolved,
+
+    /// History or required receiving reserve exceeds caps. Contract: domain/run.md, section 6.
+    TooLarge,
+}
+
 /// Why a run ended without an outcome: what the host parent acts on.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RunFailure {
+    /// Exact transient history refusal before unsupported work starts.
+    /// Contract: domain/host.md, sections 2 and 9; domain/run.md, section 6.
+    Transcript(TranscriptRefusal),
+
     /// The LLM could not do the work.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.

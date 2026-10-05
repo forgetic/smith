@@ -30,6 +30,7 @@ fn many_host_schedules_settle_against_the_boundary_referee() {
         let mut world = World::new(settings);
         world.run(20_000);
         match world.answer() {
+            Answer::Parked { .. } => ended[0] += 1,
             Answer::Delivered { .. } | Answer::Accepted { .. } => ended[0] += 1,
             Answer::Failed { .. } => ended[1] += 1,
             Answer::Refused(_) => ended[2] += 1,

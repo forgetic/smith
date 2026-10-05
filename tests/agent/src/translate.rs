@@ -6,8 +6,8 @@
 //! call IDs and diagnostic bytes, allowing the provider to check transcript
 //! pairing and the tests to inspect feedback on subsequent requests.
 
+use skein_fake_llm_domain::api as provider;
 use smith_domain::{llm as agent, run, tools};
-use smith_fake_llm_domain::api as provider;
 
 pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
     let mut tools = Vec::new();
@@ -35,7 +35,8 @@ pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
             }
             agent::Served::Deliver => fixed(b"deliver"),
             agent::Served::Finish => fixed(b"finish"),
-            agent::Served::SubAgent => fixed(b"subagent"),
+            agent::Served::SubAgent => fixed(b"sub_agent"),
+            agent::Served::Wait => fixed(b"wait"),
         };
         tools.push(specification);
     }
@@ -69,12 +70,13 @@ fn fixed(name: &[u8]) -> provider::ToolSpec {
 
 fn part(block: agent::Block) -> provider::Part {
     match block {
-        agent::Block::Text { text } => provider::Part::Text { text },
+        agent::Block::Text { text, .. } | agent::Block::Refusal { text, .. } => provider::Part::Text { text },
         agent::Block::Opaque { bytes } => provider::Part::Opaque { bytes },
-        agent::Block::ToolCall { id, name, input } => provider::Part::ToolCall { id, name, arguments: input },
+        agent::Block::ToolCall { id, name, input, .. } => provider::Part::ToolCall { id, name, arguments: input },
         agent::Block::ToolResult { id, result } => {
             let error = match &result {
-                agent::Returned::Served { error, .. } => *error,
+                agent::Returned::Text { error, .. } | agent::Returned::Served { error, .. } => *error,
+                agent::Returned::Withdrawn => true,
                 agent::Returned::Invalid { .. } | agent::Returned::NotRun => true,
                 agent::Returned::Owned { outcome } => !matches!(
                     outcome,
@@ -87,6 +89,8 @@ fn part(block: agent::Block) -> provider::Part {
                 ),
             };
             let output = match &result {
+                agent::Returned::Text { text, .. } => text.clone(),
+                agent::Returned::Withdrawn => b"withdrawn".as_slice().into(),
                 agent::Returned::Served { returned: run::Returned::DeliveryFailed { failure }, .. } => {
                     failure.diagnostic.output().into()
                 }
@@ -123,11 +127,11 @@ pub(crate) fn completion(
         .parts
         .into_iter()
         .map(|part| match part {
-            provider::Part::Text { text } => agent::Said::Text { text },
+            provider::Part::Text { text } => agent::Said::Text { text, replay: None },
             provider::Part::Opaque { bytes } => agent::Said::Opaque { bytes },
             provider::Part::ToolCall { id, name, arguments } => {
                 let call = decode(&name, &arguments, grants, served);
-                agent::Said::ToolCall { id, name, input: arguments, call }
+                agent::Said::ToolCall { id, name, input: arguments, call, replay: None }
             }
             provider::Part::ToolOutput { .. } => panic!("a fake completion contains no tool result"),
         })
@@ -135,7 +139,7 @@ pub(crate) fn completion(
     agent::Completion { content, stop, usage }
 }
 
-fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent::Served]) -> agent::Decoded {
+pub(crate) fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent::Served]) -> agent::Decoded {
     let invalid = || agent::Decoded::Invalid { problem: agent::Problem::UnknownTool };
     for tool in served {
         match tool {
@@ -147,7 +151,11 @@ fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent:
                     },
                 );
             }
-            agent::Served::Host(_) | agent::Served::Deliver | agent::Served::Finish | agent::Served::SubAgent => {}
+            agent::Served::Host(_)
+            | agent::Served::Deliver
+            | agent::Served::Finish
+            | agent::Served::SubAgent
+            | agent::Served::Wait => {}
         }
     }
     if name == b"deliver" && served.contains(&agent::Served::Deliver) {
@@ -166,7 +174,11 @@ fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent:
         return finish(arguments)
             .map_or_else(invalid, |outcome| agent::Decoded::Served { ask: run::Ask::Finish { outcome } });
     }
-    if name == b"subagent" && served.contains(&agent::Served::SubAgent) {
+    if name == b"wait" && served.contains(&agent::Served::Wait) {
+        let no_arguments: Vec<u8> = arguments.iter().copied().filter(|byte| !byte.is_ascii_whitespace()).collect();
+        return if no_arguments == b"{}" { agent::Decoded::Served { ask: run::Ask::Wait } } else { invalid() };
+    }
+    if name == b"sub_agent" && served.contains(&agent::Served::SubAgent) {
         let Some(brief) = field(arguments, b"brief") else { return invalid() };
         let has = |word: &[u8]| arguments.windows(word.len()).any(|part| part == word);
         let families = run::charter::Families {

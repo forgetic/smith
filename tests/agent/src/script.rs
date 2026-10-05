@@ -8,13 +8,17 @@
 //! The scripts follow the fixture ([`crate::fixture`]): the answer in
 //! `src/lib.rs` is 42 and the checks want 43.
 
-use smith_fake_llm_domain::api::{Finish, Line, Script, Turn};
+use skein_fake_llm_domain::api::{Finish, Line, Script, Turn};
 
 /// What a run is for, which picks the script of its main conversation.
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Job {
+    /// Repeated settled waiting permits exact live wake and resumed activation stories.
+    /// Contract: domain/run.md, sections 6 and 13.
+    Waiting,
+
     /// Calls an opaque host write and finishes a Report. Contract: domain/run.md, section 5.2.
     HostTools,
     /// Fixes code, delivers opaque ticket metadata under a separate grant, then
@@ -87,6 +91,7 @@ pub const JOBS: [Job; 11] = [
 #[must_use]
 pub const fn cue(job: Job) -> Option<&'static [u8]> {
     match job {
+        Job::Waiting => Some(b"@waiting"),
         Job::HostTools => Some(b"@hosttools"),
         Job::MidChange => Some(b"@midchange"),
         Job::MidReport => Some(b"@midreport"),
@@ -107,6 +112,17 @@ pub const fn cue(job: Job) -> Option<&'static [u8]> {
 #[must_use]
 pub fn all() -> Box<[Script]> {
     Box::new([
+        script(
+            b"@waiting",
+            vec![
+                calls(vec![call("wait", "{}")]),
+                says("Ready for a person."),
+                calls(vec![call("wait", "{}")]),
+                says("Person received."),
+                calls(vec![call("wait", "{}")]),
+                says("Waiting again."),
+            ],
+        ),
         script(
             b"@hosttools",
             vec![
@@ -178,7 +194,7 @@ fn change(body: &str) -> Line {
 
 fn sub_agent(brief: &str, tools: &str, more: &str) -> Line {
     let tools = tools.split(',').map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(",");
-    call("subagent", &format!(r#"{{"brief":"{brief}","tools":[{tools}]{more}}}"#))
+    call("sub_agent", &format!(r#"{{"brief":"{brief}","tools":[{tools}]{more}}}"#))
 }
 
 fn coding() -> Vec<Turn> {

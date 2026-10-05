@@ -17,6 +17,18 @@ use crate::run::{Alarm, Conversation, Run};
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
+    /// Live FIFO messages per admitted run. Full admission bounces before retention.
+    /// Contract: domain/run.md, sections 6 and 14.
+    pub messages: u32,
+
+    /// Maximum attested labelled text bytes retained per queued message.
+    /// Contract: domain/run.md, sections 6 and 14.
+    pub message_bytes: u32,
+
+    /// Maximum positive charter idle interval; it never pauses the wall budget.
+    /// Contract: domain/run.md, sections 6 and 10.
+    pub waiting: Duration,
+
     /// Maximum actual host operation duration after checked submission. It must
     /// be positive for a delivery-capable charter; caller expiry may be earlier.
     /// The host supplies the bounded real terminal even after run shutdown.
@@ -147,7 +159,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let runs = Slab::<Run>::worst_case(limits.runs)?;
     let conversations = Slab::<Conversation>::worst_case(limits.conversations)?;
     // A deadline per run, and two per call.
-    let alarms = Deadlines::<Alarm>::worst_case(limits.runs.checked_add(limits.calls.checked_mul(2)?)?)?;
+    let alarms =
+        Deadlines::<Alarm>::worst_case(limits.runs.checked_mul(2)?.checked_add(limits.calls.checked_mul(2)?)?)?;
     // Each run holds its charter, up to its byte limit, and what it found in
     // its checkout: a guide and a mark for checks per repository.
     let guides = List::<Guide>::worst_case(limits.repositories)?
@@ -156,6 +169,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     // A winding run holds the outcome it accepted.
     let run = limits
         .run_bytes
+        .checked_add(Queue::<crate::run::Message>::worst_case(limits.messages)?)?
+        .checked_add(u64::from(limits.messages).checked_mul(u64::from(limits.message_bytes))?)?
         .checked_add(guides)?
         .checked_add(checks)?
         .checked_add(limits.outcome_bytes.max(crate::Delivered::worst_case()))?;

@@ -60,8 +60,8 @@ mod run;
 mod tests;
 
 pub use boundary::{
-    Answer, Ask, AskRefusal, End, Event, Exit, Failure, Fault, Invalid, Opening, Place, Policy, Ran, Read, Refusal,
-    Request, Returned, Stop,
+    Answer, Ask, AskRefusal, CompletionEvidence, CompletionFailure, End, Event, Exit, Failure, Fault, Invalid,
+    MessageRefusal, Opening, Place, Policy, Ran, Read, Refusal, Request, Returned, Stop, TranscriptRefusal,
 };
 pub use budget::{Budget, Exhausted, Spend};
 pub use charter::Charter;

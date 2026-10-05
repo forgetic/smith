@@ -17,7 +17,7 @@ use alloc::boxed::Box;
 use smith_domain_run as run;
 use smith_domain_tools as tools;
 
-pub use smith_domain_session::llm::{Endpoint, Failure, Problem, Role, Stop, Usage};
+pub use smith_domain_session::llm::{Endpoint, Evidence, Failure, Problem, Replay, Role, Stop, Usage};
 
 /// One call to an LLM: everything it needs to produce the next assistant
 /// message.
@@ -62,6 +62,10 @@ pub struct Prompt {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Served {
+    /// Main-only exclusive settled-wait descriptor, fixed name wait and no arguments.
+    /// Contract: domain/run.md, section 6.
+    Wait,
+
     /// Main-only host declaration, handed unchanged to the provider schema layer.
     /// Contract: domain/run.md, sections 3, 5.1, 5.2 and 12.
     Host(
@@ -118,6 +122,16 @@ pub enum Block {
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         bytes: Box<[u8]>,
     },
+    /// Explicit provider refusal, distinct from ordinary text and preserved in place.
+    /// Contract: domain/run.md, sections 3 and 12.
+    Refusal {
+        /// Provider-attested UTF-8 refusal bytes, bounded with enclosing content.
+        /// Contract: domain/run.md, sections 3 and 12.
+        text: Box<[u8]>,
+        /// Complete optional provider replay envelope, preserved opaquely.
+        /// Contract: domain/run.md, sections 3 and 12.
+        replay: Option<Replay>,
+    },
     /// Owned bounded text in its original provider position.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -126,6 +140,9 @@ pub enum Block {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         text: Box<[u8]>,
+        /// Complete optional provider replay envelope, copied with this block.
+        /// Contract: domain/run.md, sections 3 and 12.
+        replay: Option<Replay>,
     },
     /// A tool call the LLM made, sent back as it wrote it: `id` is the
     /// provider's name for the call, `name` and `input` what the LLM wrote.
@@ -145,6 +162,9 @@ pub enum Block {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         input: Box<[u8]>,
+        /// Complete optional provider replay envelope, copied with this block.
+        /// Contract: domain/run.md, sections 3 and 12.
+        replay: Option<Replay>,
     },
     /// What came of the tool call `id`.
     ///
@@ -171,6 +191,24 @@ pub enum Block {
     reason = "fixed diagnostic tails keep boundary records bounded without allocation"
 )]
 pub enum Returned {
+    /// Actual concrete result, copied verbatim with error and optional opaque
+    /// record metadata. Canonical live run feedback carries replay None; an
+    /// adapter unable to carry restored metadata refuses before provider work.
+    /// Contract: domain/run.md, sections 6 and 13; domain/session.md, section 3.
+    Text {
+        /// Attested UTF-8 result bytes, bounded before effects.
+        /// Contract: domain/session.md, sections 3 and 5.
+        text: Box<[u8]>,
+        /// Actual caller error classification. Contract: domain/session.md, section 3.
+        error: bool,
+        /// Complete optional concrete replay metadata, never silently discarded.
+        /// Contract: domain/session.md, section 3.
+        replay: Option<Replay>,
+    },
+    /// Actual cancellation won the delegated operation; distinct from error text.
+    /// Contract: domain/run.md, section 10; domain/session.md, section 3.
+    Withdrawn,
+
     /// The tools' outcome: a success, or a failure, one that ran out of time
     /// included.
     ///
@@ -246,6 +284,16 @@ pub enum Said {
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         bytes: Box<[u8]>,
     },
+    /// Explicit provider refusal, distinct from ordinary text and preserved in place.
+    /// Contract: domain/run.md, sections 3 and 12.
+    Refusal {
+        /// Provider-attested UTF-8 refusal bytes, bounded with enclosing content.
+        /// Contract: domain/run.md, sections 3 and 12.
+        text: Box<[u8]>,
+        /// Complete optional provider replay envelope, preserved opaquely.
+        /// Contract: domain/run.md, sections 3 and 12.
+        replay: Option<Replay>,
+    },
     /// Owned bounded text in its original provider position.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -254,6 +302,9 @@ pub enum Said {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         text: Box<[u8]>,
+        /// Complete optional provider replay envelope, copied with this block.
+        /// Contract: domain/run.md, sections 3 and 12.
+        replay: Option<Replay>,
     },
     /// The LLM asks for a tool to run. `id` is the provider's name for this
     /// call, which its result echoes; `name` and `input` are what the LLM
@@ -280,6 +331,9 @@ pub enum Said {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         call: Decoded,
+        /// Complete optional provider replay envelope, copied with this block.
+        /// Contract: domain/run.md, sections 3 and 12.
+        replay: Option<Replay>,
     },
 }
 
@@ -316,4 +370,31 @@ pub enum Decoded {
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         problem: Problem,
     },
+}
+
+impl Decoded {
+    /// Checked complete application decoded-call ownership, including its inline
+    /// classification cell and every nested owning wrapper/payload. The adapter
+    /// and root use the same count for the aggregate receiving allowance before
+    /// effects; None means arithmetic overflow. Original provider call/replay
+    /// bytes are counted independently with their enclosing Said block.
+    /// Contract: domain/run.md, sections 3, 5 and 14; domain/tools.md, section 9.
+    #[must_use]
+    pub fn owned_bytes(&self) -> Option<u64> {
+        let payload = match self {
+            Decoded::Owned { call } => {
+                call.owned_bytes()?.checked_sub(u64::try_from(core::mem::size_of::<tools::Call>()).ok()?)?
+            }
+            Decoded::Served { ask } => {
+                crate::peer::ask_cost(ask)?.checked_sub(u64::try_from(core::mem::size_of::<run::Ask>()).ok()?)?
+            }
+            Decoded::Invalid { problem } => match problem {
+                Problem::UnknownTool | Problem::NotAnObject | Problem::TooLarge => 0,
+                Problem::Missing { field } | Problem::WrongType { field } | Problem::BadValue { field } => {
+                    u64::try_from(field.len()).ok()?
+                }
+            },
+        };
+        u64::try_from(core::mem::size_of::<Self>()).ok()?.checked_add(payload)
+    }
 }

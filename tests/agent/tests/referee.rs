@@ -85,6 +85,7 @@ fn a_change_answer_without_a_landed_push_is_rejected() {
             ]),
         }),
         spent: Spend::ZERO,
+        turns: 0,
     };
     broken(started(), Seen::Answered { answer, pending: 0 }, "an accepted change landed exactly once");
 }
@@ -166,6 +167,7 @@ fn an_accepted_report_that_omits_the_hosts_field_is_rejected() {
             answer: Answer::Accepted {
                 outcome: Declared::Report(Report { text: Box::new([]), fields: Box::new([]) }),
                 spent: Spend::ZERO,
+                turns: 0,
             },
             pending: 0,
         },
@@ -184,6 +186,7 @@ fn an_accepted_failure_with_no_required_reason_is_rejected() {
                     fields: Box::new([Field { name: b"source".as_slice().into(), value: b"ref".as_slice().into() }]),
                 }),
                 spent: Spend::ZERO,
+                turns: 0,
             },
             pending: 0,
         },
@@ -205,6 +208,7 @@ fn extra_field_storage_cannot_be_omitted_from_the_referees_byte_charge() {
                     ]),
                 }),
                 spent: Spend::ZERO,
+                turns: 0,
             },
             pending: 0,
         },
@@ -263,6 +267,7 @@ fn interrupted_answer() -> Answer {
         receipts,
         stopped: smith_domain::run::Failure::Cancelled,
         spent: Spend::ZERO,
+        turns: 0,
     }
 }
 
@@ -276,6 +281,7 @@ fn both_ordinary_and_interrupted_mid_delivery_histories_are_valid() {
             Answer::Accepted {
                 outcome: Declared::Report(Report { text: b"continued".as_slice().into(), fields: Box::new([]) }),
                 spent: Spend::ZERO,
+                turns: 0,
             }
         };
         referee.observe(Time::ZERO, Seen::Answered { answer, pending: 0 }, &mut Vec::new());
@@ -325,7 +331,11 @@ fn an_ordinary_mid_report_cannot_invent_a_forbidden_final_change() {
         mid_history(false),
         Seen::Answered {
             pending: 0,
-            answer: Answer::Accepted { outcome: Declared::Change(Change { fields: Box::new([]) }), spent: Spend::ZERO },
+            answer: Answer::Accepted {
+                outcome: Declared::Change(Change { fields: Box::new([]) }),
+                spent: Spend::ZERO,
+                turns: 0,
+            },
         },
         "an accepted result meets the host contract and byte cap",
     );
@@ -376,10 +386,11 @@ fn changed_bytes_between_check_and_submission_are_rejected_after_positive_check(
 #[test]
 fn an_interrupted_landing_cannot_be_erased_by_failed_or_report_answers() {
     for answer in [
-        Answer::Failed { failure: smith_domain::run::Failure::Cancelled, spent: Spend::ZERO },
+        Answer::Failed { failure: smith_domain::run::Failure::Cancelled, spent: Spend::ZERO, turns: 0 },
         Answer::Accepted {
             outcome: Declared::Report(Report { text: b"continued".as_slice().into(), fields: Box::new([]) }),
             spent: Spend::ZERO,
+            turns: 0,
         },
     ] {
         broken(
@@ -404,7 +415,7 @@ fn a_later_stop_after_ordinary_landing_cannot_reclassify_it_as_interrupted() {
     referee.observe(
         Time::ZERO,
         Seen::Answered {
-            answer: Answer::Failed { failure: smith_domain::run::Failure::Cancelled, spent: Spend::ZERO },
+            answer: Answer::Failed { failure: smith_domain::run::Failure::Cancelled, spent: Spend::ZERO, turns: 0 },
             pending: 0,
         },
         &mut Vec::new(),

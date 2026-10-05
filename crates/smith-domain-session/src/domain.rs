@@ -177,7 +177,14 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
         Event::Open { opener, spec } => session::open(domain, env, opener, spec, out),
         Event::OpenV2 { opener, spec } => session::open_v2(domain, env, opener, spec, out),
         Event::AnsweredV2 { owner, text, error, spent } => {
-            session::delegate_ended_v2(domain, env, owner, crate::llm::Returned::Text { text, error }, spent, out);
+            session::delegate_ended_v2(
+                domain,
+                env,
+                owner,
+                crate::llm::Returned::Text { text, error, replay: None },
+                spent,
+                out,
+            );
         }
         Event::AnswerCancelledV2 { owner, spent } => {
             session::delegate_ended_v2(domain, env, owner, crate::llm::Returned::Withdrawn, spent, out);
@@ -185,7 +192,9 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
         Event::Continue { session, content } => session::continued(domain, env, session, content, out),
         Event::Close { session } => session::close(domain, env, session, out),
         Event::Completed { owner, completion } => session::completed(domain, env, owner, completion, out),
-        Event::Failed { owner, failure } => session::failed(domain, env, owner, failure, out),
+        Event::Failed { owner, failure, evidence, detail } => {
+            session::failed(domain, env, owner, failure, evidence, detail, out)
+        }
         Event::Cancelled { owner } => session::cancelled(domain, env, owner, out),
         Event::Done { owner, done } => session::io_done(domain, env, owner, done, out),
         Event::Answered { owner, answer } => session::delegate_answered(domain, env, owner, answer, out),

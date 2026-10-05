@@ -23,6 +23,7 @@
 
 pub mod fixture;
 mod noisy;
+pub mod provider;
 pub mod tickets;
 pub mod translate;
 mod world;

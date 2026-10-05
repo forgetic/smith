@@ -6,10 +6,10 @@
 use std::collections::BTreeMap;
 
 use skein_fake_checkout::Checkout;
+use skein_fake_llm_domain as provider;
 use skein_lib::{Duration, ReplyTo, Rng, Time, Token};
 use skein_world::domain::{Key, Ledger, Referee, Schedule, Span, Stage, Trace};
 use smith_domain::{self as agent, Event, Fact, Grant, GrantName, Limits, Request, llm, run, tools};
-use smith_fake_llm_domain as provider;
 use smith_tools_world::translate as io;
 
 use crate::{
@@ -30,6 +30,9 @@ use crate::{
 pub enum HostReply {
     /// Real changed-directory receipt. Contract: domain/run.md, section 8.2.
     Delivered,
+    /// Maximum sealed non-UTF8 receipt, supplied as an actual successful terminal.
+    /// Contract: domain/run.md, sections 8.2 and 13; testing-strategy.md, section 7.
+    OpaqueDelivered,
     /// No changed directory. Contract: domain/run.md, section 8.2.
     Nothing,
     /// Named conflict marker. Contract: domain/run.md, sections 8.1 and 8.2.
@@ -61,6 +64,11 @@ impl HostReply {
     fn terminal(self) -> run::Delivery {
         match self {
             Self::Delivered => delivered(),
+            Self::OpaqueDelivered => run::Delivery::Delivered(
+                run::Delivered::new(Box::new([run::Receipt::new(0, vec![0xff; run::Receipt::CAPACITY].into())
+                    .expect("maximum sealed opaque receipt")]))
+                .expect("one actual changed directory"),
+            ),
             Self::Nothing => run::Delivery::Nothing,
             Self::Refused => run::Delivery::Refused(
                 run::DeliveryRefusal::new(
@@ -80,6 +88,13 @@ impl HostReply {
 /// Contract: domain/run.md, sections 8 and 13; testing-strategy.md, section 7.
 #[derive(Clone, Copy, Debug)]
 pub struct Settings {
+    /// Host selects supplied history explicitly; false starts fresh even if present.
+    /// Contract: domain/run.md, sections 3 and 13.
+    pub resume: bool,
+    /// Positive idle threshold; independent run wall time never pauses.
+    /// Contract: domain/run.md, sections 6 and 10.
+    pub waiting: Duration,
+
     /// Generic-host recovery schedule. Contract: domain/run.md, sections 5.2 and 13.
     pub host: HostSchedule,
     /// Replay seed for the host, agent and provider, independently derived.
@@ -140,6 +155,8 @@ impl Settings {
     pub fn calm(seed: u64) -> Settings {
         let provider = smith_session_world::Settings::calm(seed).provider;
         Settings {
+            resume: false,
+            waiting: Duration::from_secs(30),
             seed,
             job: Job::Coding,
             limits: LIMITS,
@@ -189,6 +206,7 @@ enum Family {
     reason = "scheduled copied terminal records retain their fixed diagnostic tails without another allocation"
 )]
 enum Delivery {
+    Message { name: Token, text: Box<[u8]> },
     Terminal { family: Family, owner: Token, event: Event },
     Io { owner: Token, op: tools::Op, deadline: Time },
     Command { owner: Token, process: skein_fake_checkout::Process, head: u32, tail: u32, timed_out: bool },
@@ -235,6 +253,11 @@ pub struct World {
     snapshots: BTreeMap<Token, Vec<u8>>,
     landed: Vec<u8>,
     prompts: Vec<provider::api::Query>,
+    turns: Vec<agent::Turn>,
+    messages_seen: Vec<(Time, crate::messages_referee::Seen)>,
+    turn_metadata: Vec<(u32, Option<Token>, run::Spend)>,
+    waiting: Vec<(Time, Option<Token>)>,
+    bounces: Vec<(Token, run::MessageRefusal)>,
     facts: Vec<Fact>,
     trace: Trace,
     referee: Referee<Meeting>,
@@ -249,6 +272,14 @@ impl World {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn new(settings: Settings) -> World {
+        Self::with_history(settings, None)
+    }
+
+    /// Actual typed V2 entrance, including the committed post-transcript tail.
+    /// History is host-owned; root/session admission decides before provider work.
+    /// Contract: domain/run.md, sections 3 and 13; domain/session.md, section 3.
+    #[must_use]
+    pub fn with_history(settings: Settings, transcript: Option<agent::Transcript>) -> World {
         let mut disk = Checkout::new();
         let root = fixture::seed(&mut disk);
         let max_out = agent::max_out(&settings.limits);
@@ -263,6 +294,7 @@ impl World {
                 name: GrantName { account: 0, generation: 1 },
                 valid: Duration::from_secs(7200),
             }]),
+            transcript,
         });
         let mut schedule = Schedule::new();
         if let Some(after) = settings.cancel_at {
@@ -291,7 +323,13 @@ impl World {
             rng: Rng::new(settings.seed ^ 0x0b),
             agent: agent::Domain::new(&settings.limits, settings.seed ^ 0x17),
             stage,
-            provider: provider::Domain::scripted(&settings.provider, settings.seed ^ 0x25, script::all()),
+            provider: provider::Domain::configured(
+                &settings.provider,
+                settings.seed ^ 0x25,
+                script::all(),
+                smith_session_world::provider::menu(),
+            )
+            .expect("scripts and application menu obey provider admission"),
             provider_stage: Stage::new(settings.provider, provider::MAX_OUT, provider::MAX_OUT + 3),
             provider_calls: Ledger::new("fake provider call"),
             schedule,
@@ -312,6 +350,11 @@ impl World {
             snapshots: BTreeMap::new(),
             landed: Vec::new(),
             prompts: Vec::new(),
+            turns: Vec::new(),
+            messages_seen: Vec::new(),
+            turn_metadata: Vec::new(),
+            waiting: Vec::new(),
+            bounces: Vec::new(),
             facts: Vec::new(),
             trace: Trace::default(),
             referee,
@@ -320,11 +363,30 @@ impl World {
         }
     }
 
+    /// Script an actual parent input; delivery requires prior Admitted, as the host does.
+    /// Contract: domain/run.md, section 6; testing-strategy.md, section 7.
+    pub fn message_at(&mut self, at: Time, name: Token, text: Box<[u8]>) {
+        self.schedule.send(at, Delivery::Message { name, text });
+    }
+
     /// Runs at most `iterations` deterministic shell rounds. Success means the
     /// one start answered, every boundary settled, and every expectation passed.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub fn run(&mut self, iterations: u32) {
+        assert!(
+            self.drive(iterations),
+            "seed {}: world did not settle within {iterations} rounds\n{}",
+            self.settings.seed,
+            self.trace.lines().join("\n")
+        );
+    }
+
+    /// Advance up to this many real loop rounds, allowing another real domain
+    /// to translate the emitted boundary records before the next round. Returns
+    /// true only after the original root/provider/IO ledgers actually settle.
+    /// Contract: domain/host.md, section 9; testing-strategy.md, section 2.3.
+    pub fn drive(&mut self, iterations: u32) -> bool {
         for _ in 0..iterations {
             self.stage.tick(self.now);
             self.provider_stage.tick(self.now);
@@ -362,7 +424,12 @@ impl World {
                         Ok(answer) => {
                             Event::Completed { owner, completion: translate::completion(answer, grants, &served) }
                         }
-                        Err(error) => Event::Failed { owner, failure: translate::failure(error) },
+                        Err(error) => Event::Failed {
+                            owner,
+                            failure: translate::failure(error),
+                            evidence: smith_domain::llm::Evidence::Unknown,
+                            detail: Default::default(),
+                        },
                     };
                     self.send(Family::Completion, owner, event);
                 }
@@ -386,7 +453,7 @@ impl World {
                 && !self.agent.is_ready()
             {
                 self.settled();
-                return;
+                return true;
             }
             let immediate = self.stage.has_events() || self.provider_stage.has_events() || self.agent.is_ready();
             if !immediate {
@@ -402,11 +469,7 @@ impl World {
                 .expect("an unsettled world has a next boundary");
             }
         }
-        panic!(
-            "seed {}: world did not settle within {iterations} rounds\n{}",
-            self.settings.seed,
-            self.trace.lines().join("\n")
-        );
+        false
     }
 
     fn observe(&mut self, seen: Seen) {
@@ -428,9 +491,29 @@ impl World {
     )]
     fn request(&mut self, request: Request) {
         match request {
+            Request::Turn { worker, number, read, spent, turn } => {
+                assert_eq!(worker, Token::new(1));
+                assert_eq!(usize::try_from(number).expect("bounded output number"), self.turns.len() + 1);
+                self.observe(Seen::Turn { number });
+                self.messages_seen
+                    .push((self.now, crate::messages_referee::Seen::Turn { number, read, turn: turn.clone() }));
+                self.turn_metadata.push((number, read, spent));
+                self.turns.push(turn);
+            }
+            Request::Waiting { worker, read } => {
+                assert_eq!(worker, Token::new(1));
+                self.messages_seen.push((self.now, crate::messages_referee::Seen::Waiting { read }));
+                self.waiting.push((self.now, read));
+            }
+            Request::MessageBounced { run, name, reason } => {
+                assert_eq!(Some(run), self.admitted);
+                self.messages_seen.push((self.now, crate::messages_referee::Seen::Bounced { name }));
+                self.bounces.push((name, reason));
+            }
             Request::Admitted { worker, run } => {
                 assert_eq!(worker, Token::new(1), "the host's admitted identity is echoed");
                 assert!(self.admitted.replace(run).is_none(), "a start is admitted at most once");
+                self.messages_seen.push((self.now, crate::messages_referee::Seen::Admitted));
             }
             Request::Answer { to, answer } => {
                 if matches!(&answer, run::Answer::Failed { .. }) {
@@ -441,7 +524,15 @@ impl World {
                     answer: copy_answer(&answer),
                     pending: self.flights.keys().count() + self.host_pending.len(),
                 });
+                let (turns, parked) = match &answer {
+                    run::Answer::Parked { turns, .. } => (*turns, true),
+                    run::Answer::Accepted { turns, .. }
+                    | run::Answer::Delivered { turns, .. }
+                    | run::Answer::Failed { turns, .. } => (*turns, false),
+                    run::Answer::Refused(_) => (0, false),
+                };
                 assert!(self.answer.replace(answer).is_none(), "one answer per host start");
+                self.messages_seen.push((self.now, crate::messages_referee::Seen::Answer { turns, parked }));
                 self.answered = Some(self.now);
             }
             Request::Checking { worker, .. } => {
@@ -453,6 +544,7 @@ impl World {
                 self.flights.open((Family::Completion, owner), Flight { key: None, cancelled: false });
                 self.provider_calls.open(owner, (prompt.tools, prompt.served.clone()));
                 let query = translate::query(prompt);
+                self.messages_seen.push((self.now, crate::messages_referee::Seen::Prompt { query: query.clone() }));
                 self.prompts.push(query.clone());
                 self.provider_stage.push(provider::Event::Call { reply_to: ReplyTo::new(owner), query });
             }
@@ -699,6 +791,11 @@ impl World {
 
     fn deliver(&mut self, delivery: Delivery) {
         match delivery {
+            Delivery::Message { name, text } => {
+                self.messages_seen.push((self.now, crate::messages_referee::Seen::Input { name, text: text.clone() }));
+                let run = self.admitted.expect("parent sends only after actual admission");
+                self.stage.push(Event::Message { run, name, text });
+            }
             Delivery::Host { relay, reply } => {
                 self.host_terminals.push((relay, self.now, reply.clone()));
                 self.host_history.terminal(self.now, relay, &reply).expect("one actual host terminal");
@@ -750,7 +847,10 @@ impl World {
                         llm::Said::ToolCall { id, name, .. } if name.as_ref() == b"host_action" => {
                             self.host_history.called(id.clone()).expect("observed single provider host operation");
                         }
-                        llm::Said::Text { .. } | llm::Said::Opaque { .. } | llm::Said::ToolCall { .. } => {}
+                        llm::Said::Text { .. }
+                        | llm::Said::Refusal { .. }
+                        | llm::Said::Opaque { .. }
+                        | llm::Said::ToolCall { .. } => {}
                     }
                 }
                 self.observe(Seen::Completed {
@@ -780,12 +880,35 @@ impl World {
             }
             Event::Aborted { .. } => self.observe(Seen::Checked { owner, exit: run::Exit::Signalled }),
             Event::HostReturned { .. }
+            | Event::Message { .. }
             | Event::Start { .. }
             | Event::Grant { .. }
             | Event::Cancel { .. }
             | Event::Done { .. }
             | Event::Read { .. }
             | Event::Probed { .. } => {}
+        }
+        match &event {
+            Event::Completed { completion, .. } => self.messages_seen.push((
+                self.now,
+                crate::messages_referee::Seen::Completed {
+                    parts: crate::messages_referee::completion_parts(&completion.content),
+                },
+            )),
+            Event::Failed { .. } | Event::Cancelled { .. } => {
+                self.messages_seen.push((self.now, crate::messages_referee::Seen::CompletionEnded))
+            }
+            Event::Start { .. }
+            | Event::Message { .. }
+            | Event::Grant { .. }
+            | Event::Cancel { .. }
+            | Event::HostReturned { .. }
+            | Event::Delivered { .. }
+            | Event::Read { .. }
+            | Event::Probed { .. }
+            | Event::Checked { .. }
+            | Event::Aborted { .. }
+            | Event::Done { .. } => {}
         }
         self.stage.push(event);
     }
@@ -846,7 +969,8 @@ impl World {
         }
         let spent = match self.answer() {
             run::Answer::Refused(_) => run::Spend::ZERO,
-            run::Answer::Delivered { spent, .. }
+            run::Answer::Parked { spent, .. }
+            | run::Answer::Delivered { spent, .. }
             | run::Answer::Accepted { spent, .. }
             | run::Answer::Failed { spent, .. } => *spent,
         };
@@ -855,9 +979,39 @@ impl World {
         assert_eq!(answered, u32::from(self.admitted.is_some()), "every admitted run answers once in its facts");
     }
 
-    /// The host's terminal answer, available after [`World::run`] settles.
-    ///
-    /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
+    /// Exact time-ordered outside observations for the independent chat oracle.
+    /// Contract: domain/run.md, sections 6 and 13; testing-strategy.md, section 7.
+    #[must_use]
+    pub fn messages_seen(&self) -> &[(Time, crate::messages_referee::Seen)] {
+        &self.messages_seen
+    }
+
+    /// Actual main concrete turns, in emitted order. Contract: domain/run.md, section 13.
+    #[must_use]
+    pub fn turns(&self) -> &[agent::Turn] {
+        &self.turns
+    }
+
+    /// Actual activation numbers/read fences/token usage. Contract: domain/run.md, sections 6 and 13.
+    #[must_use]
+    pub fn turn_metadata(&self) -> &[(u32, Option<Token>, run::Spend)] {
+        &self.turn_metadata
+    }
+
+    /// Exact entrance decisions for scripted parent messages. Contract: domain/run.md, section 6.
+    #[must_use]
+    pub fn bounces(&self) -> &[(Token, run::MessageRefusal)] {
+        &self.bounces
+    }
+
+    /// Actual settled Waiting notices. Contract: domain/run.md, section 6.
+    #[must_use]
+    pub fn waiting(&self) -> &[(Time, Option<Token>)] {
+        &self.waiting
+    }
+
+    /// Actual final root output after every lower terminal and main Turn.
+    /// Contract: domain/run.md, section 13; testing-strategy.md, section 7.
     #[must_use]
     pub fn answer(&self) -> &run::Answer {
         self.answer.as_ref().expect("the world has settled")
@@ -1000,7 +1154,8 @@ fn charter(settings: &Settings, root: u64) -> run::Charter {
             }]),
         },
     };
-    let llm = Llm { account: 0, endpoint: Endpoint(0), model: b"fake-1".as_slice().into(), max_tokens: 4096 };
+    let llm =
+        Llm { account: 0, endpoint: Endpoint(0), model: b"fake-1".as_slice().into(), max_tokens: 4096, dialect: 1 };
     run::Charter {
         brief: script::cue(settings.job).unwrap_or(b"Look into the code.").into(),
         checkout: Roots {
@@ -1065,6 +1220,8 @@ fn charter(settings: &Settings, root: u64) -> run::Charter {
         budget: settings.budget,
         models: Box::new([Llm { model: b"fake-2".as_slice().into(), ..llm.clone() }]),
         llm,
+        resume: settings.resume,
+        waiting: settings.waiting,
     }
 }
 
@@ -1072,18 +1229,25 @@ fn copy_answer(answer: &run::Answer) -> run::Answer {
     use run::outcome::Declared;
     match answer {
         run::Answer::Refused(refusal) => run::Answer::Refused(*refusal),
-        run::Answer::Delivered { name, receipts, stopped, spent } => {
-            run::Answer::Delivered { name: *name, receipts: receipts.clone(), stopped: *stopped, spent: *spent }
+        run::Answer::Parked { spent, turns } => run::Answer::Parked { spent: *spent, turns: *turns },
+        run::Answer::Delivered { name, receipts, stopped, spent, turns } => run::Answer::Delivered {
+            name: *name,
+            receipts: receipts.clone(),
+            stopped: *stopped,
+            spent: *spent,
+            turns: *turns,
+        },
+        run::Answer::Failed { failure, spent, turns } => {
+            run::Answer::Failed { failure: *failure, spent: *spent, turns: *turns }
         }
-        run::Answer::Failed { failure, spent } => run::Answer::Failed { failure: *failure, spent: *spent },
-        run::Answer::Accepted { outcome, spent } => {
+        run::Answer::Accepted { outcome, spent, turns } => {
             let outcome = match outcome {
                 Declared::Change(change) => Declared::Change(change.clone()),
                 Declared::Verdict(verdict) => Declared::Verdict(verdict.clone()),
                 Declared::Report(report) => Declared::Report(report.clone()),
                 Declared::Failure(failure) => Declared::Failure(failure.clone()),
             };
-            run::Answer::Accepted { outcome, spent: *spent }
+            run::Answer::Accepted { outcome, spent: *spent, turns: *turns }
         }
     }
 }

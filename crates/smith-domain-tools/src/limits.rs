@@ -7,6 +7,7 @@ use skein_lib::{Duration, Id, List, Map, Queue, Set, Slab};
 
 use crate::authority::{Mount, Var};
 use crate::boundary::Root;
+use crate::call::{Call, Entry, Hit};
 use crate::facts::Fact;
 use crate::job::{self, Job};
 use crate::kit::Kit;
@@ -54,6 +55,12 @@ pub struct Limits {
     ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub list_entries: u32,
+
+    /// Maximum listing ownership: each entry's fixed size plus its name bytes.
+    /// The lower scan returns a name-order prefix within this and `list_entries`,
+    /// preserving the count of omitted entries. This also bounds actual late results.
+    /// Contract: domain/tools.md, sections 4, 5 and 9; domain/session.md, section 3.
+    pub list_bytes: u64,
     /// The most line numbers an ambiguous edit answers with.
     ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
@@ -114,6 +121,10 @@ pub struct Limits {
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
+    let smallest_entry = u64::try_from(core::mem::size_of::<Entry>()).ok()?.checked_add(1)?;
+    if limits.list_bytes < smallest_entry {
+        return None;
+    }
     let kits = Slab::<Kit>::worst_case(limits.kits)?.checked_add(u64::from(limits.kits).checked_mul(kit(limits)?)?)?;
     // Only running jobs hold a place, at most `calls` a kit; the slab has more
     // slots, for the jobs answered in an iteration.
@@ -129,6 +140,29 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(List::<&Name>::worst_case(parts.checked_mul(2)?)?)?
         .checked_add(u64::from(limits.path_bytes).checked_mul(2)?)?;
     kits.checked_add(jobs)?.checked_add(facts)?.checked_add(scratch)
+}
+
+/// Maximum dynamic ownership of this call's actual outcome, excluding its
+/// enclosing result block and copied provider ID, which the session reserves
+/// separately. The parent uses this before dispatch, including for a terminal
+/// that wins cancellation; `None` means a configured bound overflowed.
+/// Contract: domain/tools.md, sections 4, 5 and 9; domain/session.md, sections 3 and 5.
+#[must_use]
+pub fn result_worst_case(call: &Call, limits: &Limits) -> Option<u64> {
+    match call {
+        Call::Read { .. } => Some(u64::from(limits.read_bytes)),
+        Call::List { .. } => Some(limits.list_bytes),
+        Call::Search { .. } => {
+            let cells = u64::try_from(core::mem::size_of::<Hit>()).ok()?;
+            cells.checked_mul(u64::from(limits.search_hits))?.checked_add(u64::from(limits.search_bytes))
+        }
+        Call::Write { .. } => Some(0),
+        Call::Edit { .. } => {
+            let cell = u64::try_from(core::mem::size_of::<u32>()).ok()?;
+            cell.checked_mul(u64::from(limits.match_lines))
+        }
+        Call::Shell { .. } => u64::from(limits.shell_head).checked_add(u64::from(limits.shell_tail)),
+    }
 }
 
 /// What one kit holds beyond its slot: its authority, each path in it at most

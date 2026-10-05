@@ -74,6 +74,17 @@ modify (`write`, `edit`), shell.
 
 ## 5. Search and shell
 
+Listings have both an entry count and an owned-byte bound. `Limits.list_bytes`
+and `Op::Scan.max_bytes` count every `Entry` array cell and its name bytes;
+names have no implicit filesystem length cap in this typed boundary. The lower
+adapter returns a name-order prefix satisfying both caps and the actual number
+of omitted entries in `Scanned.more`. It stops the prefix at the first entry
+that does not fit, including an empty prefix when that first name is too large.
+It never skips that name to return later names. An actual scan that wins its
+cancellation returns the same bounded prefix and omitted count. The session
+can therefore reserve its complete possible result before starting the call
+(session.md, section 3), and must retain the actual terminal through close.
+
 - **Search** is `rg`, run as a contained process: no configuration, the
   pattern and glob passed so that neither reads as an option, an empty
   environment, and read-only directories. A code graph served over MCP

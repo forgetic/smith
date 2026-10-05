@@ -87,6 +87,10 @@ pub enum Fact {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         failure: Failure,
+
+        /// Content-free actual lower transport evidence; diagnostic text is not retained.
+        /// Contract: domain/session.md, sections 4, 5 and 12.
+        evidence: crate::llm::Evidence,
     },
     /// The completion was abandoned.
     ///

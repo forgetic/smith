@@ -36,6 +36,7 @@ const CEILING: session::Budget = session::Budget {
 
 const LIMITS: Limits = Limits {
     accounts: 4,
+    decoded_call_bytes: 4096,
     skew: Duration::ZERO,
     run: run::Limits {
         runs: 2,
@@ -71,12 +72,19 @@ const LIMITS: Limits = Limits {
         check_timeout: Duration::from_secs(300),
         check_tail: 256,
         facts: 64,
+        messages: 8,
+        message_bytes: 4096,
+        waiting: skein_lib::Duration::from_secs(300),
     },
     session: session::Limits {
         sessions: 4,
-        spend: 0,
+        spend: 1,
         messages: 16,
-        session_bytes: 65_536,
+        session_bytes: 2_097_152,
+        completion_bytes: 4096,
+        completion_blocks: 16,
+        failure_bytes: 512,
+        delegated_result_bytes: 262_144,
         budget: CEILING,
         max_tokens: 1024,
         retries: 1,
@@ -95,6 +103,7 @@ const LIMITS: Limits = Limits {
             file_bytes: 65_536,
             read_bytes: 4096,
             list_entries: 16,
+            list_bytes: 4096,
             match_lines: 4,
             file_timeout: Duration::from_secs(60),
             env_bytes: 64,
@@ -112,11 +121,79 @@ const LIMITS: Limits = Limits {
 
 const USAGE: Usage = Usage { input_tokens: 100, output_tokens: 10, cache_read_tokens: 0, cache_write_tokens: 0 };
 
+#[test]
+fn decoded_batch_reserves_refusal_cells_before_any_payload() {
+    let cell = u64::try_from(core::mem::size_of::<Decoded>()).expect("cell size fits");
+    let offered = crate::translate::Offered {
+        host_tools: Box::new([]),
+        finish: false,
+        deliver: false,
+        agents: false,
+        wait: true,
+    };
+    let mut peer = crate::peer::Peer::new(Token::new(17), 0, offered, &LIMITS.session);
+    let completion = Completion {
+        content: Box::new([
+            Said::ToolCall {
+                id: skein_lib::bytes::copy_of(b"oversized"),
+                name: skein_lib::bytes::copy_of(b"invalid"),
+                input: skein_lib::bytes::copy_of(b"{}"),
+                call: Decoded::Invalid { problem: Problem::Missing { field: Box::new([b'x'; 32]) } },
+                replay: None,
+            },
+            Said::ToolCall {
+                id: skein_lib::bytes::copy_of(b"fits"),
+                name: skein_lib::bytes::copy_of(b"wait"),
+                input: skein_lib::bytes::copy_of(b"{}"),
+                call: Decoded::Served { ask: Ask::Wait },
+                replay: None,
+            },
+        ]),
+        stop: Stop::ToolUse,
+        usage: USAGE,
+    };
+    let completion = peer.completion(completion, cell.checked_mul(2).expect("two cells fit"));
+    let mut calls = List::with_capacity(2);
+    for block in completion.content {
+        match block {
+            session::llm::Block::ToolCall { call, .. } => calls.push(call).expect("two calls"),
+            session::llm::Block::Text { .. }
+            | session::llm::Block::Refusal { .. }
+            | session::llm::Block::Opaque { .. }
+            | session::llm::Block::ToolResult { .. } => unreachable!("provider supplied only calls"),
+        }
+    }
+    match calls.get(0).expect("first call") {
+        session::llm::Decoded::Invalid { problem } => assert_eq!(problem, &Problem::TooLarge),
+        session::llm::Decoded::Owned { .. }
+        | session::llm::Decoded::Delegated { .. }
+        | session::llm::Decoded::Historical => unreachable!("oversized payload is refused"),
+    }
+    match calls.get(1).expect("second call") {
+        session::llm::Decoded::Delegated { .. } => assert_eq!(peer.tickets(), 1),
+        session::llm::Decoded::Owned { .. }
+        | session::llm::Decoded::Invalid { .. }
+        | session::llm::Decoded::Historical => unreachable!("later payload-free wait fits"),
+    }
+}
+
+#[test]
+fn decoded_receiving_cells_are_required_before_provider_work() {
+    let mut limits = LIMITS;
+    limits.decoded_call_bytes = u64::from(limits.session.completion_blocks)
+        .checked_mul(u64::try_from(core::mem::size_of::<Decoded>()).expect("cell size fits"))
+        .expect("configured cells fit");
+    assert!(worst_case(&limits).is_some());
+    limits.decoded_call_bytes = limits.decoded_call_bytes.checked_sub(1).expect("nonempty receiving cells");
+    assert!(worst_case(&limits).is_none());
+}
+
 /// The domain, its environment, and room for one entry point's output.
 struct Harness {
     domain: Domain,
     env: Env<Limits>,
     out: Queue<Request>,
+    turns: List<crate::Turn>,
 }
 
 impl Harness {
@@ -129,6 +206,7 @@ impl Harness {
             domain: Domain::new(limits, 1),
             env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits: *limits },
             out: Queue::with_capacity(max_out(limits)),
+            turns: List::with_capacity(CEILING.turns),
         }
     }
 
@@ -166,7 +244,43 @@ impl Harness {
         let mut requests = List::with_capacity(max_out(&LIMITS));
         for _ in 0..max_out(&LIMITS) {
             let Some(request) = self.out.pop() else { break };
-            requests.push(request).expect("room for max_out");
+            match request {
+                Request::Turn { turn, number, .. } => {
+                    assert_eq!(number, self.turns.len() + 1, "actual main output numbering");
+                    self.turns.push(turn).expect("bounded activation fixture turns");
+                }
+                Request::Answer { to, answer } => {
+                    match &answer {
+                        run::Answer::Parked { turns, .. }
+                        | run::Answer::Accepted { turns, .. }
+                        | run::Answer::Failed { turns, .. }
+                        | run::Answer::Delivered { turns, .. } => {
+                            assert_eq!(*turns, self.turns.len(), "terminal follows every actual Turn");
+                        }
+                        run::Answer::Refused(_) => assert!(self.turns.is_empty()),
+                    }
+                    requests.push(Request::Answer { to, answer }).expect("room for max_out");
+                }
+                request @ (Request::HostCall { .. }
+                | Request::WithdrawHost { .. }
+                | Request::Admitted { .. }
+                | Request::Checking { .. }
+                | Request::Deliver { .. }
+                | Request::Complete { .. }
+                | Request::Rejected { .. }
+                | Request::Exhausted { .. }
+                | Request::Cancel { .. }
+                | Request::Io { .. }
+                | Request::CancelIo { .. }
+                | Request::Read { .. }
+                | Request::Probe { .. }
+                | Request::Check { .. }
+                | Request::Abort { .. }
+                | Request::Waiting { .. }
+                | Request::MessageBounced { .. }) => {
+                    requests.push(request).expect("room for max_out");
+                }
+            }
         }
         assert!(self.out.is_empty(), "an entry point emits at most max_out");
         requests.into_boxed()
@@ -183,6 +297,7 @@ impl Harness {
             reply_to: ReplyTo::new(Token::new(call)),
             worker: Token::new(call),
             charter,
+            transcript: None,
         });
         let [Request::Admitted { worker: _, run }, Request::Read { owner, .. }] = &*emitted else {
             panic!("expected an admitted run, got {emitted:?}");
@@ -207,8 +322,11 @@ impl Harness {
 
     /// The session `owner`'s LLM ends its turn saying `text`.
     fn says(&mut self, owner: Token, text: &[u8]) -> Box<[Request]> {
-        let completion =
-            Completion { content: Box::new([Said::Text { text: bytes(text) }]), stop: Stop::EndTurn, usage: USAGE };
+        let completion = Completion {
+            content: Box::new([Said::Text { text: bytes(text), replay: None }]),
+            stop: Stop::EndTurn,
+            usage: USAGE,
+        };
         self.step(Event::Completed { owner, completion })
     }
 }
@@ -226,8 +344,10 @@ fn charter() -> Charter {
         grants: Grants { deliver: None, tools: TOOLS, agents: true, host_tools: Box::new([]) },
         outcome: OutcomeSpec { change: None, verdicts: Box::new([rule(b"approve")]), report: None, failure: None },
         budget: BUDGET,
-        llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 512 },
+        llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 512, dialect: 1 },
         models: Box::new([]),
+        resume: false,
+        waiting: skein_lib::Duration::from_secs(30),
     }
 }
 
@@ -260,11 +380,23 @@ fn sub_agent(brief: &[u8]) -> Ask {
 }
 
 fn served(id: &[u8], ask: Ask) -> Said {
-    Said::ToolCall { id: bytes(id), name: bytes(b"served"), input: bytes(b"{}"), call: Decoded::Served { ask } }
+    Said::ToolCall {
+        id: bytes(id),
+        name: bytes(b"served"),
+        input: bytes(b"{}"),
+        call: Decoded::Served { ask },
+        replay: None,
+    }
 }
 
 fn owned(id: &[u8], call: Call) -> Said {
-    Said::ToolCall { id: bytes(id), name: bytes(b"read"), input: bytes(b"{}"), call: Decoded::Owned { call } }
+    Said::ToolCall {
+        id: bytes(id),
+        name: bytes(b"read"),
+        input: bytes(b"{}"),
+        call: Decoded::Owned { call },
+        replay: None,
+    }
 }
 
 fn path(absolute: bool, names: &[&[u8]]) -> Path {
@@ -280,7 +412,7 @@ fn completing(emitted: Box<[Request]>) -> (Token, Prompt) {
     let Ok(one) = Box::<[Request; 1]>::try_from(emitted) else {
         panic!("expected one request");
     };
-    let [Request::Complete { owner, prompt, timeout, grant: _ }] = *one else {
+    let [Request::Complete { owner, prompt, timeout, grant: _, .. }] = *one else {
         panic!("expected a call to an LLM");
     };
     assert_eq!(timeout, LIMITS.session.call_timeout);
@@ -338,7 +470,12 @@ fn grant_updates_do_not_change_a_call_in_flight_and_rejections_are_once_per_gene
     let next = crate::Grant { name: crate::GrantName { account: 0, generation: 1 }, valid: Duration::from_secs(60) };
     assert!(h.step(Event::Grant { grant: next }).is_empty());
     assert_eq!(
-        &*h.step(Event::Failed { owner, failure: crate::llm::Failure::Unauthorized }),
+        &*h.step(Event::Failed {
+            owner,
+            failure: crate::llm::Failure::Unauthorized,
+            evidence: crate::llm::Evidence::Unknown,
+            detail: Default::default()
+        }),
         &[Request::Rejected { grant: crate::GrantName { account: 0, generation: 0 } }]
     );
     h.env.now = h.domain.next_deadline().expect("unauthorized retry backoff");
@@ -346,12 +483,25 @@ fn grant_updates_do_not_change_a_call_in_flight_and_rejections_are_once_per_gene
     let [Request::Complete { grant, .. }] = &*emitted else { panic!("expected retry") };
     assert_eq!(*grant, next.name);
     assert_eq!(
-        &*h.step(Event::Failed { owner, failure: crate::llm::Failure::Unauthorized }),
+        &*h.step(Event::Failed {
+            owner,
+            failure: crate::llm::Failure::Unauthorized,
+            evidence: crate::llm::Evidence::Unknown,
+            detail: Default::default()
+        }),
         &[Request::Rejected { grant: next.name }]
     );
     h.env.now = h.domain.next_deadline().expect("second retry");
     drop(h.fire());
-    assert!(h.step(Event::Failed { owner, failure: crate::llm::Failure::Unauthorized }).is_empty());
+    assert!(
+        h.step(Event::Failed {
+            owner,
+            failure: crate::llm::Failure::Unauthorized,
+            evidence: crate::llm::Evidence::Unknown,
+            detail: Default::default()
+        })
+        .is_empty()
+    );
 }
 
 #[test]
@@ -364,6 +514,7 @@ fn no_grant_fails_locally_and_exhaustion_reports_the_account() {
         worker: Token::new(7),
         charter: ungranted,
         grants: Box::new([]),
+        transcript: None,
     });
     let [Request::Admitted { run, .. }, Request::Read { .. }] = &*emitted else { panic!("expected admission") };
     assert!(
@@ -374,7 +525,12 @@ fn no_grant_fails_locally_and_exhaustion_reports_the_account() {
     let mut h = Harness::new();
     let (_, owner, _) = h.admit(7, charter());
     let retry_after = Duration::from_secs(30);
-    let emitted = h.step(Event::Failed { owner, failure: crate::llm::Failure::Exhausted { retry_after } });
+    let emitted = h.step(Event::Failed {
+        owner,
+        failure: crate::llm::Failure::Exhausted { retry_after },
+        evidence: crate::llm::Evidence::Unknown,
+        detail: Default::default(),
+    });
     let Some(Request::Exhausted { account: 0, retry_after: span }) = emitted.first() else {
         panic!("exhaustion notice")
     };
@@ -382,7 +538,15 @@ fn no_grant_fails_locally_and_exhaustion_reports_the_account() {
     let mut failed = false;
     for request in &emitted {
         if let Request::Answer {
-            answer: run::Answer::Failed { failure: run::Failure::Model(run::Fault::Exhausted), .. },
+            answer:
+                run::Answer::Failed {
+                    failure:
+                        run::Failure::Model(run::Fault::Completion {
+                            failure: run::CompletionFailure::Exhausted { .. },
+                            evidence: run::CompletionEvidence::Unknown,
+                        }),
+                    ..
+                },
             ..
         } = request
         {
@@ -395,7 +559,7 @@ fn no_grant_fails_locally_and_exhaustion_reports_the_account() {
 #[test]
 fn the_limits_fit_and_a_session_must_take_what_the_run_asks() {
     assert!(worst_case(&LIMITS).is_some());
-    let fewer = Limits { session: session::Limits { sessions: 3, spend: 0, ..LIMITS.session }, ..LIMITS };
+    let fewer = Limits { session: session::Limits { sessions: 3, spend: 1, ..LIMITS.session }, ..LIMITS };
     assert_eq!(worst_case(&fewer), None, "a session for every conversation the run may have");
     let budget = session::Budget { turns: 50, ..CEILING };
     let smaller = Limits { session: session::Limits { budget, ..LIMITS.session }, ..LIMITS };
@@ -426,7 +590,11 @@ fn a_run_opens_main_as_a_session_through_to_its_first_call_to_the_llm() {
     let (_, main, prompt) = h.admit(7, charter());
     assert_eq!((prompt.endpoint, &*prompt.model, prompt.max_tokens), (session::llm::Endpoint(1), &b"model-a"[..], 512));
     assert_eq!(prompt.tools, tools::Grants { inspect: true, modify: true, shell: false });
-    assert_eq!(&*prompt.served, &[Served::Finish, Served::SubAgent], "main may finish, and ask for sub-agents");
+    assert_eq!(
+        &*prompt.served,
+        &[Served::Wait, Served::Finish, Served::SubAgent],
+        "main may finish, and ask for sub-agents"
+    );
     let [Message { role: Role::User, content }] = &*prompt.messages else {
         panic!("expected the first message only");
     };
@@ -448,7 +616,7 @@ fn a_run_opens_main_as_a_session_through_to_its_first_call_to_the_llm() {
 
 fn matches_text(content: &[Block]) -> bool {
     match content {
-        [Block::Text { text }] => !text.is_empty(),
+        [Block::Text { text, replay: None }] => !text.is_empty(),
         _ => false,
     }
 }
@@ -483,7 +651,7 @@ fn a_checkout_the_tools_cannot_lay_out_refuses_main_as_invalid() {
 fn an_opening_larger_than_a_session_holds_refuses_main_as_invalid() {
     // Limits a session honours whatever the charter, but not every opening:
     // that is the charter's, and is refused at the sessions' entrance.
-    let limits = Limits { session: session::Limits { session_bytes: 2048, ..LIMITS.session }, ..LIMITS };
+    let limits = Limits { session: session::Limits { session_bytes: 2_097_152, ..LIMITS.session }, ..LIMITS };
     assert!(worst_case(&limits).is_some());
     let mut h = Harness::with(&limits);
     let brief = filler(2048);
@@ -515,43 +683,28 @@ fn a_finish_the_run_rejects_at_once_comes_back_from_the_ready_list_as_the_sessio
     // The run judges the finish within the step, and rejects it; the answer
     // waits for the next iteration.
     assert!(h.answer(main, Box::new([served(b"f1", verdict(b"merge"))])).is_empty());
-    assert_eq!((h.domain.tickets(), h.domain.flights()), (1, 1), "the rejection's ticket, and the call it answers");
+    assert_eq!((h.domain.tickets(), h.domain.flights()), (0, 1), "concrete rejection waits on its actual call right");
     assert!(!h.domain.is_ready(), "not before the reclaim point");
 
     let (owner, prompt) = completing(h.next());
     assert_eq!(owner, main);
-    let [Block::ToolResult { id, result: Returned::Served { returned, error: true } }] = last(&prompt) else {
+    let [Block::ToolResult { id, result: Returned::Text { text, error: true, replay: None } }] = last(&prompt) else {
         panic!("expected the rejection, got {:?}", last(&prompt));
     };
     assert_eq!(&**id, b"f1");
-    assert!(matches_rejected(returned), "got {returned:?}");
+    assert!(text.starts_with(b"rejected"), "canonical rejection retains its problem details: {text:?}");
     let [_, Message { role: Role::Assistant, content }, _] = &*prompt.messages else {
         panic!("expected the call and its result");
     };
-    assert_eq!(&**content, &[Block::ToolCall { id: bytes(b"f1"), name: bytes(b"served"), input: bytes(b"{}") }]);
-    assert_eq!((h.domain.tickets(), h.domain.flights()), (1, 0), "the answer stays in the transcript");
-}
-
-fn matches_rejected(returned: &run::Returned) -> bool {
-    match returned {
-        run::Returned::Rejected { problems } => !problems.listed.is_empty(),
-        run::Returned::HostAnswered(_)
-        | run::Returned::HostUnknown
-        | run::Returned::HostRejected(_)
-        | run::Returned::Delivered(_)
-        | run::Returned::Nothing
-        | run::Returned::DeliveryRefused(_)
-        | run::Returned::Accepted
-        | run::Returned::ChecksFailed { .. }
-        | run::Returned::Stale
-        | run::Returned::DeliveryFailed { .. }
-        | run::Returned::Cancelled
-        | run::Returned::TimedOut
-        | run::Returned::Busy
-        | run::Returned::Answered { .. }
-        | run::Returned::Unanswered { .. }
-        | run::Returned::Refused { .. } => false,
-    }
+    assert_eq!(
+        &**content,
+        &[Block::ToolCall { id: bytes(b"f1"), name: bytes(b"served"), input: bytes(b"{}"), replay: None }]
+    );
+    assert_eq!(
+        (h.domain.tickets(), h.domain.flights()),
+        (0, 0),
+        "concrete answer stays in the session transcript without a local ticket"
+    );
 }
 
 #[test]
@@ -562,7 +715,7 @@ fn an_accepted_finish_closes_main_and_the_run_answers_the_worker() {
     // The answer and the close come in the next iteration: the close first,
     // which withdraws the call, whose answer has won.
     let emitted = h.next();
-    let [Request::Answer { to, answer: run::Answer::Accepted { outcome: _, spent } }] = &*emitted else {
+    let [Request::Answer { to, answer: run::Answer::Accepted { outcome: _, spent, .. } }] = &*emitted else {
         panic!("expected the run accepted, got {emitted:?}");
     };
     assert_eq!(to, &ReplyTo::new(Token::new(7)));
@@ -600,7 +753,7 @@ fn a_change_lands_through_the_worker_and_the_run_answers_with_it() {
     assert_eq!((worker, pushed), (&Token::new(7), &change));
     assert!(h.step(Event::Delivered { owner: *owner, push: delivered() }).is_empty(), "the answer and the close wait");
     let emitted = h.next();
-    let [Request::Answer { to: _, answer: run::Answer::Accepted { outcome, spent: _ } }] = &*emitted else {
+    let [Request::Answer { to: _, answer: run::Answer::Accepted { outcome, spent: _, .. } }] = &*emitted else {
         panic!("expected the run accepted, got {emitted:?}");
     };
     assert_eq!(outcome, &Declared::Change(change));
@@ -634,30 +787,27 @@ fn a_sub_agent_opens_a_child_session_whose_last_message_answers_the_call() {
     assert!(h.next().is_empty(), "the child closes, and ends");
     let (owner, prompt) = completing(h.next());
     assert_eq!(owner, main);
-    let [Block::ToolResult { id, result: Returned::Served { returned, error: false } }] = last(&prompt) else {
+    let [Block::ToolResult { id, result: Returned::Text { text, error: false, replay: None } }] = last(&prompt) else {
         panic!("expected the child's answer, got {:?}", last(&prompt));
     };
     assert_eq!(&**id, b"a1");
-    let run::Returned::Answered { text, cut: 0, stop: run::Stop::EndTurn } = returned else {
-        panic!("expected the child's last message, got {returned:?}");
-    };
     assert_eq!(&**text, b"It is in main.rs.");
     h.domain.reclaim();
-    assert_eq!((h.domain.peers(), h.domain.flights(), h.domain.tickets()), (1, 0, 1));
+    assert_eq!((h.domain.peers(), h.domain.flights(), h.domain.tickets()), (1, 0, 0));
 }
 
 /// Main, admitted, whose LLM says `text` bytes and asks for two read-only
 /// sub-agents side by side: what that emitted.
-fn side_by_side(text: u32) -> (Harness, Box<[Request]>) {
-    let mut h = Harness::new();
-    let (_, main, _) = h.admit(7, charter());
+fn side_by_side_with(limits: &Limits, text: u32) -> (Harness, Token, Box<[Request]>) {
+    let mut h = Harness::with(limits);
+    let (run, main, _) = h.admit(7, charter());
     let content = Box::new([
-        Said::Text { text: filler(text) },
+        Said::Text { text: filler(text), replay: None },
         served(b"a1", sub_agent(b"Look here.")),
         served(b"a2", sub_agent(b"Look there.")),
     ]);
     let emitted = h.answer(main, content);
-    (h, emitted)
+    (h, run, emitted)
 }
 
 /// The sub-agents `emitted` opened, whose sessions call their LLMs.
@@ -677,59 +827,76 @@ fn filler(len: u32) -> Box<[u8]> {
 }
 
 #[test]
-fn the_answers_a_full_session_cannot_take_are_held_uncharged_and_counted() {
-    // The longest text main takes with its calls, which leaves its
-    // transcript no room for their answers.
-    let (mut taken, mut refused) = (0_u32, u32::try_from(LIMITS.session.session_bytes).expect("small"));
-    assert!(children(&side_by_side(taken).1).is_some() && children(&side_by_side(refused).1).is_none());
-    for _ in 0..32_u32 {
-        let mid = taken + (refused - taken) / 2;
-        if mid == taken {
+fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_actual_bytes() {
+    // Find the exact receiving edge from actual admission/dispatch outputs.
+    // C bounds provider content; D bounds each complete canonical child result.
+    // A one-byte tighter transcript must refuse the entire adjacent read batch.
+    let mut lower = 2 * LIMITS.session.delegated_result_bytes;
+    let mut upper = LIMITS.session.session_bytes;
+    assert!(
+        children(
+            &side_by_side_with(
+                &Limits { session: session::Limits { session_bytes: lower, ..LIMITS.session }, ..LIMITS },
+                256
+            )
+            .2
+        )
+        .is_none()
+    );
+    assert!(children(&side_by_side_with(&LIMITS, 256).2).is_some());
+    for _ in 0..32 {
+        if upper - lower <= 1 {
             break;
         }
-        if children(&side_by_side(mid).1).is_some() { taken = mid } else { refused = mid }
-    }
-    let (mut h, emitted) = side_by_side(taken);
-    let [first, second] = children(&emitted).expect("main took its message");
-
-    // Both answer with as much as the run passes on, in the same iteration.
-    let answer = filler(LIMITS.run.answer_bytes);
-    assert!(h.says(first, &answer).is_empty());
-    assert!(h.says(second, &answer).is_empty());
-    assert!(h.next().is_empty(), "the children close, and end");
-    for _ in 0..64_u32 {
-        if h.domain.pop_fact().is_none() {
-            break;
+        let middle = lower + (upper - lower) / 2;
+        let limits = Limits { session: session::Limits { session_bytes: middle, ..LIMITS.session }, ..LIMITS };
+        if children(&side_by_side_with(&limits, 256).2).is_some() {
+            upper = middle;
+        } else {
+            lower = middle;
         }
     }
-    assert_eq!((h.domain.tickets(), h.domain.flights()), (2, 2), "both answers wait on the ready list");
+    assert_eq!(upper, lower + 1);
+    let tight = Limits { session: session::Limits { session_bytes: lower, ..LIMITS.session }, ..LIMITS };
+    let (tight_world, _, refused) = side_by_side_with(&tight, 256);
+    assert!(children(&refused).is_none(), "all result credit precedes the first child effect");
+    let refused_turn = tight_world.turns.last().expect("actual assistant and unstarted result tail survive");
+    assert_eq!(
+        refused_turn.messages.last().expect("real results").content.as_ref(),
+        &[
+            session::llm::Block::ToolResult { id: bytes(b"a1"), result: session::llm::Returned::NotRun },
+            session::llm::Block::ToolResult { id: bytes(b"a2"), result: session::llm::Returned::NotRun },
+        ]
+    );
 
-    // The first does not fit: main abandons the batch, and takes the second
-    // only to settle it. Neither is charged, and main's peer holds both
-    // until main ends.
-    let emitted = h.next();
-    let [Request::Answer { to: _, answer: run::Answer::Failed { .. } }] = &*emitted else {
-        panic!("expected the run failed, got {emitted:?}");
-    };
-    let mut payloads = 0_u64;
-    let mut ended = false;
-    for _ in 0..64_u32 {
-        match h.domain.pop_fact() {
-            Some(Fact::Session { fact: session::Fact::DelegateAnswered { opener: _, bytes, error: false } }) => {
-                payloads += bytes - u64::try_from(size_of::<run::Returned>()).expect("small");
+    let limits = Limits { session: session::Limits { session_bytes: upper, ..LIMITS.session }, ..LIMITS };
+    let (mut world, run, emitted) = side_by_side_with(&limits, 256);
+    let [first, second] = children(&emitted).expect("the complete batch was reserved");
+    let answer = filler(limits.run.answer_bytes);
+    assert!(world.says(first, &answer).is_empty());
+    assert!(world.says(second, &answer).is_empty());
+    assert!(world.next().is_empty(), "actual child endings queue both owning results");
+    assert_eq!(world.domain.flights(), 2);
+    assert_eq!(world.domain.run().runs(), 1, "only main remains after both real child terminals");
+    assert!(world.step(Event::Cancel { run }).is_empty());
+    // Cancel emission cannot replace either result which already won its terminal.
+    let emitted = world.next();
+    assert!(
+        !emitted.iter().any(|request| matches!(request, Request::Complete { .. })),
+        "no room for another provider receiving reserve after the exact result edge"
+    );
+    let turn = world.turns.last().expect("actual main Turn precedes its failed final answer");
+    for (index, id) in [b"a1".as_slice(), b"a2".as_slice()].into_iter().enumerate() {
+        assert_eq!(
+            turn.messages.last().expect("actual result message").content[index],
+            session::llm::Block::ToolResult {
+                id: bytes(id),
+                result: session::llm::Returned::Text { text: answer.clone(), error: false, replay: None }
             }
-            Some(Fact::Session { fact: session::Fact::Ended { opener: _, end, .. } }) => {
-                ended = true;
-                assert_eq!(end, session::End::TranscriptFull);
-            }
-            Some(_) => {}
-            None => break,
-        }
+        );
     }
-    assert!(ended, "main ended as its transcript is full");
-    let answers = u64::from(LIMITS.session.parallel_tools) * u64::from(LIMITS.run.answer_bytes);
-    assert_eq!(payloads, answers, "a batch of sub-agents' answers, each as long as the run passes on");
-    assert!(payloads <= limits::uncharged(&LIMITS).expect("the limits fit"), "counted by the top level");
+    assert_eq!(world.domain.tickets(), 0, "concrete records carry no local replay tickets");
+    assert!(u64::from(limits.run.answer_bytes) * 2 <= limits::uncharged(&limits).expect("priced queued payload"));
 }
 
 #[test]
@@ -751,7 +918,7 @@ fn a_cancel_cascades_down_a_two_level_tree_one_level_an_iteration() {
     assert!(h.step(Event::Cancelled { owner: grandchild }).is_empty());
     assert!(h.next().is_empty(), "the child's call is answered cancelled, and it ends");
     let emitted = h.next();
-    let [Request::Answer { to: _, answer: run::Answer::Failed { failure: run::Failure::Cancelled, spent } }] =
+    let [Request::Answer { to: _, answer: run::Answer::Failed { failure: run::Failure::Cancelled, spent, .. } }] =
         &*emitted
     else {
         panic!("expected the run cancelled, got {emitted:?}");
@@ -809,7 +976,7 @@ fn the_runs_deadline_fires_before_the_sessions_expiry_at_the_same_instant() {
     assert!(!h.domain.is_due(h.env.now));
     assert!(h.next().is_empty(), "the close finds main closing already");
     let emitted = h.step(Event::Cancelled { owner: main });
-    let [Request::Answer { to: _, answer: run::Answer::Failed { failure, spent: _ } }] = &*emitted else {
+    let [Request::Answer { to: _, answer: run::Answer::Failed { failure, spent: _, .. } }] = &*emitted else {
         panic!("expected the run failed, got {emitted:?}");
     };
     assert_eq!(failure, &run::Failure::Budget(run::Exhausted::Time));
@@ -864,6 +1031,7 @@ fn opaque_call(id: &[u8], tool: &[u8], effect: run::HostEffect) -> Said {
                 input: run::HostInput::attested(input).expect("typed protocol attestation"),
             },
         },
+        replay: None,
     }
 }
 
@@ -904,17 +1072,12 @@ fn declared_host_reads_run_together_write_waits_and_mismatched_effect_never_rela
     };
     assert!(h.step(Event::HostReturned { relay: *relay, reply: run::HostReply::Answered(answer.clone()) }).is_empty());
     let (owner, prompt) = completing(h.next());
-    let [
-        Block::ToolResult {
-            result: Returned::Served { returned: run::Returned::HostAnswered(actual), error: true },
-            ..
-        },
-        ..,
-    ] = last(&prompt)
+    let [Block::ToolResult { result: Returned::Text { text: actual, error: true, replay: None }, .. }, ..] =
+        last(&prompt)
     else {
         panic!("exact error reaches next completion");
     };
-    assert_eq!(actual, &answer);
+    assert_eq!(actual.as_ref(), answer.text());
     let emitted = h.answer(owner, Box::new([opaque_call(b"bad", b"outside_write", run::HostEffect::Read)]));
     let (_, prompt) = completing(emitted);
     let [Block::ToolResult { result: Returned::Invalid { problem: Problem::UnknownTool }, .. }] = last(&prompt) else {

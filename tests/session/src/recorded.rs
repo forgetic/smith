@@ -272,6 +272,7 @@ pub fn called() -> Box<[llm::Block]> {
             name: b"subagent".as_slice().into(),
             input: br#"{"task":"review"}"#.as_slice().into(),
             call: llm::Decoded::Delegated { ticket: Token::new(991), effect: Effect::Write },
+            replay: None,
         },
     ])
 }
@@ -300,11 +301,11 @@ pub fn scenario(seed: u64, facts: u32) -> World {
         world.turns[0].messages[2].content[0],
         llm::Block::ToolResult {
             id: b"provider-call".as_slice().into(),
-            result: llm::Returned::Text { text: b"child finished".as_slice().into(), error: false }
+            result: llm::Returned::Text { text: b"child finished".as_slice().into(), error: false, replay: None }
         }
     );
     world.complete(
-        Box::new([llm::Block::Text { text: b"done".as_slice().into() }]),
+        Box::new([llm::Block::Text { text: b"done".as_slice().into(), replay: None }]),
         llm::Stop::EndTurn,
         llm::Usage { output_tokens: 1, ..llm::Usage::ZERO },
     );

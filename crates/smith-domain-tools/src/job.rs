@@ -233,7 +233,10 @@ pub(crate) fn start(
             let op = Op::Load { at: place.clone(), max: limits.file_bytes };
             (State::Reading { reply_to, place, span }, op)
         }
-        Work::List { place } => (State::Listing { reply_to }, Op::Scan { at: place, max: limits.list_entries }),
+        Work::List { place } => (
+            State::Listing { reply_to },
+            Op::Scan { at: place, max: limits.list_entries, max_bytes: limits.list_bytes },
+        ),
         Work::Write { place, content, expect } => {
             let change = match expect {
                 Expect::Absent => Change::Create,

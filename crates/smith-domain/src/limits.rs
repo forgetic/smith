@@ -8,7 +8,7 @@ use smith_domain_run::{self as run, Ask};
 use smith_domain_session as session;
 
 use crate::GrantName;
-use crate::domain::{Credential, Flight, Handoff};
+use crate::domain::{Credential, Flight, Handoff, StartContext, TurnHandoff};
 use crate::facts::Fact;
 use crate::peer::{self, Peer};
 
@@ -23,6 +23,14 @@ pub struct Limits {
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub accounts: u32,
+
+    /// Aggregate decoded application-call bytes admitted from one completion.
+    /// The adapter includes these owning call fields in its translated completion
+    /// bound before provider work; oversized classifications become TooLarge.
+    /// This includes one Decoded cell for every possible completion block,
+    /// including classifications with no payload after a refusal.
+    /// Contract: domain/run.md, sections 3 and 14.
+    pub decoded_call_bytes: u64,
     /// Safety margin subtracted from credential validity before use.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -48,20 +56,19 @@ pub struct Limits {
 /// as `Invalid(Conversation)` for main, and answers a sub-agent's call as
 /// unanswered.
 ///
-/// It is the child domains', plus what the top level keeps: a peer for each
-/// conversation, with the asks and answers of its session's tickets, the maps
-/// that find peers and the delegated calls in flight, the ready list, the
-/// queues that hold what each child domain emits in a step until it is routed,
-/// and the facts. A peer's asks hold at most its session's byte limit; its
-/// answers are charged to the session, and counted with it, but for those of
-/// the batch it waits for, which it has not charged: on the ready list, or
-/// reaching it once it is closing or has no room for them. What the queued
-/// requests own is counted where they end up.
+/// Child domains are counted independently from root peer descriptors, bounded
+/// decoded asks, deferred concrete answers, causal child queues, Start histories
+/// and concrete Turn handoffs. Message/Turn arrays are additional to the
+/// session's Block/payload cap. Rewritten root prompt Block/Message envelopes,
+/// semantic-result plus escaped text construction, failure diagnostic transit
+/// and separately retained observations are counted before caller ownership
+/// transfer. V2 has no persistent answer-ticket map; valid actual results own
+/// pre-effect session credit until received and recorded through close.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
-    let Limits { run: run_limits, session: session_limits, accounts: _, skew: _ } = limits;
+    let Limits { run: run_limits, session: session_limits, accounts: _, skew: _, decoded_call_bytes: _ } = limits;
     let budget = run_limits.budget;
     let ceiling = session_limits.budget;
     let fits = budget.turns <= ceiling.turns
@@ -77,17 +84,24 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     {
         return None;
     }
+    if session_limits.spend == 0 || crate::feedback_worst_case(run_limits)? > session_limits.delegated_result_bytes {
+        return None;
+    }
+    let decoded_cells = u64::from(session_limits.completion_blocks)
+        .checked_mul(u64::try_from(core::mem::size_of::<crate::llm::Decoded>()).ok()?)?;
+    if decoded_cells > limits.decoded_call_bytes.min(session_limits.session_bytes) {
+        return None;
+    }
     let children = run::worst_case(run_limits)?.checked_add(session::worst_case(session_limits)?)?;
     let peers = run_limits.conversations;
     let tickets = run_limits
         .run_bytes
         .checked_add(Map::<u64, Ask>::worst_case(peer::asks(session_limits))?)?
-        .checked_add(session_limits.session_bytes)?
-        .checked_add(Map::<u64, run::Returned>::worst_case(peer::answers(session_limits))?)?
-        .checked_add(uncharged(limits)?)?;
+        .checked_add(limits.decoded_call_bytes)?;
     let held = Slab::<Peer>::worst_case(peers)?.checked_add(u64::from(peers).checked_mul(tickets)?)?;
     let found = Map::<Token, Id<Peer>>::worst_case(peers)?.checked_mul(2)?;
     let flights = Map::<Token, Flight>::worst_case(flights(limits)?)?
+        .checked_add(u64::from(flights(limits)?).checked_mul(session_limits.delegated_result_bytes)?)?
         .checked_add(Map::<u32, Credential>::worst_case(limits.accounts)?)?
         .checked_add(Map::<Token, GrantName>::worst_case(run_limits.conversations)?)?
         .checked_add(Queue::<crate::Request>::worst_case(1)?)?;
@@ -101,7 +115,21 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .max(run_limits.run_bytes.checked_add(u64::from(run_limits.host_input_bytes))?);
     let run_out = Queue::<run::Request>::worst_case(run_out(limits))?
         .checked_add(u64::from(run_out(limits)).checked_mul(payload)?)?;
-    let session_out = Queue::<session::Request>::worst_case(session_out(limits))?;
+    // Every copied turn/prompt in the child queue and every separate handoff
+    // can own record envelopes plus capped block payload concurrently. Start
+    // history remains independent while main has not consumed its binding.
+    let record = record_payload(limits)?;
+    let session_out = Queue::<session::Request>::worst_case(session_out(limits))?.checked_add(
+        u64::from(session_out(limits))
+            .checked_mul(record.max(prompt_payload(limits)?).max(u64::from(session_limits.failure_bytes)))?,
+    )?;
+    let starts = Slab::<StartContext>::worst_case(run_limits.runs)?
+        .checked_add(u64::from(run_limits.runs).checked_mul(record)?)?;
+    let turns = Slab::<TurnHandoff>::worst_case(session_out(limits))?
+        .checked_add(u64::from(session_out(limits)).checked_mul(record)?)?;
+    // Canonical rendering can temporarily retain the complete semantic result
+    // beside the allocated text, before it moves into one flight.
+    let rendering = payload.checked_add(session_limits.delegated_result_bytes)?;
     let facts = Queue::<Fact>::worst_case(facts(limits)?)?;
     let content = Queue::<crate::Content>::worst_case(limits.session.facts)?
         .checked_add(u64::from(limits.session.facts).checked_add(1)?.checked_mul(limits.session.session_bytes)?)?;
@@ -112,19 +140,19 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(ready)?
         .checked_add(run_out)?
         .checked_add(session_out)?
+        .checked_add(starts)?
+        .checked_add(turns)?
+        .checked_add(rendering)?
         .checked_add(facts)?
         .checked_add(content)
 }
 
-/// What a peer holds of the run's answers that its session has not charged
-/// for: the payloads of the batch it waits for, each answer's from the run's
-/// `Return` until it reaches the session from the ready list, and for good
-/// once it reaches a session that is closing, or that has no room for it.
-/// The fixed size of their tickets is among a peer's answers.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
+/// Deferred concrete payload outside session while one complete delegate batch
+/// owns its pre-effect receiving credit. Actual queued bytes are separately
+/// allocated and priced; no post-effect history-full result is discarded.
+/// Contract: domain/run.md, sections 6, 10 and 14; domain/session.md, section 3.
 pub(crate) fn uncharged(limits: &Limits) -> Option<u64> {
-    u64::from(limits.session.parallel_tools).checked_mul(peer::payload(&limits.run)?)
+    u64::from(limits.session.parallel_tools).checked_mul(limits.session.delegated_result_bytes)
 }
 
 /// Delegated calls in flight at once: a batch of each session.
@@ -193,4 +221,40 @@ pub(crate) const fn run_steps(limits: &Limits) -> u32 {
     let sent = session::max_to_opener(&limits.session);
     let at_once = sent.saturating_mul(run::MAX_OUT);
     sent.saturating_add(at_once.saturating_mul(sent))
+}
+
+/// History payload and separate allocated record/message envelopes. The source
+/// session byte cap prices Block cells/payloads, never these arrays.
+/// Contract: domain/run.md, sections 3, 13 and 14; domain/session.md, section 3.
+pub(crate) fn record_payload(limits: &Limits) -> Option<u64> {
+    let messages = u64::from(limits.session.messages);
+    limits
+        .session
+        .session_bytes
+        .checked_add(messages.checked_mul(u64::try_from(core::mem::size_of::<session::record::Turn>()).ok()?)?)?
+        .checked_add(messages.checked_mul(u64::try_from(core::mem::size_of::<session::llm::Message>()).ok()?)?)
+}
+
+/// Rewritten root prompt envelopes can be larger than session Block cells:
+/// the legacy root result union retains a sealed inline diagnostic. The payload
+/// cap prices all source Block/payload bytes, while this separate conservative
+/// bound prices every allocated root Block/Message/served descriptor and the
+/// copied host declarations. Child queue and caller-output ownership coexist.
+/// Contract: domain/run.md, sections 13 and 14; programming-model.md, section 6.3.
+pub(crate) fn prompt_payload(limits: &Limits) -> Option<u64> {
+    let session_block = u64::try_from(core::mem::size_of::<session::llm::Block>()).ok()?;
+    let blocks = limits.session.session_bytes.checked_div(session_block)?;
+    let root_block = u64::try_from(core::mem::size_of::<crate::llm::Block>()).ok()?;
+    let messages = u64::from(limits.session.messages)
+        .checked_mul(u64::try_from(core::mem::size_of::<crate::llm::Message>()).ok()?)?;
+    let descriptors = u64::from(limits.run.host_tools)
+        .checked_add(4)?
+        .checked_mul(u64::try_from(core::mem::size_of::<crate::llm::Served>()).ok()?)?;
+    limits
+        .session
+        .session_bytes
+        .checked_add(blocks.checked_mul(root_block)?)?
+        .checked_add(messages)?
+        .checked_add(descriptors)?
+        .checked_add(limits.run.run_bytes)
 }

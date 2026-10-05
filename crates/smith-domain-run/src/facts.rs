@@ -184,6 +184,8 @@ pub enum Fact {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Asked {
+    /// Main requested settled waiting. Contract: domain/run.md, section 6.
+    Wait,
     /// An opaque declared host-tool call. Contract: domain/run.md, sections 5.2 and 11.
     Host,
     /// Main requested separately granted delivery. Contract: domain/run.md, sections 8.4 and 12.
@@ -203,6 +205,8 @@ pub enum Asked {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Return {
+    /// Main wait intent accepted. Contract: domain/run.md, section 6.
+    Waiting,
     /// Actual bounded host text reached the caller. Contract: domain/run.md, sections 5.2 and 11.
     HostAnswered,
     /// Relay settled but no permitted recovery can learn its outcome. Contract: domain/run.md, sections 5.2 and 11.
@@ -266,6 +270,8 @@ pub enum Return {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Answered {
+    /// Settled idle main parked. Contract: domain/run.md, section 6.
+    Parked,
     /// Mid-run delivery landed while shutdown was pending. Contract: domain/run.md, sections 8.4, 10 and 12.
     Delivered(
         /// Already-decided shutdown reason retained with the actual landing;
@@ -366,7 +372,10 @@ pub(crate) fn tell(
                 Fact::CheckStarted { run, deadline: *deadline }
             }
             Request::Answer { to: _, answer } => Fact::Answered { run, answer: answered(answer) },
-            Request::HostCall { .. }
+            Request::MessageBounced { .. }
+            | Request::Waiting { .. }
+            | Request::Turn { .. }
+            | Request::HostCall { .. }
             | Request::WithdrawHost { .. }
             | Request::Say { .. }
             | Request::Close { .. }
@@ -382,6 +391,7 @@ pub(crate) fn tell(
 
 fn result_of(result: &Returned) -> Return {
     match result {
+        Returned::Waiting => Return::Waiting,
         Returned::HostAnswered(_) => Return::HostAnswered,
         Returned::HostUnknown => Return::HostUnknown,
         Returned::HostRejected(_) => Return::HostRejected,
@@ -404,9 +414,10 @@ fn result_of(result: &Returned) -> Return {
 
 fn answered(answer: &Answer) -> Answered {
     match answer {
+        Answer::Parked { .. } => Answered::Parked,
         Answer::Delivered { stopped, .. } => Answered::Delivered(*stopped),
         Answer::Refused(refusal) => Answered::Refused(*refusal),
         Answer::Accepted { .. } => Answered::Accepted,
-        Answer::Failed { failure, spent: _ } => Answered::Failed(*failure),
+        Answer::Failed { failure, .. } => Answered::Failed(*failure),
     }
 }

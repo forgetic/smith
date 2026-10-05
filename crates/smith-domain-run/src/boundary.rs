@@ -80,6 +80,32 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         charter: Charter,
+        /// Root-owned restore binding, consumed by main once; never decoded here.
+        /// Contract: domain/run.md, sections 3 and 13.
+        transcript: Option<Token>,
+    },
+    /// Parent-labelled live message; names, including zero, are opaque and
+    /// unique for the active run. Admission yields a bounce only on refusal.
+    /// Contract: domain/run.md, section 6.
+    Message {
+        /// Admitted live run handle. Contract: domain/run.md, section 6.
+        run: Token,
+        /// Parent-issued active-run unique name. Contract: domain/run.md, section 6.
+        name: Token,
+        /// Attested UTF-8, including the sender label, bounded before retention.
+        /// Contract: domain/run.md, section 6.
+        text: Box<[u8]>,
+    },
+    /// Actual concrete session turn; the root owns the body behind record.
+    /// Contract: domain/run.md, sections 6 and 13.
+    Turn {
+        /// Run-issued conversation binding. Contract: domain/run.md, section 13.
+        conversation: Token,
+        /// Single-use root handoff name. Contract: domain/run.md, section 13.
+        record: Token,
+        /// Historical transcript sequence, independent of activation numbering.
+        /// Contract: domain/run.md, section 13.
+        sequence: u32,
     },
     /// From the worker: end the run `run` as cancelled. A run that has already
     /// answered, or decided how it ends, ignores it.
@@ -270,6 +296,39 @@ pub enum Event {
 #[derive(PartialEq, Eq, Debug)]
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Request {
+    /// A refused live message; refusal never advances the read fence.
+    /// Contract: domain/run.md, section 6.
+    MessageBounced {
+        /// Supplied live run name. Contract: domain/run.md, section 6.
+        run: Token,
+        /// Unchanged parent message name. Contract: domain/run.md, section 6.
+        name: Token,
+        /// Entrance refusal, before bytes are retained. Contract: domain/run.md, section 6.
+        reason: MessageRefusal,
+    },
+    /// Main yielded after a settled wait with an empty inbox. No terminal is owed.
+    /// Contract: domain/run.md, sections 6 and 10.
+    Waiting {
+        /// Stable parent logical run scope. Contract: domain/run.md, section 6.
+        worker: Token,
+        /// Latest message consumed by an actual told turn. Contract: domain/run.md, section 6.
+        read: Option<Token>,
+    },
+    /// One settled main turn, emitted before the final answer; root moves its body.
+    /// Contract: domain/run.md, sections 6 and 13.
+    Turn {
+        /// Stable parent logical run scope. Contract: domain/run.md, section 13.
+        worker: Token,
+        /// Single-use root-owned concrete body binding. Contract: domain/run.md, section 13.
+        record: Token,
+        /// One-based activation-local output number. Contract: domain/run.md, section 13.
+        number: u32,
+        /// Latest message actually consumed by this turn. Contract: domain/run.md, section 6.
+        read: Option<Token>,
+        /// Actual cumulative run token usage. Contract: domain/run.md, sections 9 and 13.
+        spent: Spend,
+    },
+
     /// Relay an admitted main host-tool call without interpreting its bytes. Each
     /// actual attempt gets exactly one terminal; a durable name is decided once.
     /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
@@ -503,6 +562,10 @@ pub enum Request {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum Ask {
+    /// Main-only exclusive request to wait after this turn settles and yields.
+    /// Contract: domain/run.md, section 6.
+    Wait,
+
     /// Invoke a host-declared tool. Main-only declaration and effect are checked
     /// before effects; provider-written JSON bytes are relayed unchanged.
     /// Contract: domain/run.md, sections 5.1, 5.2 and 12.
@@ -568,6 +631,10 @@ pub enum Ask {
 #[derive(PartialEq, Eq, Hash, Debug)]
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Returned {
+    /// Main's wait intent was accepted; ordinary result and continuation settle first.
+    /// Contract: domain/run.md, section 6.
+    Waiting,
+
     /// Actual host result/error text; the host's error is forwarded, never retried.
     /// Contract: domain/run.md, section 5.2.
     HostAnswered(
@@ -840,6 +907,14 @@ pub enum Read {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Opening {
+    /// Root-owned restore binding for main, None for every child.
+    /// Contract: domain/run.md, sections 3 and 13.
+    pub transcript: Option<Token>,
+
+    /// Main-only wait descriptor; children cannot acquire this authority.
+    /// Contract: domain/run.md, section 6.
+    pub wait: bool,
+
     /// Main's bounded host declarations, copied whole; every child receives none.
     /// Contract: domain/run.md, sections 5.1–5.3 and 12.
     pub host_tools: Box<[crate::HostTool]>,
@@ -913,6 +988,14 @@ pub enum Stop {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum End {
+    /// Exact V2 history refusal before provider or tool effects.
+    /// Contract: domain/run.md, section 13.
+    TranscriptRefused {
+        /// Small lossless sibling-independent admission reason.
+        /// Contract: domain/run.md, section 13.
+        reason: TranscriptRefusal,
+    },
+
     /// The run closed it.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -936,11 +1019,100 @@ pub enum End {
     Budget(Exhausted),
 }
 
+/// Exact neutral completion failure after retries or nonretryable refusal.
+/// Diagnostic bytes were consumed by session policy; this record remains content-free.
+/// Contract: domain/run.md, sections 2, 5 and 10.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CompletionFailure {
+    /// Shared-client receiving allowance exceeded.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Limit,
+
+    /// Shared protocol response contract violated.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Protocol,
+
+    /// Unsolicited actual lower cancellation.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Cancelled,
+
+    /// Provider capacity refused the request.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Overloaded,
+
+    /// Provider could not be reached or failed.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Unavailable,
+
+    /// The actual completion deadline elapsed.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    TimedOut,
+
+    /// Provider context allowance was exceeded.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    ContextTooLong,
+
+    /// Provider rejected the request shape.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Invalid,
+
+    /// Provider rejected the credential.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Unauthorized,
+
+    /// Provider rate allowance requires the retained cooldown.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    RateLimited {
+        /// Exact lower cooldown, without scheduling or recovery policy.
+        /// Contract: domain/run.md, sections 2, 5 and 10.
+        retry_after: skein_lib::Duration,
+    },
+
+    /// Provider account allowance requires the retained cooldown.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Exhausted {
+        /// Exact lower cooldown, without scheduling or recovery policy.
+        /// Contract: domain/run.md, sections 2, 5 and 10.
+        retry_after: skein_lib::Duration,
+    },
+}
+
+/// Actual transport evidence retained alongside a neutral completion failure.
+/// No domain infers this from an error label or from requested cancellation.
+/// Contract: domain/run.md, sections 2, 5 and 10.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CompletionEvidence {
+    /// The lower proves no request bytes were sent.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Unsent,
+
+    /// The request may have reached the peer; outcome is unknown.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Unknown,
+
+    /// An actual peer response, including a refusal, was received.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Response,
+}
+
 /// What kept an LLM from going on.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Fault {
+    /// Full neutral actual failure and evidence after session retry policy.
+    /// This is distinct from local model stopping rules and requested run Cancel.
+    /// Contract: domain/run.md, sections 2, 5 and 10.
+    Completion {
+        /// Exact content-free shared-client classification and cooldown.
+        /// Contract: domain/run.md, sections 2, 5 and 10.
+        failure: CompletionFailure,
+
+        /// Exact actual transport evidence, including across interrupted Delivery.
+        /// Contract: domain/run.md, sections 2, 5 and 10.
+        evidence: CompletionEvidence,
+    },
+
     /// The account spent its provider allowance. The engine retries after cooldown.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -974,6 +1146,15 @@ pub enum Fault {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum Answer {
+    /// Settled main wait reached its idle threshold; all real rights have closed.
+    /// Contract: domain/run.md, sections 6, 10 and 13.
+    Parked {
+        /// Actual cumulative run token usage. Contract: domain/run.md, section 9.
+        spent: Spend,
+        /// Number of actual main turns emitted in this activation.
+        /// Contract: domain/run.md, section 13.
+        turns: u32,
+    },
     /// A mid-run delivery actually landed after shutdown was already decided.
     /// This is host evidence, not an LLM-declared Accepted result: even a
     /// Report-only charter preserves the real operation without inventing a Report.
@@ -992,6 +1173,9 @@ pub enum Answer {
         /// Accepted cumulative usage, including late completions while settling.
         /// Contract: domain/run.md, sections 9 and 10.
         spent: Spend,
+        /// Actual main turns emitted in this activation before this terminal.
+        /// Contract: domain/run.md, section 13.
+        turns: u32,
     },
     /// Refused at the entrance: nothing was done.
     ///
@@ -1017,6 +1201,9 @@ pub enum Answer {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         spent: Spend,
+        /// Actual main turns emitted in this activation before this terminal.
+        /// Contract: domain/run.md, section 13.
+        turns: u32,
     },
     /// The run ended without an outcome, having spent `spent`.
     ///
@@ -1030,6 +1217,9 @@ pub enum Answer {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         spent: Spend,
+        /// Actual main turns emitted in this activation before this terminal.
+        /// Contract: domain/run.md, section 13.
+        turns: u32,
     },
 }
 
@@ -1096,6 +1286,14 @@ pub enum Invalid {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Failure {
+    /// Exact transient history refusal; never silently starts fresh.
+    /// Contract: domain/run.md, section 13.
+    Transcript(
+        /// Session admission classification, translated exhaustively by root.
+        /// Contract: domain/run.md, section 13.
+        TranscriptRefusal,
+    ),
+
     /// The LLM could not do the work.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -1138,4 +1336,37 @@ pub enum Policy {
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         rejected: u32,
     },
+}
+
+/// Live-message entrance refusals; no accepted message or read state changes.
+/// Contract: domain/run.md, section 6.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum MessageRefusal {
+    /// FIFO capacity is exhausted. Contract: domain/run.md, section 6.
+    Busy,
+    /// Attested bytes exceed the configured cap. Contract: domain/run.md, section 6.
+    TooLarge,
+    /// Run has stopped or the live name is stale. Contract: domain/run.md, section 6.
+    Inactive,
+    /// Name equals a queued, offered or current-read name. Older names rely on
+    /// the parent's active-run uniqueness promise. Contract: domain/run.md, section 6.
+    ReusedName,
+}
+
+/// Exact concrete-history entrance classification, independent of the sibling type.
+/// Contract: domain/run.md, section 13.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum TranscriptRefusal {
+    /// Unsupported record version. Contract: domain/run.md, section 13.
+    Version,
+    /// Configured endpoint differs. Contract: domain/run.md, section 13.
+    Endpoint,
+    /// Configured replay dialect differs. Contract: domain/run.md, section 13.
+    Dialect,
+    /// Invalid concrete record structure. Contract: domain/run.md, section 13.
+    Malformed,
+    /// History retains a live ticket. Contract: domain/run.md, section 13.
+    Unresolved,
+    /// Receiving ownership/count cap is incompatible. Contract: domain/run.md, section 13.
+    TooLarge,
 }

@@ -30,7 +30,11 @@ pub(crate) const DELIVER: Token = Token::new(2);
 
 /// First live ticket, separate from the fixed served-tool descriptors.
 /// Contract: domain/run.md, sections 8.2 and 8.4.
-pub(crate) const FIRST: u64 = 3;
+pub(crate) const WAIT: Token = Token::new(3);
+
+/// First live descriptor/ask ticket, separate from all fixed tool descriptors.
+/// Contract: domain/run.md, sections 6 and 13.
+pub(crate) const FIRST: u64 = 4;
 
 /// The tools the run serves a conversation.
 ///
@@ -41,6 +45,7 @@ pub(crate) struct Offered {
     pub(crate) finish: bool,
     pub(crate) deliver: bool,
     pub(crate) agents: bool,
+    pub(crate) wait: bool,
 }
 
 /// The session's spec for a conversation the run opens with `opening`, and
@@ -57,15 +62,33 @@ pub(crate) struct Offered {
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn spec(opening: Opening) -> Option<(Spec, Offered)> {
-    let Opening { host_tools, llm, system, prompt, tools, checkout, budget, finish, deliver, families } = opening;
+    let Opening {
+        host_tools,
+        llm,
+        system,
+        prompt,
+        tools,
+        checkout,
+        budget,
+        finish,
+        deliver,
+        families,
+        wait,
+        transcript: _,
+    } = opening;
     let authority = authority(&checkout, tools)?;
-    let offered = Offered { host_tools: host_tools.clone(), finish, deliver, agents: families.agents };
-    let capacity = u32::try_from(host_tools.len()).ok()?.checked_add(3)?;
+    let offered = Offered { host_tools: host_tools.clone(), finish, deliver, agents: families.agents, wait };
+    let capacity = u32::try_from(host_tools.len()).ok()?.checked_add(4)?;
     let mut delegated = List::with_capacity(capacity);
     for (index, tool) in host_tools.iter().enumerate() {
         let ticket = FIRST.checked_add(u64::try_from(index).ok()?)?;
         let effect = host_effect(tool.effect);
         delegated.push(llm::Descriptor { ticket: Token::new(ticket), effect }).expect("bounded declaration inventory");
+    }
+    if wait {
+        delegated
+            .push(llm::Descriptor { ticket: WAIT, effect: Effect::Write })
+            .expect("room for all fixed descriptors");
     }
     if finish {
         delegated.push(llm::Descriptor { ticket: FINISH, effect: Effect::Write }).expect("room for both");
@@ -130,7 +153,7 @@ fn writes(families: Families) -> Effect {
 pub(crate) fn effect(ask: &Ask) -> Effect {
     match ask {
         Ask::Host { effect, .. } => host_effect(*effect),
-        Ask::Finish { .. } | Ask::Deliver { .. } => Effect::Write,
+        Ask::Wait | Ask::Finish { .. } | Ask::Deliver { .. } => Effect::Write,
         Ask::SubAgent { families, .. } => writes(*families),
     }
 }
@@ -168,22 +191,17 @@ pub(crate) const fn spend(turns: u32, usage: llm::Usage) -> Spend {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn end(end: session::End) -> run::End {
     match end {
-        session::End::TranscriptRefused { .. } | session::End::PriceOverflow => {
-            unreachable!("the legacy run opens only version-one sessions")
+        session::End::TranscriptRefused { reason } => {
+            run::End::TranscriptRefused { reason: transcript_refusal(reason) }
         }
+        session::End::PriceOverflow => unreachable!("transitional zero prices cannot overflow"),
         session::End::Busy => run::End::Busy,
         session::End::Invalid => run::End::Invalid,
         session::End::Closed => run::End::Closed,
-        session::End::Failed { failure } => match failure {
-            llm::Failure::Exhausted { .. } => run::End::Fault(run::Fault::Exhausted),
-            llm::Failure::ContextTooLong => run::End::Fault(run::Fault::ContextFull),
-            llm::Failure::Overloaded
-            | llm::Failure::RateLimited { .. }
-            | llm::Failure::Unavailable
-            | llm::Failure::TimedOut
-            | llm::Failure::Invalid
-            | llm::Failure::Unauthorized => run::End::Fault(run::Fault::Provider),
-        },
+        session::End::Failed { failure, evidence } => run::End::Fault(run::Fault::Completion {
+            failure: completion_failure(failure),
+            evidence: completion_evidence(evidence),
+        }),
         session::End::Budget { spent } => run::End::Budget(exhausted(spent)),
         session::End::TranscriptFull => run::End::Fault(run::Fault::ContextFull),
     }
@@ -207,6 +225,7 @@ fn exhausted(spent: Dimension) -> run::Exhausted {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn failed(returned: &run::Returned) -> bool {
     match returned {
+        run::Returned::Waiting => false,
         run::Returned::HostAnswered(answer) => answer.error(),
         run::Returned::Accepted | run::Returned::Delivered(_) | run::Returned::Answered { .. } => false,
         run::Returned::HostUnknown
@@ -225,40 +244,50 @@ pub(crate) const fn failed(returned: &run::Returned) -> bool {
     }
 }
 
-/// A copy of the run's answer, for a prompt.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-pub(crate) fn copy(returned: &run::Returned) -> run::Returned {
-    match returned {
-        run::Returned::HostAnswered(answer) => run::Returned::HostAnswered(answer.clone()),
-        run::Returned::HostUnknown => run::Returned::HostUnknown,
-        run::Returned::HostRejected(problem) => run::Returned::HostRejected(*problem),
-        run::Returned::Delivered(receipts) => run::Returned::Delivered(receipts.clone()),
-        run::Returned::Nothing => run::Returned::Nothing,
-        run::Returned::DeliveryRefused(refusal) => run::Returned::DeliveryRefused(refusal.clone()),
-        run::Returned::Accepted => run::Returned::Accepted,
-        run::Returned::Rejected { problems } => run::Returned::Rejected { problems: problems.clone() },
-        run::Returned::ChecksFailed { repository, ran } => {
-            let run::Ran { exit, output, cut } = ran;
-            let ran = run::Ran { exit: *exit, output: copy_of(output), cut: *cut };
-            run::Returned::ChecksFailed { repository: copy_of(repository), ran }
-        }
-        run::Returned::Stale => run::Returned::Stale,
-        run::Returned::DeliveryFailed { failure } => run::Returned::DeliveryFailed { failure: *failure },
-        run::Returned::Cancelled => run::Returned::Cancelled,
-        run::Returned::TimedOut => run::Returned::TimedOut,
-        run::Returned::Busy => run::Returned::Busy,
-        run::Returned::Answered { text, cut, stop } => {
-            run::Returned::Answered { text: copy_of(text), cut: *cut, stop: *stop }
-        }
-        run::Returned::Unanswered { end } => run::Returned::Unanswered { end: *end },
-        run::Returned::Refused { refusal } => run::Returned::Refused { refusal: *refusal },
-    }
-}
-
 pub(crate) const fn host_effect(effect: run::HostEffect) -> Effect {
     match effect {
         run::HostEffect::Read => Effect::Read,
         run::HostEffect::Write => Effect::Write,
+    }
+}
+
+/// Lossless small sibling translation; no provider parsing or retry policy.
+/// Contract: domain/run.md, sections 5, 10 and 14; domain/session.md, section 5.
+fn completion_failure(failure: llm::Failure) -> run::CompletionFailure {
+    match failure {
+        llm::Failure::Limit => run::CompletionFailure::Limit,
+        llm::Failure::Protocol => run::CompletionFailure::Protocol,
+        llm::Failure::Cancelled => run::CompletionFailure::Cancelled,
+        llm::Failure::Overloaded => run::CompletionFailure::Overloaded,
+        llm::Failure::Unavailable => run::CompletionFailure::Unavailable,
+        llm::Failure::TimedOut => run::CompletionFailure::TimedOut,
+        llm::Failure::ContextTooLong => run::CompletionFailure::ContextTooLong,
+        llm::Failure::Invalid => run::CompletionFailure::Invalid,
+        llm::Failure::Unauthorized => run::CompletionFailure::Unauthorized,
+        llm::Failure::RateLimited { retry_after } => run::CompletionFailure::RateLimited { retry_after },
+        llm::Failure::Exhausted { retry_after } => run::CompletionFailure::Exhausted { retry_after },
+    }
+}
+
+/// Transport evidence is copied exactly, without inferring absence of effects.
+/// Contract: domain/run.md, sections 5, 10 and 14; domain/session.md, section 5.
+fn completion_evidence(evidence: llm::Evidence) -> run::CompletionEvidence {
+    match evidence {
+        llm::Evidence::Unsent => run::CompletionEvidence::Unsent,
+        llm::Evidence::Unknown => run::CompletionEvidence::Unknown,
+        llm::Evidence::Response => run::CompletionEvidence::Response,
+    }
+}
+
+/// Small total sibling translation; no history refusal becomes a fresh retry.
+/// Contract: domain/run.md, section 13; domain/session.md, section 3.
+const fn transcript_refusal(reason: session::record::Refusal) -> run::TranscriptRefusal {
+    match reason {
+        session::record::Refusal::Version => run::TranscriptRefusal::Version,
+        session::record::Refusal::Endpoint => run::TranscriptRefusal::Endpoint,
+        session::record::Refusal::Dialect => run::TranscriptRefusal::Dialect,
+        session::record::Refusal::Malformed => run::TranscriptRefusal::Malformed,
+        session::record::Refusal::Unresolved => run::TranscriptRefusal::Unresolved,
+        session::record::Refusal::TooLarge => run::TranscriptRefusal::TooLarge,
     }
 }

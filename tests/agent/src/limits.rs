@@ -33,6 +33,7 @@ const CEILING: session::Budget = session::Budget {
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 pub const LIMITS: Limits = Limits {
     accounts: 4,
+    decoded_call_bytes: 4096,
     skew: Duration::ZERO,
     run: run::Limits {
         runs: 1,
@@ -61,12 +62,19 @@ pub const LIMITS: Limits = Limits {
         check_timeout: Duration::from_secs(60),
         check_tail: 512,
         facts: 1024,
+        messages: 8,
+        message_bytes: 4096,
+        waiting: skein_lib::Duration::from_secs(300),
     },
     session: session::Limits {
         sessions: 6,
-        spend: 0,
+        spend: 1,
         messages: 64,
-        session_bytes: 1 << 20,
+        session_bytes: 33_554_432,
+        completion_bytes: 4096,
+        completion_blocks: 16,
+        failure_bytes: 512,
+        delegated_result_bytes: 4_194_304,
         budget: CEILING,
         max_tokens: 4096,
         retries: 3,
@@ -85,6 +93,7 @@ pub const LIMITS: Limits = Limits {
             file_bytes: 1 << 16,
             read_bytes: 4096,
             list_entries: 64,
+            list_bytes: 4096,
             match_lines: 8,
             file_timeout: Duration::from_secs(30),
             env_bytes: 256,
@@ -106,6 +115,7 @@ pub const LIMITS: Limits = Limits {
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 pub const TIGHT: Limits = Limits {
     accounts: LIMITS.accounts,
+    decoded_call_bytes: LIMITS.decoded_call_bytes,
     skew: LIMITS.skew,
     run: run::Limits {
         conversations: 4,
@@ -118,9 +128,13 @@ pub const TIGHT: Limits = Limits {
     },
     session: session::Limits {
         sessions: 4,
-        spend: 0,
+        spend: 1,
         messages: 32,
-        session_bytes: 1 << 16,
+        session_bytes: 33_554_432,
+        completion_bytes: 4096,
+        completion_blocks: 16,
+        failure_bytes: 512,
+        delegated_result_bytes: 4_194_304,
         retries: 2,
         call_timeout: Duration::from_secs(20),
         tool_timeout: Duration::from_secs(30),

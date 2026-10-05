@@ -405,7 +405,7 @@ impl Host {
                         mount.writable.then_some(u32::try_from(position).expect("bounded mounts"))
                     })
                     .collect();
-                out.push(Event::Start { reply_to: ReplyTo::new(job), worker: job, charter });
+                out.push(Event::Start { reply_to: ReplyTo::new(job), worker: job, charter, transcript: None });
                 self.set(job, State::Starting);
             }
             State::Running { run } => {
@@ -537,6 +537,7 @@ impl Host {
             endpoint: Endpoint(0),
             model: Box::from(model),
             max_tokens: script.max_tokens,
+            dialect: 1,
         };
         Charter {
             brief,
@@ -564,6 +565,8 @@ impl Host {
             budget,
             llm: llm(b"fake-1"),
             models: Box::new([llm(b"fake-2"), llm(b"fake-3")]),
+            resume: false,
+            waiting: skein_lib::Duration::from_secs(30),
         }
     }
 }

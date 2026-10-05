@@ -27,6 +27,7 @@ fn failure(answer: &Answer) -> Failure {
         Answer::Failed { failure, .. } => *failure,
         Answer::Delivered { stopped, .. } => *stopped,
         Answer::Refused(refusal) => panic!("the run was refused: {refusal:?}"),
+        Answer::Parked { .. } => panic!("this source partner never requests waiting"),
         Answer::Accepted { outcome, .. } => panic!("the run finished with {outcome:?}"),
     }
 }

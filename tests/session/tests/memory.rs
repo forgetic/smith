@@ -45,6 +45,10 @@ const LIMITS: Limits = Limits {
     spend: 0,
     messages: 4,
     session_bytes: 1024,
+    completion_bytes: 4096,
+    completion_blocks: 16,
+    failure_bytes: 512,
+    delegated_result_bytes: 16_384,
     budget: Budget {
         turns: 16,
         input: 1 << 20,
@@ -164,7 +168,8 @@ fn fill(limits: Limits, route: Route) {
                 let output = limits.session_bytes - spec_cost - tooling_cost;
                 let path = Path { absolute: false, parts: Box::new([Part::Name { name: name() }]) };
                 let call = Decoded::Owned { call: Call::Read { path, skip: 0, lines: None } };
-                let content = Box::new([Block::ToolCall { id: bytes(1), name: bytes(1), input: bytes(1), call }]);
+                let content =
+                    Box::new([Block::ToolCall { id: bytes(1), name: bytes(1), input: bytes(1), call, replay: None }]);
                 let completion = Completion { content, stop: Stop::ToolUse, usage: Usage::ZERO };
                 let Some(Asked::Io { owner: op }) = step(Event::Completed { owner, completion }) else {
                     panic!("the session's tools load the file");
@@ -178,7 +183,8 @@ fn fill(limits: Limits, route: Route) {
                 // The problem is held twice, in the call and in its answer.
                 let field = (limits.session_bytes - spec_cost - (block + 3) - (block + 1)) / 2;
                 let call = Decoded::Invalid { problem: Problem::Missing { field: bytes(field) } };
-                let content = Box::new([Block::ToolCall { id: bytes(1), name: bytes(1), input: bytes(1), call }]);
+                let content =
+                    Box::new([Block::ToolCall { id: bytes(1), name: bytes(1), input: bytes(1), call, replay: None }]);
                 let completion = Completion { content, stop: Stop::ToolUse, usage: Usage::ZERO };
                 let Some(Asked::Complete { .. }) = step(Event::Completed { owner, completion }) else {
                     panic!("a session that answers its calls itself goes on");
@@ -187,7 +193,7 @@ fn fill(limits: Limits, route: Route) {
             Route::Talk => {
                 let answer_cost = block + 1;
                 let message = limits.session_bytes - spec_cost - answer_cost - block;
-                let content = Box::new([Block::Text { text: bytes(1) }]);
+                let content = Box::new([Block::Text { text: bytes(1), replay: None }]);
                 let completion = Completion { content, stop: Stop::EndTurn, usage: Usage::ZERO };
                 let Some(Asked::Other) = step(Event::Completed { owner, completion }) else {
                     panic!("the session yields");
@@ -198,7 +204,12 @@ fn fill(limits: Limits, route: Route) {
                 };
             }
         }
-        let backoff = step(Event::Failed { owner, failure: Failure::Overloaded });
+        let backoff = step(Event::Failed {
+            owner,
+            failure: Failure::Overloaded,
+            evidence: smith_domain_session::llm::Evidence::Unknown,
+            detail: Default::default(),
+        });
         assert!(backoff.is_none(), "a transient failure backs off quietly");
     }
     let held = meter.held();
@@ -333,12 +344,26 @@ fn slabs_lists_and_queues_take_no_more_than_their_worst_case() {
 #[test]
 fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
     use smith_domain_session::record;
-    let limits = Limits { messages: 6, spend: u64::MAX, ..LIMITS };
+    let block = size(size_of::<Block>());
+    let spec_charge = 2 + size(size_of::<Descriptor>()) + block + 1;
+    let turn_charge = block + 1 + block + 3 + block + 1;
+    let output = 16_384 - spec_charge - turn_charge;
+    let limits = Limits {
+        messages: 6,
+        spend: u64::MAX,
+        session_bytes: 16_384,
+        completion_bytes: 512,
+        completion_blocks: 2,
+        delegated_result_bytes: output,
+        ..LIMITS
+    };
     let bound = worst_case(&limits).expect("the counted scenario fits");
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
     let mut out = Queue::with_capacity(max_out(&limits));
     let meter = Meter::new();
     let mut domain = Domain::new(&limits, 77);
+    let mut saved = Vec::new();
+    let mut ended = None;
     let mut drive = |event| {
         meter.start();
         smith_domain_session::step(&mut domain, &env, event, &mut out);
@@ -349,11 +374,11 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
             match request {
                 Request::Complete { owner, .. } => completion = Some(owner),
                 Request::Delegate { owner, .. } => delegate = Some(owner),
+                Request::Turn { turn, .. } => saved.push(turn),
+                Request::Ended { end, .. } => ended = Some(end),
                 Request::Opened { .. }
                 | Request::Yielded { .. }
                 | Request::Used { .. }
-                | Request::Ended { .. }
-                | Request::Turn { .. }
                 | Request::Priced { .. }
                 | Request::Cancel { .. }
                 | Request::Io { .. }
@@ -374,10 +399,6 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
         max_tokens: 1,
         budget: limits.budget,
     };
-    let block = size(size_of::<Block>());
-    let spec_charge = 2 + size(size_of::<Descriptor>()) + block + 1;
-    let turn_charge = block + 1 + block + 3 + block + 1;
-    let output = limits.session_bytes - spec_charge - turn_charge;
     let (owner, _) = drive(Event::OpenV2 {
         opener: Token::new(1),
         spec: record::Opening {
@@ -398,6 +419,7 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
                     name: bytes(1),
                     input: bytes(1),
                     call: Decoded::Delegated { ticket: Token::new(99), effect: Effect::Write },
+                    replay: None,
                 },
             ]),
             stop: Stop::ToolUse,
@@ -410,14 +432,28 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
         error: false,
         spent: 0,
     });
-    drive(Event::Failed { owner: owner.expect("the counted scenario fits"), failure: Failure::Overloaded });
+    assert!(owner.is_none(), "full actual result is retained; next provider reserve fails before work");
+    drop(drive);
+    assert_eq!(ended, Some(smith_domain_session::End::TranscriptFull));
+    assert_eq!(saved.len(), 1, "actual full-cap Turn was handed off before Ended");
+    assert!(matches!(&saved[0].messages[2].content[0], Block::ToolResult {
+        result: smith_domain_session::llm::Returned::Text { text, error: false, replay: None }, ..
+    } if text.len() == usize::try_from(output).expect("bounded cap")));
+    drop(saved);
     assert!(meter.held() >= limits.session_bytes);
 }
 
 #[test]
 fn restoring_a_maximum_recorded_history_stays_within_the_counted_bound() {
     use smith_domain_session::record;
-    let limits = Limits { messages: 6, spend: u64::MAX, ..LIMITS };
+    let limits = Limits {
+        messages: 6,
+        spend: u64::MAX,
+        session_bytes: 16_384,
+        completion_bytes: 256,
+        completion_blocks: 1,
+        ..LIMITS
+    };
     let bound = worst_case(&limits).expect("the limits fit");
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
     let mut out = Queue::with_capacity(max_out(&limits));
@@ -425,7 +461,8 @@ fn restoring_a_maximum_recorded_history_stays_within_the_counted_bound() {
     let mut domain = Domain::new(&limits, 78);
     let block = size(size_of::<Block>());
     let charge = 2 + size(size_of::<Descriptor>()) + block + 1;
-    let opaque = limits.session_bytes - charge - 2 * block - 1;
+    let reserve = smith_domain_session::completion_reserve(&limits).expect("complete receiving credit");
+    let opaque = limits.session_bytes - charge - 2 * block - 1 - reserve;
     let spec = Spec {
         endpoint: Endpoint(7),
         model: bytes(1),
@@ -450,7 +487,7 @@ fn restoring_a_maximum_recorded_history_stays_within_the_counted_bound() {
             messages: Box::new([
                 smith_domain_session::llm::Message {
                     role: smith_domain_session::llm::Role::User,
-                    content: Box::new([Block::Text { text: bytes(1) }]),
+                    content: Box::new([Block::Text { text: bytes(1), replay: None }]),
                 },
                 smith_domain_session::llm::Message {
                     role: smith_domain_session::llm::Role::Assistant,
@@ -483,9 +520,9 @@ fn restoring_a_maximum_recorded_history_stays_within_the_counted_bound() {
             completed = true;
         }
     }
-    assert!(completed, "a history filled to the exact byte cap still leaves an answer slot");
+    assert!(completed, "maximum admitted history separately preserves complete provider receiving room");
     meter.check(measured, bound, &limits);
-    assert!(meter.held() >= limits.session_bytes);
+    assert!(meter.held() >= limits.session_bytes - reserve);
 }
 
 #[test]
@@ -502,6 +539,7 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
         file_bytes: 16,
         read_bytes: 16,
         list_entries: 1,
+        list_bytes: 4096,
         match_lines: 1,
         env_bytes: 0,
         shell_head: 0,
@@ -526,7 +564,13 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
     for call in 0..calls {
         let mut id = bytes(id_bytes).into_vec();
         id[..4].copy_from_slice(&call.to_le_bytes());
-        tail.push(Block::ToolCall { id: id.into(), name: bytes(1), input: bytes(1), call: Decoded::Historical });
+        tail.push(Block::ToolCall {
+            id: id.into(),
+            name: bytes(1),
+            input: bytes(1),
+            call: Decoded::Historical,
+            replay: None,
+        });
     }
     let history = record::Transcript {
         version: record::VERSION,
@@ -540,7 +584,7 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
             usage: Usage::ZERO,
             spent: 0,
             messages: Box::new([
-                Message { role: Role::User, content: Box::new([Block::Text { text: bytes(1) }]) },
+                Message { role: Role::User, content: Box::new([Block::Text { text: bytes(1), replay: None }]) },
                 Message { role: Role::Assistant, content: tail.into() },
             ]),
         }]),

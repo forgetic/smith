@@ -22,6 +22,12 @@ use smith_domain::run::{
     reason = "observed push terminals retain the copied fixed diagnostic tail without changing their boundary value"
 )]
 pub enum Seen {
+    /// Actual root Turn output; final count must match this observed chronology.
+    /// Contract: domain/run.md, section 13.
+    Turn {
+        /// One-based activation output number. Contract: domain/run.md, section 13.
+        number: u32,
+    },
     /// Public host shutdown observation, independent of private run state.
     /// Contract: domain/run.md, sections 10 and 13; testing-strategy.md, section 7.
     Stopped {
@@ -169,6 +175,7 @@ enum Phase {
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 #[derive(Debug)]
 pub struct Meeting {
+    turns: u32,
     phase: Phase,
     contract: Option<OutcomeSpec>,
     outcome_bytes: u64,
@@ -219,6 +226,13 @@ impl Expectations for Meeting {
 
     fn observe(&mut self, seen: Seen, judge: &mut Judge<Self::Name, Self::Stimulus>) {
         match seen {
+            Seen::Turn { number } => {
+                judge.check(
+                    self.turns.checked_add(1) == Some(number),
+                    "actual turn output numbers form an exact prefix",
+                );
+                self.turns = number;
+            }
             Seen::Stopped { failure } => {
                 if self.stopped.is_none() {
                     self.stopped = Some(failure);
@@ -329,7 +343,7 @@ impl Meeting {
             "an answer waits for every request terminal",
         );
         let (spent, change) = match answer {
-            Answer::Delivered { spent, name, receipts, stopped } => {
+            Answer::Delivered { spent, name, receipts, stopped, .. } => {
                 judge.check(
                     self.delivery
                         && self.required_delivery.as_ref().is_some_and(|(actual_name, actual_receipts, _)| {
@@ -344,9 +358,18 @@ impl Meeting {
                 (*spent, false)
             }
             Answer::Refused(_) => (Spend::ZERO, false),
-            Answer::Accepted { spent, outcome } => (*spent, matches!(outcome, Declared::Change(_))),
-            Answer::Failed { spent, .. } => (*spent, false),
+            Answer::Accepted { spent, outcome, .. } => (*spent, matches!(outcome, Declared::Change(_))),
+            Answer::Parked { spent, .. } | Answer::Failed { spent, .. } => (*spent, false),
         };
+        match answer {
+            Answer::Parked { turns, .. }
+            | Answer::Accepted { turns, .. }
+            | Answer::Delivered { turns, .. }
+            | Answer::Failed { turns, .. } => {
+                judge.check(*turns == self.turns, "final turn count follows every actual root output");
+            }
+            Answer::Refused(_) => judge.check(self.turns == 0, "refused start invented no turns"),
+        }
         judge.check(
             self.required_delivery.is_none() || matches!(answer, Answer::Delivered { .. }),
             "an interrupted landing requires its delivered answer",

@@ -41,7 +41,9 @@ impl Domain {
             runs: Slab::with_capacity(limits.runs),
             conversations: Slab::with_capacity(limits.conversations),
             calls: Calls::with_capacity(limits.calls),
-            alarms: Deadlines::with_capacity(limits.runs.saturating_add(limits.calls.saturating_mul(2))),
+            alarms: Deadlines::with_capacity(
+                limits.runs.saturating_mul(2).saturating_add(limits.calls.saturating_mul(2)),
+            ),
             facts: Facts::with_capacity(limits.facts),
         }
     }
@@ -131,7 +133,7 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
 fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     match event {
         Event::HostReturned { relay, reply } => run::host_returned(domain, env, relay, reply, out),
-        Event::Start { reply_to, worker, charter } => run::start(domain, env, reply_to, worker, charter, out),
+        Event::Start { reply_to, worker, charter, .. } => run::start(domain, env, reply_to, worker, charter, out),
         Event::Cancel { run } => run::cancel(domain, run, out),
         Event::Started { conversation, peer } => run::started(domain, conversation, peer, out),
         Event::Yielded { conversation, stop, text } => run::yielded(domain, env, conversation, stop, &text, out),
@@ -163,6 +165,7 @@ pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     let mark = out.len();
     match alarm {
         Alarm::Deadline { run } => run::deadline(domain, run, out),
+        Alarm::Park { run } => run::park(domain, run, out),
         Alarm::Call { call } => run::expired(domain, call, out),
         Alarm::Host { call } => run::host_alarm(domain, env, call, out),
     }

@@ -28,6 +28,7 @@ smith-domain = { path = "crates/smith-domain" }
 smith-domain-run = { path = "crates/smith-domain-run" }
 smith-domain-session = { path = "crates/smith-domain-session" }
 smith-domain-tools = { path = "crates/smith-domain-tools" }
+smith-protocol-llm = { path = "crates/smith-protocol-llm" }
 smith-llm-anthropic = { path = "crates/smith-llm-anthropic" }
 smith-llm-openai = { path = "crates/smith-llm-openai" }
 smith-oauth = { path = "crates/smith-oauth" }

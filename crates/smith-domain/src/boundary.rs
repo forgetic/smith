@@ -111,11 +111,26 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         charter: run::Charter,
+        /// Typed V2 history including committed post-transcript actual results.
+        /// False charter.resume ignores it; semantic refusal never starts fresh.
+        /// Receiving record/count caps are checked before root retention.
+        /// Contract: domain/run.md, sections 3 and 13; domain/session.md, section 3.
+        transcript: Option<smith_domain_session::record::Transcript>,
         /// Host credential-name and remaining-validity notices, bounded by `Limits.accounts`.
         /// These select a usable credential generation; they grant no checkout or tool authority.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         grants: Box<[Grant]>,
+    },
+    /// Parent-labelled live message, FIFO and bounded before retention.
+    /// Contract: domain/run.md, section 6.
+    Message {
+        /// Admitted live run handle. Contract: domain/run.md, section 6.
+        run: Token,
+        /// Active-run unique opaque name, including zero. Contract: domain/run.md, section 6.
+        name: Token,
+        /// Attested UTF-8 including sender label. Contract: domain/run.md, section 6.
+        text: Box<[u8]>,
     },
     /// A refreshed credential, pushed by the engine through the worker.
     ///
@@ -178,6 +193,15 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         failure: Failure,
+
+        /// Exact content-free transport evidence carried by the actual terminal.
+        /// Contract: domain/run.md, sections 4, 5 and 12.
+        evidence: crate::llm::Evidence,
+
+        /// Bounded exact shared-client diagnostic, consumed and dropped by policy.
+        /// It never controls text-based retry decisions or enters saved history.
+        /// Contract: domain/run.md, sections 4, 5 and 12.
+        detail: Box<[u8]>,
     },
     /// Terminal for `Complete`, after `Cancel`: the call was abandoned.
     ///
@@ -258,6 +282,42 @@ pub enum Event {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(PartialEq, Eq, Debug)]
 pub enum Request {
+    /// Refused live message; existing FIFO and read state remain unchanged.
+    /// Contract: domain/run.md, section 6.
+    MessageBounced {
+        /// Supplied live run name. Contract: domain/run.md, section 6.
+        run: Token,
+        /// Unchanged parent name. Contract: domain/run.md, section 6.
+        name: Token,
+        /// Refusal before retention. Contract: domain/run.md, section 6.
+        reason: run::MessageRefusal,
+    },
+    /// Settled main wait and yield with empty inbox; wall time keeps running.
+    /// Contract: domain/run.md, sections 6 and 10.
+    Waiting {
+        /// Stable parent run scope. Contract: domain/run.md, section 6.
+        worker: Token,
+        /// Latest name consumed by an actual turn. Contract: domain/run.md, section 6.
+        read: Option<Token>,
+    },
+    /// Actual main turn; caller owns durable payload and host ACK metadata has
+    /// its separate existing owner. Emitted before the final Answer.
+    /// Contract: domain/run.md, section 13; domain/host.md, section 6.
+    Turn {
+        /// Stable parent run scope. Contract: domain/run.md, section 13.
+        worker: Token,
+        /// One-based output number within this activation. Contract: domain/run.md, section 13.
+        number: u32,
+        /// Latest message consumed by this actual turn. Contract: domain/run.md, section 6.
+        read: Option<Token>,
+        /// Cumulative actual token usage, independently enforced from record prices.
+        /// Contract: domain/run.md, sections 9 and 13.
+        spent: run::Spend,
+        /// Full concrete record including replay and actual terminal results.
+        /// Contract: domain/session.md, section 3.
+        turn: smith_domain_session::record::Turn,
+    },
+
     /// Opaque declared main host tool, forwarded without interpreting its input.
     /// One actual terminal is owed per attempt; durable decisions replay by name.
     /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
@@ -377,6 +437,28 @@ pub enum Request {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         timeout: Duration,
+
+        /// Maximum owned translated completion bytes, including block cells,
+        /// replay envelopes and decoded calls. The adapter verifies its configured
+        /// bound before preparing the provider request; actual terminals obey it.
+        /// Contract: domain/run.md, sections 3 and 14.
+        max_completion_bytes: u64,
+
+        /// Maximum translated completion blocks, reserved with result skeletons
+        /// before this request. One actual terminal remains owed after Cancel.
+        /// Contract: domain/run.md, sections 3 and 14.
+        max_completion_blocks: u32,
+
+        /// Maximum exact shared-client failure diagnostic bytes. The adapter
+        /// verifies compatibility before prepare; policy consumes the actual
+        /// terminal and drops detail without retaining text in facts/history.
+        /// Contract: domain/run.md, sections 4, 5 and 12.
+        max_failure_bytes: u32,
+
+        /// Aggregate decoded application-call ownership permitted in this
+        /// completion, included by the adapter in its full translated byte bound.
+        /// Contract: domain/run.md, sections 3 and 14.
+        decoded_call_bytes: u64,
     },
     /// Provider authentication rejected this exact credential generation; a notice
     /// to the host, with no terminal owed. Repeated rejection of that generation is suppressed.

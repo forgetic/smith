@@ -1,11 +1,11 @@
 //! End to end at the session child domain: the agent's sessions, their opener
 //! and a fake provider's domain, talking through a domain world.
 
+use skein_fake_llm_domain::Config;
 use skein_lib::{Duration, Time};
 use smith_domain_session::llm::Failure;
 use smith_domain_session::{Budget, Dimension, End, Limits, Spec, Yield};
 use smith_domain_tools::{self as tools, Authority, Grants};
-use smith_fake_llm_domain::Config;
 use smith_session_world::{BUDGET, Count, Ended, Settings, Span, Told, World, noisy, spec, submit_noisily};
 
 const ITERATIONS: u32 = 100_000;
@@ -150,7 +150,10 @@ fn a_session_fails_once_its_retries_run_out() {
     let opener = world.submit(Time::ZERO, spec(b"fix the build"));
     world.run(ITERATIONS);
 
-    assert_eq!(end(&world, opener), End::Failed { failure: Failure::Overloaded });
+    assert_eq!(
+        end(&world, opener),
+        End::Failed { failure: Failure::Overloaded, evidence: smith_domain_session::llm::Evidence::Unknown }
+    );
     assert_eq!(world.stats().calls, calm.agent.retries + 1);
 }
 
@@ -170,7 +173,10 @@ fn calls_slower_than_their_timeout_time_out_and_their_late_answers_are_dropped()
     let opener = world.submit(Time::ZERO, spec(b"fix the build"));
     world.run(ITERATIONS);
 
-    assert_eq!(end(&world, opener), End::Failed { failure: Failure::TimedOut });
+    assert_eq!(
+        end(&world, opener),
+        End::Failed { failure: Failure::TimedOut, evidence: smith_domain_session::llm::Evidence::Unknown }
+    );
     let stats = world.stats();
     assert_eq!((stats.calls, stats.timeouts, stats.late_answers), (3, 3, 3));
 }

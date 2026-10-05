@@ -17,6 +17,7 @@ pub const LIMITS: Limits = Limits {
     file_bytes: 256,
     read_bytes: 64,
     list_entries: 4,
+    list_bytes: 4096,
     match_lines: 4,
     file_timeout: Duration::from_secs(10),
     env_bytes: 256,

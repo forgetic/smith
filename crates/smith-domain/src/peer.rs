@@ -1,27 +1,14 @@
 //! Peers: what the top level keeps of each conversation the run opens, from
 //! its `Open` to its session's `Ended`, and the tickets that session carries.
 //!
-//! A session cannot name the run's types, and step code has no generics, so
-//! what is run-typed in a session is a ticket: an opaque token, which the top
-//! level resolves to the value it stands for when it translates the session's
-//! records for the run and the protocol layer. Tickets name values within one
-//! session, so each peer keeps its own, and they go when it does: the tools
-//! the run serves it, three fixed tickets ([`FINISH`], [`DELIVER`], [`SUB_AGENT`]);
-//! the asks of its last completion's calls to them, from the completion until the
-//! session dispatches each to the run (or until it yields or calls the LLM
-//! again, when the calls it did not dispatch never will be); and the run's
-//! answers, from the run's `Return` until the session ends, as they stay in
-//! its transcript and are copied into every prompt.
-//!
-//! Both are bounded by the session's byte limit, so that a peer holds little
-//! more than its session could: an answer is charged to the session at its
-//! fixed size plus its payload (the `bytes` of the session's `Answer`), and a
-//! session holds no more answers than fit its limit, besides those of the one
-//! batch it waits for, which it has not charged: on the ready list until they
-//! reach it, or arriving once it is closing or has no room for them (see
-//! [`payload`]); and the asks a completion makes are held only while what
-//! they hold, counted the same way, fits the limit too. A call beyond that is
-//! handed to the session as too large, and answered so to the LLM.
+//! The session cannot name run asks, so each live decoded application call gets
+//! one bounded peer ticket until dispatch or yield. Fixed offered descriptors
+//! are finish/deliver/sub-agent/wait plus admitted opaque host declarations.
+//! Aggregate decoded owning bytes and completion block count bound this map.
+//! Concrete V2 results move through the ready list into session history; no
+//! persistent root answer-ticket inventory survives for prompt replay. Historical
+//! calls are concrete provider id/name/input/replay with Historical classification.
+//! The peer never knows provider syntax, credential secrets or host effects.
 //!
 //! Contract: domain/run.md, section 14; programming-model.md, sections 4.4 and 6.3.
 
@@ -32,7 +19,7 @@ use smith_domain_run::{self as run, Ask};
 use smith_domain_session::{self as session, llm as sllm};
 
 use crate::llm::{self, Block, Decoded, Message, Prompt, Returned, Said, Served};
-use crate::translate::{self, DELIVER, FINISH, FIRST, Offered, SUB_AGENT};
+use crate::translate::{self, DELIVER, FINISH, FIRST, Offered, SUB_AGENT, WAIT};
 
 /// A conversation the run opened, and its session's tickets.
 ///
@@ -55,10 +42,6 @@ pub(crate) struct Peer {
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     asks: Map<u64, Ask>,
     held: u64,
-    /// The run's answers to the session's calls, by ticket.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-    answers: Map<u64, run::Returned>,
     /// The next ticket to give.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -74,16 +57,19 @@ impl Peer {
             offered,
             asks: Map::with_capacity(asks(limits)),
             held: 0,
-            answers: Map::with_capacity(answers(limits)),
             next: FIRST,
         }
+    }
+
+    pub(crate) const fn is_main(&self) -> bool {
+        self.offered.finish
     }
 
     /// The tickets it holds.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) fn tickets(&self) -> u32 {
-        self.asks.len().saturating_add(self.answers.len())
+        self.asks.len()
     }
 
     /// The session's view of `completion`: each call to a tool the run serves
@@ -94,12 +80,40 @@ impl Peer {
     pub(crate) fn completion(&mut self, completion: llm::Completion, limit: u64) -> sllm::Completion {
         let llm::Completion { content, stop, usage } = completion;
         let mut blocks = List::with_capacity(u32::try_from(content.len()).expect("a completion fits in memory"));
+        // Every call keeps a classification cell even when decoding is refused.
+        // Reserve the complete batch's cells first, so an oversized first call
+        // cannot spend the allowance needed by a later TooLarge classification.
+        let cell = u64::try_from(size_of::<Decoded>()).expect("a classification cell fits a u64");
+        let mut decoded_bytes = 0_u64;
+        for said in &content {
+            match said {
+                Said::ToolCall { .. } => {
+                    decoded_bytes = decoded_bytes.checked_add(cell).expect("completion cells fit in memory");
+                }
+                Said::Text { .. } | Said::Refusal { .. } | Said::Opaque { .. } => {}
+            }
+        }
         for said in content {
             let block = match said {
-                Said::Text { text } => sllm::Block::Text { text },
+                Said::Text { text, replay } => sllm::Block::Text { text, replay },
+                Said::Refusal { text, replay } => sllm::Block::Refusal { text, replay },
                 Said::Opaque { bytes } => sllm::Block::Opaque { bytes },
-                Said::ToolCall { id, name, input, call } => {
-                    sllm::Block::ToolCall { id, name, input, call: self.decoded(call, limit) }
+                Said::ToolCall { id, name, input, call, replay } => {
+                    let total = match call.owned_bytes() {
+                        Some(bytes) => match bytes.checked_sub(cell) {
+                            Some(payload) => decoded_bytes.checked_add(payload),
+                            None => None,
+                        },
+                        None => None,
+                    };
+                    let call = match total {
+                        Some(bytes) if bytes <= limit => {
+                            decoded_bytes = bytes;
+                            self.decoded(call, limit)
+                        }
+                        Some(_) | None => sllm::Decoded::Invalid { problem: sllm::Problem::TooLarge },
+                    };
+                    sllm::Block::ToolCall { id, name, input, call, replay }
                 }
             };
             blocks.push(block).expect("room for every block");
@@ -123,6 +137,7 @@ impl Peer {
             Decoded::Served { ask } => ask,
         };
         let offered = match &ask {
+            Ask::Wait => self.offered.wait,
             Ask::Host { tool, effect, .. } => self.host_offered(tool, *effect),
             Ask::Finish { .. } => self.offered.finish,
             Ask::Deliver { .. } => self.offered.deliver,
@@ -165,18 +180,6 @@ impl Peer {
         forgotten
     }
 
-    /// Keeps the run's answer `returned` for the session, under a new ticket.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-    pub(crate) fn answer(&mut self, returned: run::Returned) -> sllm::Answer {
-        let bytes = returned_cost(&returned).expect("an answer the run makes fits in memory");
-        let error = translate::failed(&returned);
-        let ticket = self.ticket();
-        let fresh = self.answers.insert(ticket, returned).expect("room for the answers a session may hold");
-        assert!(fresh.is_none(), "tickets are not reused");
-        sllm::Answer { ticket: Token::new(ticket), bytes, error }
-    }
-
     /// The protocol layer's view of the session's `prompt`: every ticket in it
     /// resolved, the answers copied.
     ///
@@ -186,6 +189,7 @@ impl Peer {
         let mut served = List::with_capacity(u32::try_from(delegated.len()).expect("bounded declaration inventory"));
         for descriptor in &delegated {
             let tool = match descriptor.ticket {
+                WAIT => Served::Wait,
                 DELIVER => Served::Deliver,
                 FINISH => Served::Finish,
                 SUB_AGENT => Served::SubAgent,
@@ -220,21 +224,18 @@ impl Peer {
 
     fn block(&self, block: sllm::Block) -> Block {
         match block {
-            sllm::Block::Text { text } => Block::Text { text },
+            sllm::Block::Text { text, replay } => Block::Text { text, replay },
+            sllm::Block::Refusal { text, replay } => Block::Refusal { text, replay },
             sllm::Block::Opaque { bytes } => Block::Opaque { bytes },
-            sllm::Block::ToolCall { id, name, input, call: _ } => Block::ToolCall { id, name, input },
+            sllm::Block::ToolCall { id, name, input, call: _, replay } => Block::ToolCall { id, name, input, replay },
             sllm::Block::ToolResult { id, result } => {
                 let result = match result {
                     sllm::Returned::Owned { outcome } => Returned::Owned { outcome },
-                    sllm::Returned::Delegated { answer } => {
-                        let returned = self.answers.get(&answer.ticket.raw()).expect("an answer lives as its session");
-                        Returned::Served { returned: translate::copy(returned), error: answer.error }
-                    }
+                    sllm::Returned::Delegated { .. } => unreachable!("V2 records contain concrete run answers"),
                     sllm::Returned::Invalid { problem } => Returned::Invalid { problem },
                     sllm::Returned::NotRun => Returned::NotRun,
-                    sllm::Returned::Text { .. } | sllm::Returned::Withdrawn => {
-                        unreachable!("version-one sessions retain ticketed served answers")
-                    }
+                    sllm::Returned::Text { text, error, replay } => Returned::Text { text, error, replay },
+                    sllm::Returned::Withdrawn => Returned::Withdrawn,
                 };
                 Block::ToolResult { id, result }
             }
@@ -253,16 +254,7 @@ impl Peer {
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn asks(limits: &session::Limits) -> u32 {
-    per(limits.session_bytes, size_of::<Ask>())
-}
-
-/// The most answers a peer holds: as many as the session's byte limit takes
-/// at their fixed size, and those of a batch that arrives once it takes no
-/// more.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-pub(crate) fn answers(limits: &session::Limits) -> u32 {
-    per(limits.session_bytes, size_of::<run::Returned>()).saturating_add(limits.parallel_tools)
+    per(limits.session_bytes, size_of::<Ask>()).min(limits.completion_blocks)
 }
 
 fn per(bytes: u64, size: usize) -> u32 {
@@ -274,8 +266,9 @@ fn per(bytes: u64, size: usize) -> u32 {
 /// fixed size plus its payload.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-fn ask_cost(ask: &Ask) -> Option<u64> {
+pub(crate) fn ask_cost(ask: &Ask) -> Option<u64> {
     let payload = match ask {
+        Ask::Wait => 0,
         Ask::Host { tool, input, .. } => size(tool.len())?.checked_add(size(input.bytes().len())?)?,
         Ask::Deliver { change } => change.owned_bytes()?,
         Ask::Finish { outcome } => run::outcome::owned_bytes(outcome)?,
@@ -312,57 +305,6 @@ pub(crate) fn payload(limits: &run::Limits) -> Option<u64> {
             .max(refused)
             .max(u64::from(limits.host_reply_bytes)),
     )
-}
-
-/// What an answer holds, as the session is charged for it: its fixed size,
-/// and its payload.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-fn returned_cost(returned: &run::Returned) -> Option<u64> {
-    let payload = match returned {
-        run::Returned::HostAnswered(answer) => size(answer.text().len())?,
-        run::Returned::Delivered(receipts) => receipts.owned_bytes(),
-        run::Returned::DeliveryRefused(refusal) => refusal.owned_bytes(),
-        run::Returned::HostUnknown
-        | run::Returned::HostRejected(_)
-        | run::Returned::Nothing
-        | run::Returned::Accepted
-        | run::Returned::Stale
-        | run::Returned::DeliveryFailed { .. }
-        | run::Returned::Cancelled
-        | run::Returned::TimedOut
-        | run::Returned::Busy
-        | run::Returned::Unanswered { .. }
-        | run::Returned::Refused { .. } => 0,
-        run::Returned::Rejected { problems } => {
-            let problem = size(size_of::<run::outcome::Problem>())?;
-            let mut cost = problem.checked_mul(size(problems.listed.len())?)?;
-            for listed in &problems.listed {
-                let field = match listed {
-                    run::outcome::Problem::MissingField { item: _, field }
-                    | run::outcome::Problem::EmptyField { item: _, field }
-                    | run::outcome::Problem::RepeatedField { item: _, field }
-                    | run::outcome::Problem::FieldTooLarge { item: _, field, max: _ } => len(field)?,
-                    run::outcome::Problem::TooLarge { .. }
-                    | run::outcome::Problem::ChangeNotAllowed
-                    | run::outcome::Problem::VerdictNotAllowed
-                    | run::outcome::Problem::UnknownVerdict
-                    | run::outcome::Problem::TooFewItems { .. }
-                    | run::outcome::Problem::TooManyItems { .. }
-                    | run::outcome::Problem::KindNotAllowed { .. }
-                    | run::outcome::Problem::ReportNotAllowed
-                    | run::outcome::Problem::FailureNotAllowed
-                    | run::outcome::Problem::TextTooShort { .. }
-                    | run::outcome::Problem::TextTooLarge { .. } => 0,
-                };
-                cost = cost.checked_add(field)?;
-            }
-            cost
-        }
-        run::Returned::ChecksFailed { repository, ran } => len(repository)?.checked_add(len(&ran.output)?)?,
-        run::Returned::Answered { text, cut: _, stop: _ } => len(text)?,
-    };
-    size(size_of::<run::Returned>())?.checked_add(payload)
 }
 
 fn len(bytes: &[u8]) -> Option<u64> {

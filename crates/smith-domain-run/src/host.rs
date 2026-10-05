@@ -120,6 +120,14 @@ impl HostAnswer {
         Some(Self { text, error })
     }
 
+    /// Move the sealed actual text and host error bit to concrete transcript
+    /// feedback without copying or interpreting either value.
+    /// Contract: domain/run.md, sections 5.2 and 14.
+    #[must_use]
+    pub fn into_parts(self) -> (Box<[u8]>, bool) {
+        (self.text, self.error)
+    }
+
     /// Exact bounded host text. Contract: domain/run.md, section 5.2.
     #[must_use]
     pub fn text(&self) -> &[u8] {

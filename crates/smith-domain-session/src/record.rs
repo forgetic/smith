@@ -196,3 +196,29 @@ pub enum Refusal {
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     TooLarge,
 }
+
+impl Transcript {
+    /// Complete retained history ownership, including allocated Turn and Message
+    /// envelopes separately from block/payload storage. The protocol bounds
+    /// input counts; the root checks this count before retaining Start context,
+    /// while session performs the semantic admission before any effects.
+    /// Contract: domain/session.md, sections 3 and 12; programming-model.md, section 6.3.
+    #[must_use]
+    pub fn owned_bytes(&self) -> Option<u64> {
+        let mut bytes =
+            u64::try_from(core::mem::size_of::<Turn>()).ok()?.checked_mul(u64::try_from(self.turns.len()).ok()?)?;
+        for turn in &self.turns {
+            bytes = bytes.checked_add(messages_bytes(&turn.messages)?)?;
+        }
+        bytes.checked_add(messages_bytes(&self.after)?)
+    }
+}
+
+fn messages_bytes(messages: &[Message]) -> Option<u64> {
+    let mut bytes =
+        u64::try_from(core::mem::size_of::<Message>()).ok()?.checked_mul(u64::try_from(messages.len()).ok()?)?;
+    for message in messages {
+        bytes = bytes.checked_add(crate::session::content_cost(&message.content)?)?;
+    }
+    Some(bytes)
+}

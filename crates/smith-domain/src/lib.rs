@@ -33,6 +33,8 @@ extern crate alloc;
 mod boundary;
 mod domain;
 mod facts;
+
+mod feedback;
 mod limits;
 pub mod llm;
 mod peer;
@@ -44,8 +46,13 @@ mod translate;
 pub use boundary::{Event, Grant, GrantName, Request};
 pub use domain::{Domain, fire, max_out, resume, step};
 pub use facts::{Content, Fact};
+
+pub use feedback::{Feedback, FeedbackRefusal, feedback, feedback_worst_case};
 pub use limits::{Limits, worst_case};
 // The payloads are the children's: a parent may use its children's types.
 pub use smith_domain_run as run;
 pub use smith_domain_session as session;
 pub use smith_domain_tools as tools;
+
+// Concrete history names belong to session; the root parent may name child records.
+pub use smith_domain_session::record::{Transcript, Turn};

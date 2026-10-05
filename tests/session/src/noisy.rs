@@ -3,10 +3,10 @@
 //! and close twice; and sessions opened at random, with budgets of every
 //! size, some too large and some spent before they start.
 
+use skein_fake_llm_domain::Config;
 use skein_lib::{Duration, Rng, Time};
 use smith_domain_session::{Budget, Limits, Spec};
 use smith_domain_tools as tools;
-use smith_fake_llm_domain::Config;
 
 use crate::{BUDGET, Count, Settings, Span, World, spec};
 
@@ -32,6 +32,10 @@ pub fn noisy(seed: u64) -> Settings {
             sessions,
             messages: pick(4, 16),
             session_bytes: u64::from(pick(2_000, 8_000)),
+            completion_bytes: 4096,
+            completion_blocks: 16,
+            failure_bytes: 512,
+            delegated_result_bytes: 16_384,
             budget: Budget { turns: pick(1, 6), time: session_timeout, ..BUDGET },
             retries: pick(0, 4),
             backoff_base: Duration::from_millis(50),

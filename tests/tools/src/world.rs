@@ -68,6 +68,7 @@ impl Settings {
                 file_bytes: 4096,
                 read_bytes: 1024,
                 list_entries: 16,
+                list_bytes: 4096,
                 match_lines: 4,
                 file_timeout: Duration::from_secs(10),
                 env_bytes: 256,

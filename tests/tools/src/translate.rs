@@ -137,10 +137,30 @@ pub fn perform(checkout: &mut fake::Checkout, op: Op) -> Done {
             Ok((content, found)) => Done::Loaded { content: content.into(), version: version(found) },
             Err(failure) => done(failure),
         },
-        Op::Scan { at, max } => {
+        Op::Scan { at, max, max_bytes } => {
             let max = usize::try_from(max).expect("a small listing");
             match checkout.scan(root(at.root), &at.path, max) {
-                Ok((entries, more)) => Done::Scanned { entries: entries.into_iter().map(entry).collect(), more },
+                Ok((entries, mut more)) => {
+                    let mut retained = Vec::with_capacity(entries.len());
+                    let mut bytes = 0_u64;
+                    let mut full = false;
+                    for found in entries {
+                        let found = entry(found);
+                        let cost = u64::try_from(core::mem::size_of::<Entry>())
+                            .expect("entry size")
+                            .checked_add(u64::try_from(found.name.as_bytes().len()).expect("name size"))
+                            .expect("bounded listing");
+                        let next = bytes.checked_add(cost).expect("bounded listing");
+                        if full || next > max_bytes {
+                            full = true;
+                            more = more.saturating_add(1);
+                        } else {
+                            bytes = next;
+                            retained.push(found);
+                        }
+                    }
+                    Done::Scanned { entries: retained.into_boxed_slice(), more }
+                }
                 Err(failure) => done(failure),
             }
         }

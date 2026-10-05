@@ -81,6 +81,53 @@ What is still open is listed in section 11.
   malformed, unresolved or oversized history are distinct refusals; the
   run treats every one as a transient failure (run.md, section 6).
 
+### 3.1 Receiving room before work
+
+For V2, `completion_bytes` caps the full owning translated completion: Block
+cells, all text/id/name/input bytes, replay envelopes and decoded owning calls.
+`completion_blocks` independently caps the number of cells. The protocol
+adapter checks its configured shared-client-to-domain worst case against both
+Request::Complete metadata caps before preparing a provider request. A client
+answer payload limit alone is not this owning bound. Replay is a complete opaque
+shared-client envelope; Text, Refusal and ToolCall keep their optional envelope,
+and Opaque keeps the complete reasoning or future-block envelope. Session never
+parses a provider tag or chooses a provider from these bytes.
+
+Before every provider effect, including retry and Continue, the session retains
+logical credit at least `P = 2*C + N*max(size_of(Block),size_of(Slot))`,
+checked for overflow, and the complete bounded failure terminal if larger,
+plus two free Message slots. C covers the actual assistant content;
+the second C covers copied provider IDs and invalid-result details, and the
+independent wrapper term covers every possible result skeleton. Calling and
+Closing retain this credit until the actual Completed/Failed/Cancelled
+terminal. Cancel emission cannot release it. An in-cap completion converts the
+credit into the actual assistant and full result skeleton once. A completion
+that wins cancellation records its actual assistant and NotRun for every
+unstarted call, usage and full last Turn before Ended. Insufficient room
+prevents the request; incompatible restoration is TooLarge before tools or a
+provider starts. Completion caps do not silently reduce the history payload
+ceiling: receiving room is an explicit pre-work requirement.
+
+Before dispatching any adjacent read batch or exclusive write, a bounded
+prescan reserves all maximum result payloads together. Each live call owns its
+credit through close until its one actual terminal converts credit into actual
+retained bytes. Delegates use `delegated_result_bytes`; owned tools use the
+exhaustive call-kind cap from tools Limits. Read, List, Search, Shell and edit
+ambiguity all have finite receiving bounds. Scan carries the aggregate Entry
+and name byte cap described in domain/tools.md, section 5. Invalid and unstarted
+result blocks and their provider IDs were secured before the provider request.
+Insufficient batch room starts no underlying effect; earlier actual results
+remain and only the unstarted tail becomes NotRun in the actual Turn before
+TranscriptFull. Normal and closing receiving paths cannot discard a valid
+actual result because later history filled the conversation.
+
+`session_bytes` counts Block wrappers and owning payloads, including secured
+result skeletons, separately from Message arrays. The worst case additionally
+prices Message storage, result Slot containers including their coexistence with
+an assembled result Block array, and restore Turn/Message staging. Root and
+caller price their concrete transcript/Turn output envelopes and transit copies
+independently. No logical reservation allocates bytes or abandons a terminal.
+
 ## 4. Providers and retries
 
 - **Any provider.** A session talks to the endpoint and model it was
@@ -203,3 +250,14 @@ Migration 05s2 copied provider and OAuth crates to preserve the source baseline.
 05s2a replaces that temporary ownership with the existing shared `skein-llm`
 client and shared peers. The copy ledger remains historical evidence; the
 replacement audits its codec fixtures and stories before deleting the copies.
+
+Actual shared-client failures additionally distinguish Limit, Protocol and
+unsolicited Cancelled, all nonretryable. Failed carries exact transport Evidence
+(Unsent/Unknown/Response) and bounded diagnostic bytes, at most failure_bytes.
+Request::Complete advertises max_failure_bytes; the adapter checks its configured
+receiving diagnostic bound before prepare/effects. Root passes the exact actual
+terminal to session. Policy consumes and drops detail without text-driven retry,
+saved transcript text or diagnostic facts. Content-free CompletionFailed facts
+and End::Failed retain the exact class and evidence. Requested Cancel still owes
+one actual Completed, Failed or genuine Cancelled terminal; a failed or completed
+operation that wins Cancel is never replaced by an acknowledgement.

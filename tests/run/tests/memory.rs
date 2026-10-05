@@ -60,6 +60,9 @@ const LIMITS: Limits = Limits {
     check_timeout: Duration::from_secs(60),
     check_tail: 1024,
     facts: 16,
+    messages: 8,
+    message_bytes: 4096,
+    waiting: skein_lib::Duration::from_secs(300),
 };
 
 /// A charter that holds exactly `held` bytes, as the run counts them: one of
@@ -123,8 +126,10 @@ fn charter(held: u64) -> Charter {
             failure: None,
         },
         budget: BUDGET,
-        llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1 },
-        models: Box::new([Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1 }]),
+        llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 },
+        models: Box::new([Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 }]),
+        resume: false,
+        waiting: skein_lib::Duration::from_secs(30),
     }
 }
 
@@ -172,6 +177,9 @@ fn fill(limits: Limits) {
                 Request::Answer { answer, to: _ } => Asked::Answer { answer },
                 Request::HostCall { .. }
                 | Request::WithdrawHost { .. }
+                | Request::Turn { .. }
+                | Request::Waiting { .. }
+                | Request::MessageBounced { .. }
                 | Request::Admitted { .. }
                 | Request::Say { .. }
                 | Request::Close { .. }
@@ -188,7 +196,12 @@ fn fill(limits: Limits) {
     let expiry = Time::ZERO.saturating_add(limits.budget.time);
     for run in 0..limits.runs {
         let worker = Token::new(u64::from(run));
-        let start = Event::Start { reply_to: ReplyTo::new(worker), worker, charter: charter(limits.run_bytes) };
+        let start = Event::Start {
+            reply_to: ReplyTo::new(worker),
+            worker,
+            charter: charter(limits.run_bytes),
+            transcript: None,
+        };
         let [Asked::Other, Asked::Read { owner }] = step(start)[..] else {
             panic!("a charter of exactly the byte limit is admitted");
         };
@@ -248,7 +261,12 @@ fn fill(limits: Limits) {
     // A byte more is refused.
     let mut domain = Domain::new(&Limits { runs: 1, conversations: 2, ..limits });
     let worker = Token::new(0);
-    let start = Event::Start { reply_to: ReplyTo::new(worker), worker, charter: charter(limits.run_bytes + 1) };
+    let start = Event::Start {
+        reply_to: ReplyTo::new(worker),
+        worker,
+        charter: charter(limits.run_bytes + 1),
+        transcript: None,
+    };
     smith_domain_run::step(&mut domain, &env, start, &mut out);
     let Some(Request::Answer { to: _, answer }) = out.pop() else { panic!("expected an answer") };
     assert_eq!(answer, Answer::Refused(Refusal::Invalid(Invalid::TooLarge)));
@@ -350,7 +368,12 @@ fn delivery_memory_step(
                 assert_eq!(receipts.owned_bytes(), smith_domain_run::Delivered::worst_case());
                 answered = true;
             }
-            Request::Admitted { .. } | Request::Checking { .. } | Request::Close { .. } => {}
+            Request::Turn { .. }
+            | Request::Waiting { .. }
+            | Request::MessageBounced { .. }
+            | Request::Admitted { .. }
+            | Request::Checking { .. }
+            | Request::Close { .. } => {}
             unexpected @ (Request::HostCall { .. }
             | Request::WithdrawHost { .. }
             | Request::Answer { .. }
@@ -395,8 +418,10 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
             failure: None,
         },
         budget: BUDGET,
-        llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1 },
+        llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 },
         models: Box::new([]),
+        resume: false,
+        waiting: skein_lib::Duration::from_secs(30),
     };
     let worker = Token::new(10);
     let (owner, _) = delivery_memory_step(
@@ -404,7 +429,7 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
         &env,
         &mut out,
         &meter,
-        Event::Start { reply_to: ReplyTo::new(worker), worker, charter },
+        Event::Start { reply_to: ReplyTo::new(worker), worker, charter, transcript: None },
     );
     let run = owner.expect("preparation read");
     let mut owner = run;
@@ -497,7 +522,10 @@ fn host_memory_take(
                 assert_eq!(opening.host_tools.len(), 1);
                 token = Some(conversation);
             }
-            Request::Admitted { .. }
+            Request::Turn { .. }
+            | Request::Waiting { .. }
+            | Request::MessageBounced { .. }
+            | Request::Admitted { .. }
             | Request::WithdrawHost { .. }
             | Request::Close { .. }
             | Request::Answer { .. } => {}
@@ -532,7 +560,12 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
         &env,
         &mut out,
         &meter,
-        Some(Event::Start { reply_to: ReplyTo::new(Token::new(88)), worker: Token::new(91), charter }),
+        Some(Event::Start {
+            reply_to: ReplyTo::new(Token::new(88)),
+            worker: Token::new(91),
+            charter,
+            transcript: None,
+        }),
     );
     let run = run.expect("real admitted run reads");
     let (conversation, _) = host_memory_take(

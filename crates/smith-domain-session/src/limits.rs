@@ -8,9 +8,9 @@ use smith_domain_tools as tools;
 
 use crate::boundary::Budget;
 use crate::facts::Fact;
-use crate::llm::Message;
+use crate::llm::{Block, Message};
 use crate::record::Turn;
-use crate::session::{Alarm, Ready, Run, Session};
+use crate::session::{Alarm, Ready, Run, Session, Slot};
 
 /// The most tool calls a session runs at once: what `Limits::parallel_tools`
 /// may be, and what bounds the requests a step emits.
@@ -42,6 +42,29 @@ pub struct Limits {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub session_bytes: u64,
+
+    /// Maximum owned content of one actual V2 provider completion, including
+    /// block cells, replay envelopes and decoded owned-call fields. The session
+    /// reserves this and every possible unstarted result before asking the provider.
+    /// Contract: domain/session.md, sections 3, 5 and 12.
+    pub completion_bytes: u64,
+
+    /// Maximum blocks in an actual V2 completion; result-slot storage is
+    /// reserved independently before the provider request. The adapter's full
+    /// translated completion bound must obey both receiving caps.
+    /// Contract: domain/session.md, sections 3, 5 and 12.
+    pub completion_blocks: u32,
+
+    /// Maximum exact actual failure diagnostic bytes. Provider receiving credit
+    /// covers this terminal before work; policy drops detail after consumption.
+    /// Contract: domain/session.md, sections 4, 5 and 12.
+    pub failure_bytes: u32,
+
+    /// Maximum concrete opener-result payload per admitted delegated call.
+    /// A whole batch reserves its possible results before any effect; each
+    /// actual terminal owns its reservation through close and turn emission.
+    /// Contract: domain/session.md, sections 3, 5 and 12.
+    pub delegated_result_bytes: u64,
     /// The largest budget a spec may ask for, dimension by dimension. Its time
     /// is the longest a session may live.
     ///
@@ -94,6 +117,19 @@ pub struct Limits {
     pub tools: tools::Limits,
 }
 
+/// Logical V2 room secured before each provider request: maximum completion,
+/// copied result IDs/details and independent Block/Slot skeleton wrappers.
+/// This does not allocate memory or lower the transcript payload ceiling; it
+/// prevents a provider effect whose actual in-cap terminal cannot be retained.
+/// It also covers the full bounded failure terminal; diagnostic policy consumes
+/// and drops that transient detail. Returns None on zero completion caps or
+/// checked arithmetic overflow.
+/// Contract: domain/session.md, sections 3, 5 and 12.
+#[must_use]
+pub fn completion_reserve(limits: &Limits) -> Option<u64> {
+    crate::session::provider_reserve(limits)
+}
+
 /// The most memory the domain holds under `limits`, in bytes (programming-model.md, section 6.3), or `None`
 /// if it does not fit a `u64` or the limits cannot be honoured: a parallel
 /// batch wider than [`MAX_PARALLEL`] or than the tools run for a kit at once
@@ -124,7 +160,15 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let tools = tools::worst_case(&limits.tools)?;
     let tools_out = Queue::<tools::Request>::worst_case(tools::max_out(&limits.tools))?;
     // Each session owns its transcript's list and up to its byte limit.
-    let session = List::<Message>::worst_case(limits.messages)?.checked_add(limits.session_bytes)?;
+    // Result slots coexist with the assembled result Block array. The latter
+    // is charged in session_bytes; the full Slot container is additional.
+    // V1 can fill the byte cap with minimal calls; V2 additionally promises
+    // its configured block count. No assumption that Slot <= Block is needed.
+    let block = u64::try_from(core::mem::size_of::<Block>()).ok()?;
+    let calls = u32::try_from(limits.session_bytes.checked_div(block)?).ok()?.max(limits.completion_blocks);
+    let slots = List::<Slot>::worst_case(calls)?;
+    let session =
+        List::<Message>::worst_case(limits.messages)?.checked_add(slots)?.checked_add(limits.session_bytes)?;
     let held = u64::from(limits.sessions).checked_mul(session)?;
     // One restore event at a time may still own its bounded record envelopes
     // while its messages move into the already allocated transcript list.

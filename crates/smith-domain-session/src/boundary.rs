@@ -140,6 +140,15 @@ pub enum Event {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         failure: Failure,
+
+        /// Exact content-free transport evidence carried by the actual terminal.
+        /// Contract: domain/session.md, sections 4, 5 and 12.
+        evidence: crate::llm::Evidence,
+
+        /// Bounded exact shared-client diagnostic, consumed and dropped by policy.
+        /// It never controls text-based retry decisions or enters saved history.
+        /// Contract: domain/session.md, sections 4, 5 and 12.
+        detail: Box<[u8]>,
     },
     /// Terminal for `Complete`, after `Cancel`: the call was abandoned.
     ///
@@ -309,6 +318,23 @@ pub enum Request {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         timeout: Duration,
+
+        /// Maximum owned translated completion bytes, including block cells,
+        /// replay envelopes and decoded calls. The adapter verifies its configured
+        /// bound before preparing the provider request; actual terminals obey it.
+        /// Contract: domain/session.md, sections 3, 5 and 12.
+        max_completion_bytes: u64,
+
+        /// Maximum translated completion blocks, reserved with result skeletons
+        /// before this request. One actual terminal remains owed after Cancel.
+        /// Contract: domain/session.md, sections 3, 5 and 12.
+        max_completion_blocks: u32,
+
+        /// Maximum exact shared-client failure diagnostic bytes. The adapter
+        /// verifies compatibility before prepare; policy consumes the actual
+        /// terminal and drops detail without retaining text in facts/history.
+        /// Contract: domain/session.md, sections 4, 5 and 12.
+        max_failure_bytes: u32,
     },
     /// Abandon the `Complete` in flight for `owner`. Its terminal event still
     /// comes: `Cancelled`, or whichever outcome won the race.
@@ -558,6 +584,10 @@ pub enum End {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         failure: Failure,
+
+        /// Exact content-free transport evidence carried by the actual terminal.
+        /// Contract: domain/session.md, sections 4, 5 and 12.
+        evidence: crate::llm::Evidence,
     },
     /// The session's budget ran out in the `spent` dimension: it needed a
     /// completion the budget does not leave room for, or its time is up.

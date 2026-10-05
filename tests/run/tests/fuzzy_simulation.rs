@@ -34,6 +34,7 @@ fn random_worlds_settle_with_every_start_answered_once() {
         expired += stats.partner.expired;
         for answer in answers(&world) {
             let kind = match answer {
+                Answer::Parked { .. } => panic!("source random partner does not request wait"),
                 Answer::Accepted { .. } => "accepted",
                 Answer::Delivered { .. } => {
                     panic!("this copied random driver offers no mid-run delivery grant")
@@ -42,7 +43,9 @@ fn random_worlds_settle_with_every_start_answered_once() {
                 Answer::Refused(Refusal::Invalid(Invalid::Conversation)) => "conversation invalid",
                 Answer::Refused(Refusal::Invalid(_)) => "invalid",
                 Answer::Failed { failure, .. } => match failure {
-                    Failure::Model(Fault::Provider | Fault::ContextFull | Fault::Exhausted) => "fault",
+                    Failure::Model(
+                        Fault::Completion { .. } | Fault::Provider | Fault::ContextFull | Fault::Exhausted,
+                    ) => "fault",
                     Failure::Model(Fault::Truncated | Fault::Refused | Fault::Malformed) => "stopped",
                     Failure::Budget(Exhausted::Turns) => "turns",
                     Failure::Budget(Exhausted::Time) => "time",
@@ -50,6 +53,7 @@ fn random_worlds_settle_with_every_start_answered_once() {
                     Failure::Policy(Policy::Unfinished { .. }) => "unfinished",
                     Failure::Cancelled => "cancelled",
                     Failure::Stale => "stale",
+                    Failure::Transcript(_) => panic!("source random partner does not restore history"),
                 },
             };
             seen.insert(kind);

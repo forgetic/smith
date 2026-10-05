@@ -41,6 +41,7 @@ fn index(rng: &mut Rng, len: usize) -> usize {
 /// few bytes each.
 const LIMITS: Limits = Limits {
     accounts: 4,
+    decoded_call_bytes: 4096,
     skew: Duration::ZERO,
     run: run::Limits {
         runs: 2,
@@ -58,7 +59,11 @@ const LIMITS: Limits = Limits {
     session: smith_domain::session::Limits {
         sessions: 4,
         messages: 12,
-        session_bytes: 4096,
+        session_bytes: 1_048_576,
+        completion_bytes: 4096,
+        completion_blocks: 16,
+        failure_bytes: 512,
+        delegated_result_bytes: 131_072,
         parallel_tools: 2,
         facts: 32,
         tools: smith_domain::tools::Limits {
@@ -67,6 +72,7 @@ const LIMITS: Limits = Limits {
             file_bytes: 512,
             read_bytes: 256,
             list_entries: 8,
+            list_bytes: 4096,
             shell_head: 64,
             shell_tail: 64,
             search_hits: 4,
@@ -123,8 +129,10 @@ fn charter(brief: u64) -> Charter {
             failure: Some(TextSpec { min: 1, max: 512, fields: Box::new([]) }),
         },
         budget: run::Budget { turns: 12, ..TIGHT.run.budget },
-        llm: Llm { account: 0, endpoint: Endpoint(0), model: (*b"m").into(), max_tokens: 256 },
+        llm: Llm { account: 0, endpoint: Endpoint(0), model: (*b"m").into(), max_tokens: 256, dialect: 1 },
         models: Box::new([]),
+        resume: false,
+        waiting: skein_lib::Duration::from_secs(30),
     }
 }
 
@@ -202,12 +210,17 @@ impl Driver {
                 }
                 Request::Admitted { worker: _, run } => self.runs.push(run),
                 Request::Answer { .. } => self.seen[5] += 1,
-                Request::Checking { .. } | Request::Rejected { .. } | Request::Exhausted { .. } => {}
+                Request::Turn { .. }
+                | Request::Waiting { .. }
+                | Request::MessageBounced { .. }
+                | Request::Checking { .. }
+                | Request::Rejected { .. }
+                | Request::Exhausted { .. } => {}
                 Request::Deliver { owner, .. } => {
                     self.seen[4] += 1;
                     self.ask(Asked::Delivery { owner, cancelled: false });
                 }
-                Request::Complete { owner, prompt, timeout: _, grant: _ } => {
+                Request::Complete { owner, prompt, timeout: _, grant: _, .. } => {
                     self.seen[0] += 1;
                     let (finish, agents) = served(&prompt);
                     self.ask(Asked::Complete { owner, finish, agents, cancelled: false });
@@ -283,6 +296,7 @@ impl Driver {
                 reply_to: ReplyTo::new(worker),
                 worker,
                 charter: charter(brief),
+                transcript: None,
             });
         }
         if roll == 1 && !self.runs.is_empty() && self.rng.chance(100) {
@@ -292,7 +306,12 @@ impl Driver {
         Some(match asked {
             Asked::Complete { owner, cancelled: true, .. } if self.rng.chance(700) => Event::Cancelled { owner },
             Asked::Complete { owner, finish, agents, .. } => match self.rng.below(10) {
-                0 => Event::Failed { owner, failure: Failure::Overloaded },
+                0 => Event::Failed {
+                    owner,
+                    failure: Failure::Overloaded,
+                    evidence: smith_domain::llm::Evidence::Unknown,
+                    detail: Default::default(),
+                },
                 _ => Event::Completed { owner, completion: self.completion(limits, finish, agents) },
             },
             Asked::Io { owner, cancelled: true, .. } if self.rng.chance(700) => {
@@ -339,7 +358,7 @@ impl Driver {
         let most = limits.session.session_bytes / 4;
         let usage = Usage { input_tokens: 100, output_tokens: 20, cache_read_tokens: 50, cache_write_tokens: 50 };
         if self.rng.chance(150) {
-            let text = Said::Text { text: bytes(self.rng.below(most)) };
+            let text = Said::Text { text: bytes(self.rng.below(most)), replay: None };
             return Completion { content: Box::new([text]), stop: Stop::EndTurn, usage };
         }
         let count = 1 + self.rng.below(2);
@@ -347,7 +366,13 @@ impl Driver {
             .map(|at| {
                 let size = self.rng.below(most / 2);
                 let call = self.call(limits, size, finish, agents);
-                Said::ToolCall { id: format!("c{at}").into_bytes().into(), name: bytes(4), input: bytes(size), call }
+                Said::ToolCall {
+                    id: format!("c{at}").into_bytes().into(),
+                    name: bytes(4),
+                    input: bytes(size),
+                    call,
+                    replay: None,
+                }
             })
             .collect();
         Completion { content, stop: Stop::ToolUse, usage }
@@ -449,7 +474,7 @@ fn served(prompt: &Prompt) -> (bool, bool) {
     for tool in &prompt.served {
         match tool {
             Served::Host(_) => panic!("random legacy driver has no host declarations"),
-            Served::Deliver => {}
+            Served::Wait | Served::Deliver => {}
             Served::Finish => offered.0 = true,
             Served::SubAgent => offered.1 = true,
         }
@@ -521,12 +546,17 @@ enum Point {
 fn a_domain_driven_at_random_stays_within_its_worst_case_at_every_entry_point() {
     let wider = Limits {
         accounts: LIMITS.accounts,
+        decoded_call_bytes: LIMITS.decoded_call_bytes,
         skew: LIMITS.skew,
         run: run::Limits { runs: 3, conversations: 8, run_conversations: 4, calls: 8, ..LIMITS.run },
         session: smith_domain::session::Limits {
             sessions: 8,
             messages: 24,
-            session_bytes: 8192,
+            session_bytes: 1_048_576,
+            completion_bytes: 4096,
+            completion_blocks: 16,
+            failure_bytes: 512,
+            delegated_result_bytes: 131_072,
             parallel_tools: 3,
             tools: smith_domain::tools::Limits { kits: 8, calls: 3, ..LIMITS.session.tools },
             ..LIMITS.session

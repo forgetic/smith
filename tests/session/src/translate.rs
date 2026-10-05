@@ -9,9 +9,9 @@ use smith_domain_session::Event;
 use smith_domain_session::llm as agent;
 
 use crate::tickets::{Ticketed, Tickets};
+use skein_fake_llm_domain::api as provider;
 use skein_lib::Token;
 use smith_domain_tools::{Call, Effect, Exit, Grants, Name, Outcome, Part, Path};
-use smith_fake_llm_domain::api as provider;
 
 /// The tools the agent's side offers, by name: the family that grants each,
 /// and its schema.
@@ -72,7 +72,12 @@ pub fn outcome(
 ) -> Event {
     match result {
         Ok(answer) => Event::Completed { owner, completion: completion(answer, tickets, opener, served) },
-        Err(error) => Event::Failed { owner, failure: failure(error) },
+        Err(error) => Event::Failed {
+            owner,
+            failure: failure(error),
+            evidence: smith_domain_session::llm::Evidence::Unknown,
+            detail: Default::default(),
+        },
     }
 }
 
@@ -106,10 +111,12 @@ fn translate_message(message: agent::Message, tickets: &Tickets) -> provider::Me
 
 fn part(block: agent::Block, tickets: &Tickets) -> provider::Part {
     match block {
-        agent::Block::Text { text } => provider::Part::Text { text },
+        agent::Block::Text { text, .. } | agent::Block::Refusal { text, .. } => provider::Part::Text { text },
         agent::Block::Opaque { bytes } => provider::Part::Opaque { bytes },
         // The call goes back as the LLM wrote it.
-        agent::Block::ToolCall { id, name, input, call: _ } => provider::Part::ToolCall { id, name, arguments: input },
+        agent::Block::ToolCall { id, name, input, call: _, .. } => {
+            provider::Part::ToolCall { id, name, arguments: input }
+        }
         agent::Block::ToolResult { id, result: agent::Returned::Delegated { answer } } => {
             let Ticketed::Answer { text, error } = tickets.resolve(answer.ticket) else {
                 panic!("an answer's ticket names an answer");
@@ -150,7 +157,7 @@ fn completion(
 
 fn block(part: provider::Part, tickets: &mut Tickets, opener: u64, served: &[agent::Descriptor]) -> agent::Block {
     match part {
-        provider::Part::Text { text } => agent::Block::Text { text },
+        provider::Part::Text { text } => agent::Block::Text { text, replay: None },
         provider::Part::Opaque { bytes } => agent::Block::Opaque { bytes },
         provider::Part::ToolCall { id, name, arguments } => {
             let call = match delegated(&name, served, tickets) {
@@ -160,7 +167,7 @@ fn block(part: provider::Part, tickets: &mut Tickets, opener: u64, served: &[age
                 }
                 None => decode(&name, &arguments),
             };
-            agent::Block::ToolCall { id, name, input: arguments, call }
+            agent::Block::ToolCall { id, name, input: arguments, call, replay: None }
         }
         provider::Part::ToolOutput { .. } => unreachable!("the fake answers with text and tool calls"),
     }
@@ -276,7 +283,7 @@ fn path(text: &[u8]) -> Result<Path, agent::Problem> {
 #[must_use]
 pub fn render(result: &agent::Returned) -> (Box<[u8]>, bool) {
     match result {
-        agent::Returned::Text { text, error } => (text.clone(), *error),
+        agent::Returned::Text { text, error, replay: _ } => (text.clone(), *error),
         agent::Returned::Owned { outcome } => {
             let failed = !matches!(
                 outcome,

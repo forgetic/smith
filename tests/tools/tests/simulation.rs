@@ -143,6 +143,83 @@ fn reads_and_listings_are_bounded() {
 }
 
 #[test]
+fn listing_byte_credit_keeps_the_exact_name_order_prefix_and_omitted_count() {
+    let cell = u64::try_from(core::mem::size_of::<Entry>()).expect("entry size");
+    let first = cell + 6;
+    let both = first + cell + 7;
+    for (cap, expected) in [
+        (
+            both,
+            Outcome::Listed {
+                entries: Box::new([entry(b"lib.rs", Kind::File), entry(b"main.rs", Kind::File)]),
+                more: 0,
+            },
+        ),
+        (both - 1, Outcome::Listed { entries: Box::new([entry(b"lib.rs", Kind::File)]), more: 1 }),
+        (first, Outcome::Listed { entries: Box::new([entry(b"lib.rs", Kind::File)]), more: 1 }),
+        (first - 1, Outcome::Listed { entries: Box::new([]), more: 2 }),
+    ] {
+        let calm = Settings::calm(701);
+        let settings = Settings { tools: Limits { list_bytes: cap, ..calm.tools }, ..calm };
+        let (answers, world) = run(settings, INSPECT, vec![Step::Calls(vec![list(b"src")])]);
+        assert_eq!(answers, [expected]);
+        assert_eq!(world.stats().ops, 1);
+    }
+}
+
+#[test]
+fn listing_credit_counts_tiny_entry_wrappers_and_does_not_skip_a_long_first_name() {
+    let cell = u64::try_from(core::mem::size_of::<Entry>()).expect("entry size");
+    for (directory, cap, expected) in [
+        (
+            b"tiny".as_slice(),
+            2 * (cell + 1),
+            Outcome::Listed { entries: Box::new([entry(b"a", Kind::File), entry(b"b", Kind::File)]), more: 4 },
+        ),
+        (
+            b"tiny".as_slice(),
+            2 * (cell + 1) - 1,
+            Outcome::Listed { entries: Box::new([entry(b"a", Kind::File)]), more: 5 },
+        ),
+        (b"src".as_slice(), cell + 6, Outcome::Listed { entries: Box::new([]), more: 3 }),
+    ] {
+        let mut fixture = Fixture::new();
+        let authority = fixture.authority(INSPECT);
+        for name in b"abcdef" {
+            let mut path = b"work/temper/tiny/".to_vec();
+            path.push(*name);
+            fixture.checkout.write(&path, b"x");
+        }
+        let mut path = b"work/temper/src/".to_vec();
+        path.extend([b'a'; 200]);
+        fixture.checkout.write(&path, b"long first name");
+        let calm = Settings::calm(702);
+        let settings = Settings { tools: Limits { list_bytes: cap, ..calm.tools }, ..calm };
+        let mut world = World::new(settings, fixture.checkout);
+        let session = world.session(Time::ZERO, authority, vec![Step::Calls(vec![list(directory)])]);
+        world.run(ITERATIONS);
+        assert_eq!(world.answers(session), [&expected]);
+        assert_eq!(world.stats().ops, 1);
+    }
+}
+
+#[test]
+fn an_actual_listing_that_wins_cancel_keeps_its_bounded_prefix_and_omitted_count() {
+    let cell = u64::try_from(core::mem::size_of::<Entry>()).expect("entry size");
+    let calm = Settings::calm(703);
+    let settings = Settings {
+        tools: Limits { list_bytes: cell + 6, ..calm.tools },
+        late_cancels: 1000,
+        io: Span::millis(100, 100),
+        ..calm
+    };
+    let (answers, world) = run(settings, INSPECT, vec![Step::Send(vec![list(b"src")])]);
+    assert_eq!(answers, [Outcome::Listed { entries: Box::new([entry(b"lib.rs", Kind::File)]), more: 1 }]);
+    assert_eq!(world.stats().cancels, 1);
+    assert_eq!(world.stats().late_cancels, 1);
+}
+
+#[test]
 fn a_kit_without_the_inspect_grant_neither_reads_nor_lists() {
     let modify = Grants { inspect: false, modify: true, shell: true };
     let script = vec![Step::Calls(vec![read(b"src/lib.rs"), list(b"src")])];

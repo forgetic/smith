@@ -140,7 +140,8 @@ impl History {
             run::Returned::Busy | run::Returned::Cancelled | run::Returned::TimedOut => {
                 self.answered.is_none() && !self.uncertain
             }
-            run::Returned::HostRejected(_)
+            run::Returned::Waiting
+            | run::Returned::HostRejected(_)
             | run::Returned::Delivered(_)
             | run::Returned::Nothing
             | run::Returned::DeliveryRefused(_)
@@ -193,6 +194,7 @@ impl History {
                         result = Some(returned);
                     }
                     llm::Block::Text { .. }
+                    | llm::Block::Refusal { .. }
                     | llm::Block::Opaque { .. }
                     | llm::Block::ToolCall { .. }
                     | llm::Block::ToolResult { .. } => {}
@@ -200,6 +202,21 @@ impl History {
             }
         }
         match result {
+            Some(llm::Returned::Text { text, error, replay }) => {
+                if self.live.is_some() || replay.is_some() {
+                    return Err("feedback precedes actual terminal or invents replay metadata");
+                }
+                let expected = match &self.answered {
+                    Some(answer) => (answer.text(), answer.error()),
+                    None if self.uncertain => (b"host-unknown".as_slice(), true),
+                    None => (b"busy".as_slice(), true),
+                };
+                if text.as_ref() != expected.0 || *error != expected.1 {
+                    return Err("feedback erased or fabricated exact host evidence");
+                }
+                self.feedback = true;
+                Ok(())
+            }
             Some(llm::Returned::Served { returned, error }) => {
                 let expected_error = match returned {
                     run::Returned::HostAnswered(answer) => answer.error(),
@@ -207,7 +224,8 @@ impl History {
                     | run::Returned::Busy
                     | run::Returned::Cancelled
                     | run::Returned::TimedOut => true,
-                    run::Returned::HostRejected(_)
+                    run::Returned::Waiting
+                    | run::Returned::HostRejected(_)
                     | run::Returned::Delivered(_)
                     | run::Returned::Nothing
                     | run::Returned::DeliveryRefused(_)
@@ -225,9 +243,12 @@ impl History {
                 }
                 self.feedback(returned)
             }
-            Some(llm::Returned::Owned { .. } | llm::Returned::Invalid { .. } | llm::Returned::NotRun) => {
-                Err("host feedback was rewritten")
-            }
+            Some(
+                llm::Returned::Withdrawn
+                | llm::Returned::Owned { .. }
+                | llm::Returned::Invalid { .. }
+                | llm::Returned::NotRun,
+            ) => Err("host feedback was rewritten"),
             None => Err("continuation omitted host feedback"),
         }
     }

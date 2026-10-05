@@ -8,7 +8,7 @@
 use alloc::boxed::Box;
 use core::mem::size_of;
 
-use skein_lib::Token;
+use skein_lib::{Duration, Token};
 
 use crate::boundary::Invalid;
 use crate::budget::Budget;
@@ -22,6 +22,15 @@ pub use crate::host::{HostEffect, HostTool};
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Charter {
+    /// Select supplied concrete history at the root entrance; false starts fresh.
+    /// Contract: domain/run.md, sections 3 and 13.
+    pub resume: bool,
+
+    /// Positive idle interval after a settled main wait and yield, bounded by
+    /// the receiving waiting limit. Wall time continues independently.
+    /// Contract: domain/run.md, sections 6 and 10.
+    pub waiting: Duration,
+
     /// Text for the LLM, rendered by the engine: the work item and its
     /// lineage, the role, the action's guidance.
     ///
@@ -170,6 +179,10 @@ pub struct Tools {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Llm {
+    /// Opaque configured replay dialect; history requires an exact match.
+    /// Contract: domain/run.md, sections 3 and 13.
+    pub dialect: u32,
+
     /// The credential account configured for the endpoint.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -207,8 +220,12 @@ pub struct Endpoint(
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
-    let Charter { brief: _, checkout, grants, outcome, budget, llm, models } = charter;
-    if !budget.is_workable() || !budget.within(&limits.budget) {
+    let Charter { brief: _, checkout, grants, outcome, budget, llm, models, resume: _, waiting } = charter;
+    if !budget.is_workable()
+        || !budget.within(&limits.budget)
+        || *waiting == Duration::ZERO
+        || *waiting > limits.waiting
+    {
         return Err(Invalid::Budget);
     }
     if !fits(llm, limits) || count(models.len()) > limits.models || repeated_model(models) {
@@ -256,7 +273,7 @@ pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
 pub(crate) fn cost(charter: &Charter) -> Option<u64> {
     let mut cost = len(&charter.brief)?.checked_add(len(&charter.llm.model)?)?;
     let llm = u64::try_from(size_of::<Llm>()).ok()?;
-    for Llm { account: _, endpoint: _, model, max_tokens: _ } in &charter.models {
+    for Llm { account: _, endpoint: _, model, max_tokens: _, dialect: _ } in &charter.models {
         cost = cost.checked_add(llm)?.checked_add(len(model)?)?;
     }
     let repository = u64::try_from(size_of::<Repository>()).ok()?;

@@ -28,6 +28,18 @@ pub struct Endpoint(
     pub u32,
 );
 
+/// A complete shared-client replay envelope, preserved opaquely by the domain.
+/// The protocol owns its format and attests its size before delivering a block;
+/// this wrapper and all bytes count against completion and transcript ownership.
+/// Contract: domain/session.md, sections 3 and 12.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Replay {
+    /// Complete bounded tagged envelope, including unknown provider extensions.
+    /// The domain neither parses it nor selects a provider from it.
+    /// Contract: domain/session.md, sections 3 and 12.
+    pub bytes: Box<[u8]>,
+}
+
 /// Who wrote a message.
 ///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
@@ -57,6 +69,16 @@ pub enum Block {
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         bytes: Box<[u8]>,
     },
+    /// Explicit provider refusal, distinct from ordinary text and preserved in place.
+    /// Contract: domain/session.md, sections 3 and 12.
+    Refusal {
+        /// Provider-attested UTF-8 refusal bytes, bounded with enclosing content.
+        /// Contract: domain/session.md, sections 3 and 12.
+        text: Box<[u8]>,
+        /// Complete optional provider replay envelope, preserved opaquely.
+        /// Contract: domain/session.md, sections 3 and 12.
+        replay: Option<Replay>,
+    },
     /// Owned bounded text in its original provider position.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
@@ -65,6 +87,9 @@ pub enum Block {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         text: Box<[u8]>,
+        /// Complete optional provider replay envelope, copied with this block.
+        /// Contract: domain/session.md, sections 3 and 12.
+        replay: Option<Replay>,
     },
     /// The LLM asks for a tool to run. `id` is the provider's name for this
     /// call, which its result echoes; `name` and `input` are what the LLM
@@ -91,6 +116,9 @@ pub enum Block {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         call: Decoded,
+        /// Complete optional provider replay envelope, copied with this block.
+        /// Contract: domain/session.md, sections 3 and 12.
+        replay: Option<Replay>,
     },
     /// What came of the tool call `id`.
     ///
@@ -206,6 +234,9 @@ pub enum Returned {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         error: bool,
+        /// Complete optional provider replay envelope, copied with this block.
+        /// Contract: domain/session.md, sections 3 and 12.
+        replay: Option<Replay>,
     },
     /// A delegated call whose withdrawal won its terminal race.
     ///
@@ -440,12 +471,44 @@ impl Usage {
     }
 }
 
+/// What the actual transport terminal proves about a provider operation.
+/// It is supplied by the shared client, never inferred from failure wording.
+/// Contract: domain/session.md, sections 4, 5 and 12.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Evidence {
+    /// The lower proves no request bytes were sent.
+    /// Contract: domain/session.md, sections 4, 5 and 12.
+    Unsent,
+
+    /// The operation may have reached the peer; no response proves its outcome.
+    /// Contract: domain/session.md, sections 4, 5 and 12.
+    Unknown,
+
+    /// The actual peer response was received, including a refused response.
+    /// Contract: domain/session.md, sections 4, 5 and 12.
+    Response,
+}
+
 /// Why a call produced no message, as the protocol layer classifies the
 /// provider's answer, or the lack of one.
 ///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Failure {
+    /// The shared client's bounded receiving allowance was exceeded.
+    /// This actual terminal is nonretryable; it is distinct from provider rejection.
+    /// Contract: domain/session.md, sections 4, 5 and 12.
+    Limit,
+
+    /// The peer response violated the shared protocol contract, nonretryably.
+    /// Contract: domain/session.md, sections 4, 5 and 12.
+    Protocol,
+
+    /// An unsolicited actual lower cancellation, not acknowledgement of a
+    /// requested Cancel. This failure is nonretryable and keeps transport evidence.
+    /// Contract: domain/session.md, sections 4, 5 and 12.
+    Cancelled,
+
     /// The provider is overloaded (HTTP 529, 503). Transient.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.

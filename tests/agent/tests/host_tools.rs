@@ -34,7 +34,7 @@ fn host_busy_lost_then_replayed_answer_preserves_opaque_input_name_scope_and_exa
         assert!(submission.deadline <= submission.at.saturating_add(Duration::from_millis(300)));
     }
     assert_eq!(first.input.bytes(), br#" {"opaque":{"policy":"outside","numbers":[1,2]},"unchanged":"\u0041"} "#);
-    assert!(world.prompts().iter().flat_map(|query| &query.messages).flat_map(|message| &message.parts).any(|part| matches!(part, smith_fake_llm_domain::api::Part::ToolOutput { output, is_error: false, .. } if output.as_ref() == b"opaque host answer: first decision")), "actual exact host text is continuation feedback");
+    assert!(world.prompts().iter().flat_map(|query| &query.messages).flat_map(|message| &message.parts).any(|part| matches!(part, skein_fake_llm_domain::api::Part::ToolOutput { output, is_error: false, .. } if output.as_ref() == b"opaque host answer: first decision")), "actual exact host text is continuation feedback");
     assert_replays(812, 816, |seed| {
         let world = story(HostSchedule::Replay, seed);
         (world.trace().to_vec(), format!("{:?} {:?}", world.host_submissions(), world.answer()))
@@ -45,7 +45,7 @@ fn host_busy_lost_then_replayed_answer_preserves_opaque_input_name_scope_and_exa
 fn exhausted_lost_then_busy_keeps_unknown_and_continues_to_report() {
     let world = story(HostSchedule::Unknown, 813);
     assert_eq!(world.host_submissions().len(), 3);
-    assert!(world.prompts().iter().flat_map(|query| &query.messages).flat_map(|message| &message.parts).any(|part| matches!(part, smith_fake_llm_domain::api::Part::ToolOutput { output, is_error: true, .. } if output.windows(b"HostUnknown".len()).any(|part| part == b"HostUnknown"))));
+    assert!(world.prompts().iter().flat_map(|query| &query.messages).flat_map(|message| &message.parts).any(|part| matches!(part, skein_fake_llm_domain::api::Part::ToolOutput { output, is_error: true, .. } if output.as_ref() == b"host-unknown")));
 }
 
 #[test]

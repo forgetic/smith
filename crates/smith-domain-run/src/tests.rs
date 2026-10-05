@@ -61,6 +61,9 @@ pub(crate) const LIMITS: Limits = Limits {
     check_timeout: Duration::from_secs(300),
     check_tail: 4096,
     facts: 64,
+    messages: 8,
+    message_bytes: 4096,
+    waiting: skein_lib::Duration::from_secs(300),
 };
 
 /// The domain, its environment, and room for one step's output.
@@ -104,7 +107,7 @@ impl Harness {
     /// Starts a run of `charter` for call `call`: what it emitted.
     fn start(&mut self, call: u64, charter: Charter) -> Box<[Request]> {
         let reply_to = ReplyTo::new(Token::new(call));
-        self.step(Event::Start { reply_to, worker: Token::new(call), charter })
+        self.step(Event::Start { reply_to, worker: Token::new(call), charter, transcript: None })
     }
 
     /// Starts a run of the test charter for call `call`, which is admitted:
@@ -200,8 +203,10 @@ pub(crate) fn charter() -> Charter {
             failure: None,
         },
         budget: BUDGET,
-        llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 1024 },
+        llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 1024, dialect: 1 },
         models: Box::new([]),
+        resume: false,
+        waiting: skein_lib::Duration::from_secs(30),
     }
 }
 
@@ -221,7 +226,7 @@ fn answered(emitted: Box<[Request]>) -> (u64, Answer) {
 }
 
 fn failed(failure: Failure, spent: Spend) -> Answer {
-    Answer::Failed { failure, spent }
+    Answer::Failed { failure, spent, turns: 0 }
 }
 
 #[test]
@@ -254,6 +259,8 @@ fn an_admitted_run_reads_its_checkout_then_opens_main_with_the_whole_budget() {
         budget: BUDGET,
         finish: true,
         families: crate::charter::Families { tools: charter().grants.tools, agents: false },
+        transcript: None,
+        wait: true,
     };
     assert_eq!(opening, &expected);
     assert_eq!(h.domain.next_deadline(), Some(Time::ZERO.saturating_add(BUDGET.time)));
@@ -350,7 +357,7 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
             timeout: Duration::from_secs(5),
         },
     ]);
-    let llm = Llm { account: 0, endpoint: Endpoint(2), model: bytes(b"model-b"), max_tokens: 512 };
+    let llm = Llm { account: 0, endpoint: Endpoint(2), model: bytes(b"model-b"), max_tokens: 512, dialect: 1 };
     let models = Box::new([llm.clone(), Llm { endpoint: Endpoint(3), ..llm }]);
     let cases = [
         (Charter { budget: Budget { turns: 101, ..BUDGET }, ..charter() }, Invalid::Budget),
@@ -700,7 +707,7 @@ fn a_verdict_that_fits_is_accepted_and_the_run_finishes_with_it() {
     let emitted = h.step(finish(conversation, 7, outcome));
     assert_eq!(&*emitted, &[returned(7, Returned::Accepted), Request::Close { peer: Token::new(100) }]);
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: spend(5) });
-    let accepted = Answer::Accepted { outcome: verdict(b"request", Box::new([comment()])), spent: spend(5) };
+    let accepted = Answer::Accepted { outcome: verdict(b"request", Box::new([comment()])), spent: spend(5), turns: 0 };
     assert_eq!(answered(emitted), (1, accepted));
 }
 
@@ -729,7 +736,7 @@ fn a_change_runs_each_repositorys_checks_then_is_pushed_and_accepted() {
     let emitted = h.step(Event::Delivered { owner, push: delivered() });
     assert_eq!(&*emitted, &[returned(7, Returned::Delivered(receipts())), Request::Close { peer: Token::new(100) }]);
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
-    let accepted = Answer::Accepted { outcome: Declared::Change(change()), spent: Spend::ZERO };
+    let accepted = Answer::Accepted { outcome: Declared::Change(change()), spent: Spend::ZERO, turns: 0 };
     assert_eq!(answered(emitted), (1, accepted));
     h.domain.reclaim();
     assert_eq!((h.domain.runs(), h.domain.conversations(), h.domain.calls()), (0, 0, 0));
@@ -870,7 +877,10 @@ fn past_the_budget_a_finish_in_the_turn_in_flight_still_counts() {
     assert_eq!(&*emitted, &[returned(7, Returned::Accepted), Request::Close { peer: Token::new(100) }]);
     let total = spend(BUDGET.input + 1);
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: total });
-    assert_eq!(answered(emitted), (1, Answer::Accepted { outcome: verdict(b"approve", Box::new([])), spent: total }));
+    assert_eq!(
+        answered(emitted),
+        (1, Answer::Accepted { outcome: verdict(b"approve", Box::new([])), spent: total, turns: 0 })
+    );
 
     // A refused one closes main, and the run fails for budget.
     let (_, conversation) = h.running(2, 101);
@@ -982,7 +992,7 @@ fn a_push_that_lands_while_a_cancel_closes_main_wins_over_it() {
         &[returned(7, Returned::Delivered(receipts()))]
     );
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
-    let accepted = Answer::Accepted { outcome: Declared::Change(change()), spent: Spend::ZERO };
+    let accepted = Answer::Accepted { outcome: Declared::Change(change()), spent: Spend::ZERO, turns: 0 };
     assert_eq!(answered(emitted), (1, accepted));
 
     // Or the actual host operation times out while run cancellation settles.
@@ -1025,7 +1035,7 @@ fn a_push_that_lands_after_the_deadline_wins_over_it() {
     );
     assert!(h.step(Event::Withdraw { conversation, call: Token::new(7) }).is_empty(), "returned already");
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
-    let accepted = Answer::Accepted { outcome: Declared::Change(change()), spent: Spend::ZERO };
+    let accepted = Answer::Accepted { outcome: Declared::Change(change()), spent: Spend::ZERO, turns: 0 };
     assert_eq!(answered(emitted), (1, accepted));
 
     // Over the budget, too.
@@ -1045,7 +1055,10 @@ fn a_push_that_lands_after_the_deadline_wins_over_it() {
     );
     let total = spend(BUDGET.input + 1);
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: total });
-    assert_eq!(answered(emitted), (1, Answer::Accepted { outcome: Declared::Change(change()), spent: total }));
+    assert_eq!(
+        answered(emitted),
+        (1, Answer::Accepted { outcome: Declared::Change(change()), spent: total, turns: 0 })
+    );
 }
 
 #[test]
@@ -1077,7 +1090,7 @@ fn a_cancel_while_the_run_winds_down_changes_nothing() {
     drop(h.step(finish(conversation, 7, verdict(b"approve", Box::new([])))));
     assert!(h.step(Event::Cancel { run }).is_empty(), "the ending is decided");
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
-    let accepted = Answer::Accepted { outcome: verdict(b"approve", Box::new([])), spent: Spend::ZERO };
+    let accepted = Answer::Accepted { outcome: verdict(b"approve", Box::new([])), spent: Spend::ZERO, turns: 0 };
     assert_eq!(answered(emitted), (2, accepted));
 }
 
@@ -1120,7 +1133,8 @@ fn families(inspect: bool, modify: bool, agents: bool) -> crate::charter::Famili
 /// The test charter, granting sub-agents and listing one LLM for them.
 fn agents() -> Charter {
     let grants = Grants { agents: true, ..charter().grants };
-    let models = Box::new([Llm { account: 0, endpoint: Endpoint(2), model: bytes(b"model-b"), max_tokens: 512 }]);
+    let models =
+        Box::new([Llm { account: 0, endpoint: Endpoint(2), model: bytes(b"model-b"), max_tokens: 512, dialect: 1 }]);
     Charter { grants, models, ..charter() }
 }
 
@@ -1529,7 +1543,10 @@ fn reports_and_declared_failures_settle_once_without_checks_or_push() {
         assert_eq!(&*emitted, &[returned(7, Returned::Accepted), Request::Close { peer: Token::new(100) }]);
         assert!(h.step(Event::Cancel { run: Token::new(999) }).is_empty());
         let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: spend(5) });
-        assert_eq!(answered(emitted), (1, Answer::Accepted { outcome: text_result(failure, text), spent: spend(5) }));
+        assert_eq!(
+            answered(emitted),
+            (1, Answer::Accepted { outcome: text_result(failure, text), spent: spend(5), turns: 0 })
+        );
         assert!(h.step(Event::Cancel { run }).is_empty(), "a late cancel emits no second answer");
     }
 }
@@ -1674,11 +1691,12 @@ fn mid_report_landing_continues_but_an_interrupted_landing_has_its_own_answer() 
                     name: crate::CallName { completion: 3, position: 2 },
                     receipts: receipts(),
                     stopped: Failure::Cancelled,
-                    spent: Spend::ZERO
+                    spent: Spend::ZERO,
+                    turns: 0
                 }
             );
         } else {
-            assert_eq!(answer, Answer::Accepted { outcome: report(), spent: Spend::ZERO });
+            assert_eq!(answer, Answer::Accepted { outcome: report(), spent: Spend::ZERO, turns: 0 });
         }
         harness.domain.reclaim();
         assert!(
@@ -1708,7 +1726,7 @@ fn malformed_host_mount_or_zero_origin_never_becomes_successful_delivery() {
     );
     drop(harness.step(finish(conversation, 51, report())));
     let answer = answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })).1;
-    assert_eq!(answer, Answer::Accepted { outcome: report(), spent: Spend::ZERO });
+    assert_eq!(answer, Answer::Accepted { outcome: report(), spent: Spend::ZERO, turns: 0 });
 }
 
 fn report() -> Declared {
@@ -1753,6 +1771,7 @@ fn time_and_spend_shutdown_keep_an_already_submitted_mid_landing() {
                 receipts: receipts(),
                 stopped: expected,
                 spent: expected_spend,
+                turns: 0
             }
         );
     }
@@ -1771,7 +1790,7 @@ fn generic_non_marker_host_refusal_is_feedback_and_report_can_finish() {
     );
     drop(harness.step(finish(conversation, 51, report())));
     let answer = answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })).1;
-    assert_eq!(answer, Answer::Accepted { outcome: report(), spent: Spend::ZERO });
+    assert_eq!(answer, Answer::Accepted { outcome: report(), spent: Spend::ZERO, turns: 0 });
 }
 
 #[test]
@@ -1827,9 +1846,9 @@ fn caller_only_stop_keeps_submitted_mid_delivery_and_ordinary_continuation() {
             assert_eq!(
                 answer,
                 if later_cancel {
-                    Answer::Failed { failure: Failure::Cancelled, spent: Spend::ZERO }
+                    Answer::Failed { failure: Failure::Cancelled, spent: Spend::ZERO, turns: 0 }
                 } else {
-                    Answer::Accepted { outcome: report(), spent: Spend::ZERO }
+                    Answer::Accepted { outcome: report(), spent: Spend::ZERO, turns: 0 }
                 }
             );
         }
@@ -2032,4 +2051,138 @@ fn undeclared_host_and_effect_mismatch_are_refused_before_relay() {
         );
     }
     assert_eq!(h.domain.calls(), 0);
+}
+
+#[test]
+fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
+    let mut h = Harness::new(LIMITS);
+    let (run, conversation) = h.running(1, 9);
+    let call = Token::new(20);
+    let made = crate::CallName { completion: 1, position: 0 };
+    assert_eq!(
+        &*h.step(Event::Delegated {
+            conversation,
+            call,
+            name: made,
+            ask: Ask::Wait,
+            deadline: Time::from_nanos(u64::MAX)
+        }),
+        &[Request::Return { call, result: Returned::Waiting }]
+    );
+    assert_eq!(
+        &*h.step(Event::Turn { conversation, record: Token::new(50), sequence: 1 }),
+        &[Request::Turn { worker: Token::new(1), record: Token::new(50), number: 1, read: None, spent: Spend::ZERO }]
+    );
+    assert_eq!(
+        &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }),
+        &[Request::Waiting { worker: Token::new(1), read: None }]
+    );
+    assert_eq!(
+        &*h.step(Event::Message { run, name: Token::new(0), text: bytes(b"person: first") }),
+        &[Request::Say { peer: Token::new(9), text: bytes(b"person: first") }]
+    );
+    for (name, text) in [(99, b"person: second".as_slice()), (7, b"person: third".as_slice())] {
+        assert!(h.step(Event::Message { run, name: Token::new(name), text: bytes(text) }).is_empty());
+    }
+    for (sequence, read, next) in
+        [(2, 0, Some(b"person: second".as_slice())), (3, 99, Some(b"person: third".as_slice())), (4, 7, None)]
+    {
+        assert_eq!(
+            &*h.step(Event::Turn { conversation, record: Token::new(u64::from(sequence)), sequence }),
+            &[Request::Turn {
+                worker: Token::new(1),
+                record: Token::new(u64::from(sequence)),
+                number: sequence,
+                read: Some(Token::new(read)),
+                spent: Spend::ZERO
+            }]
+        );
+        if let Some(text) = next {
+            assert_eq!(
+                &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"done") }),
+                &[Request::Say { peer: Token::new(9), text: bytes(text) }]
+            );
+        }
+    }
+    assert_eq!(
+        &*h.step(Event::Message { run, name: Token::new(7), text: bytes(b"reused") }),
+        &[Request::MessageBounced { run, name: Token::new(7), reason: crate::MessageRefusal::ReusedName }]
+    );
+    let wait = Event::Delegated {
+        conversation,
+        call,
+        name: crate::CallName { completion: 4, position: 0 },
+        ask: Ask::Wait,
+        deadline: Time::from_nanos(u64::MAX),
+    };
+    assert_eq!(&*h.step(wait), &[Request::Return { call, result: Returned::Waiting }]);
+    assert_eq!(
+        &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }),
+        &[Request::Waiting { worker: Token::new(1), read: Some(Token::new(7)) }]
+    );
+    h.after(Duration::from_secs(30));
+    assert_eq!(&*h.fire(), &[Request::Close { peer: Token::new(9) }]);
+    assert_eq!(
+        answered(h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })),
+        (1, Answer::Parked { spent: Spend::ZERO, turns: 4 })
+    );
+    assert_eq!(
+        &*h.step(Event::Message { run, name: Token::new(8), text: bytes(b"late") }),
+        &[Request::MessageBounced { run, name: Token::new(8), reason: crate::MessageRefusal::Inactive }]
+    );
+    h.domain.reclaim();
+    assert_eq!((h.domain.runs(), h.domain.conversations(), h.domain.calls()), (0, 0, 0));
+}
+
+#[test]
+fn bounded_messages_and_input_at_idle_deadline_preserve_existing_fifo() {
+    let limits = Limits { messages: 1, message_bytes: 4, ..LIMITS };
+    let mut h = Harness::new(limits);
+    let (run, conversation) = h.running(1, 9);
+    assert!(h.step(Event::Message { run, name: Token::new(5), text: bytes(b"full") }).is_empty());
+    for (name, text, reason) in [
+        (5, b"x".as_slice(), crate::MessageRefusal::ReusedName),
+        (6, b"x".as_slice(), crate::MessageRefusal::Busy),
+        (6, b"large".as_slice(), crate::MessageRefusal::TooLarge),
+    ] {
+        assert_eq!(
+            &*h.step(Event::Message { run, name: Token::new(name), text: bytes(text) }),
+            &[Request::MessageBounced { run, name: Token::new(name), reason }]
+        );
+    }
+    assert_eq!(
+        &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"done") }),
+        &[Request::Say { peer: Token::new(9), text: bytes(b"full") }]
+    );
+    assert_eq!(
+        &*h.step(Event::Turn { conversation, record: Token::new(40), sequence: 1 }),
+        &[Request::Turn {
+            worker: Token::new(1),
+            record: Token::new(40),
+            number: 1,
+            read: Some(Token::new(5)),
+            spent: Spend::ZERO
+        }]
+    );
+    let _ = h.step(Event::Delegated {
+        conversation,
+        call: Token::new(20),
+        name: crate::CallName { completion: 1, position: 0 },
+        ask: Ask::Wait,
+        deadline: Time::from_nanos(u64::MAX),
+    });
+    assert_eq!(
+        &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }),
+        &[Request::Waiting { worker: Token::new(1), read: Some(Token::new(5)) }]
+    );
+    h.after(Duration::from_secs(30));
+    assert_eq!(
+        &*h.step(Event::Message { run, name: Token::new(0), text: bytes(b"wake") }),
+        &[Request::Say { peer: Token::new(9), text: bytes(b"wake") }]
+    );
+    assert!(!h.domain.is_due(h.env.now), "same-iteration input cancels idle expiry before fire");
+    let _ = h.step(Event::Cancel { run });
+    let _ = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
+    h.domain.reclaim();
+    assert_eq!(h.domain.runs(), 0);
 }

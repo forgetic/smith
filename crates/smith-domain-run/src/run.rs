@@ -18,7 +18,8 @@ use skein_lib::{Deadlines, Duration, Env, Id, Queue, ReplyTo, Slab, Time, Token}
 
 use crate::agent::{self, Child, Means};
 use crate::boundary::{
-    Answer, Ask, AskRefusal, End, Failure, Fault, Invalid, Opening, Policy, Ran, Read, Refusal, Request, Returned, Stop,
+    Answer, Ask, AskRefusal, End, Failure, Fault, Invalid, MessageRefusal, Opening, Policy, Ran, Read, Refusal,
+    Request, Returned, Stop,
 };
 use crate::budget::{Exhausted, Spend};
 use crate::call::{Call, Calls, Withdrawal, Work};
@@ -64,6 +65,21 @@ pub(crate) struct Run {
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     deadline: Time,
     state: State,
+    transcript: Option<Token>,
+    inbox: Queue<Message>,
+    offered: Option<Token>,
+    read: Option<Token>,
+    waiting: bool,
+    turns: u32,
+    sequence: Option<u32>,
+}
+
+/// Retained FIFO payload; parent names remain opaque. Payload moves into Say.
+/// Contract: domain/run.md, sections 6 and 14.
+#[derive(Debug)]
+pub(crate) struct Message {
+    name: Token,
+    text: Box<[u8]>,
 }
 
 #[derive(Debug)]
@@ -81,6 +97,8 @@ enum State {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Working { reply_to: ReplyTo, main: Id<Conversation> },
+    /// Actual settled main yield after wait; wall and idle timers remain distinct.
+    Waiting { reply_to: ReplyTo, main: Id<Conversation>, until: Time },
     /// It has spent past its budget's `exhausted` part, and main keeps the
     /// turn in flight.
     ///
@@ -101,6 +119,7 @@ enum State {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 enum Ending {
+    Parked,
     Delivered { name: CallName, receipts: Delivered, stopped: Failure },
     Accepted(Declared),
     Failed(Failure),
@@ -170,6 +189,8 @@ pub(crate) enum Alarm {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Deadline { run: Id<Run> },
+    /// Idle expiry of an actual waiting main. Contract: domain/run.md, section 6.
+    Park { run: Id<Run> },
     /// The deadline of the call `call` passes.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -188,6 +209,7 @@ pub(crate) fn start(
     reply_to: ReplyTo,
     worker: Token,
     charter: Charter,
+    transcript: Option<Token>,
     out: &mut Queue<Request>,
 ) {
     let Domain { runs, conversations, calls: _, alarms, facts } = domain;
@@ -215,6 +237,13 @@ pub(crate) fn start(
         conversations: 1,
         deadline,
         state: State::Closed,
+        transcript,
+        inbox: Queue::with_capacity(env.limits.messages),
+        offered: None,
+        read: None,
+        waiting: false,
+        turns: 0,
+        sequence: None,
     };
     let id = runs.insert(run).expect("checked for room above");
     facts.about(id.token());
@@ -231,6 +260,130 @@ pub(crate) fn start(
     follow(runs, alarms, id);
 }
 
+/// Admit labelled text before retaining bytes; input is processed before idle alarms.
+/// Contract: domain/run.md, sections 6 and 14.
+pub(crate) fn message(
+    domain: &mut Domain,
+    env: &Env<Limits>,
+    token: Token,
+    name: Token,
+    text: Box<[u8]>,
+    out: &mut Queue<Request>,
+) {
+    let id = Id::<Run>::from_token(token);
+    let reason = match domain.runs.get(id) {
+        Some(run) => message_refusal(run, name, text.len(), &env.limits),
+        None => Some(MessageRefusal::Inactive),
+    };
+    match reason {
+        Some(reason) => {
+            out.push(Request::MessageBounced { run: token, name, reason });
+            return;
+        }
+        None => {}
+    }
+    domain.facts.about(token);
+    let run = domain.runs.get_mut(id).expect("checked live run above");
+    run.inbox.push(Message { name, text });
+    let state = mem::replace(&mut run.state, State::Closed);
+    run.state = match state {
+        State::Waiting { reply_to, main, until: _ } => {
+            let conversation = domain.conversations.get(main).expect("waiting main remains alive");
+            let peer = match conversation.phase {
+                Phase::Running { peer } => peer,
+                Phase::Pending | Phase::Opening | Phase::Unwanted | Phase::Closing | Phase::Closed => {
+                    unreachable!("waiting requires an actual yielded running main")
+                }
+            };
+            let message = run.inbox.pop().expect("admitted one message above");
+            continue_message(run, reply_to, main, peer, message, out)
+        }
+        state @ (State::Preparing { .. } | State::Working { .. } | State::Over { .. }) => state,
+        State::Stopping { .. } | State::Winding { .. } | State::Closed => {
+            unreachable!("inactive runs refuse before retaining text")
+        }
+    };
+    follow(&mut domain.runs, &mut domain.alarms, id);
+}
+
+fn message_refusal(run: &Run, name: Token, bytes: usize, limits: &Limits) -> Option<MessageRefusal> {
+    match run.state {
+        State::Preparing { .. } | State::Working { .. } | State::Waiting { .. } | State::Over { .. } => {}
+        State::Stopping { .. } | State::Winding { .. } | State::Closed => return Some(MessageRefusal::Inactive),
+    }
+    if u64::try_from(bytes).expect("owned length fits") > u64::from(limits.message_bytes) {
+        return Some(MessageRefusal::TooLarge);
+    }
+    if run.offered == Some(name) || run.read == Some(name) {
+        return Some(MessageRefusal::ReusedName);
+    }
+    for message in run.inbox.iter() {
+        if message.name == name {
+            return Some(MessageRefusal::ReusedName);
+        }
+    }
+    if run.inbox.is_full() {
+        return Some(MessageRefusal::Busy);
+    }
+    None
+}
+
+fn continue_message(
+    run: &mut Run,
+    reply_to: ReplyTo,
+    main: Id<Conversation>,
+    peer: Token,
+    message: Message,
+    out: &mut Queue<Request>,
+) -> State {
+    assert!(run.offered.is_none(), "the previous continuation has produced its actual turn");
+    run.offered = Some(message.name);
+    run.waiting = false;
+    say(reply_to, main, peer, message.text, out)
+}
+
+/// Root calls this only for main; child bodies are discarded at its routing seam.
+/// Actual turns may still arrive during shutdown, before the terminal.
+/// Contract: domain/run.md, sections 6, 10 and 13.
+pub(crate) fn turn(domain: &mut Domain, conversation: Token, record: Token, sequence: u32, out: &mut Queue<Request>) {
+    let conversation = domain.conversations.get(Id::from_token(conversation)).expect("turn precedes session end");
+    assert!(conversation.asker.is_none(), "only main enters the host transcript");
+    let run = domain.runs.get_mut(conversation.run).expect("run outlives its actual turns");
+    match run.sequence {
+        Some(previous) => assert!(previous.checked_add(1) == Some(sequence), "exact historical turn prefix"),
+        None => assert!(sequence > 0, "historical sequence is one-based"),
+    }
+    run.sequence = Some(sequence);
+    run.turns = run.turns.checked_add(1).expect("activation count is bounded by historical sequence");
+    match run.offered.take() {
+        Some(name) => run.read = Some(name),
+        None => {}
+    }
+    domain.facts.about(conversation.run.token());
+    out.push(Request::Turn { worker: run.worker, record, number: run.turns, read: run.read, spent: run.spent });
+}
+
+pub(crate) fn park(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request>) {
+    let run = domain.runs.get_mut(id).expect("idle alarm is cancelled before retirement");
+    domain.facts.about(id.token());
+    let state = mem::replace(&mut run.state, State::Closed);
+    run.state = match state {
+        State::Waiting { reply_to, main, until: _ } => {
+            assert!(run.inbox.is_empty(), "an admitted wake cancels idle expiry");
+            wind_down(&mut domain.conversations, reply_to, main, Ending::Parked, out)
+        }
+        State::Preparing { .. }
+        | State::Stopping { .. }
+        | State::Working { .. }
+        | State::Over { .. }
+        | State::Winding { .. }
+        | State::Closed => {
+            unreachable!("idle alarm belongs only to settled Waiting")
+        }
+    };
+    follow(&mut domain.runs, &mut domain.alarms, id);
+}
+
 pub(crate) fn read(domain: &mut Domain, env: &Env<Limits>, owner: Token, read: Read, out: &mut Queue<Request>) {
     let Domain { runs, conversations, calls: _, alarms, facts } = domain;
     let id = Id::<Run>::from_token(owner);
@@ -243,7 +396,7 @@ pub(crate) fn read(domain: &mut Domain, env: &Env<Limits>, owner: Token, read: R
             prepared(run, conversations, id, reply_to, main, step, env, out)
         }
         State::Stopping { reply_to, main, failure } => stop(run, conversations, reply_to, main, failure, out),
-        State::Working { .. } | State::Over { .. } | State::Winding { .. } | State::Closed => {
+        State::Working { .. } | State::Waiting { .. } | State::Over { .. } | State::Winding { .. } | State::Closed => {
             unreachable!("a run reads only while it prepares")
         }
     };
@@ -262,7 +415,7 @@ pub(crate) fn probed(domain: &mut Domain, env: &Env<Limits>, owner: Token, execu
             prepared(run, conversations, id, reply_to, main, step, env, out)
         }
         State::Stopping { reply_to, main, failure } => stop(run, conversations, reply_to, main, failure, out),
-        State::Working { .. } | State::Over { .. } | State::Winding { .. } | State::Closed => {
+        State::Working { .. } | State::Waiting { .. } | State::Over { .. } | State::Winding { .. } | State::Closed => {
             unreachable!("a run probes only while it prepares")
         }
     };
@@ -281,9 +434,9 @@ pub(crate) fn cancel(domain: &mut Domain, run: Token, out: &mut Queue<Request>) 
     let state = mem::replace(&mut run.state, State::Closed);
     run.state = match state {
         State::Preparing { reply_to, main, step: _ } => State::Stopping { reply_to, main, failure: Failure::Cancelled },
-        State::Working { reply_to, main } | State::Over { reply_to, main, exhausted: _ } => {
-            wind_down(conversations, reply_to, main, cancelled, out)
-        }
+        State::Working { reply_to, main }
+        | State::Waiting { reply_to, main, until: _ }
+        | State::Over { reply_to, main, exhausted: _ } => wind_down(conversations, reply_to, main, cancelled, out),
         // How the run ends is decided already.
         State::Stopping { reply_to, main, failure } => State::Stopping { reply_to, main, failure },
         State::Winding { reply_to, ending } => State::Winding { reply_to, ending },
@@ -345,15 +498,27 @@ pub(crate) fn yielded(
     run.state = match state {
         State::Working { reply_to, main } => {
             assert!(main == id, "a conversation with no asker is main");
-            match nudge(run, stop, &env.limits) {
-                Ok(()) => say(reply_to, main, peer, prompt::nudge(stop, run.nudges, env.limits.nudges), out),
-                Err(failure) => wind_down(conversations, reply_to, main, Ending::Failed(failure), out),
+            assert!(conversation.calls == 0, "a main yield follows every actual call terminal");
+            match run.inbox.pop() {
+                Some(message) => continue_message(run, reply_to, main, peer, message, out),
+                None if run.waiting => {
+                    out.push(Request::Waiting { worker: run.worker, read: run.read });
+                    State::Waiting { reply_to, main, until: env.now.saturating_add(run.charter.waiting) }
+                }
+                None => match nudge(run, stop, &env.limits) {
+                    Ok(()) => say(reply_to, main, peer, prompt::nudge(stop, run.nudges, env.limits.nudges), out),
+                    Err(failure) => wind_down(conversations, reply_to, main, Ending::Failed(failure), out),
+                },
             }
         }
         State::Over { reply_to, main, exhausted } => {
             wind_down(conversations, reply_to, main, Ending::Failed(Failure::Budget(exhausted)), out)
         }
-        State::Preparing { .. } | State::Stopping { .. } | State::Winding { .. } | State::Closed => {
+        State::Preparing { .. }
+        | State::Stopping { .. }
+        | State::Waiting { .. }
+        | State::Winding { .. }
+        | State::Closed => {
             unreachable!("main yields only while its run works: it is closed when the run winds down")
         }
     };
@@ -392,7 +557,7 @@ pub(crate) fn used(domain: &mut Domain, conversation: Token, spend: Spend, out: 
         }
         // Spent all the same, and counted in the answer.
         State::Winding { reply_to, ending } => State::Winding { reply_to, ending },
-        State::Preparing { .. } | State::Stopping { .. } | State::Closed => {
+        State::Preparing { .. } | State::Stopping { .. } | State::Waiting { .. } | State::Closed => {
             unreachable!("a run's conversation spends only while the run works or winds down")
         }
     };
@@ -426,6 +591,7 @@ pub(crate) fn delegated(
     let run_id = conversation.run;
     facts.about(run_id.token());
     let asked = match &ask {
+        Ask::Wait => Asked::Wait,
         Ask::Host { .. } => Asked::Host,
         Ask::Deliver { .. } => Asked::Deliver,
         Ask::Finish { .. } => Asked::Finish,
@@ -446,6 +612,16 @@ pub(crate) fn delegated(
             State::Winding { reply_to, ending }
         }
         State::Working { reply_to, main } => match ask {
+            Ask::Wait => {
+                let result = if main == id {
+                    run.waiting = true;
+                    Returned::Waiting
+                } else {
+                    Returned::Refused { refusal: AskRefusal::NotGranted }
+                };
+                out.push(Request::Return { call, result });
+                State::Working { reply_to, main }
+            }
             Ask::Host { tool, effect, input } => {
                 let made = Asking { name, call, deadline };
                 host_call(run, run_id, conversations, calls, alarms, id, made, tool, effect, input, env, out);
@@ -477,12 +653,12 @@ pub(crate) fn delegated(
                 finish(run, run_id, conversations, calls, alarms, reply_to, main, over, made, outcome, env, out)
             }
             // Past the budget, nothing new is opened.
-            Ask::Host { .. } | Ask::Deliver { .. } | Ask::SubAgent { .. } => {
+            Ask::Wait | Ask::Host { .. } | Ask::Deliver { .. } | Ask::SubAgent { .. } => {
                 out.push(Request::Return { call, result: Returned::Refused { refusal: AskRefusal::Over } });
                 State::Over { reply_to, main, exhausted }
             }
         },
-        State::Preparing { .. } | State::Stopping { .. } | State::Closed => {
+        State::Preparing { .. } | State::Stopping { .. } | State::Waiting { .. } | State::Closed => {
             unreachable!("a run's conversation calls only while the run works or winds down")
         }
     };
@@ -584,11 +760,13 @@ pub(crate) fn ended(domain: &mut Domain, conversation: Token, end: End, spend: S
     }
     let state = mem::replace(&mut run.state, State::Closed);
     run.state = match state {
-        State::Working { reply_to, main } | State::Over { reply_to, main, exhausted: _ } => {
+        State::Working { reply_to, main }
+        | State::Waiting { reply_to, main, until: _ }
+        | State::Over { reply_to, main, exhausted: _ } => {
             assert!(main == id, "a conversation with no asker is main");
-            answer(reply_to, ending(end, run.spent), out)
+            answer(reply_to, ending(end, run.spent, run.turns), out)
         }
-        State::Winding { reply_to, ending } => answer(reply_to, finished(ending, run.spent), out),
+        State::Winding { reply_to, ending } => answer(reply_to, finished(ending, run.spent, run.turns), out),
         State::Preparing { .. } | State::Stopping { .. } | State::Closed => {
             unreachable!("a run's conversation ends only once the run has opened it")
         }
@@ -604,7 +782,9 @@ pub(crate) fn deadline(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request
     let state = mem::replace(&mut run.state, State::Closed);
     run.state = match state {
         State::Preparing { reply_to, main, step: _ } => State::Stopping { reply_to, main, failure },
-        State::Working { reply_to, main } => wind_down(conversations, reply_to, main, Ending::Failed(failure), out),
+        State::Working { reply_to, main } | State::Waiting { reply_to, main, until: _ } => {
+            wind_down(conversations, reply_to, main, Ending::Failed(failure), out)
+        }
         // It was past its budget first.
         State::Over { reply_to, main, exhausted } => {
             wind_down(conversations, reply_to, main, Ending::Failed(Failure::Budget(exhausted)), out)
@@ -641,7 +821,9 @@ pub(crate) fn opened(
 fn follow(runs: &mut Slab<Run>, alarms: &mut Deadlines<Alarm>, id: Id<Run>) {
     let run = runs.get(id).expect("a run lives until it is retired");
     let (deadline, closed) = match &run.state {
-        State::Preparing { .. } | State::Working { .. } | State::Over { .. } => (Some(run.deadline), false),
+        State::Preparing { .. } | State::Working { .. } | State::Waiting { .. } | State::Over { .. } => {
+            (Some(run.deadline), false)
+        }
         State::Stopping { .. } | State::Winding { .. } => (None, false),
         State::Closed => (None, true),
     };
@@ -650,6 +832,20 @@ fn follow(runs: &mut Slab<Run>, alarms: &mut Deadlines<Alarm>, id: Id<Run>) {
         alarms.arm(alarm, at).expect("the alarm table has room for an alarm per run and per call");
     } else {
         alarms.cancel(alarm);
+    }
+    let park = Alarm::Park { run: id };
+    match run.state {
+        State::Waiting { until, .. } => {
+            alarms.arm(park, until).expect("one independent idle alarm per run");
+        }
+        State::Preparing { .. }
+        | State::Stopping { .. }
+        | State::Working { .. }
+        | State::Over { .. }
+        | State::Winding { .. }
+        | State::Closed => {
+            alarms.cancel(park);
+        }
     }
     if closed {
         runs.retire(id);
@@ -663,7 +859,11 @@ fn follow(runs: &mut Slab<Run>, alarms: &mut Deadlines<Alarm>, id: Id<Run>) {
 fn may_finish(state: &State) -> bool {
     match state {
         State::Working { .. } | State::Over { .. } => true,
-        State::Preparing { .. } | State::Stopping { .. } | State::Winding { .. } | State::Closed => false,
+        State::Preparing { .. }
+        | State::Stopping { .. }
+        | State::Waiting { .. }
+        | State::Winding { .. }
+        | State::Closed => false,
     }
 }
 
@@ -692,13 +892,13 @@ fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<R
             State::Winding { reply_to, ending } => {
                 let stopped = match ending {
                     Ending::Failed(stopped) => stopped,
-                    Ending::Accepted(_) | Ending::Delivered { .. } => {
+                    Ending::Parked | Ending::Accepted(_) | Ending::Delivered { .. } => {
                         unreachable!("one exclusive mid delivery precedes shutdown")
                     }
                 };
                 State::Winding { reply_to, ending: Ending::Delivered { name, receipts, stopped } }
             }
-            State::Preparing { .. } | State::Stopping { .. } | State::Closed => {
+            State::Preparing { .. } | State::Stopping { .. } | State::Waiting { .. } | State::Closed => {
                 unreachable!("delivery starts after main")
             }
         },
@@ -711,7 +911,7 @@ fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<R
             State::Winding { reply_to, ending: _ } => {
                 State::Winding { reply_to, ending: Ending::Accepted(Declared::Change(change)) }
             }
-            State::Preparing { .. } | State::Stopping { .. } | State::Closed => {
+            State::Preparing { .. } | State::Stopping { .. } | State::Waiting { .. } | State::Closed => {
                 unreachable!("a run lands a change only once it has opened main, and before it answers")
             }
         },
@@ -722,7 +922,7 @@ fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<R
                     wind_down(conversations, reply_to, main, Ending::Failed(Failure::Budget(exhausted)), out)
                 }
                 state @ (State::Working { .. } | State::Winding { .. }) => state,
-                State::Preparing { .. } | State::Stopping { .. } | State::Closed => {
+                State::Preparing { .. } | State::Stopping { .. } | State::Waiting { .. } | State::Closed => {
                     unreachable!("a run lands a change only once it has opened main, and before it answers")
                 }
             }
@@ -732,7 +932,7 @@ fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<R
                 wind_down(conversations, reply_to, main, Ending::Failed(Failure::Stale), out)
             }
             state @ State::Winding { .. } => state,
-            State::Preparing { .. } | State::Stopping { .. } | State::Closed => {
+            State::Preparing { .. } | State::Stopping { .. } | State::Waiting { .. } | State::Closed => {
                 unreachable!("a run lands a change only once it has opened main, and before it answers")
             }
         },
@@ -784,7 +984,7 @@ fn prepared(
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn open(
-    run: &Run,
+    run: &mut Run,
     conversations: &mut Slab<Conversation>,
     reply_to: ReplyTo,
     main: Id<Conversation>,
@@ -799,7 +999,8 @@ fn open(
             unreachable!("main is opened once, when its run has prepared")
         }
     };
-    let opening = opening(&run.charter, &run.found, run.spent, run.deadline.saturating_since(now));
+    let mut opening = opening(&run.charter, &run.found, run.spent, run.deadline.saturating_since(now));
+    opening.transcript = run.transcript.take();
     out.push(Request::Open { conversation: main.token(), opening });
     State::Working { reply_to, main }
 }
@@ -825,7 +1026,7 @@ fn stop(
         }
     }
     conversations.retire(main);
-    answer(reply_to, Answer::Failed { failure, spent: run.spent }, out)
+    answer(reply_to, Answer::Failed { failure, spent: run.spent, turns: run.turns }, out)
 }
 
 /// Working, or over the budget's `over` part: main called `finish` as
@@ -1039,6 +1240,8 @@ fn sub_agent(
     asking.calls = asking.calls.saturating_add(1);
     run.conversations = run.conversations.saturating_add(1);
     let opening = Opening {
+        transcript: None,
+        wait: false,
         host_tools: Box::new([]),
         deliver: false,
         system: prompt::child(&run.charter, &run.found, &wanted.brief, plan.families),
@@ -1170,6 +1373,8 @@ fn answer(reply_to: ReplyTo, answer: Answer, out: &mut Queue<Request>) -> State 
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn opening(charter: &Charter, found: &Found, spent: Spend, left: Duration) -> Opening {
     Opening {
+        transcript: None,
+        wait: true,
         host_tools: charter.grants.host_tools.clone(),
         deliver: charter.grants.deliver.is_some(),
         llm: charter.llm.clone(),
@@ -1187,12 +1392,13 @@ fn opening(charter: &Charter, found: &Found, spent: Spend, left: Duration) -> Op
 /// having spent `spent`.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-fn ending(end: End, spent: Spend) -> Answer {
+fn ending(end: End, spent: Spend, turns: u32) -> Answer {
     match end {
+        End::TranscriptRefused { reason } => Answer::Failed { failure: Failure::Transcript(reason), spent, turns },
         End::Busy => Answer::Refused(Refusal::Busy),
         End::Invalid => Answer::Refused(Refusal::Invalid(Invalid::Conversation)),
-        End::Fault(fault) => Answer::Failed { failure: Failure::Model(fault), spent },
-        End::Budget(exhausted) => Answer::Failed { failure: Failure::Budget(exhausted), spent },
+        End::Fault(fault) => Answer::Failed { failure: Failure::Model(fault), spent, turns },
+        End::Budget(exhausted) => Answer::Failed { failure: Failure::Budget(exhausted), spent, turns },
         End::Closed => unreachable!("a conversation ends closed only once its run has closed it, winding down"),
     }
 }
@@ -1200,11 +1406,12 @@ fn ending(end: End, spent: Spend) -> Answer {
 /// The answer of a run that wound down to `ending`, having spent `spent`.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-fn finished(ending: Ending, spent: Spend) -> Answer {
+fn finished(ending: Ending, spent: Spend, turns: u32) -> Answer {
     match ending {
-        Ending::Delivered { name, receipts, stopped } => Answer::Delivered { name, receipts, stopped, spent },
-        Ending::Accepted(outcome) => Answer::Accepted { outcome, spent },
-        Ending::Failed(failure) => Answer::Failed { failure, spent },
+        Ending::Parked => Answer::Parked { spent, turns },
+        Ending::Delivered { name, receipts, stopped } => Answer::Delivered { name, receipts, stopped, spent, turns },
+        Ending::Accepted(outcome) => Answer::Accepted { outcome, spent, turns },
+        Ending::Failed(failure) => Answer::Failed { failure, spent, turns },
     }
 }
 
@@ -1437,6 +1644,7 @@ fn host_active(state: &State) -> bool {
         State::Working { .. } => true,
         State::Preparing { .. }
         | State::Stopping { .. }
+        | State::Waiting { .. }
         | State::Over { .. }
         | State::Winding { .. }
         | State::Closed => false,

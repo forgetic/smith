@@ -16,13 +16,25 @@
 //! the host. Replay and memory use skein's shared kit, with no local allocator.
 
 mod fixture;
+
 pub mod host_referee;
+
 mod limits;
+
+pub mod messages_referee;
+
 pub mod referee;
+
 pub mod script;
+
 mod translate;
+
+pub mod wire;
+
 mod world;
 
 pub use limits::{BUDGET, LIMITS, TIGHT};
+
 pub use script::{JOBS, Job};
+
 pub use world::{HostReply, HostSchedule, Settings, World, delivered};

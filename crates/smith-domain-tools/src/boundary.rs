@@ -212,7 +212,7 @@ pub enum Op {
         max: u32,
     },
     /// List the directory at `at`, following symbolic links: at most `max`
-    /// entries, the first in name order, without `.` and `..`. Ends in
+    /// entries within `max_bytes`, the first in name order, without `.` and `..`. Ends in
     /// `Scanned`, `Missing`, `NotDirectory` or a common terminal.
     ///
     /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
@@ -225,6 +225,13 @@ pub enum Op {
         ///
         /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
         max: u32,
+
+        /// Maximum owned listing bytes: entry array cells plus every name's bytes.
+        /// The actual terminal obeys this cap even when it wins cancellation.
+        /// An unfit first entry returns an empty prefix; `Scanned.more` counts
+        /// all omitted entries, including those excluded by the byte cap.
+        /// Contract: domain/tools.md, sections 4, 5 and 9; domain/session.md, section 3.
+        max_bytes: u64,
     },
     /// Make the regular file at `at` hold `content`, if it is as `expect`
     /// says. No part of `at` may be a symbolic link (`Linked`): io resolves
