@@ -58,7 +58,7 @@ pub struct GrantName {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Grant {
-    /// Boundary name, compared byte for byte; it carries no authority by itself.
+    /// Host-supplied numeric credential account and generation; no secret credential bytes.
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub name: GrantName,
     /// Remaining monotonic validity of the granted credential.
