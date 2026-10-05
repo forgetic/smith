@@ -258,10 +258,13 @@ fn a_declared_failure_corrects_its_contract_and_is_an_accepted_result() {
     assert_eq!(&*failure.reason, b"The host has not supplied the needed access.");
     assert_eq!(&*failure.fields[0].name, b"cause");
     assert_eq!(&*failure.fields[0].value, b"missing-authority");
-    assert_eq!(count(&world, |fact| matches!(fact, run::facts::Fact::Rejected { .. })), 1);
+    assert_eq!(
+        count(&world, |fact| matches!(fact, run::facts::Fact::Returned { result: run::facts::Return::Rejected, .. })),
+        1
+    );
     assert!(world.pushes().is_empty() && world.checked().is_empty());
     assert_replays(19, 20, |seed| {
         let world = settled(&Settings { job: Job::Failing, ..Settings::calm(seed) });
-        (format!("{:?}", world.answer()), world.trace().to_vec())
+        (world.trace().to_vec(), format!("{:?}", world.answer()))
     });
 }
