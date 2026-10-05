@@ -216,8 +216,9 @@ workspace all-target clippy and formatting also passed. Idle serial workspace
 measurements passed 459 focused tests in 5.001 seconds and ten fuzzy tests in
 6.569 seconds, with no skips; world shares are in [workflow.md](workflow.md).
 
-The parent runs all four gates on the committed source before its fast-forward
-to main and records exact source counts/times afterward. No wire codec,
+The exact committed source `eb46ecc` passed all four workflow gates before its
+fast-forward to main: formatting, workspace all-target clippy, 459 focused tests
+in 1.606 seconds and ten fuzzy tests in 2.593 seconds, with no skips. No wire codec,
 compatibility mode, real IO process runner or local host is claimed by this
 typed-domain extraction. Final agent policy and provider protocol remain their
 own increments; the host neither invents private stops nor durable decisions.

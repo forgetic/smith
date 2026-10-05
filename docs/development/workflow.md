@@ -152,4 +152,6 @@ PASS durations. Four host memory drivers retain maximum starts, full queued
 messages/replies, caller-owned Start coexistence and sealed proof replacement.
 The 240-seed V2 sweep asserts actual ending classes and settlement, preserving
 mapped source behavior and new typed ownership controls. Budgets are unchanged.
-Exact source-commit four-gate results are recorded after validation.
+Source `eb46ecc` passed the exact-tip four gates before merging: 459 focused /
+1.606 seconds and ten fuzzy / 2.593 seconds, without skips; formatting and
+workspace all-target clippy also passed.
