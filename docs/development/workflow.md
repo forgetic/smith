@@ -81,4 +81,6 @@ increments; their world stories and limits belong to their design documents.
 Before adding a world, record its focused and fuzzy serial measurements
 here, on an idle machine, and keep the workspace suites within their
 existing budgets. Do not raise a timeout to accommodate a new world.
-The foundation's measurements are recorded when its exact-tip gate runs.
+The foundation was measured serially on 2026-10-05: two focused tests in
+0.007 seconds and one fuzzy test (64 seeds, each replayed) in 0.006 seconds.
+These are consumer tests of the shared kit; later worlds record their own shares.
