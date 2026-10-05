@@ -115,7 +115,7 @@ pub struct Limits {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub nudges: u32,
-    /// The most bytes of a repository's `AGENTS.md` a run reads and puts in
+    /// The most bytes of a repository's selected guide a run reads and puts in
     /// its system text.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -161,7 +161,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     // A deadline per run, and two per call.
     let alarms =
         Deadlines::<Alarm>::worst_case(limits.runs.checked_mul(2)?.checked_add(limits.calls.checked_mul(2)?)?)?;
-    // Each run holds its charter, up to its byte limit, and what it found in
+    // Each run holds its charter, including both convention path payloads, up
+    // to its byte limit (inline path wrappers are in Slab<Run>), and what it found in
     // its checkout: a guide and a mark for checks per repository.
     let guides = List::<Guide>::worst_case(limits.repositories)?
         .checked_add(u64::from(limits.repositories).checked_mul(u64::from(limits.guide_bytes))?)?;

@@ -2,11 +2,11 @@
 //! (domain/run.md, section 14). The engine never reads a repository, so the
 //! run looks for itself:
 //!
-//! - For each repository, the start of its `AGENTS.md`, which the system text
+//! - For each repository, the start of its selected guide, which the system text
 //!   carries after the brief.
-//! - For each writable repository, when the outcome spec has a change pass
-//!   the checks, whether it has checks: an executable at `.temper/pre-pr`,
-//!   run before a change is pushed. No executable, no checks.
+//! - For each writable repository, when Change or a delivery grant requires
+//!   checks, whether its selected relative check path
+//!   names an executable, run before host delivery. No executable, no checks.
 //!
 //! One operation at a time, in the checkout's order, each with its deadline.
 //! A file that is missing, that is not text, or that io fails to read, is
@@ -19,17 +19,8 @@ use skein_lib::{List, Time, Token};
 
 use crate::boundary::{Place, Read, Request};
 use crate::charter::{Charter, Repository, count};
+use crate::conventions;
 use crate::limits::Limits;
-
-/// Where a repository's guide for LLMs is, beneath its root.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-pub(crate) const GUIDE: &[u8] = b"AGENTS.md";
-
-/// Where a repository's checks are, beneath its root.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-pub(crate) const CHECKS: &[u8] = b".temper/pre-pr";
 
 /// One thing a run looks for: in the repository at `repository` in its
 /// checkout, its guide or its checks.
@@ -63,7 +54,7 @@ pub(crate) struct Found {
     pub(crate) checks: List<u32>,
 }
 
-/// The start of a repository's `AGENTS.md`.
+/// The start of a repository's selected guide.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
@@ -117,10 +108,12 @@ pub(crate) fn request(charter: &Charter, step: Step, owner: Token, now: Time, li
     let deadline = now.saturating_add(limits.io_timeout);
     match step.look {
         Look::Guide => {
-            let at = Place { root, path: copy_of(GUIDE) };
+            let at = Place { root, path: copy_of(conventions::guide(charter)) };
             Request::Read { owner, at, max: limits.guide_bytes, deadline }
         }
-        Look::Checks => Request::Probe { owner, at: Place { root, path: copy_of(CHECKS) }, deadline },
+        Look::Checks => {
+            Request::Probe { owner, at: Place { root, path: copy_of(conventions::checks(charter)) }, deadline }
+        }
     }
 }
 

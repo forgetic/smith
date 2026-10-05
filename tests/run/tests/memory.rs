@@ -73,8 +73,9 @@ fn charter(held: u64) -> Charter {
         (size(size_of::<Repository>()) + 1) + (size(size_of::<HostTool>()) + 14) + 1 + (size(size_of::<Llm>()) + 1);
     let rule = size(size_of::<VerdictRule>()) + 1 + size(size_of::<ItemRule>()) + 1 + size(size_of::<FieldRule>()) + 1;
     let change_rules = 2 * size(size_of::<FieldRule>()) + 5 + 4;
+    let convention_paths = size(b"AGENTS.md".len() + b".temper/pre-pr".len());
     Charter {
-        brief: bytes(held - parts - rule - change_rules),
+        brief: bytes(held - parts - rule - change_rules - convention_paths),
         checkout: Checkout {
             repositories: Box::new([Repository { name: bytes(1), root: Token::new(1), writable: true }]),
         },
@@ -128,6 +129,10 @@ fn charter(held: u64) -> Charter {
         budget: BUDGET,
         llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 },
         models: Box::new([Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 }]),
+        conventions: Some(smith_domain_run::Conventions {
+            guide: b"AGENTS.md".as_slice().into(),
+            checks: b".temper/pre-pr".as_slice().into(),
+        }),
         resume: false,
         waiting: skein_lib::Duration::from_secs(30),
     }
@@ -144,6 +149,47 @@ enum Asked {
     Other,
 }
 
+/// Observe and release a receiving request without retaining or allocating bytes.
+fn observed_request(request: Request, selected: Option<&smith_domain_run::Conventions>) -> Asked {
+    match request {
+        Request::Open { conversation, .. } => Asked::Open { conversation },
+        Request::Read { owner, at, .. } => {
+            if let Some(selected) = selected {
+                assert_eq!(at.path, selected.guide);
+                assert_eq!(at.path.len(), smith_domain_run::Conventions::PATH_CAPACITY);
+            }
+            Asked::Read { owner }
+        }
+        Request::Probe { owner, at, .. } => {
+            if let Some(selected) = selected {
+                assert_eq!(at.path, selected.checks);
+                assert_eq!(at.path.len(), smith_domain_run::Conventions::PATH_CAPACITY);
+            }
+            Asked::Probe { owner }
+        }
+        Request::Check { owner, program, .. } => {
+            if let Some(selected) = selected {
+                assert_eq!(program.path, selected.checks);
+                assert_eq!(program.path.len(), smith_domain_run::Conventions::PATH_CAPACITY);
+            }
+            Asked::Check { owner }
+        }
+        Request::Answer { answer, to: _ } => Asked::Answer { answer },
+        Request::HostCall { .. }
+        | Request::WithdrawHost { .. }
+        | Request::Turn { .. }
+        | Request::Waiting { .. }
+        | Request::MessageBounced { .. }
+        | Request::Admitted { .. }
+        | Request::Say { .. }
+        | Request::Close { .. }
+        | Request::Abort { .. }
+        | Request::Checking { .. }
+        | Request::Deliver { .. }
+        | Request::Return { .. } => Asked::Other,
+    }
+}
+
 /// Fills every run of a domain under `limits` with a charter of exactly its
 /// byte limit and a guide of exactly its limit too, and has each one's main
 /// conversation start, spend, yield, be nudged, ask for a sub-agent that
@@ -155,6 +201,10 @@ enum Asked {
 /// until the reclaim point. The peak of the heap in every step is checked
 /// against the worst case.
 fn fill(limits: Limits) {
+    fill_selected(limits, None);
+}
+
+fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions>) {
     let bound = worst_case(&limits).expect("the test limits fit");
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
     let mut out = Queue::with_capacity(MAX_OUT);
@@ -169,25 +219,7 @@ fn fill(limits: Limits) {
         let measured = meter.end();
         let mut asked = Vec::new();
         while let Some(request) = out.pop() {
-            asked.push(match request {
-                Request::Open { conversation, .. } => Asked::Open { conversation },
-                Request::Read { owner, .. } => Asked::Read { owner },
-                Request::Probe { owner, .. } => Asked::Probe { owner },
-                Request::Check { owner, .. } => Asked::Check { owner },
-                Request::Answer { answer, to: _ } => Asked::Answer { answer },
-                Request::HostCall { .. }
-                | Request::WithdrawHost { .. }
-                | Request::Turn { .. }
-                | Request::Waiting { .. }
-                | Request::MessageBounced { .. }
-                | Request::Admitted { .. }
-                | Request::Say { .. }
-                | Request::Close { .. }
-                | Request::Abort { .. }
-                | Request::Checking { .. }
-                | Request::Deliver { .. }
-                | Request::Return { .. } => Asked::Other,
-            });
+            asked.push(observed_request(request, selected));
         }
         meter.check(measured, bound, &limits);
         asked
@@ -199,7 +231,19 @@ fn fill(limits: Limits) {
         let start = Event::Start {
             reply_to: ReplyTo::new(worker),
             worker,
-            charter: charter(limits.run_bytes),
+            charter: {
+                let mut charter = charter(limits.run_bytes);
+                if let Some(selected) = selected {
+                    let previous = charter.conventions.as_ref().expect("explicit legacy fixture policy");
+                    let previous_paths = size(previous.guide.len() + previous.checks.len());
+                    let selected_paths = size(selected.guide.len() + selected.checks.len());
+                    // The same exact aggregate cap is attained: move byte room
+                    // from the brief into the two maximum owning paths.
+                    charter.brief = bytes(size(charter.brief.len()) + previous_paths - selected_paths);
+                    charter.conventions = Some(selected.clone());
+                }
+                charter
+            },
             transcript: None,
         };
         let [Asked::Other, Asked::Read { owner }] = step(start)[..] else {
@@ -478,7 +522,9 @@ fn full_delivery_charter(limits: Limits) -> Charter {
             writable: true,
         })
         .collect();
-    let parts = u64::from(smith_domain_run::MAX_DIRECTORIES) * (size(size_of::<Repository>()) + 1) + 1;
+    let parts = u64::from(smith_domain_run::MAX_DIRECTORIES) * (size(size_of::<Repository>()) + 1)
+        + 1
+        + size(b"AGENTS.md".len() + b".temper/pre-pr".len());
     Charter {
         brief: bytes(limits.run_bytes - parts),
         checkout: Checkout { repositories },
@@ -498,6 +544,10 @@ fn full_delivery_charter(limits: Limits) -> Charter {
         budget: BUDGET,
         llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 },
         models: Box::new([]),
+        conventions: Some(smith_domain_run::Conventions {
+            guide: b"AGENTS.md".as_slice().into(),
+            checks: b".temper/pre-pr".as_slice().into(),
+        }),
         resume: false,
         waiting: skein_lib::Duration::from_secs(30),
     }
@@ -634,4 +684,14 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
     );
     domain.reclaim();
     assert_eq!((domain.runs(), domain.conversations(), domain.calls()), (0, 0, 0));
+}
+
+#[test]
+fn maximum_selected_read_probe_and_check_paths_attain_the_full_run_ownership_bound() {
+    let capacity = smith_domain_run::Conventions::PATH_CAPACITY;
+    let selected = smith_domain_run::Conventions {
+        guide: vec![b'g'; capacity].into_boxed_slice(),
+        checks: vec![b'c'; capacity].into_boxed_slice(),
+    };
+    fill_selected(Limits { run_bytes: 16_384, ..LIMITS }, Some(&selected));
 }

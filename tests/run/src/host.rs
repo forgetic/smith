@@ -565,6 +565,10 @@ impl Host {
             budget,
             llm: llm(b"fake-1"),
             models: Box::new([llm(b"fake-2"), llm(b"fake-3")]),
+            conventions: Some(smith_domain_run::Conventions {
+                guide: b"AGENTS.md".as_slice().into(),
+                checks: b".temper/pre-pr".as_slice().into(),
+            }),
             resume: false,
             waiting: skein_lib::Duration::from_secs(30),
         }

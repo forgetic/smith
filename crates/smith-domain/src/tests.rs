@@ -350,6 +350,10 @@ fn charter() -> Charter {
         budget: BUDGET,
         llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 512, dialect: 1 },
         models: Box::new([]),
+        conventions: Some(smith_domain_run::Conventions {
+            guide: b"AGENTS.md".as_slice().into(),
+            checks: b".temper/pre-pr".as_slice().into(),
+        }),
         resume: false,
         waiting: Duration::from_secs(30),
     }
@@ -1135,4 +1139,345 @@ fn declared_host_reads_run_together_write_waits_and_mismatched_effect_never_rela
     let [Block::ToolResult { result: Returned::Invalid { problem: Problem::UnknownTool }, .. }] = last(&prompt) else {
         panic!("effect mismatch is rejected before session scheduling");
     };
+}
+
+/// Actual composed root entrance; decoy paths belong to the fake filesystem,
+/// not to Smith's selection. Read-only mounts supply guides but no check probe.
+fn convention_main(harness: &mut Harness, selected: Option<run::Conventions>) -> (Token, Token, Prompt) {
+    let (guide_path, check_path) = match &selected {
+        Some(conventions) => (conventions.guide.as_ref(), conventions.checks.as_ref()),
+        None => (b"AGENTS.md".as_slice(), b".smith/check".as_slice()),
+    };
+    let guide_path = bytes(guide_path);
+    let check_path = bytes(check_path);
+    let charter = Charter {
+        conventions: selected,
+        checkout: Checkout {
+            repositories: Box::new([
+                Repository { name: bytes(b"work"), root: Token::new(900), writable: true },
+                Repository { name: bytes(b"reference"), root: Token::new(901), writable: false },
+            ]),
+        },
+        outcome: OutcomeSpec {
+            change: Some(ChangeSpec { fields: Box::new([]) }),
+            verdicts: Box::new([]),
+            report: None,
+            failure: None,
+        },
+        ..charter()
+    };
+    let emitted = harness.step(Event::Start {
+        reply_to: ReplyTo::new(Token::new(77)),
+        worker: Token::new(77),
+        charter,
+        transcript: None,
+        grants: Box::new([crate::Grant {
+            name: crate::GrantName { account: 0, generation: 1 },
+            valid: Duration::from_secs(3600),
+        }]),
+    });
+    let [Request::Admitted { run, .. }, Request::Read { owner, at, max, deadline }] = emitted.as_ref() else {
+        panic!("actual admitted discovery: {emitted:?}");
+    };
+    let run = *run;
+    assert_eq!(*owner, run);
+    assert_eq!(at.root, Token::new(900));
+    assert_eq!((max, deadline), (&LIMITS.run.guide_bytes, &Time::ZERO.saturating_add(LIMITS.run.io_timeout)));
+    // All three fake paths exist. Only the caller-selected guide is meaningful;
+    // the others return decoy text and would fail the public prompt assertion.
+    let files = [
+        (guide_path.as_ref(), b"Caller-selected writable guide".as_slice()),
+        (b"AGENTS.md".as_slice(), b"DECOY legacy guide".as_slice()),
+        (b"legacy/GUIDE".as_slice(), b"DECOY other guide".as_slice()),
+    ];
+    let mut found = None;
+    for (path, content) in files {
+        if path == at.path.as_ref() {
+            found = Some(content);
+            break;
+        }
+    }
+    let text = found.expect("fake guide path exists");
+    assert_eq!(at.path, guide_path);
+    let emitted = harness.step(Event::Read { owner: run, read: run::Read::Text { text: bytes(text), whole: false } });
+    let [Request::Probe { owner, at, deadline }] = emitted.as_ref() else {
+        panic!("only writable directory has a check probe: {emitted:?}");
+    };
+    assert_eq!(*owner, run);
+    assert_eq!(at.root, Token::new(900));
+    assert_eq!(at.path, check_path);
+    assert_eq!(*deadline, Time::ZERO.saturating_add(LIMITS.run.io_timeout));
+    let emitted = harness.step(Event::Probed { owner: run, executable: true });
+    let [Request::Read { owner, at, .. }] = emitted.as_ref() else {
+        panic!("readonly mount still supplies a guide: {emitted:?}");
+    };
+    assert_eq!(*owner, run);
+    assert_eq!(at.root, Token::new(901));
+    assert_eq!(at.path, guide_path);
+    let (main, prompt) = completing(harness.step(Event::Read {
+        owner: run,
+        read: run::Read::Text { text: bytes(b"Caller-selected readonly guide"), whole: true },
+    }));
+    let system = prompt.system.as_ref();
+    for fragment in [
+        b"Caller-selected writable guide".as_slice(),
+        b"Caller-selected readonly guide",
+        b"The file goes on: read the rest with your tools.",
+        guide_path.as_ref(),
+        check_path.as_ref(),
+    ] {
+        assert!(skein_lib::bytes::find(system, fragment).is_some(), "selected policy is rendered verbatim");
+    }
+    assert!(skein_lib::bytes::find(system, b"DECOY").is_none());
+    if guide_path.as_ref() != b"AGENTS.md" {
+        assert!(skein_lib::bytes::find(system, b"AGENTS.md").is_none());
+    }
+    if check_path.as_ref() != b".temper/pre-pr" {
+        assert!(skein_lib::bytes::find(system, b".temper/pre-pr").is_none());
+    }
+    (run, main, prompt)
+}
+
+#[test]
+fn caller_conventions_select_actual_default_custom_and_explicit_legacy_check_delivery_paths() {
+    for (selected, expected_path) in [
+        (None, b".smith/check".as_slice()),
+        (
+            Some(run::Conventions { guide: bytes(b"docs/WORKFLOW"), checks: bytes(b".ci/check-suite") }),
+            b".ci/check-suite".as_slice(),
+        ),
+        (
+            Some(run::Conventions { guide: bytes(b"AGENTS.md"), checks: bytes(b".temper/pre-pr") }),
+            b".temper/pre-pr".as_slice(),
+        ),
+    ] {
+        let mut harness = Harness::new();
+        let (_, main, _) = convention_main(&mut harness, selected);
+        let change = Change { fields: Box::new([]) };
+        let emitted = harness.answer(
+            main,
+            Box::new([served(b"finish-convention", Ask::Finish { outcome: Declared::Change(change.clone()) })]),
+        );
+        let [Request::Check { owner, program, deadline, tail }, Request::Checking { worker, deadline: said }] =
+            emitted.as_ref()
+        else {
+            panic!("actual exclusive Check precedes host delivery: {emitted:?}");
+        };
+        assert_eq!(program.root, Token::new(900), "readonly mount is never checked");
+        assert_eq!(program.path.as_ref(), expected_path);
+        assert_eq!(*worker, Token::new(77));
+        assert_eq!(deadline, said);
+        assert_eq!(*tail, LIMITS.run.check_tail);
+        assert_eq!(*deadline, Time::ZERO.saturating_add(LIMITS.run.check_timeout));
+        let owner = *owner;
+        let emitted = harness.step(Event::Checked {
+            owner,
+            ran: run::Ran { exit: run::Exit::Code { code: 0 }, output: bytes(b"check passed"), cut: 0 },
+        });
+        let [Request::Deliver { owner: delivered_owner, change: delivered_change, .. }] = emitted.as_ref() else {
+            panic!("only actual successful writable Check admits host delivery: {emitted:?}");
+        };
+        assert_eq!(*delivered_owner, owner);
+        assert_eq!(delivered_change, &change);
+        assert!(harness.step(Event::Delivered { owner, push: delivered() }).is_empty());
+        let emitted = harness.next();
+        let [Request::Answer { answer: run::Answer::Accepted { outcome, .. }, .. }] = emitted.as_ref() else {
+            panic!("one actual accepted terminal after settled Check and delivery: {emitted:?}");
+        };
+        assert_eq!(outcome, &Declared::Change(change));
+        harness.domain.reclaim();
+        assert_eq!((harness.domain.peers(), harness.domain.flights(), harness.domain.tickets()), (0, 0, 0));
+    }
+}
+
+#[test]
+fn custom_check_cancellation_waits_for_the_actual_abort_terminal() {
+    let mut harness = Harness::new();
+    let (run, main, _) = convention_main(
+        &mut harness,
+        Some(run::Conventions { guide: bytes(b"docs/WORKFLOW"), checks: bytes(b".ci/check-suite") }),
+    );
+    let emitted = harness.answer(
+        main,
+        Box::new([served(
+            b"finish-convention",
+            Ask::Finish { outcome: Declared::Change(Change { fields: Box::new([]) }) },
+        )]),
+    );
+    let [Request::Check { owner, .. }, Request::Checking { .. }] = emitted.as_ref() else {
+        panic!("actual custom Check: {emitted:?}");
+    };
+    let owner = *owner;
+    assert!(harness.step(Event::Cancel { run }).is_empty());
+    let emitted = harness.next();
+    let [Request::Abort { owner: aborted }] = emitted.as_ref() else {
+        panic!("one actual check abort request: {emitted:?}");
+    };
+    assert_eq!(*aborted, owner);
+    assert!(harness.next().is_empty(), "cancel requests no settlement or delivery");
+    assert!(harness.step(Event::Aborted { owner }).is_empty());
+    let emitted = harness.next();
+    let [Request::Answer { answer: run::Answer::Failed { failure: run::Failure::Cancelled, .. }, .. }] =
+        emitted.as_ref()
+    else {
+        panic!("only the actual abort terminal permits the original Start cancellation answer: {emitted:?}");
+    };
+    harness.domain.reclaim();
+    assert_eq!((harness.domain.peers(), harness.domain.flights(), harness.domain.tickets()), (0, 0, 0));
+}
+
+#[test]
+fn invalid_conventions_are_refused_at_original_root_start_before_any_effect() {
+    let oversized = Box::new([b'x'; run::Conventions::PATH_CAPACITY + 1]);
+    for path in [
+        b"".as_slice(),
+        b"/abs",
+        b"a//b",
+        b"a/../b",
+        b"a/./b",
+        b"a/",
+        b".",
+        b"..",
+        b"zero\0byte",
+        b"a\\b",
+        b"line\nbreak",
+        oversized.as_ref(),
+    ] {
+        for bad_guide in [true, false] {
+            let mut harness = Harness::new();
+            let conventions = if bad_guide {
+                run::Conventions { guide: bytes(path), checks: bytes(b".ci/check") }
+            } else {
+                run::Conventions { guide: bytes(b"docs/GUIDE"), checks: bytes(path) }
+            };
+            let emitted = harness.step(Event::Start {
+                reply_to: ReplyTo::new(Token::new(77)),
+                worker: Token::new(77),
+                charter: Charter { conventions: Some(conventions), ..charter() },
+                transcript: None,
+                grants: Box::new([]),
+            });
+            let [Request::Answer { answer, .. }] = emitted.as_ref() else {
+                panic!("invalid selection has only its original Start terminal: {emitted:?}");
+            };
+            assert_eq!(answer, &run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Conventions)));
+            assert!(harness.next().is_empty());
+            harness.domain.reclaim();
+            assert_eq!((harness.domain.peers(), harness.domain.flights(), harness.domain.tickets()), (0, 0, 0));
+        }
+    }
+}
+
+/// Settle the positive default-path companion using its actual provider terminal.
+fn settle_default_convention_control(harness: &mut Harness, run: Token, main: Token, receiving: &Limits) {
+    let mut cancelled = List::with_capacity(max_out(receiving));
+    for request in harness.step(Event::Cancel { run }) {
+        cancelled.push(request).unwrap();
+    }
+    for request in harness.next() {
+        cancelled.push(request).unwrap();
+    }
+    let [Request::Cancel { owner }] = cancelled.as_slice() else {
+        panic!("positive default control cancels its actual provider request: {cancelled:?}");
+    };
+    assert_eq!(*owner, main);
+    let mut ended = List::with_capacity(max_out(receiving));
+    for request in harness.step(Event::Cancelled { owner: main }) {
+        ended.push(request).unwrap();
+    }
+    for request in harness.next() {
+        ended.push(request).unwrap();
+    }
+    let [Request::Answer { answer: run::Answer::Failed { failure: run::Failure::Cancelled, .. }, .. }] =
+        ended.as_slice()
+    else {
+        panic!("positive default control settles its original Start: {ended:?}");
+    };
+}
+
+#[test]
+fn maximum_custom_guide_headings_obey_the_actual_session_receiving_limit_after_discovery() {
+    for maximum_paths in [false, true] {
+        let run = run::Limits { run_bytes: 16_384, ..LIMITS.run };
+        let receiving = Limits {
+            run,
+            session: session::Limits {
+                session_bytes: 8192,
+                completion_bytes: 128,
+                completion_blocks: 1,
+                delegated_result_bytes: crate::feedback_worst_case(&run).unwrap(),
+                ..LIMITS.session
+            },
+            ..LIMITS
+        };
+        assert!(worst_case(&receiving).is_some());
+        let mut harness = Harness::with(&receiving);
+        let selected = if maximum_paths {
+            Some(run::Conventions {
+                guide: Box::new([b'g'; run::Conventions::PATH_CAPACITY]),
+                checks: Box::new([b'c'; run::Conventions::PATH_CAPACITY]),
+            })
+        } else {
+            None
+        };
+        let emitted = harness.step(Event::Start {
+            reply_to: ReplyTo::new(Token::new(7)),
+            worker: Token::new(7),
+            charter: Charter {
+                conventions: selected,
+                checkout: Checkout {
+                    repositories: Box::new([
+                        Repository { name: bytes(b"work"), root: Token::new(900), writable: false },
+                        Repository { name: bytes(b"reference"), root: Token::new(901), writable: false },
+                    ]),
+                },
+                ..charter()
+            },
+            transcript: None,
+            grants: Box::new([crate::Grant {
+                name: crate::GrantName { account: 0, generation: 1 },
+                valid: Duration::from_secs(3600),
+            }]),
+        });
+        let [Request::Admitted { run, .. }, Request::Read { .. }] = emitted.as_ref() else {
+            panic!("valid maximum paths admit before actual opening size is known: {emitted:?}");
+        };
+        let run = *run;
+        let emitted = harness.step(Event::Read {
+            owner: run,
+            read: run::Read::Text { text: bytes(b"Small actual guide"), whole: true },
+        });
+        let [Request::Read { .. }] = emitted.as_ref() else {
+            panic!("both admitted guide requests occur before actual opening refusal: {emitted:?}");
+        };
+        let emitted = harness.step(Event::Read {
+            owner: run,
+            read: run::Read::Text { text: bytes(b"Small actual guide"), whole: true },
+        });
+        if maximum_paths {
+            let [
+                Request::Answer {
+                    answer: run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Conversation)), ..
+                },
+            ] = emitted.as_ref()
+            else {
+                panic!(
+                    "repeated maximum guide headings exceed receiving ownership before any provider or tool effect: {emitted:?}"
+                );
+            };
+        } else {
+            let (main, _) = completing(emitted);
+            settle_default_convention_control(&mut harness, run, main, &receiving);
+        }
+        harness.domain.reclaim();
+        assert_eq!(
+            (
+                harness.domain.peers(),
+                harness.domain.flights(),
+                harness.domain.tickets(),
+                harness.domain.session().sessions()
+            ),
+            (0, 0, 0, 0)
+        );
+    }
 }

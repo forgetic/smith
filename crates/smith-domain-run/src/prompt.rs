@@ -1,6 +1,6 @@
 //! What a run tells its LLMs (domain/run.md, section 14): the system text, which is
 //! the brief (the charter's for main, the asker's for a sub-agent), then what
-//! the run found in its checkout (each repository's `AGENTS.md`), then the
+//! the run found in its checkout (each repository's selected guide), then the
 //! sections on the run's own mechanics (its tools, its checkout, its
 //! sub-agents, and how to finish, or for a sub-agent how to answer); and the
 //! nudges. The brief and the guides go in as
@@ -16,8 +16,9 @@ use skein_lib::Writer;
 
 use crate::boundary::Stop;
 use crate::charter::{Charter, Families, Llm, Repository, Tools};
+use crate::conventions;
 use crate::outcome::{FieldRule, OutcomeSpec, TextSpec, VerdictRule};
-use crate::prepare::{self, Found, Guide};
+use crate::prepare::{Found, Guide};
 
 /// The first user message of a main conversation.
 ///
@@ -70,11 +71,11 @@ fn render_system(text: &mut Text, charter: &Charter, found: &Found, brief: &[u8]
     }
     let repositories = &charter.checkout.repositories;
     for guide in &found.guides {
-        render_guide(text, repositories, guide);
+        render_guide(text, repositories, guide, conventions::guide(charter));
     }
     render_tools(text, families.tools);
     text.put(b"\n");
-    render_checkout(text, repositories, found.checks.as_slice());
+    render_checkout(text, repositories, found.checks.as_slice(), conventions::checks(charter));
     text.put(b"\n");
     if families.agents {
         render_agents(text, &charter.models);
@@ -130,9 +131,9 @@ fn end_paragraph(text: &mut Text, came: &[u8]) {
     text.put(b"\n");
 }
 
-fn render_guide(text: &mut Text, repositories: &[Repository], guide: &Guide) {
+fn render_guide(text: &mut Text, repositories: &[Repository], guide: &Guide, guide_path: &[u8]) {
     text.put(b"## ");
-    text.put(prepare::GUIDE);
+    text.put(guide_path);
     text.put(b" in `");
     text.put(&name(repositories, guide.repository).name);
     text.put(b"`\n\n");
@@ -162,7 +163,7 @@ fn render_tools(text: &mut Text, tools: Tools) {
     }
 }
 
-fn render_checkout(text: &mut Text, repositories: &[Repository], checks: &[u32]) {
+fn render_checkout(text: &mut Text, repositories: &[Repository], checks: &[u32], check_path: &[u8]) {
     text.put(b"## Checkout\n\n");
     if repositories.is_empty() {
         text.put(b"There is no checkout.\n");
@@ -174,7 +175,7 @@ fn render_checkout(text: &mut Text, repositories: &[Repository], checks: &[u32])
         text.put(if *writable { b"`, which you may change" } else { b"`, which you may only read" });
         if checks.contains(&index) {
             text.put(b", with checks (`");
-            text.put(prepare::CHECKS);
+            text.put(check_path);
             text.put(b"`)");
         }
         text.put(b"\n");

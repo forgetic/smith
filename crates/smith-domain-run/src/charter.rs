@@ -15,6 +15,8 @@ use crate::budget::Budget;
 use crate::limits::Limits;
 use crate::outcome::{self, OutcomeSpec};
 
+pub use crate::conventions::Conventions;
+
 pub use crate::host::{HostEffect, HostTool};
 
 /// What a run is given when it starts.
@@ -40,6 +42,13 @@ pub struct Charter {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub checkout: Checkout,
+
+    /// Host-supplied relative guide/check paths, admitted before effects. None
+    /// selects AGENTS.md and .smith/check. Both owning paths count in `run_bytes`;
+    /// workspace authority and lower IO root confinement still apply.
+    /// Contract: domain/run.md, sections 3.1, 3.3, 8.1, 12 and 14.
+    pub conventions: Option<Conventions>,
+
     /// Explicit authority supplied by the opener, never inferred from role or text.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -220,7 +229,7 @@ pub struct Endpoint(
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
-    let Charter { brief: _, checkout, grants, outcome, budget, llm, models, resume: _, waiting } = charter;
+    let Charter { brief: _, checkout, grants, outcome, budget, llm, models, resume: _, waiting, conventions } = charter;
     if !budget.is_workable()
         || !budget.within(&limits.budget)
         || *waiting == Duration::ZERO
@@ -235,6 +244,11 @@ pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
         if !fits(model, limits) {
             return Err(Invalid::Llm);
         }
+    }
+    if let Some(conventions) = conventions
+        && !crate::conventions::valid(conventions)
+    {
+        return Err(Invalid::Conventions);
     }
     match cost(charter) {
         Some(bytes) if bytes <= limits.run_bytes => {}
@@ -271,6 +285,10 @@ pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn cost(charter: &Charter) -> Option<u64> {
     let mut cost = len(&charter.brief)?.checked_add(len(&charter.llm.model)?)?;
+    if let Some(conventions) = &charter.conventions {
+        // The two Box wrappers live inline in Charter, priced by Slab<Run>.
+        cost = cost.checked_add(len(&conventions.guide)?)?.checked_add(len(&conventions.checks)?)?;
+    }
     let llm = u64::try_from(size_of::<Llm>()).ok()?;
     for Llm { account: _, endpoint: _, model, max_tokens: _, dialect: _ } in &charter.models {
         cost = cost.checked_add(llm)?.checked_add(len(model)?)?;

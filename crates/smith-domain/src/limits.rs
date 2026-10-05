@@ -114,6 +114,14 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .max(run_limits.outcome_bytes)
         .max(run::Delivered::worst_case())
         .max(run_limits.run_bytes.checked_add(u64::from(run_limits.host_input_bytes))?);
+    // An Open renders each selected guide/check path once per mount. These
+    // owning prompt copies can coexist with the retained Charter and queued
+    // sibling/caller handoffs; inline wrappers remain in their containers.
+    let convention_paths = run_limits
+        .run_bytes
+        .min(u64::try_from(run::Conventions::PATH_CAPACITY).ok()?.checked_mul(2)?)
+        .checked_mul(u64::from(run_limits.repositories))?;
+    let payload = payload.checked_add(convention_paths)?;
     let run_out = Queue::<run::Request>::worst_case(run_out(limits))?
         .checked_add(u64::from(run_out(limits)).checked_mul(payload)?)?;
     // Every copied turn/prompt in the child queue and every separate handoff

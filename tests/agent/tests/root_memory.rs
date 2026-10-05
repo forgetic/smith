@@ -179,9 +179,26 @@ fn charter(restoring: bool) -> run::Charter {
             dialect: 2,
         },
         models: Box::new([]),
+        conventions: None,
         resume: restoring,
         waiting: Duration::from_secs(1),
     }
+}
+
+/// Independent owning boxes of this fixed public caller Start fixture. Charter
+/// and Conventions wrappers are inline in Counted, not heap allocations.
+fn charter_bytes(charter: &run::Charter) -> u64 {
+    assert!(charter.grants.host_tools.is_empty() && charter.models.is_empty());
+    assert!(charter.outcome.verdicts.is_empty());
+    assert!(charter.outcome.change.as_ref().is_none_or(|spec| spec.fields.is_empty()));
+    assert!(charter.outcome.report.as_ref().is_some_and(|spec| spec.fields.is_empty()));
+    sum([
+        len(&charter.brief),
+        len(&charter.llm.model),
+        cells::<run::charter::Repository>(charter.checkout.repositories.len()),
+        sum(charter.checkout.repositories.iter().map(|repository| len(&repository.name))),
+        charter.conventions.as_ref().map_or(0, |conventions| sum([len(&conventions.guide), len(&conventions.checks)])),
+    ])
 }
 
 fn scripts(cycles: u32) -> Box<[Script]> {
@@ -659,6 +676,7 @@ struct Counted {
     out: Queue<Request>,
     queue_bytes: u64,
     configuration_bytes: u64,
+    caller_charter: Option<run::Charter>,
     records: Vec<session::record::Turn>,
     prefix: Option<root::Transcript>,
     saved: Option<root::Transcript>,
@@ -694,6 +712,7 @@ impl Counted {
             out,
             queue_bytes,
             configuration_bytes: 0,
+            caller_charter: None,
             records: Vec::new(),
             prefix: None,
             saved: None,
@@ -750,6 +769,7 @@ impl Counted {
             + self.records.iter().map(turn_bytes).sum::<u64>();
         self.queue_bytes
             + self.configuration_bytes
+            + self.caller_charter.as_ref().map_or(0, charter_bytes)
             + records
             + self.prefix.as_ref().map_or(0, transcript_bytes)
             + self.saved.as_ref().map_or(0, transcript_bytes)
@@ -782,10 +802,21 @@ impl Counted {
                     assert_eq!(worker, WORKER);
                     assert!(self.admitted.replace(run).is_none());
                 }
-                Request::Read { owner, .. } => {
+                Request::Read { owner, at, .. } => {
+                    if let Some(caller) = &self.caller_charter {
+                        let selected = caller.conventions.as_ref().expect("maximum path Start");
+                        assert_eq!(at.path.as_ref(), selected.guide.as_ref());
+                        assert_eq!(at.path.len(), run::Conventions::PATH_CAPACITY);
+                    }
                     assert!(self.read.replace(owner).is_none());
                 }
-                Request::Probe { owner, .. } => {
+                Request::Probe { owner, at, .. } => {
+                    if let Some(caller) = &self.caller_charter {
+                        let selected = caller.conventions.as_ref().expect("maximum path Start");
+                        assert_eq!(at.path.as_ref(), selected.checks.as_ref());
+                        assert_eq!(at.path.len(), run::Conventions::PATH_CAPACITY);
+                        assert_eq!(at.root, Token::new(7), "only the writable mount is probed");
+                    }
                     assert!(self.probe.replace(owner).is_none());
                 }
                 Request::Complete {
@@ -1174,7 +1205,7 @@ fn restore_overlap(counted: &mut Counted, configuration: &Configuration, message
         counted.restored_overlap,
         "full generated histories, both restored Prompt copies and a real Turn copy coexist with native overlap"
     );
-    assert!(counted.waiting, "actual restored Wait/text pair parks after both native terminals");
+    assert!(counted.waiting, "actual restored Wait/text pair reaches Waiting after both native terminals");
     let run = counted.admitted.expect("actual overlapping restore activation");
     counted.waiting = false;
     counted.step(Event::Cancel { run });
@@ -1270,6 +1301,7 @@ fn reclaim_every_owner(mut counted: Counted, tight: &Limits, configuration: Conf
     drop(counted.prefix.take());
     drop(counted.saved.take());
     drop(counted.initial.take());
+    drop(counted.caller_charter.take());
     drop(counted.held_prompt.take());
     drop(counted.prompt_copy.take());
     drop(counted.turn_copy.take());
@@ -1296,4 +1328,103 @@ fn restored_root_arrays_payload_rewrites_and_turn_copies_stay_within_the_attaine
         refuse_one_over(&mut counted, &configuration, cycles, &tight);
         reclaim_every_owner(counted, &tight, configuration);
     }
+}
+
+#[test]
+fn maximum_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapping_clients() {
+    let path_bytes = run::Conventions::PATH_CAPACITY;
+    let mut receiving = bounds(16);
+    receiving.run.run_bytes = 16_384;
+    receiving.run.repositories = 2;
+    receiving.session.tools.repos = 2;
+    // The receiving root must retain every rendered actual run result. Select
+    // the public checked feedback bound exactly, rather than widening the
+    // original history/actual completion caps or bypassing root admission.
+    receiving.session.delegated_result_bytes = root::feedback_worst_case(&receiving.run)
+        .expect("maximum path charter has a finite exact receiving feedback bound")
+        .max(receiving.session.delegated_result_bytes);
+    let mut counted = Counted::new(&receiving);
+    let configuration = counted.configuration();
+    let make_path = |byte| {
+        let mut path = vec![byte; path_bytes];
+        for slash in (63..path_bytes - 1).step_by(64) {
+            path[slash] = b'/';
+        }
+        path.into_boxed_slice()
+    };
+    let caller = run::Charter {
+        conventions: Some(run::Conventions { guide: make_path(b'g'), checks: make_path(b'c') }),
+        checkout: run::charter::Checkout {
+            repositories: Box::new([
+                run::charter::Repository { name: b"work".as_slice().into(), root: Token::new(7), writable: true },
+                run::charter::Repository { name: b"reference".as_slice().into(), root: Token::new(8), writable: false },
+            ]),
+        },
+        outcome: run::outcome::OutcomeSpec {
+            change: Some(run::outcome::ChangeSpec { fields: Box::new([]) }),
+            ..charter(false).outcome
+        },
+        ..charter(false)
+    };
+    let caller_bytes = charter_bytes(&caller);
+    let both_paths = path_bytes.checked_mul(2).expect("two bounded convention paths fit a fixture size");
+    assert!(caller_bytes >= u64::try_from(both_paths).expect("bounded maximum convention payload fits u64"));
+    let selected = caller.conventions.clone();
+    let checkout = caller.checkout.clone();
+    let outcome = caller.outcome.clone();
+    counted.caller_charter = Some(caller);
+    counted.step(Event::Start {
+        reply_to: ReplyTo::new(PARENT),
+        worker: WORKER,
+        charter: run::Charter { conventions: selected, checkout, outcome, ..charter(false) },
+        transcript: None,
+        grants: Box::new([Grant { name: GrantName { account: 0, generation: 1 }, valid: Duration::from_secs(3600) }]),
+    });
+    assert!(counted.admitted.is_some() && counted.read.is_some());
+    assert_eq!(counted.calls, 0, "maximum retained paths and caller Start coexist before any provider effect");
+    let owner = counted.read.take().expect("actual maximum-path discovery");
+    counted.step(Event::Read {
+        owner,
+        read: run::Read::Text { text: b"Maximum host-selected guide".as_slice().into(), whole: true },
+    });
+    let owner = counted.probe.take().expect("actual maximum check-path Probe");
+    counted.step(Event::Probed { owner, executable: true });
+    let owner = counted.read.take().expect("actual maximum guide-path Read for the readonly mount");
+    counted.step(Event::Read {
+        owner,
+        read: run::Read::Text { text: b"Maximum readonly guide".as_slice().into(), whole: true },
+    });
+    let first = counted.complete.as_ref().expect("actual first root Complete");
+    let selected = counted
+        .caller_charter
+        .as_ref()
+        .expect("caller retains its original maximum-path Start")
+        .conventions
+        .as_ref()
+        .expect("caller explicitly selected both maximum convention paths");
+    assert_eq!(selected.guide.len(), path_bytes);
+    assert_eq!(selected.checks.len(), path_bytes);
+    assert_eq!(
+        first.prompt.system.windows(path_bytes).filter(|path| *path == selected.guide.as_ref()).count(),
+        2,
+        "both actual guide headings own the maximum selected path"
+    );
+    assert_eq!(
+        first.prompt.system.windows(path_bytes).filter(|path| *path == selected.checks.as_ref()).count(),
+        1,
+        "the writable mount owns the maximum selected check label"
+    );
+    assert!(counted.probe.is_none(), "the readonly mount adds no second check probe");
+    counted.cycle(&configuration, 1);
+    assert!(
+        counted.waiting && counted.overlaps > 0,
+        "actual Wait/text terminals settle with two real Clients overlapping"
+    );
+    assert!(counted.caller_charter.is_some(), "caller owns both maximum paths throughout actual native handoffs");
+    let run = counted.admitted.expect("maximum-path activation was actually admitted");
+    counted.waiting = false;
+    counted.step(Event::Cancel { run });
+    counted.cycle(&configuration, 1);
+    assert!(matches!(counted.answer, Some(run::Answer::Failed { failure: run::Failure::Cancelled, turns: 2, .. })));
+    reclaim_every_owner(counted, &receiving, configuration);
 }

@@ -74,7 +74,7 @@ What the host gives a run to set it up:
   role's name. A run may have no external tools; main still has `finish` and `wait`.
 - **Result contract:** what counts as done (section 7).
 - **Conventions:** where a workspace directory keeps its guide and its
-  checks (8.1); smith's defaults when absent.
+  checks (8.1); smith's defaults when absent, `AGENTS.md` and `.smith/check`.
 - **Budget:** what the whole run may spend across all its sessions, in
   the host's unit, with each model's prices (section 9); and turns and
   wall time.
@@ -86,6 +86,18 @@ What the host gives a run to set it up:
   the receiving waiting limit; zero is refused before admission.
 - **Resuming:** whether the main session opens from the transcript in
   the start, when there is one.
+
+The typed charter supplies `conventions: Option<Conventions>`. A custom pair
+replaces both default paths unchanged, with no fallback to a legacy path.
+The host attests UTF-8 as for its other charter text. Each path is nonempty,
+relative, at most 4,096 bytes, and has no NUL, ASCII control byte, backslash,
+empty component, `.` or `..` component. Unsafe paths are refused as
+`Invalid::Conventions` before admission or IO. Both owning payloads count
+against the aggregate receiving `run_bytes`; their inline Box wrappers belong
+to the charter's slab storage. Discovery, main and child prompt labels and
+actual check execution use the same immutable selection. A valid charter may
+still discover guides before its rendered opening is refused by the session's
+receiving byte limit; conventions do not change that opening contract.
 
 ### 3.2 The start
 
@@ -669,8 +681,10 @@ name.
 The first 05s4 RESULTS and DELIVERY increments implement generic final forms,
 separately granted main delivery, all discovered writable checks, sealed actual
 host terminals and stable transcript-derived naming. The copied token-split
-budget, fixed `.temper/pre-pr` discovery convention and charter remain
-until subsequent increments. The HOST TOOLS increment replaces closed forge
+budget and charter workspace/unstructured brief remain until subsequent
+increments. The CONVENTIONS increment replaces fixed discovery/check paths
+with the bounded host-supplied pair described in section 3.1; Temper-style
+callers explicitly select `.temper/pre-pr`. The HOST TOOLS increment replaces closed forge
 and outlet grants with bounded declarations and opaque durable relays, settled
 recovery and exact first-record answers. The MESSAGES increment implements
 named FIFO input, settled main-only wait/wake/park, concrete root V2 Turns,
@@ -678,11 +692,12 @@ activation counts and exact selected-history/post-transcript restoration. It
 also repairs session receiving ownership before provider and tool effects
 (domain/session.md, section 3.1), preserving maximum actual late terminals.
 Provider-neutral canonical feedback lives in the root; shared Client/peer and
-replay codecs belong to Skein. Optional workspace/conventions, conflict files
+replay codecs belong to Skein. Optional workspace, titled brief, conflict files
 in Start, scalar run pricing, live channel/transcript codecs and the executable
 remain later increments. Source and validation status are recorded in
-`docs/development/migration-05s4-messages.md`; a source draft alone is not a gate
-claim.
+`docs/development/migration-05s4-messages.md` and
+`docs/development/migration-05s4-conventions.md`; a source draft alone is not a
+gate claim.
 
 ## 15. Open questions
 

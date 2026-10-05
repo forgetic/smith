@@ -131,6 +131,10 @@ fn charter(brief: u64) -> Charter {
         budget: run::Budget { turns: 12, ..TIGHT.run.budget },
         llm: Llm { account: 0, endpoint: Endpoint(0), model: (*b"m").into(), max_tokens: 256, dialect: 1 },
         models: Box::new([]),
+        conventions: Some(smith_domain::run::Conventions {
+            guide: b"AGENTS.md".as_slice().into(),
+            checks: b".temper/pre-pr".as_slice().into(),
+        }),
         resume: false,
         waiting: skein_lib::Duration::from_secs(30),
     }

@@ -175,21 +175,7 @@ impl Marker {
         if directory >= MAX_DIRECTORIES || path.is_empty() || path.len() > Self::CAPACITY {
             return None;
         }
-        let mut start = 0;
-        for (position, byte) in path.iter().enumerate() {
-            if *byte == 0 {
-                return None;
-            }
-            if *byte == b'/' {
-                let part = path.get(start..position).expect("ordered path positions");
-                if part.is_empty() || part == b".." || part == b"." {
-                    return None;
-                }
-                start = position.checked_add(1).expect("position within the bounded path");
-            }
-        }
-        let part = path.get(start..).expect("position within path");
-        if part.is_empty() || part == b".." || part == b"." {
+        if !relative_path(&path) {
             return None;
         }
         Some(Self { directory, path })
@@ -456,6 +442,32 @@ impl Delivery {
             Self::Stale => DeliveryStatus::Stale,
         }
     }
+}
+
+/// Shared relative-path spelling check; confinement belongs to lower IO.
+/// Contract: domain/run.md, sections 8.1, 8.2 and 12.
+pub(crate) fn relative_path(path: &[u8]) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    let mut start = 0;
+    for (position, byte) in path.iter().enumerate() {
+        if *byte == 0 {
+            return false;
+        }
+        if *byte == b'/' {
+            let part = path.get(start..position).expect("ordered path positions");
+            if part.is_empty() || part == b".." || part == b"." {
+                return false;
+            }
+            start = position.checked_add(1).expect("position within the bounded path");
+        }
+    }
+    let part = path.get(start..).expect("position within path");
+    if part.is_empty() || part == b".." || part == b"." {
+        return false;
+    }
+    true
 }
 
 #[cfg(test)]

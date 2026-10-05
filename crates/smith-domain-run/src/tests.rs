@@ -205,6 +205,10 @@ pub(crate) fn charter() -> Charter {
         budget: BUDGET,
         llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 1024, dialect: 1 },
         models: Box::new([]),
+        conventions: Some(crate::Conventions {
+            guide: b"AGENTS.md".as_slice().into(),
+            checks: b".temper/pre-pr".as_slice().into(),
+        }),
         resume: false,
         waiting: Duration::from_secs(30),
     }
@@ -2194,4 +2198,50 @@ fn bounded_messages_and_input_at_idle_deadline_preserve_existing_fifo() {
     );
     h.domain.reclaim();
     assert_eq!(h.domain.runs(), 0);
+}
+
+#[test]
+fn convention_path_payloads_fill_the_exact_charter_cap_and_cancel_discovery_settles() {
+    let mut selected = charter();
+    selected.conventions = Some(crate::Conventions {
+        guide: Box::new([b'g'; crate::Conventions::PATH_CAPACITY]),
+        checks: Box::new([b'c'; crate::Conventions::PATH_CAPACITY]),
+    });
+    let exact = crate::charter::cost(&selected).expect("bounded maximum paths");
+    let baseline = crate::charter::cost(&Charter { conventions: None, ..charter() }).unwrap();
+    // The legacy fixture contributes explicit path payloads; remove them from
+    // this independent cap comparison rather than reducing any fixture maximum.
+    assert_eq!(exact, baseline + u64::try_from(crate::Conventions::PATH_CAPACITY * 2).unwrap());
+    let mut harness = Harness::new(Limits { run_bytes: exact, ..LIMITS });
+    let emitted = harness.start(77, selected);
+    let [Request::Admitted { run, .. }, Request::Read { owner, at, .. }] = emitted.as_ref() else {
+        panic!("exact aggregate convention storage is admitted: {emitted:?}");
+    };
+    assert_eq!(at.path.len(), crate::Conventions::PATH_CAPACITY);
+    assert_eq!(*owner, *run);
+    let run = *run;
+    assert!(harness.step(Event::Cancel { run }).is_empty(), "cancel cannot manufacture the outstanding Read terminal");
+    assert_eq!(
+        answered(harness.step(Event::Read { owner: run, read: Read::Missing })),
+        (77, failed(Failure::Cancelled, Spend::ZERO))
+    );
+    harness.domain.reclaim();
+    assert_eq!((harness.domain.runs(), harness.domain.conversations(), harness.domain.calls()), (0, 0, 0));
+
+    let oversized = Charter {
+        conventions: Some(crate::Conventions {
+            guide: Box::new([b'g'; crate::Conventions::PATH_CAPACITY]),
+            checks: Box::new([b'c'; crate::Conventions::PATH_CAPACITY]),
+        }),
+        brief: {
+            let brief = charter().brief;
+            let mut writer = skein_lib::Writer::new(brief.len().checked_add(1).unwrap());
+            writer.put(&brief).expect("room for the original brief");
+            writer.put(b"x").expect("one exact extra byte");
+            writer.finish()
+        },
+        ..charter()
+    };
+    assert_eq!(answered(harness.start(78, oversized)), (78, Answer::Refused(Refusal::Invalid(Invalid::TooLarge))));
+    assert_eq!((harness.domain.runs(), harness.domain.conversations(), harness.domain.calls()), (0, 0, 0));
 }

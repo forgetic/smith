@@ -9,10 +9,10 @@
 use crate::boundary::{Exit, Place, Ran, Request, Returned};
 use crate::call::{self, Call, Withdrawal};
 use crate::charter::Repository;
+use crate::conventions;
 use crate::delivery::{CallName, Delivered, Delivery, DeliveryFailure, DeliveryReason};
 use crate::limits::Limits;
 use crate::outcome::Change;
-use crate::prepare;
 use crate::run::Run;
 use core::mem;
 use skein_lib::bytes::copy_of;
@@ -183,7 +183,7 @@ fn next(landing: &Landing, id: Id<Call>, run: &Run, check: u32, env: &Env<Limits
     };
     let root = repository_at(run, index).root;
     let deadline = landing.deadline.min(env.now.saturating_add(env.limits.check_timeout));
-    let program = Place { root, path: copy_of(prepare::CHECKS) };
+    let program = Place { root, path: copy_of(conventions::checks(&run.charter)) };
     out.push(Request::Check { owner: id.token(), program, deadline, tail: env.limits.check_tail });
     out.push(Request::Checking { worker: run.worker, deadline });
     Stage::Checking { check }

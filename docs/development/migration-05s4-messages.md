@@ -3,8 +3,10 @@
 This is the implementation ledger for the approved messages increment. Source
 is in progress; the early compiler checkpoint is
 `49d15601c4346251eb3c514a4ba68058b9da6f83`, rebased onto Smith `45a2eea`.
-The original author base was `51fdd24`. The current temporary increment follows
-reviewed checkpoint `5b4bc94` and adds overlapping physical component ownership.
+The original author base was `51fdd24`. The reviewed temporary checkpoint `f9c9981` follows
+`5b4bc94` and adds overlapping physical component ownership. The subsequent
+[Conventions increment](migration-05s4-conventions.md) has its own source and
+validation ledger; the measurements below belong to this messages checkpoint.
 Independent source review covers actual Start/discovery, concrete root records,
 new Client continuation, parking and physical cleanup in both configured dialects.
 Root-entry/caller-copy memory, native restoration and overlapping physical
@@ -124,8 +126,9 @@ cannot consume an outstanding call/delivery or ACK right.
 
 Current Charter has no prices to ignore. Root opens V2 with zero prices and
 unit one; scalar record spend is zero, while copied typed token/turn/wall budgets
-and child spend remain enforced. Scalar run pricing, optional workspace and
-conventions, live channel/transcript codecs and executable are later increments.
+and child spend remain enforced. Scalar run pricing, optional workspace, live channel/transcript codecs and
+executable remain later increments. Conventions are implemented by the
+subsequent increment linked above.
 The live composition's full Debug record is a test encoding, not a production
 codec claim. The opt-in actual Client binding retains each physical owner through
 Reusable, explicit Close and actual Closed, even when a root callback is reused.

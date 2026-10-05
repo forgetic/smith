@@ -898,7 +898,7 @@ impl World {
             }
             Request::Check { owner, program, deadline, tail } => {
                 self.observe(Seen::Checking { owner, tree: self.code() });
-                assert_eq!(&*program.path, fixture::CHECKS, "the copied run checks its baseline convention");
+                assert_eq!(&*program.path, fixture::CHECKS, "the host explicitly selected its Temper fixture checks");
                 let (passed, output) = fixture::check(&self.disk, program.root.raw());
                 self.flights
                     .open((Family::Check, owner), Flight { key: None, cancelled: false, completion_message: None });
@@ -1533,6 +1533,10 @@ fn charter(settings: &Settings, root: u64) -> run::Charter {
         budget: settings.budget,
         models: Box::new([Llm { model: b"fake-2".as_slice().into(), ..llm.clone() }]),
         llm,
+        conventions: Some(smith_domain::run::Conventions {
+            guide: b"AGENTS.md".as_slice().into(),
+            checks: b".temper/pre-pr".as_slice().into(),
+        }),
         resume: settings.resume,
         waiting: settings.waiting,
     }
