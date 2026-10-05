@@ -122,10 +122,9 @@ pub struct Script {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub max_tokens: u32,
-    /// The chances, per mille, that a charter's first repository is writable,
-    /// that its outcome may be a change, that a change must pass its checks,
-    /// and that its outcome may be a verdict. One that may be neither may be
-    /// a change.
+    /// Chance per mille that a charter's first repository is writable.
+    /// Result permissions are drawn separately; when none is selected,
+    /// the fixture permits a change.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub writable: u32,
@@ -137,7 +136,7 @@ pub struct Script {
     ///
     /// Scripted-world contract: domain/run.md, sections 7.1 and 13; testing-strategy.md, section 2.2.
     pub reports: u32,
-    /// Chance per mille of a declared failure after report selection; zero preserves earlier random draws.
+    /// Independent chance per mille of permitting declared failure; zero preserves earlier random draws.
     ///
     /// Scripted-world contract: domain/run.md, sections 7.1 and 13; testing-strategy.md, section 2.2.
     pub failures: u32,
@@ -496,11 +495,11 @@ impl Host {
     /// - Reading is always granted; writing, the shell, forge reads and a
     ///   "comment" outlet each at random; sub-agents with the configured
     ///   chance, with two more models listed for them.
-    /// - The outcome is a change, the verdicts "approve" (no children) and
-    ///   "request-changes" (one to eight children, each "blocking" or a
-    ///   "nit", with a "path" and a "body"), or either, with the configured
-    ///   chances; so is whether a change must pass its checks. The partner's
-    ///   outcomes that fit are made for these.
+    /// - Result permissions include change, the closed verdicts "approve"
+    ///   and "request-changes", report and declared failure, at the configured
+    ///   chances. Change requires title/body fields; review items require
+    ///   path/body; report requires source and failure requires cause. These
+    ///   names and meanings are owned by this host fixture.
     /// - The budget's turns, tokens and time are drawn from their ranges.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.

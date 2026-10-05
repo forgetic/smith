@@ -11,8 +11,8 @@
 //!   (`Ended` with a fault), call `finish` (`Delegated`, then wait for its
 //!   `Return`), ask for sub-agents (the same, for each), yield (`Yielded`,
 //!   then wait for `Say` or `Close`), or carry on. A finish declares an
-//!   outcome that fits the host's charters or one that breaks them, a change
-//!   or a verdict. An ask may want more than the asker has, or an LLM
+//!   outcome that fits the host's charters or one that breaks them, a change,
+//!   verdict, report or declared failure. An ask may want more than the asker has, or an LLM
 //!   the charter does not list, and may ask for a small share. A sub-agent
 //!   may not finish: where main would, it yields its answer.
 //! - A write runs alone, as a session runs it: a finish, or an ask for a
@@ -677,7 +677,7 @@ impl Partner {
         talk.phase = Phase::Calling { pending, over };
     }
 
-    /// An outcome to declare: a change or a verdict, one that fits the host's
+    /// An outcome to declare, from any of four forms, that fits the host's
     /// charters or one that does not.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.

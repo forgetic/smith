@@ -79,7 +79,7 @@ const LIMITS: Limits = Limits {
 };
 
 /// A charter of `brief` bytes of brief that grants everything, and wants a
-/// change that passes its checks or a verdict.
+/// change that passes its checks, a verdict, report or declared failure.
 fn charter(brief: u64) -> Charter {
     let repository = Repository { name: (*b"temper").into(), root: Token::new(1), writable: true };
     let all = Tools { inspect: true, modify: true, shell: true };

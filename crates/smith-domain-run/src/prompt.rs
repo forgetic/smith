@@ -330,14 +330,13 @@ impl Text {
 
 #[cfg(test)]
 mod tests {
-    use super::{child, nudge, system};
+    use super::{Text, child, nudge, system};
     use crate::boundary::Stop;
-    use crate::charter::{Charter, Checkout, Families, Grants, Repository, Tools};
+    use crate::charter::{Charter, Checkout, Families, Grants, Tools};
     use crate::outcome::{ChangeSpec, FieldRule, ItemRule, ItemSpec, OutcomeSpec, TextSpec, VerdictRule};
     use crate::prepare::{Found, Guide};
     use crate::tests::{bytes, charter};
     use alloc::boxed::Box;
-    use skein_lib::Token;
 
     #[expect(clippy::disallowed_methods, reason = "a test reads the exact fixture text it checks")]
     fn text(bytes: &[u8]) -> &str {

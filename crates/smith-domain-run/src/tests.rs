@@ -383,7 +383,7 @@ fn repository(name: &[u8]) -> Repository {
 }
 
 fn spec(verdicts: Box<[VerdictRule]>) -> OutcomeSpec {
-    OutcomeSpec { change: None, verdicts: verdicts, report: None, failure: None }
+    OutcomeSpec { change: None, verdicts, report: None, failure: None }
 }
 
 #[test]
@@ -558,8 +558,8 @@ fn comment() -> Item {
 fn change() -> Change {
     Change {
         fields: Box::new([
-            crate::outcome::Field { name: b"title".as_slice().into(), value: bytes(b"Fix the parser") },
-            crate::outcome::Field { name: b"body".as_slice().into(), value: bytes(b"It accepts tabs now.") },
+            Field { name: b"title".as_slice().into(), value: bytes(b"Fix the parser") },
+            Field { name: b"body".as_slice().into(), value: bytes(b"It accepts tabs now.") },
         ]),
     }
 }
@@ -1468,7 +1468,7 @@ fn impossible_result_contracts_refuse_before_any_preparation_or_session() {
     let mut h = Harness::new(LIMITS);
     assert_eq!(answered(h.start(1, c)), (1, Answer::Refused(Refusal::Invalid(Invalid::Outcome))));
     assert_eq!((h.domain.runs(), h.domain.conversations()), (0, 0));
-    let min = u64::try_from(core::mem::size_of::<Field>()).unwrap() + 6 + 1;
+    let min = u64::try_from(size_of::<Field>()).unwrap() + 6 + 1;
     let mut h = Harness::new(Limits { outcome_bytes: min - 1, ..LIMITS });
     assert_eq!(answered(h.start(2, text_charter(false))), (2, Answer::Refused(Refusal::Invalid(Invalid::Outcome))));
     assert_eq!((h.domain.runs(), h.domain.conversations()), (0, 0));
