@@ -1,5 +1,6 @@
 //! Typed provider request documents and bounded encoders. No network, credentials or session state is kept here.
 //! `encode_request` validates before allocating; `decode_request` admits one complete bounded document or returns a typed error.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4, 4.5 and 6.3.
 
 use crate::{DecodeError, Json, Limits, identity, json};

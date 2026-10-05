@@ -22,6 +22,7 @@
 //! [`payload`]); and the asks a completion makes are held only while what
 //! they hold, counted the same way, fits the limit too. A call beyond that is
 //! handed to the session as too large, and answered so to the LLM.
+//!
 //! Contract: domain/run.md, section 14; programming-model.md, sections 4.4 and 6.3.
 
 use core::mem::size_of;

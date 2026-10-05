@@ -9,6 +9,7 @@
 //! a prompt offers, decodes the JSON the LLM writes as a tool's input into a
 //! typed call, or into the [`Problem`] that keeps it from being one, and
 //! renders what comes of a call as the text the LLM reads.
+//!
 //! Contract: domain/run.md, section 14; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

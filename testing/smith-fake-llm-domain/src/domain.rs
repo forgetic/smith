@@ -1,4 +1,5 @@
 //! The fake provider's state and its entry points.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

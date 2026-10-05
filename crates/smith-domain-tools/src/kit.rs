@@ -23,6 +23,7 @@
 //!
 //! A call or a close to a kit that is not open is the session's bug. A kit is
 //! retired once it is Closed.
+//!
 //! Contract: domain/tools.md, section 9; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

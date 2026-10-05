@@ -1,6 +1,8 @@
 //! A bounded rotating OAuth issuer over the real HTTP server. Fault controls
 //! belong to the byte world, independently of the refresh client's decoder.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
+
 use alloc::boxed::Box;
 use core::mem::size_of;
 use skein_http::{Header, Method, server as http};

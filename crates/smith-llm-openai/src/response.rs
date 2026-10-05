@@ -1,5 +1,6 @@
 //! Bounded provider stream state and event codecs. The decoder keeps only ordered blocks, usage and terminal progress.
 //! event accepts injected decoded events; end settles truncation or failure once. The caller reserves `MAX_OUT` output slots.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4, 4.5 and 6.3.
 
 use crate::{

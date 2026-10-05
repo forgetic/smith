@@ -1,6 +1,8 @@
 //! A real HTTP/SSE fake provider service. HTTP documents enter the neutral
 //! fake domain; its answers leave through the dialect server and SSE writer.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
+
 use crate::{documents, oauth};
 use alloc::boxed::Box;
 use core::mem::size_of;

@@ -1,5 +1,7 @@
 //! A bounded owned JSON value, using skein's tokenizer and measured writer.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
+
 use crate::{DecodeError, Limits};
 use alloc::boxed::Box;
 use skein_json::{Token, tokenizer, writer};

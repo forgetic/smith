@@ -2,6 +2,7 @@
 //! there, once or more, is policy, so it is decided here, over the file io
 //! loaded, with lib's linear byte search; the new file is spliced together at
 //! its final length.
+//!
 //! Contract: domain/tools.md, section 9; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

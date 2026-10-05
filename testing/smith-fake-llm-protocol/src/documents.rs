@@ -1,6 +1,8 @@
 //! Both provider document sides translated to the fake's neutral vocabulary.
 //! This adapter has no agent dependency and decodes the actual request grammar.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
+
 use alloc::boxed::Box;
 use skein_http::sse::writer::Outgoing;
 use skein_json::Token;

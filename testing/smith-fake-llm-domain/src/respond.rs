@@ -23,6 +23,7 @@
 //! - The prompt takes a token for every four bytes of text. All of it but the
 //!   last message is read from the cache, written by the call before; the
 //!   last message is read afresh, and cached for the next call.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

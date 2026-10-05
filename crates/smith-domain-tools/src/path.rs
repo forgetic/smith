@@ -10,6 +10,7 @@
 //!
 //! `..` is resolved by the names, not by the files: `a/link/..` is `a`
 //! wherever `link` points, and `..` at the root stays at the root.
+//!
 //! Contract: domain/tools.md, section 9; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

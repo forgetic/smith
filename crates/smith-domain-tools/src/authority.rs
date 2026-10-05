@@ -2,6 +2,7 @@
 //! may be written, and the families of tools granted. The run decides it from
 //! its charter, and it is copied into the session, and from there into its
 //! kit, when the session opens.
+//!
 //! Contract: domain/tools.md, section 9; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

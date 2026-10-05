@@ -1,5 +1,6 @@
 //! The provider's API, as its domain layer sees it once the protocol layer has
 //! parsed a request.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

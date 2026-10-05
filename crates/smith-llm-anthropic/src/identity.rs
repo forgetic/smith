@@ -3,7 +3,9 @@
 //! were successful. They are historical compatibility evidence, not a fresh
 //! capture of Claude Code. A billing line and metadata must be supplied from
 //! the deployment's verified identity rather than invented here.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
+
 /// Named subject archive from which these fixed provider identity bytes were copied.
 pub const PROVENANCE: &[u8] = b"tongs subject capture 2026-06-13 f4e0a2b";
 

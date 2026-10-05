@@ -5,6 +5,7 @@
 //!
 //! It is bounded: past `Limits::known_files`, the file read longest ago is
 //! forgotten, and must be read again before it is changed.
+//!
 //! Contract: domain/tools.md, section 9; programming-model.md, sections 4.4 and 6.3.
 
 use skein_lib::Map;

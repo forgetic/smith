@@ -1,5 +1,6 @@
 //! Versioned credential record values and checked codecs. This module owns no durable store and reads no clock.
 //! `encode_record` and `decode_record` exchange bounded bytes; rotate preserves prior refresh credentials unless the peer supplied a new value.
+//!
 //! Contract: domain/host.md, sections 7 and 11; programming-model.md, sections 4.4, 4.5 and 6.3.
 
 use crate::{DecodeError, Limits, TokenResponse, common, documents, jwt};

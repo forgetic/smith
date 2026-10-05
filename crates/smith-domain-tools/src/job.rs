@@ -56,6 +56,7 @@
 //! telling it as a fact, is done in one place ([`settle`]). A job is retired
 //! once it is Done ([`follow`]), which also ends a closing kit with its last
 //! job.
+//!
 //! Contract: domain/tools.md, section 9; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

@@ -1,6 +1,7 @@
 #![expect(clippy::match_like_matches_macro, reason = "workspace bans matches so tests use explicit match assertions")]
 #![expect(clippy::wildcard_enum_match_arm, reason = "ordinary tests make focused partial-variant assertions")]
 //! Synthetic scenarios and separately identified archived provider traffic.
+
 #![expect(clippy::disallowed_types, reason = "ordinary test code collects provider outputs in Vec")]
 #![expect(clippy::disallowed_methods, reason = "tests inspect fixture text and collect outputs")]
 #![expect(clippy::arithmetic_side_effects, reason = "the test's trusted archive cursor uses ordinary arithmetic")]

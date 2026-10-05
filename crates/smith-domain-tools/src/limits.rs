@@ -1,5 +1,6 @@
 //! Ownership caps and checked worst-case arithmetic. This module retains no runtime state.
 //! `worst_case` projects immutable limits into container and payload bounds, returning `None` on overflow.
+//!
 //! Contract: domain/tools.md, section 9; programming-model.md, sections 4.4, 4.5 and 6.3.
 
 use skein_lib::{Duration, Id, List, Map, Queue, Set, Slab};

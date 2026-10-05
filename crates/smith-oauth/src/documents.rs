@@ -1,5 +1,6 @@
 //! Bounded OAuth request, response and error documents. Credential values are secret; no token store or transport is owned here.
 //! Encoding and decoding accept caller-supplied limits and return a complete value or a typed refusal.
+//!
 //! Contract: domain/host.md, sections 7 and 11; programming-model.md, sections 4.4, 4.5 and 6.3.
 
 use crate::{DecodeError, Json, Limits, common, json};

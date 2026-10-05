@@ -1,5 +1,6 @@
 //! Bounded codec limits, provider metadata and terminal classifications. The caller owns transport and retry state.
 //! The classification and limits helpers use only supplied status, headers and time; they issue no effects.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4, 4.5 and 6.3.
 
 use crate::Part;

@@ -6,6 +6,7 @@
 //! text the LLM reads. A malformed call never gets here: the session answers
 //! it. What an outcome holds, such as how much of a file comes back, is the
 //! tools' decision.
+//!
 //! Contract: domain/tools.md, section 9; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

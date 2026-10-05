@@ -1,6 +1,7 @@
 //! Payload metadata only: this decoder does not authenticate JWT signatures.
 //! The owner obtains tokens from its authenticated TLS token endpoint; claims
 //! supply the request's account header, never a new authentication decision.
+
 use crate::{DecodeError, Json, Limits, common, json};
 use alloc::boxed::Box;
 use skein_lib::{Duration, Wall, Writer, bytes};

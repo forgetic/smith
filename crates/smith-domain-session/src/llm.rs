@@ -8,6 +8,7 @@
 //! renders what comes of a call as the text the LLM reads. The domain never
 //! parses: it keeps a call's input as the bytes the LLM wrote, to send back
 //! verbatim, beside what was decoded from it.
+//!
 //! Contract: domain/session.md, section 12; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

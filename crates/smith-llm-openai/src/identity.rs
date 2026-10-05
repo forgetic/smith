@@ -1,7 +1,9 @@
 //! Historical `ChatGPT` subscription identity from tongs' redacted subject
 //! recordings, 2026-06-13 (recorder f4e0a2b). These were successful exchanges
 //! made by tongs; fresh captures of Codex itself remain a deployment task.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
+
 /// Named subject archive from which these fixed provider identity bytes were copied.
 pub const PROVENANCE: &[u8] = b"tongs subject capture 2026-06-13 f4e0a2b";
 

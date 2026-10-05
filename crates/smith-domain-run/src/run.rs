@@ -88,6 +88,7 @@
 //! run prepares, works or is over its budget; it follows from the state, in
 //! one place ([`follow`]), which also retires a run once it is Closed. A
 //! call's alarm runs from the call's start until it returns or is withdrawn.
+//!
 //! Contract: domain/run.md, section 14; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;

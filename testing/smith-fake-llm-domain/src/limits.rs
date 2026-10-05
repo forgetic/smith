@@ -1,4 +1,5 @@
 //! Owned payload caps and the provider's worst-case live heap.
+//!
 //! Contract: domain/session.md, sections 4 and 12; programming-model.md, sections 4.4 and 6.3.
 
 use core::mem::size_of;

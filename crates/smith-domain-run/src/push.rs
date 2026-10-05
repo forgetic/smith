@@ -1,4 +1,5 @@
 //! Bounded feedback for a change that did not land.
+//!
 //! Contract: domain/run.md, section 14; programming-model.md, sections 4.4 and 6.3.
 
 /// The last bytes of a failed git invocation's diagnostic output. The fixed

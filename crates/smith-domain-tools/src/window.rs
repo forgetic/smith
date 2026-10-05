@@ -2,6 +2,7 @@
 //! what a read answers with. A line is the bytes up to and including a `\n`,
 //! or the bytes after the last one; finding them is counting bytes, not
 //! parsing. Numbering the lines for the LLM is the protocol layer's rendering.
+//!
 //! Contract: domain/tools.md, section 9; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;
