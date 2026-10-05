@@ -1431,13 +1431,13 @@ fn text_result(failure: bool, text: &[u8]) -> Declared {
 fn reports_and_declared_failures_settle_once_without_checks_or_push() {
     for (failure, text) in [(false, b"".as_slice()), (true, b"no".as_slice())] {
         let mut h = Harness::new(LIMITS);
-        let (_, conversation) = h.running_on(1, 100, text_charter(failure));
+        let (run, conversation) = h.running_on(1, 100, text_charter(failure));
         let emitted = h.step(finish(conversation, 7, text_result(failure, text)));
         assert_eq!(&*emitted, &[returned(7, Returned::Accepted), Request::Close { peer: Token::new(100) }]);
         assert!(h.step(Event::Cancel { run: Token::new(999) }).is_empty());
         let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: spend(5) });
         assert_eq!(answered(emitted), (1, Answer::Accepted { outcome: text_result(failure, text), spent: spend(5) }));
-        assert!(h.step(Event::Ended { conversation, end: End::Closed, spend: spend(5) }).is_empty());
+        assert!(h.step(Event::Cancel { run }).is_empty(), "a late cancel emits no second answer");
     }
 }
 
