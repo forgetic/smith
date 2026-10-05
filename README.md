@@ -44,7 +44,7 @@ expectations; generic harness mechanisms are reused from `skein_world::domain`.
 implementation or agent behavior.
 
 Dependencies on skein use `https://git.ekanayaka.io/ai/skein.git`, with
-the revision fixed in the workspace manifest and resolved in `Cargo.lock`.
+canonical URLs in the workspace manifest and the revision pinned in `Cargo.lock`.
 smith and temper must resolve the same
 skein revision when composed. Changes to shared mechanisms land in skein
 first; smith and temper then take that revision through their own gates.
