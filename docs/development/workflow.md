@@ -88,3 +88,24 @@ existing budgets. Do not raise a timeout to accommodate a new world.
 The foundation was measured serially on 2026-10-05: two focused tests in
 0.007 seconds and one fuzzy test (64 seeds, each replayed) in 0.006 seconds.
 These are consumer tests of the shared kit; later worlds record their own shares.
+
+05s2 was measured serially on 2026-10-05 at source `762c858`, with the
+canonical skein lock at `5e52dd9`. The commands in section 2 ran the whole
+workspace with `-j 1`: 351 focused tests passed in 4.446 seconds, and eight
+fuzzy tests passed in 6.278 seconds, with no skips. The world shares below
+sum nextest's reported individual test durations, rounded to milliseconds;
+the suite summaries also include test process and runner overhead.
+
+| World | Focused tests / serial seconds | Fuzzy tests / serial seconds |
+| --- | ---: | ---: |
+| Agent on scripted host | 22 / 0.213 | 2 / 2.608 |
+| Run | 28 / 0.523 | 1 / 0.311 |
+| Session | 44 / 2.259 | 2 / 0.664 |
+| Tools | 34 / 0.667 | 2 / 2.688 |
+| Fake LLM byte peer | 4 / 0.014 | 0 / 0.000 |
+| Shared harness consumer | 2 / 0.006 | 1 / 0.006 |
+
+The copied production crate tests contribute the remaining 217 focused
+tests. These measurements retain the copied seed sweeps and memory
+drivers; the parallel default and fuzzy gate still enforce the original
+15-second and 60-second workspace ceilings.
