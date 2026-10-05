@@ -63,7 +63,7 @@ fn actual_chat_positive_and_omitted_reordered_or_corrupted_turns() {
                         .expect("actual assistant");
                     match &mut assistant.content[0] {
                         smith_domain::session::llm::Block::ToolCall { id, .. } => {
-                            *id = b"invented-id".as_slice().into()
+                            *id = b"invented-id".as_slice().into();
                         }
                         smith_domain::session::llm::Block::Text { .. }
                         | smith_domain::session::llm::Block::Refusal { .. }
@@ -95,7 +95,7 @@ fn premature_waiting_wrong_wake_text_and_wrong_final_count_or_park_time_are_reje
             }
             1 => {
                 let prompt = bad.iter_mut().find_map(|(_, seen)| match seen {
-                    Seen::Prompt { query } if query.messages.last().is_some_and(|message| matches!(message.parts.as_slice(), [Part::Text { text }] if text.as_ref() == b"person: first")) => Some(query),
+                    Seen::Prompt { query } if query.messages.last().is_some_and(|message| matches!(message.parts.as_ref(), [Part::Text { text }] if text.as_ref() == b"person: first")) => Some(query),
                     Seen::Admitted | Seen::Input { .. } | Seen::Bounced { .. } | Seen::Prompt { .. } | Seen::Completed { .. }
                     | Seen::CompletionEnded | Seen::Turn { .. } | Seen::Waiting { .. } | Seen::Answer { .. } => None,
                 }).expect("actual first wake request");

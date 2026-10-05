@@ -164,7 +164,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     // is charged in session_bytes; the full Slot container is additional.
     // V1 can fill the byte cap with minimal calls; V2 additionally promises
     // its configured block count. No assumption that Slot <= Block is needed.
-    let block = u64::try_from(core::mem::size_of::<Block>()).ok()?;
+    let block = u64::try_from(size_of::<Block>()).ok()?;
     let calls = u32::try_from(limits.session_bytes.checked_div(block)?).ok()?.max(limits.completion_blocks);
     let slots = List::<Slot>::worst_case(calls)?;
     let session =

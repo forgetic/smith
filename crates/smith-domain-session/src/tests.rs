@@ -899,7 +899,7 @@ fn transient_failures_are_retried_after_a_backoff_until_the_retries_run_out() {
                 owner,
                 failure: Failure::Overloaded,
                 evidence: crate::llm::Evidence::Unknown,
-                detail: Default::default()
+                detail: Box::default()
             }),
             None
         );
@@ -912,7 +912,7 @@ fn transient_failures_are_retried_after_a_backoff_until_the_retries_run_out() {
         owner,
         failure: Failure::Overloaded,
         evidence: crate::llm::Evidence::Unknown,
-        detail: Default::default(),
+        detail: Box::default(),
     });
     assert_eq!(
         end,
@@ -926,7 +926,7 @@ fn a_rate_limit_is_waited_out_and_lasting_failures_are_not_retried() {
     let (owner, _) = h.open(2);
     let failure = Failure::RateLimited { retry_after: Duration::from_secs(5) };
     assert_eq!(
-        h.step(Event::Failed { owner, failure, evidence: crate::llm::Evidence::Unknown, detail: Default::default() }),
+        h.step(Event::Failed { owner, failure, evidence: crate::llm::Evidence::Unknown, detail: Box::default() }),
         None
     );
     assert_eq!(h.domain.next_deadline(), Some(Time::ZERO.saturating_add(Duration::from_secs(5))));
@@ -936,7 +936,7 @@ fn a_rate_limit_is_waited_out_and_lasting_failures_are_not_retried() {
         owner,
         failure: Failure::Invalid,
         evidence: crate::llm::Evidence::Unknown,
-        detail: Default::default(),
+        detail: Box::default(),
     });
     assert_eq!(end, Some(ended(End::Failed { failure: Failure::Invalid, evidence: crate::llm::Evidence::Unknown }, 0)));
 }
@@ -966,7 +966,7 @@ fn a_completion_that_wins_the_race_with_a_close_still_ends_the_session() {
             owner,
             failure: Failure::Overloaded,
             evidence: crate::llm::Evidence::Unknown,
-            detail: Default::default()
+            detail: Box::default()
         }),
         Some(ended(End::Closed, 0))
     );
@@ -1002,7 +1002,7 @@ fn closing_a_session_with_nothing_in_flight_ends_it_at_once() {
             owner,
             failure: Failure::Unavailable,
             evidence: crate::llm::Evidence::Unknown,
-            detail: Default::default()
+            detail: Box::default()
         }),
         None
     );
@@ -1072,7 +1072,7 @@ fn an_expiring_session_in_backoff_or_yielded_ends_at_once() {
             owner,
             failure: Failure::Unavailable,
             evidence: crate::llm::Evidence::Unknown,
-            detail: Default::default()
+            detail: Box::default()
         }),
         None
     );
@@ -1351,7 +1351,7 @@ fn retries_cancels_and_refusals_are_told_too() {
             owner,
             failure: Failure::Overloaded,
             evidence: crate::llm::Evidence::Unknown,
-            detail: Default::default()
+            detail: Box::default()
         }),
         None
     );

@@ -78,10 +78,6 @@ pub struct Grant {
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(PartialEq, Eq, Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "fixed diagnostic tails keep boundary records bounded without allocation"
-)]
 pub enum Event {
     /// Actual terminal for one host relay attempt; old callbacks are inert.
     /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.

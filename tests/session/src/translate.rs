@@ -76,7 +76,7 @@ pub fn outcome(
             owner,
             failure: failure(error),
             evidence: smith_domain_session::llm::Evidence::Unknown,
-            detail: Default::default(),
+            detail: Box::default(),
         },
     }
 }

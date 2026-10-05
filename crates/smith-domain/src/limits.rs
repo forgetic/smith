@@ -26,7 +26,7 @@ pub struct Limits {
 
     /// Aggregate decoded application-call bytes admitted from one completion.
     /// The adapter includes these owning call fields in its translated completion
-    /// bound before provider work; oversized classifications become TooLarge.
+    /// bound before provider work; oversized classifications become `TooLarge`.
     /// This includes one Decoded cell for every possible completion block,
     /// including classifications with no payload after a refusal.
     /// Contract: domain/run.md, sections 3 and 14.
@@ -88,7 +88,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         return None;
     }
     let decoded_cells = u64::from(session_limits.completion_blocks)
-        .checked_mul(u64::try_from(core::mem::size_of::<crate::llm::Decoded>()).ok()?)?;
+        .checked_mul(u64::try_from(size_of::<crate::llm::Decoded>()).ok()?)?;
     if decoded_cells > limits.decoded_call_bytes.min(session_limits.session_bytes) {
         return None;
     }
@@ -119,7 +119,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     // can own record envelopes plus capped block payload concurrently. Start
     // history remains independent while main has not consumed its binding.
     let record = record_payload(limits)?;
-    let session_out = Queue::<session::Request>::worst_case(session_out(limits))?.checked_add(
+    let queued_session = Queue::<session::Request>::worst_case(session_out(limits))?.checked_add(
         u64::from(session_out(limits))
             .checked_mul(record.max(prompt_payload(limits)?).max(u64::from(session_limits.failure_bytes)))?,
     )?;
@@ -139,7 +139,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(flights)?
         .checked_add(ready)?
         .checked_add(run_out)?
-        .checked_add(session_out)?
+        .checked_add(queued_session)?
         .checked_add(starts)?
         .checked_add(turns)?
         .checked_add(rendering)?
@@ -151,6 +151,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
 /// owns its pre-effect receiving credit. Actual queued bytes are separately
 /// allocated and priced; no post-effect history-full result is discarded.
 /// Contract: domain/run.md, sections 6, 10 and 14; domain/session.md, section 3.
+#[cfg(test)]
 pub(crate) fn uncharged(limits: &Limits) -> Option<u64> {
     u64::from(limits.session.parallel_tools).checked_mul(limits.session.delegated_result_bytes)
 }
@@ -231,8 +232,8 @@ pub(crate) fn record_payload(limits: &Limits) -> Option<u64> {
     limits
         .session
         .session_bytes
-        .checked_add(messages.checked_mul(u64::try_from(core::mem::size_of::<session::record::Turn>()).ok()?)?)?
-        .checked_add(messages.checked_mul(u64::try_from(core::mem::size_of::<session::llm::Message>()).ok()?)?)
+        .checked_add(messages.checked_mul(u64::try_from(size_of::<session::record::Turn>()).ok()?)?)?
+        .checked_add(messages.checked_mul(u64::try_from(size_of::<session::llm::Message>()).ok()?)?)
 }
 
 /// Rewritten root prompt envelopes can be larger than session Block cells:
@@ -242,14 +243,14 @@ pub(crate) fn record_payload(limits: &Limits) -> Option<u64> {
 /// copied host declarations. Child queue and caller-output ownership coexist.
 /// Contract: domain/run.md, sections 13 and 14; programming-model.md, section 6.3.
 pub(crate) fn prompt_payload(limits: &Limits) -> Option<u64> {
-    let session_block = u64::try_from(core::mem::size_of::<session::llm::Block>()).ok()?;
+    let session_block = u64::try_from(size_of::<session::llm::Block>()).ok()?;
     let blocks = limits.session.session_bytes.checked_div(session_block)?;
-    let root_block = u64::try_from(core::mem::size_of::<crate::llm::Block>()).ok()?;
-    let messages = u64::from(limits.session.messages)
-        .checked_mul(u64::try_from(core::mem::size_of::<crate::llm::Message>()).ok()?)?;
+    let root_block = u64::try_from(size_of::<crate::llm::Block>()).ok()?;
+    let messages =
+        u64::from(limits.session.messages).checked_mul(u64::try_from(size_of::<crate::llm::Message>()).ok()?)?;
     let descriptors = u64::from(limits.run.host_tools)
         .checked_add(4)?
-        .checked_mul(u64::try_from(core::mem::size_of::<crate::llm::Served>()).ok()?)?;
+        .checked_mul(u64::try_from(size_of::<crate::llm::Served>()).ok()?)?;
     limits
         .session
         .session_bytes

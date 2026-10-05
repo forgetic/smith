@@ -74,7 +74,7 @@ const LIMITS: Limits = Limits {
         facts: 64,
         messages: 8,
         message_bytes: 4096,
-        waiting: skein_lib::Duration::from_secs(300),
+        waiting: Duration::from_secs(300),
     },
     session: session::Limits {
         sessions: 4,
@@ -123,7 +123,7 @@ const USAGE: Usage = Usage { input_tokens: 100, output_tokens: 10, cache_read_to
 
 #[test]
 fn decoded_batch_reserves_refusal_cells_before_any_payload() {
-    let cell = u64::try_from(core::mem::size_of::<Decoded>()).expect("cell size fits");
+    let cell = u64::try_from(size_of::<Decoded>()).expect("cell size fits");
     let offered = crate::translate::Offered {
         host_tools: Box::new([]),
         finish: false,
@@ -181,7 +181,7 @@ fn decoded_batch_reserves_refusal_cells_before_any_payload() {
 fn decoded_receiving_cells_are_required_before_provider_work() {
     let mut limits = LIMITS;
     limits.decoded_call_bytes = u64::from(limits.session.completion_blocks)
-        .checked_mul(u64::try_from(core::mem::size_of::<Decoded>()).expect("cell size fits"))
+        .checked_mul(u64::try_from(size_of::<Decoded>()).expect("cell size fits"))
         .expect("configured cells fit");
     assert!(worst_case(&limits).is_some());
     limits.decoded_call_bytes = limits.decoded_call_bytes.checked_sub(1).expect("nonempty receiving cells");
@@ -246,7 +246,11 @@ impl Harness {
             let Some(request) = self.out.pop() else { break };
             match request {
                 Request::Turn { turn, number, .. } => {
-                    assert_eq!(number, self.turns.len() + 1, "actual main output numbering");
+                    assert_eq!(
+                        number,
+                        self.turns.len().checked_add(1).expect("next actual turn number"),
+                        "actual main output numbering"
+                    );
                     self.turns.push(turn).expect("bounded activation fixture turns");
                 }
                 Request::Answer { to, answer } => {
@@ -347,7 +351,7 @@ fn charter() -> Charter {
         llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 512, dialect: 1 },
         models: Box::new([]),
         resume: false,
-        waiting: skein_lib::Duration::from_secs(30),
+        waiting: Duration::from_secs(30),
     }
 }
 
@@ -474,7 +478,7 @@ fn grant_updates_do_not_change_a_call_in_flight_and_rejections_are_once_per_gene
             owner,
             failure: crate::llm::Failure::Unauthorized,
             evidence: crate::llm::Evidence::Unknown,
-            detail: Default::default()
+            detail: Box::default()
         }),
         &[Request::Rejected { grant: crate::GrantName { account: 0, generation: 0 } }]
     );
@@ -487,7 +491,7 @@ fn grant_updates_do_not_change_a_call_in_flight_and_rejections_are_once_per_gene
             owner,
             failure: crate::llm::Failure::Unauthorized,
             evidence: crate::llm::Evidence::Unknown,
-            detail: Default::default()
+            detail: Box::default()
         }),
         &[Request::Rejected { grant: next.name }]
     );
@@ -498,7 +502,7 @@ fn grant_updates_do_not_change_a_call_in_flight_and_rejections_are_once_per_gene
             owner,
             failure: crate::llm::Failure::Unauthorized,
             evidence: crate::llm::Evidence::Unknown,
-            detail: Default::default()
+            detail: Box::default()
         })
         .is_empty()
     );
@@ -529,7 +533,7 @@ fn no_grant_fails_locally_and_exhaustion_reports_the_account() {
         owner,
         failure: crate::llm::Failure::Exhausted { retry_after },
         evidence: crate::llm::Evidence::Unknown,
-        detail: Default::default(),
+        detail: Box::default(),
     });
     let Some(Request::Exhausted { account: 0, retry_after: span }) = emitted.first() else {
         panic!("exhaustion notice")
@@ -635,6 +639,7 @@ fn a_checkout_the_tools_cannot_lay_out_refuses_main_as_invalid() {
         reply_to: ReplyTo::new(Token::new(7)),
         worker: Token::new(7),
         charter: Charter { checkout, ..charter() },
+        transcript: None,
     });
     let [Request::Admitted { run, .. }, Request::Read { .. }] = &*emitted else {
         panic!("expected an admitted run, got {emitted:?}");
@@ -651,10 +656,21 @@ fn a_checkout_the_tools_cannot_lay_out_refuses_main_as_invalid() {
 fn an_opening_larger_than_a_session_holds_refuses_main_as_invalid() {
     // Limits a session honours whatever the charter, but not every opening:
     // that is the charter's, and is refused at the sessions' entrance.
-    let limits = Limits { session: session::Limits { session_bytes: 2_097_152, ..LIMITS.session }, ..LIMITS };
+    let run = run::Limits { run_bytes: 16_384, ..LIMITS.run };
+    let limits = Limits {
+        run,
+        session: session::Limits {
+            session_bytes: 8192,
+            completion_bytes: 128,
+            completion_blocks: 1,
+            delegated_result_bytes: crate::feedback_worst_case(&run).expect("complete compatible feedback"),
+            ..LIMITS.session
+        },
+        ..LIMITS
+    };
     assert!(worst_case(&limits).is_some());
     let mut h = Harness::with(&limits);
-    let brief = filler(2048);
+    let brief = filler(10_240);
     let emitted = h.step(Event::Start {
         grants: Box::new([crate::Grant {
             name: crate::GrantName { account: 0, generation: 0 },
@@ -663,6 +679,7 @@ fn an_opening_larger_than_a_session_holds_refuses_main_as_invalid() {
         reply_to: ReplyTo::new(Token::new(7)),
         worker: Token::new(7),
         charter: Charter { brief, ..charter() },
+        transcript: None,
     });
     let [Request::Admitted { run, .. }, Request::Read { .. }] = &*emitted else {
         panic!("expected an admitted run, got {emitted:?}");
@@ -826,12 +843,40 @@ fn filler(len: u32) -> Box<[u8]> {
     text.into_boxed()
 }
 
+fn assert_no_provider_completion(emitted: &[Request]) {
+    for request in emitted {
+        match request {
+            Request::Complete { .. } => {
+                panic!("no room for another provider receiving reserve after the exact result edge")
+            }
+            Request::MessageBounced { .. }
+            | Request::Waiting { .. }
+            | Request::Turn { .. }
+            | Request::HostCall { .. }
+            | Request::WithdrawHost { .. }
+            | Request::Admitted { .. }
+            | Request::Answer { .. }
+            | Request::Checking { .. }
+            | Request::Deliver { .. }
+            | Request::Rejected { .. }
+            | Request::Exhausted { .. }
+            | Request::Cancel { .. }
+            | Request::Io { .. }
+            | Request::CancelIo { .. }
+            | Request::Read { .. }
+            | Request::Probe { .. }
+            | Request::Check { .. }
+            | Request::Abort { .. } => {}
+        }
+    }
+}
+
 #[test]
 fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_actual_bytes() {
     // Find the exact receiving edge from actual admission/dispatch outputs.
     // C bounds provider content; D bounds each complete canonical child result.
     // A one-byte tighter transcript must refuse the entire adjacent read batch.
-    let mut lower = 2 * LIMITS.session.delegated_result_bytes;
+    let mut lower = LIMITS.session.delegated_result_bytes.checked_mul(2).expect("two result caps");
     let mut upper = LIMITS.session.session_bytes;
     assert!(
         children(
@@ -844,11 +889,12 @@ fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_actual_
         .is_none()
     );
     assert!(children(&side_by_side_with(&LIMITS, 256).2).is_some());
-    for _ in 0..32 {
-        if upper - lower <= 1 {
+    for _ in 0_u32..32 {
+        if upper.checked_sub(lower).expect("ordered receiving edge") <= 1 {
             break;
         }
-        let middle = lower + (upper - lower) / 2;
+        let distance = upper.checked_sub(lower).expect("ordered receiving edge");
+        let middle = lower.checked_add(distance.checked_div(2).expect("nonzero divisor")).expect("midpoint");
         let limits = Limits { session: session::Limits { session_bytes: middle, ..LIMITS.session }, ..LIMITS };
         if children(&side_by_side_with(&limits, 256).2).is_some() {
             upper = middle;
@@ -856,7 +902,7 @@ fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_actual_
             lower = middle;
         }
     }
-    assert_eq!(upper, lower + 1);
+    assert_eq!(upper, lower.checked_add(1).expect("adjacent receiving edge"));
     let tight = Limits { session: session::Limits { session_bytes: lower, ..LIMITS.session }, ..LIMITS };
     let (tight_world, _, refused) = side_by_side_with(&tight, 256);
     assert!(children(&refused).is_none(), "all result credit precedes the first child effect");
@@ -881,14 +927,17 @@ fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_actual_
     assert!(world.step(Event::Cancel { run }).is_empty());
     // Cancel emission cannot replace either result which already won its terminal.
     let emitted = world.next();
-    assert!(
-        !emitted.iter().any(|request| matches!(request, Request::Complete { .. })),
-        "no room for another provider receiving reserve after the exact result edge"
-    );
+    assert_no_provider_completion(&emitted);
     let turn = world.turns.last().expect("actual main Turn precedes its failed final answer");
     for (index, id) in [b"a1".as_slice(), b"a2".as_slice()].into_iter().enumerate() {
         assert_eq!(
-            turn.messages.last().expect("actual result message").content[index],
+            *turn
+                .messages
+                .last()
+                .expect("actual result message")
+                .content
+                .get(index)
+                .expect("one result per admitted child"),
             session::llm::Block::ToolResult {
                 id: bytes(id),
                 result: session::llm::Returned::Text { text: answer.clone(), error: false, replay: None }
@@ -896,7 +945,10 @@ fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_actual_
         );
     }
     assert_eq!(world.domain.tickets(), 0, "concrete records carry no local replay tickets");
-    assert!(u64::from(limits.run.answer_bytes) * 2 <= limits::uncharged(&limits).expect("priced queued payload"));
+    assert!(
+        u64::from(limits.run.answer_bytes).checked_mul(2).expect("two exact child answers")
+            <= limits::uncharged(&limits).expect("priced queued payload")
+    );
 }
 
 #[test]

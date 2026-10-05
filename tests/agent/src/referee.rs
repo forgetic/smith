@@ -197,6 +197,7 @@ pub struct Meeting {
 impl Default for Meeting {
     fn default() -> Self {
         Self {
+            turns: 0,
             phase: Phase::Waiting,
             contract: None,
             outcome_bytes: 0,
@@ -302,37 +303,41 @@ impl Expectations for Meeting {
                     "one push in flight per owner",
                 );
             }
-            Seen::Delivered { owner, push, tree } => {
-                let asked = self.pushing.remove(&owner);
-                judge.check(asked.is_some(), "a host push terminal names a pending push");
-                match push {
-                    Delivery::Delivered(receipts) => {
-                        judge.check(
-                            asked.as_ref().map(|(_, snapshot, _)| snapshot) == Some(&tree),
-                            "the host lands exactly the tree the agent left",
-                        );
-                        if let Some((name, _, finishing)) = &asked {
-                            if *finishing {
-                                self.final_landed += 1;
-                            } else if self.interrupted.remove(&owner) {
-                                self.required_delivery =
-                                    Some((*name, receipts, self.stopped.expect("interruption observed")));
-                            }
-                        }
-                        self.landed += 1;
-                    }
-                    Delivery::Stale | Delivery::Failed(_) | Delivery::Refused(_) | Delivery::Nothing => {
-                        self.interrupted.remove(&owner);
-                        judge.check(tree.is_empty(), "an unsuccessful push lands nothing");
-                    }
-                }
-            }
+            Seen::Delivered { owner, push, tree } => self.delivered(owner, push, &tree, judge),
             Seen::Answered { answer, pending } => self.answer(&answer, pending, judge),
         }
     }
 }
 
 impl Meeting {
+    /// Check one actual delivery terminal against its observed submission and
+    /// retain successful interrupted evidence for the final answer check.
+    /// Contract: domain/run.md, sections 8.2 and 8.4; testing-strategy.md, section 7.
+    fn delivered(&mut self, owner: Token, push: Delivery, tree: &[u8], judge: &mut Judge<&'static str, ()>) {
+        let asked = self.pushing.remove(&owner);
+        judge.check(asked.is_some(), "a host push terminal names a pending push");
+        match push {
+            Delivery::Delivered(receipts) => {
+                judge.check(
+                    asked.as_ref().map(|(_, snapshot, _)| snapshot.as_slice()) == Some(tree),
+                    "the host lands exactly the tree the agent left",
+                );
+                if let Some((name, _, finishing)) = &asked {
+                    if *finishing {
+                        self.final_landed += 1;
+                    } else if self.interrupted.remove(&owner) {
+                        self.required_delivery = Some((*name, receipts, self.stopped.expect("interruption observed")));
+                    }
+                }
+                self.landed += 1;
+            }
+            Delivery::Stale | Delivery::Failed(_) | Delivery::Refused(_) | Delivery::Nothing => {
+                self.interrupted.remove(&owner);
+                judge.check(tree.is_empty(), "an unsuccessful push lands nothing");
+            }
+        }
+    }
+
     /// Check the final boundary value against actual terminals and provider usage,
     /// then discharge the one answer obligation. No production state is inspected.
     /// Contract: domain/run.md, sections 8.4, 10 and 13; testing-strategy.md, section 7.

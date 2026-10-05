@@ -1,5 +1,8 @@
 //! Application translation over one actual shared Client and real scripted byte peer.
 //! These are boundary controls; the root composition uses the same wire helper.
+//! Incoming streamed argument bytes are checked exactly at the root. Continued
+//! native embedded objects use handwritten outside wire expectations: whitespace
+//! serialization preserves the complete nested value and every extra field.
 use skein_fake_llm_domain::api::{Finish, Line, Part, Script, Turn};
 use skein_lib::{Duration, Token};
 use smith_agent_world::wire::{self, Configuration, Observed, Wire};
@@ -96,6 +99,7 @@ fn run_wire(prompt: llm::Prompt, configuration: &Configuration, owner: u64) -> (
 fn actual_feedback(
     query: &skein_fake_llm_domain::api::Query,
     expected_id: &[u8],
+    expected_arguments: &[u8],
     expected_text: &[u8],
     expected_error: bool,
 ) -> bool {
@@ -111,7 +115,7 @@ fn actual_feedback(
     id.as_ref() == expected_id
         && result_id.as_ref() == expected_id
         && name.as_ref() == b"opaque_host"
-        && arguments.as_ref() == BODY
+        && arguments.as_ref() == expected_arguments
         && output.as_ref() == expected_text
         && *is_error == expected_error
 }
@@ -180,13 +184,14 @@ fn conveys(configuration: &Configuration, error: bool) {
         if error { [configuration.error_prefix.as_ref(), FEEDBACK].concat() } else { FEEDBACK.to_vec() };
     let expected_error = error && configuration.error_flag;
     assert!(
-        actual_feedback(query, id, &expected_text, expected_error),
-        "positive actual whole input and exact paired feedback"
+        actual_feedback(query, id, &configuration.continuation_arguments, &expected_text, expected_error),
+        "positive actual whole input and exact paired feedback: provider={:?}, error={error}, expected_id={id:?}, expected_text={expected_text:?}, expected_error={expected_error}, actual_query={query:?}",
+        configuration.endpoint.provider
     );
     let mut missing = query.clone();
     missing.messages.last_mut().expect("actual user message").parts = Box::new([]);
     assert!(
-        !actual_feedback(&missing, id, &expected_text, expected_error),
+        !actual_feedback(&missing, id, &configuration.continuation_arguments, &expected_text, expected_error),
         "missing concrete host feedback cannot satisfy outside evidence"
     );
     let mut changed = query.clone();
@@ -196,9 +201,10 @@ fn conveys(configuration: &Configuration, error: bool) {
     };
     *output = b"rewritten host receipt".as_slice().into();
     assert!(
-        !actual_feedback(&changed, id, &expected_text, expected_error),
+        !actual_feedback(&changed, id, &configuration.continuation_arguments, &expected_text, expected_error),
         "rewritten feedback cannot satisfy outside evidence"
     );
+    corrupted_arguments(query, id, &configuration.continuation_arguments, &expected_text, expected_error);
     let Event::Completed { owner, completion } = terminal else {
         panic!("actual normal continuation");
     };
@@ -207,6 +213,37 @@ fn conveys(configuration: &Configuration, error: bool) {
         panic!("actual continued text");
     };
     assert_eq!(text.as_ref(), b"actual continued result");
+}
+
+fn corrupted_arguments(
+    query: &skein_fake_llm_domain::api::Query,
+    expected_id: &[u8],
+    expected_arguments: &[u8],
+    expected_text: &[u8],
+    expected_error: bool,
+) {
+    for drop_extra in [false, true] {
+        let mut changed = query.clone();
+        let [Part::ToolCall { arguments, .. }] = changed.messages[1].parts.as_mut() else {
+            panic!("positive control established the actual assistant call");
+        };
+        let mut bytes = arguments.clone().into_vec();
+        if drop_extra {
+            let field = br#""extra":"unchanged""#;
+            let start = bytes.windows(field.len()).position(|window| window == field).expect("actual extra field");
+            let comma = bytes[..start].iter().rposition(|byte| *byte == b',').expect("extra field separator");
+            drop(bytes.drain(comma..start + field.len()));
+        } else {
+            let nested = b"[1,true,null]";
+            let start = bytes.windows(nested.len()).position(|window| window == nested).expect("actual nested value");
+            bytes[start + 1] = b'2';
+        }
+        *arguments = bytes.into();
+        assert!(
+            !actual_feedback(&changed, expected_id, expected_arguments, expected_text, expected_error),
+            "changed nested value or dropped extra field cannot satisfy the exact outside continuation oracle"
+        );
+    }
 }
 
 #[test]

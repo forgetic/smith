@@ -76,8 +76,7 @@ fn part(block: agent::Block) -> provider::Part {
         agent::Block::ToolResult { id, result } => {
             let error = match &result {
                 agent::Returned::Text { error, .. } | agent::Returned::Served { error, .. } => *error,
-                agent::Returned::Withdrawn => true,
-                agent::Returned::Invalid { .. } | agent::Returned::NotRun => true,
+                agent::Returned::Withdrawn | agent::Returned::Invalid { .. } | agent::Returned::NotRun => true,
                 agent::Returned::Owned { outcome } => !matches!(
                     outcome,
                     tools::Outcome::Read { .. }
@@ -89,12 +88,12 @@ fn part(block: agent::Block) -> provider::Part {
                 ),
             };
             let output = match &result {
-                agent::Returned::Text { text, .. } => text.clone(),
+                agent::Returned::Text { text, .. }
+                | agent::Returned::Served { returned: run::Returned::Answered { text, .. }, .. } => text.clone(),
                 agent::Returned::Withdrawn => b"withdrawn".as_slice().into(),
                 agent::Returned::Served { returned: run::Returned::DeliveryFailed { failure }, .. } => {
                     failure.diagnostic.output().into()
                 }
-                agent::Returned::Served { returned: run::Returned::Answered { text, .. }, .. } => text.clone(),
                 agent::Returned::Served { returned: run::Returned::HostAnswered(answer), .. } => answer.text().into(),
                 agent::Returned::Owned { .. }
                 | agent::Returned::Served { .. }

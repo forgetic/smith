@@ -264,10 +264,10 @@ observations; dropped facts saturate a counter and change no decision.
   fails the channel. The parent owns the precise grant history, so it ignores
   obsolete names or validates skipped historical generations against its own
   record; the kit does not retain an unbounded generation history.
-- **Or the agent's own:** the local host signs in to a provider with
-  `smith-oauth`, keeps the refresh token in the user's configuration
-  directory, and lends the agent its grants the same way, so the agent
-  has one path for credentials.
+- **Or caller-configured:** a local host may obtain credentials through its
+  caller's sign-in/refresh mechanism and lend grants through the same boundary.
+  Smith's domains keep names only; provider authentication and credential bytes
+  belong to the caller or a shared credential client, not a Smith OAuth crate.
 
 ## 8. The local host
 
@@ -309,6 +309,20 @@ in its own.
   a run cannot be killed whole. That suits tests, development and one
   person's machine, not a host that runs agents it does not trust with
   its own process.
+
+The composed root emits a concrete typed Turn and keeps no ACK table. Its
+parent owns the body after that output; a protocol face may encode it as the
+host kit's opaque Turn. The host kit retains number/byte/read/spend metadata
+through exact parent commitment and actual ACK Send completion, independently
+of root Answer, process exit, tree emptiness and channel EOF. Committing turn 2
+cannot commit turn 1. The composition world carries complete typed bodies via a
+test-only full-record encoding; it does not claim a production transcript codec.
+
+Current root record prices are zero under the explicit transitional contract in
+domain/run.md, section 9. Channel scalar spend uses that actual record value;
+typed run token spend is observed separately. The composition does not invent a
+token-to-price conversion. Waiting follows the real settled run notice; the kit
+may pause no-progress monitoring then, while its independent wall clock runs.
 
 ## 10. The world
 

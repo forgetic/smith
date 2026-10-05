@@ -71,7 +71,7 @@ What the host gives a run to set it up:
 - **Tools:** the families the LLM may call (section 5): inspect, modify
   and shell, on the workspace, if it has one; sub-agents; `deliver`;
   `wait`; and each host tool, declared (5.2). Data, never derived from a
-  role's name. A run may have no tools but `finish`.
+  role's name. A run may have no external tools; main still has `finish` and `wait`.
 - **Result contract:** what counts as done (section 7).
 - **Conventions:** where a workspace directory keeps its guide and its
   checks (8.1); smith's defaults when absent.
@@ -82,7 +82,8 @@ What the host gives a run to set it up:
   others sub-agents may use. The agent is configured with endpoints; a
   charter only names them.
 - **Waiting:** how long the run may wait for a message before it parks
-  (section 6); zero parks as soon as it waits.
+  (section 6). The current typed boundary requires a positive interval within
+  the receiving waiting limit; zero is refused before admission.
 - **Resuming:** whether the main session opens from the transcript in
   the start, when there is one.
 
@@ -155,7 +156,7 @@ not text counts as no guide.
 | Source | Tools | Who answers | Effect |
 |---|---|---|---|
 | the workspace | `read`, `list`, `search`; `write`, `edit`, `shell` | the session, through its tools (tools.md) | reads; writes |
-| the run | `finish`, `deliver`, `wait`, sub-agents | the run | `finish` and `deliver` write; a sub-agent's follows its tools |
+| the run | `finish`, `deliver`, `wait`, sub-agents | the run | `finish`, `deliver` and `wait` write; a sub-agent's follows its tools |
 | the host | declared in the charter | the host, relayed | as declared |
 | MCP servers, later | as each server lists them | the protocol layer, as opaque calls | as the charter declares |
 
@@ -235,8 +236,9 @@ conversation once. Exhausted or stopped recovery after any unresolved
 Pure Busy exhaustion remains Busy, and a caller stop between only known
 predecision attempts may return Cancelled/TimedOut. The unknown answer does not
 claim that nothing happened. Submitted delivery ownership follows section 8
-unchanged. Full transcript restart integration remains a later increment; the
-typed recovery boundary already requires the stable logical scope.
+unchanged. Root V2 transcript restart preserves the concrete settled result and
+its provider identity; a restored result is not another host effect. The stable
+logical scope remains the parent's across activations.
 
 Retained memory is bounded by declaration count and aggregate charter bytes,
 call slots, one immutable name/tool/effect/body per logical call, fixed attempt
@@ -260,6 +262,34 @@ Within a run, sub-agents: cheap, sharing its workspace and budget, ended
 with the call that asked for them. Work that should outlive the run, run
 elsewhere or have its own authority is the host's, which may offer a
 host tool for it, as temper's `delegate` does.
+
+### 5.4 Concrete application feedback
+
+The root translates a settled run result directly into the session's concrete
+`AnsweredV2` text/error terminal. `feedback(returned, max_bytes)` consumes one
+semantic terminal and returns `Feedback { text, error }`, or `TooLarge` before
+allocation; `feedback_worst_case` supplies its checked receiving bound. This is
+a pure application translation using the same checked two-pass Writer pattern
+as the run's prompt. It creates no protocol callback, operation, retry or new
+terminal right. The client adapter uses the canonical text verbatim.
+
+Actual `HostAnswered` text/error moves unchanged. An ordinary child answer with
+`cut = 0` and `EndTurn` likewise moves unchanged. Other child answers retain the
+exact child text followed by its cut count and typed stop annotation; MaxTokens,
+NoCalls and Refusal cannot become ordinary EndTurn. All other statuses use fixed
+ASCII labels and preserve every semantic field: problem names and omitted count,
+receipt directory/text pairs, delivery reason and diagnostic, marker name,
+repository/check exit/cut/tail, and the complete typed child failure.
+
+Opaque evidence is never presumed UTF-8. Quoted byte literals use printable
+ASCII directly except quote and backslash; every other byte, including those
+two delimiters, uses lowercase `\xNN`. This is lossless, valid protocol text,
+with at most four text bytes per opaque byte. It introduces no encoding parser
+or replacement character. The maximum includes expansion and all labels/counts.
+The root refuses incompatible receiving limits before any work, prices the
+simultaneously owned semantic result and rendered text, then retains the actual
+concrete text through its queued handoff, session history and Turn output. An
+actual admitted result cannot be substituted or truncated after an effect.
 
 ## 6. Messages, waiting, parking, resuming
 
@@ -288,6 +318,58 @@ host tool for it, as temper's `delegate` does.
   transient, saying which (session.md, section 3), and the host decides
   what the next run starts from. A run that does not resume starts fresh
   from its brief, which carries what the host thinks it needs.
+
+### 6.1 Named input and settled waiting
+
+`Event::Message` names an admitted live run and an opaque parent-chosen Token,
+including zero. Parent names are unique for the active logical run; arrival order
+is FIFO and numeric token order carries no meaning. The receiver detects reuse
+among queued, currently offered and current-read names. It does not retain an
+unbounded history of acknowledged names. Text already includes the parent's
+sender label and is attested UTF-8 at the protocol face.
+
+The queue has independent count and per-message byte caps. Busy, TooLarge,
+Inactive and ReusedName bounce the actual input without retaining its bytes or
+advancing a read fence. A queued message enters main only when it yields. The
+name remains offered until an actual main Turn includes that continuation;
+only that Turn advances `read`. Children cannot advance main's fence. Waiting
+repeats the last actual read name, never a queued or merely offered name.
+
+Every main is offered `wait`, an exclusive write call; children are not. Its ordinary deferred
+result is the concrete successful text `waiting`. The call records intent;
+Waiting is emitted only when that turn and every actual call have settled and
+main yields with an empty inbox. An input wakes the same session and cancels
+its idle-park alarm. Input delivered before an alarm at the same clock instant
+wins. At the positive idle deadline an empty waiting run closes main and waits
+for all actual terminals, tells the last Turn, then answers Parked. Independent
+run wall time continues while waiting. A submitted delivery and a requested
+cancel still require their real terminal; Waiting cannot manufacture settlement.
+
+### 6.2 Concrete history and activation numbering
+
+Root starts every main and child session through OpenV2. It owns the original
+Start reply right and any selected concrete Transcript while the run prepares;
+an opaque binding transfers the selected history only to main. False `resume`
+drops supplied history and starts from the brief. True with no history starts
+fresh. Version, Endpoint, Dialect, Malformed, Unresolved and TooLarge remain six
+precise transient transcript failures, with no automatic fresh fallback and no
+provider/tool effect before semantic admission. Checkout preparation precedes
+main opening as in an ordinary start.
+
+The session restores all typed historical provider blocks and optional complete
+replay envelopes, followed by the parent's concrete post-transcript results in
+`Transcript.after` and the waking prompt. Those results keep exact provider ID,
+text, error and supported replay bytes. They are not executed again. Historical
+sequence continues the prior transcript; the new activation's main Turn number
+starts at one. Each root Turn moves its complete body outside before the next
+completion or final Answer. Root opaque handoff cells retain bodies only until
+that move; parent durable ownership and host ACK metadata are separate.
+
+Accepted, Failed, Delivered and Parked carry the exact number of actual main
+Turns emitted in this activation, plus cumulative typed spend. Refused has no
+admitted work. Child turns are not main transcript turns. Main Turns carry the
+current read fence, including through close when a real completion or result
+wins cancellation; an emitted cancel cannot replace that terminal.
 
 ## 7. Results
 
@@ -422,12 +504,12 @@ blocks before it), scoped by the host's logical run. The host must preserve that
 logical run identity across restart. Provider ids may repeat in different turns;
 neither those ids, callback tokens nor translation tickets are durable names.
 Version-two sessions include the restored contiguous transcript prefix in the
-sequence; the retained V1 run currently names only its activation. Checked
+sequence; root V2 includes restored history while its live Turn count names
+only the current activation. Checked
 sequence or block-position exhaustion refuses the completion's effects before a host request.
 Zero completion is refused before checks. Calls retain their origin through
-ticket translation and repeated provider names. This is the naming seam for
-later answered-after-transcript integration, not a claim that root run restart
-is implemented by this increment.
+ticket translation and repeated provider names. Root restart and answered-after-transcript restoration use this same origin
+without retaining local answer tickets.
 
 Before submission a withdrawal or expiry may abort checks, and no delivery
 begins once the caller deadline has passed. After submission no host cancellation
@@ -490,6 +572,13 @@ Change delivers the state at that finish.
   runs out: no session starts another completion, and the run answers
   with what it has.
 - **Spend is told:** cumulative in each turn, and whole in the answer.
+
+The current root increment retains the copied per-kind token/turn/wall budget
+and child accounting. Its Charter has no model-price fields, so root OpenV2 uses
+zero input/cached/output prices with unit one and a positive receiving spend cap.
+Record scalar spend is therefore zero; typed run token spend is still exact and
+enforced. No charter prices are ignored. Scalar run pricing and aggregate scalar
+budget policy remain a subsequent increment, not an implemented promise here.
 
 ## 10. The answer
 
@@ -583,11 +672,17 @@ host terminals and stable transcript-derived naming. The copied token-split
 budget, fixed `.temper/pre-pr` discovery convention and charter remain
 until subsequent increments. The HOST TOOLS increment replaces closed forge
 and outlet grants with bounded declarations and opaque durable relays, settled
-recovery and exact first-record answers. Optional workspaces/conventions, conflict
-files in Start, provider schema integration, messages and root transcript restart
-are still pending;
-the marker-refusal correction world exercises an actual host route without
-claiming those later admission or restart features.
+recovery and exact first-record answers. The MESSAGES increment implements
+named FIFO input, settled main-only wait/wake/park, concrete root V2 Turns,
+activation counts and exact selected-history/post-transcript restoration. It
+also repairs session receiving ownership before provider and tool effects
+(domain/session.md, section 3.1), preserving maximum actual late terminals.
+Provider-neutral canonical feedback lives in the root; shared Client/peer and
+replay codecs belong to Skein. Optional workspace/conventions, conflict files
+in Start, scalar run pricing, live channel/transcript codecs and the executable
+remain later increments. Source and validation status are recorded in
+`docs/development/migration-05s4-messages.md`; a source draft alone is not a gate
+claim.
 
 ## 15. Open questions
 

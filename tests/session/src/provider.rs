@@ -7,7 +7,7 @@ use skein_fake_llm_domain::api::{InvalidInput, Menu};
 
 /// Complete application-owned random inputs, including the preserved deliberate
 /// unknown name, malformed object and missing fields. Script and menu wrappers
-/// and bytes jointly obey the actual provider Config.script_bytes admission.
+/// and bytes jointly obey the actual provider `Config.script_bytes` admission.
 /// Contract: domain/session.md, sections 9 and 12; testing-strategy.md, section 4.
 #[must_use]
 pub fn menu() -> Menu {

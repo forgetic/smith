@@ -175,6 +175,10 @@ pub enum Out {
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Tally {
+    /// Actual successful settled wait results, independent of accepted outcomes.
+    /// Contract: domain/run.md, section 6.
+    pub waiting: u32,
+
     /// Count of opened observed at this scripted boundary.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -489,6 +493,7 @@ impl Partner {
             Returned::HostAnswered(_) | Returned::HostUnknown | Returned::HostRejected(_) => {
                 panic!("legacy partner never calls a generic host tool")
             }
+            Returned::Waiting => self.tally.waiting += 1,
             Returned::Accepted | Returned::Delivered(_) => self.tally.accepted += 1,
             Returned::Nothing | Returned::DeliveryRefused(_) | Returned::DeliveryFailed { .. } => {
                 self.tally.unpushed += 1;

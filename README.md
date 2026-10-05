@@ -20,9 +20,14 @@ operation names and settled bounded recovery, retaining actual terminal rights
 during withdrawal and shutdown. The standalone
 [V2 host supervision kit](docs/development/migration-05s6-host.md) now relays
 opaque starts, messages and numbered turns, supervises contained agent processes
-and retains actual call/delivery rights through shutdown. Further generic host
-changes, live channel and provider protocol integration, the local host and the
-executable remain later increments of temper's `05s-smith.md` migration plan.
+and retains actual call/delivery rights through shutdown. The
+[messages and concrete resume increment](docs/development/migration-05s4-messages.md)
+is being implemented through the real root/run/session worlds: named FIFO input,
+settled wait/wake/park, concrete V2 Turns and post-transcript answers, with
+receiving ownership reserved before effects. Its early compiler checkpoint is
+not a final gate claim. Live channel, scalar pricing, optional workspace and
+conventions, the local host and the executable remain later increments of
+temper's `05s-smith.md` migration plan.
 
 The design now assigns provider clients and generic LLM peers to skein's
 `skein-llm` and shared fake crates. The copied provider/OAuth crates remain

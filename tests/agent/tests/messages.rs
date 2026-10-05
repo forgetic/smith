@@ -212,7 +212,7 @@ fn every_transient_history_refusal_is_exact_and_starts_no_provider_or_tool_effec
                         replay: None,
                     }]),
                 }]
-                .into()
+                .into();
             }
         }
         let mut world = World::with_history(Settings { resume: true, ..waiting(908) }, Some(saved));

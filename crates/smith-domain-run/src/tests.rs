@@ -63,7 +63,7 @@ pub(crate) const LIMITS: Limits = Limits {
     facts: 64,
     messages: 8,
     message_bytes: 4096,
-    waiting: skein_lib::Duration::from_secs(300),
+    waiting: Duration::from_secs(300),
 };
 
 /// The domain, its environment, and room for one step's output.
@@ -206,7 +206,7 @@ pub(crate) fn charter() -> Charter {
         llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 1024, dialect: 1 },
         models: Box::new([]),
         resume: false,
-        waiting: skein_lib::Duration::from_secs(30),
+        waiting: Duration::from_secs(30),
     }
 }
 
@@ -2164,13 +2164,16 @@ fn bounded_messages_and_input_at_idle_deadline_preserve_existing_fifo() {
             spent: Spend::ZERO
         }]
     );
-    let _ = h.step(Event::Delegated {
-        conversation,
-        call: Token::new(20),
-        name: crate::CallName { completion: 1, position: 0 },
-        ask: Ask::Wait,
-        deadline: Time::from_nanos(u64::MAX),
-    });
+    assert_eq!(
+        &*h.step(Event::Delegated {
+            conversation,
+            call: Token::new(20),
+            name: crate::CallName { completion: 1, position: 0 },
+            ask: Ask::Wait,
+            deadline: Time::from_nanos(u64::MAX),
+        }),
+        &[Request::Return { call: Token::new(20), result: Returned::Waiting }]
+    );
     assert_eq!(
         &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }),
         &[Request::Waiting { worker: Token::new(1), read: Some(Token::new(5)) }]
@@ -2181,8 +2184,14 @@ fn bounded_messages_and_input_at_idle_deadline_preserve_existing_fifo() {
         &[Request::Say { peer: Token::new(9), text: bytes(b"wake") }]
     );
     assert!(!h.domain.is_due(h.env.now), "same-iteration input cancels idle expiry before fire");
-    let _ = h.step(Event::Cancel { run });
-    let _ = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
+    assert_eq!(&*h.step(Event::Cancel { run }), &[Request::Close { peer: Token::new(9) }]);
+    assert_eq!(
+        &*h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO }),
+        &[Request::Answer {
+            to: ReplyTo::new(Token::new(1)),
+            answer: Answer::Failed { failure: Failure::Cancelled, spent: Spend::ZERO, turns: 1 },
+        }]
+    );
     h.domain.reclaim();
     assert_eq!(h.domain.runs(), 0);
 }

@@ -428,7 +428,7 @@ impl World {
                             owner,
                             failure: translate::failure(error),
                             evidence: smith_domain::llm::Evidence::Unknown,
-                            detail: Default::default(),
+                            detail: Box::default(),
                         },
                     };
                     self.send(Family::Completion, owner, event);
@@ -896,7 +896,7 @@ impl World {
                 },
             )),
             Event::Failed { .. } | Event::Cancelled { .. } => {
-                self.messages_seen.push((self.now, crate::messages_referee::Seen::CompletionEnded))
+                self.messages_seen.push((self.now, crate::messages_referee::Seen::CompletionEnded));
             }
             Event::Start { .. }
             | Event::Message { .. }

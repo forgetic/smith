@@ -1492,7 +1492,7 @@ impl World {
                         owner,
                         failure: Failure::TimedOut,
                         evidence: smith_domain_session::llm::Evidence::Unknown,
-                        detail: Default::default(),
+                        detail: Box::default(),
                     });
                     self.stats.timeouts += 1;
                 }

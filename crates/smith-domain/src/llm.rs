@@ -383,10 +383,10 @@ impl Decoded {
     pub fn owned_bytes(&self) -> Option<u64> {
         let payload = match self {
             Decoded::Owned { call } => {
-                call.owned_bytes()?.checked_sub(u64::try_from(core::mem::size_of::<tools::Call>()).ok()?)?
+                call.owned_bytes()?.checked_sub(u64::try_from(size_of::<tools::Call>()).ok()?)?
             }
             Decoded::Served { ask } => {
-                crate::peer::ask_cost(ask)?.checked_sub(u64::try_from(core::mem::size_of::<run::Ask>()).ok()?)?
+                crate::peer::ask_cost(ask)?.checked_sub(u64::try_from(size_of::<run::Ask>()).ok()?)?
             }
             Decoded::Invalid { problem } => match problem {
                 Problem::UnknownTool | Problem::NotAnObject | Problem::TooLarge => 0,
@@ -395,6 +395,6 @@ impl Decoded {
                 }
             },
         };
-        u64::try_from(core::mem::size_of::<Self>()).ok()?.checked_add(payload)
+        u64::try_from(size_of::<Self>()).ok()?.checked_add(payload)
     }
 }

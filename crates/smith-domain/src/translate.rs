@@ -40,6 +40,10 @@ pub(crate) const FIRST: u64 = 4;
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent immutable tool grants, not lifecycle states or exclusive alternatives"
+)]
 pub(crate) struct Offered {
     pub(crate) host_tools: Box<[run::HostTool]>,
     pub(crate) finish: bool,
@@ -225,9 +229,11 @@ fn exhausted(spent: Dimension) -> run::Exhausted {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn failed(returned: &run::Returned) -> bool {
     match returned {
-        run::Returned::Waiting => false,
         run::Returned::HostAnswered(answer) => answer.error(),
-        run::Returned::Accepted | run::Returned::Delivered(_) | run::Returned::Answered { .. } => false,
+        run::Returned::Waiting
+        | run::Returned::Accepted
+        | run::Returned::Delivered(_)
+        | run::Returned::Answered { .. } => false,
         run::Returned::HostUnknown
         | run::Returned::HostRejected(_)
         | run::Returned::Nothing

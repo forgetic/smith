@@ -437,22 +437,21 @@ fn cap_filled_provider_credit_preserves_actual_replay_completion_that_wins_cance
     fill_initial(&mut spec, world.env.limits.session_bytes - reserve);
     world.open(spec);
     assert_eq!(world.prompts.len(), 1);
-    let call = recorded::called().into_vec().remove(0);
-    let fixed = 3 * core::mem::size_of::<llm::Block>()
-        + b"provider-call".len()
-        + b"finish".len()
-        + b"{}".len()
-        + b"refused".len()
-        + 8;
-    // called() names its descriptor below; use its actual preserved bytes.
+    let call = recorded::called().into_vec().remove(1);
+    // called() starts with opaque reasoning; the second block is its actual call.
     let call_payload = match &call {
-        llm::Block::ToolCall { id, name, input, .. } => id.len() + name.len() + input.len(),
+        llm::Block::ToolCall { id, name, input, .. } => {
+            assert_eq!(id.as_ref(), b"provider-call");
+            assert_eq!(name.as_ref(), b"subagent");
+            assert_eq!(input.as_ref(), br#"{"task":"review"}"#);
+            id.len() + name.len() + input.len()
+        }
         llm::Block::Text { .. }
         | llm::Block::Refusal { .. }
         | llm::Block::Opaque { .. }
         | llm::Block::ToolResult { .. } => panic!("fixture call"),
     };
-    let fixed = fixed - b"provider-call".len() - b"finish".len() - b"{}".len() + call_payload;
+    let fixed = 3 * core::mem::size_of::<llm::Block>() + call_payload + b"refused".len() + 8;
     let opaque = vec![0xff; 2048 - fixed].into_boxed_slice();
     let completion: Box<[llm::Block]> = Box::new([
         llm::Block::Opaque { bytes: opaque },
@@ -615,9 +614,7 @@ fn exact_failure_classes_and_transport_evidence_survive_policy_without_diagnosti
 
 #[test]
 fn fullest_history_keeps_maximum_actual_owned_read_list_search_and_shell_after_cancel() {
-    use smith_domain_tools::{
-        self as tools, Authority, Call, Done, Entry, Exit, Grants, Hit, Kind, Name, Outcome, Part, Path, Repo, Version,
-    };
+    use smith_domain_tools::{self as tools, Authority, Call, Grants, Name, Repo};
     for kind in 0..4 {
         for short in [false, true] {
             let mut world = World::new(110 + kind, 0);
@@ -631,58 +628,7 @@ fn fullest_history_keeps_maximum_actual_owned_read_list_search_and_shell_after_c
             world.env.limits.tools.search_bytes = 4096;
             world.env.limits.tools.shell_head = 2048;
             world.env.limits.tools.shell_tail = 2048;
-            let path = || Path {
-                absolute: false,
-                parts: Box::new([Part::Name { name: Name::new(b"file".as_slice().into()).expect("file name") }]),
-            };
-            let (call, done, expected) = match kind {
-                0 => (
-                    Call::Read { path: path(), skip: 0, lines: None },
-                    Done::Loaded { content: vec![b'r'; 4096].into(), version: Version::new([1; 4]) },
-                    Outcome::Read { content: vec![b'r'; 4096].into(), skipped: 0, lines: 1, total: 1, cut: false },
-                ),
-                1 => {
-                    let each = (4096 - 8 * core::mem::size_of::<Entry>()) / 8;
-                    let entries: Box<[Entry]> = (0..8)
-                        .map(|index| Entry {
-                            name: Name::new(vec![b'a' + index; each].into()).expect("nonempty bounded name"),
-                            kind: Kind::File,
-                        })
-                        .collect();
-                    assert_eq!(8 * core::mem::size_of::<Entry>() + 8 * each, 4096);
-                    (
-                        Call::List { path: path() },
-                        Done::Scanned { entries: entries.clone(), more: 17 },
-                        Outcome::Listed { entries, more: 17 },
-                    )
-                }
-                2 => {
-                    let hits: Box<[Hit]> = (0..4)
-                        .map(|line| Hit { path: b"f".as_slice().into(), line: line + 1, text: vec![b's'; 1023].into() })
-                        .collect();
-                    (
-                        Call::Search { path: path(), pattern: b"s".as_slice().into(), glob: None },
-                        Done::Found { hits: hits.clone(), more: 19, timed_out: true },
-                        Outcome::Found { hits, more: 19, timed_out: true },
-                    )
-                }
-                3 => (
-                    Call::Shell { command: b"echo owned".as_slice().into(), timeout: None },
-                    Done::Exited {
-                        exit: Exit::Code { code: 7 },
-                        head: vec![b'h'; 2048].into(),
-                        tail: vec![b't'; 2048].into(),
-                        dropped: 23,
-                    },
-                    Outcome::Exited {
-                        exit: Exit::Code { code: 7 },
-                        head: vec![b'h'; 2048].into(),
-                        tail: vec![b't'; 2048].into(),
-                        dropped: 23,
-                    },
-                ),
-                _ => unreachable!("four owning result kinds"),
-            };
+            let (call, done, expected) = maximum_owned_result(kind);
             let credit = tools::result_worst_case(&call, &world.env.limits.tools).expect("checked complete result cap");
             let id = b"actual-owned".as_slice();
             let name = b"owned".as_slice();
@@ -736,5 +682,64 @@ fn fullest_history_keeps_maximum_actual_owned_read_list_search_and_shell_after_c
             }
             world.close();
         }
+    }
+}
+
+/// Exact maximum real lower terminal and independently expected semantic result.
+fn maximum_owned_result(
+    kind: u64,
+) -> (smith_domain_tools::Call, smith_domain_tools::Done, smith_domain_tools::Outcome) {
+    use smith_domain_tools::{Call, Done, Entry, Exit, Hit, Kind, Name, Outcome, Part, Path, Version};
+    let path = || Path {
+        absolute: false,
+        parts: Box::new([Part::Name { name: Name::new(b"file".as_slice().into()).expect("file name") }]),
+    };
+    match kind {
+        0 => (
+            Call::Read { path: path(), skip: 0, lines: None },
+            Done::Loaded { content: vec![b'r'; 4096].into(), version: Version::new([1; 4]) },
+            Outcome::Read { content: vec![b'r'; 4096].into(), skipped: 0, lines: 1, total: 1, cut: false },
+        ),
+        1 => {
+            let each = (4096 - 8 * core::mem::size_of::<Entry>()) / 8;
+            let entries: Box<[Entry]> = (0..8)
+                .map(|index| Entry {
+                    name: Name::new(vec![b'a' + index; each].into()).expect("nonempty bounded name"),
+                    kind: Kind::File,
+                })
+                .collect();
+            assert_eq!(8 * core::mem::size_of::<Entry>() + 8 * each, 4096);
+            (
+                Call::List { path: path() },
+                Done::Scanned { entries: entries.clone(), more: 17 },
+                Outcome::Listed { entries, more: 17 },
+            )
+        }
+        2 => {
+            let hits: Box<[Hit]> = (0..4)
+                .map(|line| Hit { path: b"f".as_slice().into(), line: line + 1, text: vec![b's'; 1023].into() })
+                .collect();
+            (
+                Call::Search { path: path(), pattern: b"s".as_slice().into(), glob: None },
+                Done::Found { hits: hits.clone(), more: 19, timed_out: true },
+                Outcome::Found { hits, more: 19, timed_out: true },
+            )
+        }
+        3 => (
+            Call::Shell { command: b"echo owned".as_slice().into(), timeout: None },
+            Done::Exited {
+                exit: Exit::Code { code: 7 },
+                head: vec![b'h'; 2048].into(),
+                tail: vec![b't'; 2048].into(),
+                dropped: 23,
+            },
+            Outcome::Exited {
+                exit: Exit::Code { code: 7 },
+                head: vec![b'h'; 2048].into(),
+                tail: vec![b't'; 2048].into(),
+                dropped: 23,
+            },
+        ),
+        _ => unreachable!("four owning result kinds"),
     }
 }

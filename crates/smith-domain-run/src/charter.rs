@@ -258,8 +258,7 @@ pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
         return Err(Invalid::Grants);
     }
     if (outcome.change.is_some() || grants.deliver.is_some())
-        && (count(checkout.repositories.len()) > crate::MAX_DIRECTORIES
-            || limits.delivery_timeout == skein_lib::Duration::ZERO)
+        && (count(checkout.repositories.len()) > crate::MAX_DIRECTORIES || limits.delivery_timeout == Duration::ZERO)
     {
         return Err(Invalid::Checkout);
     }
@@ -348,8 +347,8 @@ pub(crate) fn len(bytes: &[u8]) -> Option<u64> {
 fn valid_host_tools(tools: &[HostTool], limits: &Limits) -> bool {
     if !tools.is_empty()
         && (limits.host_attempts == 0
-            || limits.host_timeout == skein_lib::Duration::ZERO
-            || limits.host_backoff == skein_lib::Duration::ZERO
+            || limits.host_timeout == Duration::ZERO
+            || limits.host_backoff == Duration::ZERO
             || limits.host_input_bytes < 2
             || limits.host_input_bytes > u32::try_from(crate::HostInput::CAPACITY).expect("fixed input cap")
             || limits.host_reply_bytes > u32::try_from(crate::HostAnswer::CAPACITY).expect("fixed answer cap"))
@@ -360,7 +359,7 @@ fn valid_host_tools(tools: &[HostTool], limits: &Limits) -> bool {
         if tool.name.is_empty()
             || tool.description.is_empty()
             || tool.schema.is_empty()
-            || tool.timeout == skein_lib::Duration::ZERO
+            || tool.timeout == Duration::ZERO
         {
             return false;
         }

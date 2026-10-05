@@ -112,44 +112,7 @@ impl Settings {
     pub const fn calm(seed: u64) -> Settings {
         Settings {
             seed,
-            run: run::Limits {
-                runs: 4,
-                conversations: 16,
-                run_bytes: 1 << 16,
-                repositories: 4,
-                host_tools: 4,
-                host_input_bytes: 65_536,
-                host_reply_bytes: 65_536,
-                host_timeout: Duration::from_secs(60),
-                host_backoff: Duration::from_millis(50),
-                host_attempts: 3,
-                verdicts: 4,
-                calls: 16,
-                budget: run::Budget {
-                    turns: 1000,
-                    input: 1 << 32,
-                    output: 1 << 32,
-                    cache_read: 1 << 32,
-                    cache_write: 1 << 32,
-                    time: Duration::from_secs(24 * 3600),
-                },
-                max_tokens: 8192,
-                models: 4,
-                depth: 2,
-                run_conversations: 4,
-                answer_bytes: 512,
-                nudges: 2,
-                guide_bytes: 1024,
-                io_timeout: Duration::from_secs(5),
-                outcome_bytes: 4096,
-                delivery_timeout: Duration::from_secs(600),
-                check_timeout: Duration::from_secs(600),
-                check_tail: 256,
-                facts: 64,
-                messages: 8,
-                message_bytes: 4096,
-                waiting: skein_lib::Duration::from_secs(300),
-            },
+            run: calm_run_limits(),
             host: host::Script {
                 jobs: 4,
                 window: Duration::from_secs(10),
@@ -212,6 +175,49 @@ impl Settings {
             races: 500,
             inject: 0,
         }
+    }
+}
+
+/// Immutable admission/ownership configuration for the calm component world.
+/// Contract: domain/run.md, sections 3 and 13.
+const fn calm_run_limits() -> run::Limits {
+    run::Limits {
+        runs: 4,
+        conversations: 16,
+        run_bytes: 1 << 16,
+        repositories: 4,
+        host_tools: 4,
+        host_input_bytes: 65_536,
+        host_reply_bytes: 65_536,
+        host_timeout: Duration::from_secs(60),
+        host_backoff: Duration::from_millis(50),
+        host_attempts: 3,
+        verdicts: 4,
+        calls: 16,
+        budget: run::Budget {
+            turns: 1000,
+            input: 1 << 32,
+            output: 1 << 32,
+            cache_read: 1 << 32,
+            cache_write: 1 << 32,
+            time: Duration::from_secs(24 * 3600),
+        },
+        max_tokens: 8192,
+        models: 4,
+        depth: 2,
+        run_conversations: 4,
+        answer_bytes: 512,
+        nudges: 2,
+        guide_bytes: 1024,
+        io_timeout: Duration::from_secs(5),
+        outcome_bytes: 4096,
+        delivery_timeout: Duration::from_secs(600),
+        check_timeout: Duration::from_secs(600),
+        check_tail: 256,
+        facts: 64,
+        messages: 8,
+        message_bytes: 4096,
+        waiting: skein_lib::Duration::from_secs(300),
     }
 }
 
@@ -405,6 +411,9 @@ struct RunView {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     decided: bool,
     spent: run::Spend,
+    /// Actual main Turn output count and last reported read fence.
+    turns: u32,
+    read: Option<Token>,
     /// Its conversations opened and not ended, and the most it had at once.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -752,8 +761,26 @@ impl World {
         self.log(&format!("run -> {request:?}"));
         let mut current = current;
         match request {
-            run::Request::Turn { .. } | run::Request::Waiting { .. } | run::Request::MessageBounced { .. } => {
-                panic!("source partner sends no V2 turn, wait or parent message")
+            run::Request::Turn { worker, number, read, spent, record: _ } => {
+                current = Some(self.observed_turn(worker, number, read, spent));
+            }
+            run::Request::Waiting { worker, read } => {
+                let run = self.run_of_owner[&worker];
+                let view = &self.views[&run];
+                assert_eq!(read, view.read, "Waiting carries the actual last Turn fence");
+                assert!(view.started && !view.decided, "only a working main waits");
+                assert!(
+                    self.calls
+                        .values()
+                        .all(|call| { self.run_of_conversation[&call.conversation] != run || call.returned }),
+                    "Waiting follows actual settlement of every call"
+                );
+                current = Some(run);
+            }
+            run::Request::MessageBounced { run, name: _, reason: _ } => {
+                // The exact bounced input is already retained in the boundary
+                // trace. It owns no operation or read-fence advancement.
+                current = Some(run);
             }
             run::Request::HostCall { .. } | run::Request::WithdrawHost { .. } => {
                 panic!("legacy run scripts do not invoke generic host tools")
@@ -768,6 +795,8 @@ impl World {
                     started: false,
                     decided: false,
                     spent: run::Spend::ZERO,
+                    turns: 0,
+                    read: None,
                     live: 0,
                     peak: 0,
                     answered: None,
@@ -834,6 +863,18 @@ impl World {
             }
         }
         current
+    }
+
+    /// Count only actual main output; this component neighbour owns opaque records.
+    /// Contract: domain/run.md, sections 6 and 13.
+    fn observed_turn(&mut self, worker: Token, number: u32, read: Option<Token>, spent: run::Spend) -> Token {
+        let run = self.run_of_owner[&worker];
+        let view = self.views.get_mut(&run).expect("Turn belongs to an admitted run");
+        assert_eq!(number, view.turns + 1, "actual main outputs are consecutive");
+        assert_eq!(spent, view.spent, "Turn carries the observed cumulative spend");
+        view.turns = number;
+        view.read = read;
+        run
     }
 
     /// The run's reads, probes and aborts, carried out the way io would.
@@ -912,9 +953,10 @@ impl World {
         match event {
             run::Event::HostReturned { .. } => panic!("generic-host terminals are driven by the focused agent world"),
             run::Event::Start { .. } => None,
-            run::Event::Cancel { run } => Some(*run),
+            run::Event::Cancel { run } | run::Event::Message { run, .. } => Some(*run),
             run::Event::Read { owner, .. } | run::Event::Probed { owner, .. } => Some(*owner),
             run::Event::Started { conversation, .. }
+            | run::Event::Turn { conversation, .. }
             | run::Event::Yielded { conversation, .. }
             | run::Event::Used { conversation, .. }
             | run::Event::Ended { conversation, .. }
@@ -951,6 +993,8 @@ impl World {
             }
             run::Event::HostReturned { .. }
             | run::Event::Start { .. }
+            | run::Event::Message { .. }
+            | run::Event::Turn { .. }
             | run::Event::Yielded { .. }
             | run::Event::Ended { .. }
             | run::Event::Delegated { .. }
@@ -1064,6 +1108,15 @@ impl World {
         let owner = to.into_token();
         let start = self.starts.get_mut(&owner).expect("an answer is to a start that was made");
         assert!(start.answer.is_none(), "a start is answered once");
+        let turns = match &answer {
+            run::Answer::Accepted { turns, .. }
+            | run::Answer::Failed { turns, .. }
+            | run::Answer::Delivered { turns, .. }
+            | run::Answer::Parked { turns, .. } => *turns,
+            run::Answer::Refused(_) => 0,
+        };
+        let observed = self.run_of_owner.get(&owner).map_or(0, |run| self.views[run].turns);
+        assert_eq!(turns, observed, "final count matches actual main outputs");
         let peak = self.run_of_owner.get(&owner).map_or(0, |run| self.views[run].peak);
         assert_within(&start.budget, &answer, self.partner.turn_max(), peak);
         // A change is accepted only once it is pushed, and once it is pushed,
@@ -1163,6 +1216,7 @@ impl World {
                     self.stats.starts += 1;
                     self.send(Lane::Agent, Delivery::Start { reply_to, worker, charter });
                 }
+                event @ run::Event::Message { .. } => self.send(Lane::Agent, Delivery::Host(event)),
                 run::Event::Cancel { run } => {
                     self.stats.cancels += 1;
                     self.send(Lane::Agent, Delivery::Cancel { run });
@@ -1175,6 +1229,7 @@ impl World {
                     self.send(Lane::Agent, Delivery::Host(run::Event::Delivered { owner, push }));
                 }
                 run::Event::HostReturned { .. }
+                | run::Event::Turn { .. }
                 | run::Event::Started { .. }
                 | run::Event::Yielded { .. }
                 | run::Event::Used { .. }
@@ -1261,6 +1316,8 @@ impl World {
                             self.checking.remove(owner).is_some()
                         }
                         run::Event::HostReturned { .. }
+                        | run::Event::Message { .. }
+                        | run::Event::Turn { .. }
                         | run::Event::Start { .. }
                         | run::Event::Cancel { .. }
                         | run::Event::Started { .. }
@@ -1352,9 +1409,9 @@ impl World {
         let (conversation, started, ended) = match event {
             run::Event::Started { conversation, .. } => (conversation, true, false),
             run::Event::Ended { conversation, .. } => (conversation, false, true),
-            run::Event::Yielded { conversation, .. } | run::Event::Used { conversation, .. } => {
-                (conversation, false, false)
-            }
+            run::Event::Yielded { conversation, .. }
+            | run::Event::Turn { conversation, .. }
+            | run::Event::Used { conversation, .. } => (conversation, false, false),
             run::Event::Delegated { conversation, call, .. } => {
                 let fresh = self.calls.insert(*call, Call { conversation: *conversation, returned: false }).is_none();
                 assert!(fresh, "calls have distinct names");
@@ -1367,6 +1424,7 @@ impl World {
             }
             run::Event::HostReturned { .. }
             | run::Event::Start { .. }
+            | run::Event::Message { .. }
             | run::Event::Cancel { .. }
             | run::Event::Read { .. }
             | run::Event::Probed { .. }

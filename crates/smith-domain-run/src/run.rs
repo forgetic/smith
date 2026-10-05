@@ -275,12 +275,9 @@ pub(crate) fn message(
         Some(run) => message_refusal(run, name, text.len(), &env.limits),
         None => Some(MessageRefusal::Inactive),
     };
-    match reason {
-        Some(reason) => {
-            out.push(Request::MessageBounced { run: token, name, reason });
-            return;
-        }
-        None => {}
+    if let Some(reason) = reason {
+        out.push(Request::MessageBounced { run: token, name, reason });
+        return;
     }
     domain.facts.about(token);
     let run = domain.runs.get_mut(id).expect("checked live run above");
@@ -317,12 +314,12 @@ fn message_refusal(run: &Run, name: Token, bytes: usize, limits: &Limits) -> Opt
     if run.offered == Some(name) || run.read == Some(name) {
         return Some(MessageRefusal::ReusedName);
     }
-    for message in run.inbox.iter() {
+    for message in &run.inbox {
         if message.name == name {
             return Some(MessageRefusal::ReusedName);
         }
     }
-    if run.inbox.is_full() {
+    if run.inbox.len() == run.inbox.capacity() {
         return Some(MessageRefusal::Busy);
     }
     None
@@ -355,9 +352,8 @@ pub(crate) fn turn(domain: &mut Domain, conversation: Token, record: Token, sequ
     }
     run.sequence = Some(sequence);
     run.turns = run.turns.checked_add(1).expect("activation count is bounded by historical sequence");
-    match run.offered.take() {
-        Some(name) => run.read = Some(name),
-        None => {}
+    if let Some(name) = run.offered.take() {
+        run.read = Some(name);
     }
     domain.facts.about(conversation.run.token());
     out.push(Request::Turn { worker: run.worker, record, number: run.turns, read: run.read, spent: run.spent });
@@ -965,7 +961,7 @@ fn look(
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[expect(clippy::too_many_arguments, reason = "a cell handler takes the fields it touches")]
 fn prepared(
-    run: &Run,
+    run: &mut Run,
     conversations: &mut Slab<Conversation>,
     id: Id<Run>,
     reply_to: ReplyTo,

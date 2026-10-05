@@ -141,19 +141,7 @@ fn fill(limits: Limits, route: Route) {
         // call, the message with its problem and room for its answer, then
         // the answer's id and the problem again; or, by talk, the assistant's
         // answer, then the opener's message.
-        let spec = Spec {
-            endpoint: Endpoint(0),
-            model: bytes(1),
-            system: bytes(1),
-            authority: authority(),
-            delegated: Box::new([
-                Descriptor { ticket: Token::new(1), effect: Effect::Write },
-                Descriptor { ticket: Token::new(2), effect: Effect::Read },
-            ]),
-            prompt: bytes(1),
-            max_tokens: 1,
-            budget: limits.budget,
-        };
+        let spec = fill_spec(limits);
         let spec_cost = 2 + 2 * size(size_of::<Descriptor>()) + (block + 1);
 
         let opener = Token::new(u64::from(opener));
@@ -208,13 +196,30 @@ fn fill(limits: Limits, route: Route) {
             owner,
             failure: Failure::Overloaded,
             evidence: smith_domain_session::llm::Evidence::Unknown,
-            detail: Default::default(),
+            detail: Box::default(),
         });
         assert!(backoff.is_none(), "a transient failure backs off quietly");
     }
     let held = meter.held();
     let full = u64::from(limits.sessions) * limits.session_bytes;
     assert!(held >= full, "{limits:?}: every session holds its byte limit");
+}
+
+/// Caller-owned input with the same exact byte charge in every fill route.
+fn fill_spec(limits: Limits) -> Spec {
+    Spec {
+        endpoint: Endpoint(0),
+        model: bytes(1),
+        system: bytes(1),
+        authority: authority(),
+        delegated: Box::new([
+            Descriptor { ticket: Token::new(1), effect: Effect::Write },
+            Descriptor { ticket: Token::new(2), effect: Effect::Read },
+        ]),
+        prompt: bytes(1),
+        max_tokens: 1,
+        budget: limits.budget,
+    }
 }
 
 #[test]
@@ -433,7 +438,6 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
         spent: 0,
     });
     assert!(owner.is_none(), "full actual result is retained; next provider reserve fails before work");
-    drop(drive);
     assert_eq!(ended, Some(smith_domain_session::End::TranscriptFull));
     assert_eq!(saved.len(), 1, "actual full-cap Turn was handed off before Ended");
     assert!(matches!(&saved[0].messages[2].content[0], Block::ToolResult {
@@ -531,24 +535,7 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
         llm::{Message, Role},
         record,
     };
-    let tools = smith_domain_tools::Limits {
-        kits: 1,
-        calls: 1,
-        path_bytes: 16,
-        known_files: 0,
-        file_bytes: 16,
-        read_bytes: 16,
-        list_entries: 1,
-        list_bytes: 4096,
-        match_lines: 1,
-        env_bytes: 0,
-        shell_head: 0,
-        shell_tail: 0,
-        search_hits: 1,
-        search_bytes: 16,
-        facts: 0,
-        ..LIMITS.tools
-    };
+    let tools = restore_tail_tools();
     let calls = 128_u32;
     let id_bytes = 8192_u64;
     let block = size(size_of::<Block>());
@@ -631,4 +618,26 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
     domain.reclaim();
     assert_eq!(domain.sessions(), 0);
     assert_eq!(domain.kits(), 0);
+}
+
+/// Minimal lower inventory isolates the large historical-ID staging peak.
+fn restore_tail_tools() -> smith_domain_tools::Limits {
+    smith_domain_tools::Limits {
+        kits: 1,
+        calls: 1,
+        path_bytes: 16,
+        known_files: 0,
+        file_bytes: 16,
+        read_bytes: 16,
+        list_entries: 1,
+        list_bytes: 4096,
+        match_lines: 1,
+        env_bytes: 0,
+        shell_head: 0,
+        shell_tail: 0,
+        search_hits: 1,
+        search_bytes: 16,
+        facts: 0,
+        ..LIMITS.tools
+    }
 }

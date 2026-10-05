@@ -93,7 +93,7 @@ impl Meeting {
             if message.role != Role::User {
                 return None;
             }
-            match message.parts.as_slice() {
+            match message.parts.as_ref() {
                 [Part::Text { text }] => Some(text.as_ref()),
                 [] | [Part::Opaque { .. } | Part::ToolCall { .. } | Part::ToolOutput { .. }] | [_, _, ..] => None,
             }

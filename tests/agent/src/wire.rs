@@ -19,6 +19,10 @@ pub struct Configuration {
     pub error_prefix: Box<[u8]>,
     /// Independent outside expectation for a native error result's parsed flag.
     pub error_flag: bool,
+    /// Handwritten outside expectation for this fixture's continued arguments.
+    /// Incoming delta bytes remain exact at the root. A native embedded-object
+    /// continuation may serialize object whitespace while preserving every field.
+    pub continuation_arguments: Box<[u8]>,
 }
 
 /// Native configurations are shared kit data, with no Smith dialect branching.
@@ -33,12 +37,15 @@ pub fn configurations() -> Box<[Configuration]> {
             },
             error_prefix: b"Error: ".as_slice().into(),
             error_flag: false,
+            continuation_arguments:
+                br#"{ "opaque" : {"future":[1,true,null]}, "extra":"unchanged" }"#.as_slice().into(),
         },
         Configuration {
             endpoint: shared::Endpoint::anthropic(),
             credential: shared::Credential::anthropic(b"fixture-token".as_slice().into()),
             error_prefix: Box::new([]),
             error_flag: true,
+            continuation_arguments: br#"{"opaque":{"future":[1,true,null]},"extra":"unchanged"}"#.as_slice().into(),
         },
     ])
 }
@@ -77,6 +84,10 @@ impl core::fmt::Debug for Wire {
 impl Wire {
     /// The root's actual Complete request supplies owner/prompt/receiving metadata.
     /// Preparation is effect free; start is a separate real Client entrance.
+    ///
+    /// # Errors
+    /// Returns the adapter's admission error when the complete prompt, application
+    /// descriptors or receiving contract cannot fit the supplied limits.
     pub fn prepare(
         owner: Token,
         prompt: llm::Prompt,

@@ -205,8 +205,7 @@ impl Transcript {
     /// Contract: domain/session.md, sections 3 and 12; programming-model.md, section 6.3.
     #[must_use]
     pub fn owned_bytes(&self) -> Option<u64> {
-        let mut bytes =
-            u64::try_from(core::mem::size_of::<Turn>()).ok()?.checked_mul(u64::try_from(self.turns.len()).ok()?)?;
+        let mut bytes = u64::try_from(size_of::<Turn>()).ok()?.checked_mul(u64::try_from(self.turns.len()).ok()?)?;
         for turn in &self.turns {
             bytes = bytes.checked_add(messages_bytes(&turn.messages)?)?;
         }
@@ -215,8 +214,7 @@ impl Transcript {
 }
 
 fn messages_bytes(messages: &[Message]) -> Option<u64> {
-    let mut bytes =
-        u64::try_from(core::mem::size_of::<Message>()).ok()?.checked_mul(u64::try_from(messages.len()).ok()?)?;
+    let mut bytes = u64::try_from(size_of::<Message>()).ok()?.checked_mul(u64::try_from(messages.len()).ok()?)?;
     for message in messages {
         bytes = bytes.checked_add(crate::session::content_cost(&message.content)?)?;
     }

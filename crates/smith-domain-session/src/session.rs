@@ -1361,6 +1361,19 @@ fn advance(
     if started > 0 && next < end {
         return State::Resting { tools };
     }
+    finish_tools(conversation, id, tools, env, out)
+}
+
+/// Assemble a fully settled batch in original call order, then issue the next
+/// provider request only after its new receiving credit is available.
+/// Contract: domain/session.md, sections 3 and 5.
+fn finish_tools(
+    conversation: &mut Conversation,
+    id: Id<Session>,
+    tools: Tools,
+    env: &Env<Limits>,
+    out: &mut Queue<Request>,
+) -> State {
     let mut results = List::with_capacity(tools.slots.len());
     for slot in tools.slots.into_boxed() {
         match slot {
@@ -1797,7 +1810,7 @@ fn text_of(content: &[Block]) -> Box<[u8]> {
     for block in content {
         match block {
             Block::Text { text, .. } | Block::Refusal { text, .. } => {
-                len = len.checked_add(text.len()).expect("bytes held fit in a usize")
+                len = len.checked_add(text.len()).expect("bytes held fit in a usize");
             }
             Block::Opaque { .. } | Block::ToolCall { .. } | Block::ToolResult { .. } => {}
         }
@@ -1806,7 +1819,7 @@ fn text_of(content: &[Block]) -> Box<[u8]> {
     for block in content {
         match block {
             Block::Text { text: part, .. } | Block::Refusal { text: part, .. } => {
-                text.put(part).expect("the length was counted above")
+                text.put(part).expect("the length was counted above");
             }
             Block::Opaque { .. } | Block::ToolCall { .. } | Block::ToolResult { .. } => {}
         }
@@ -1933,12 +1946,8 @@ fn reserve_provider(conversation: &mut Conversation, limits: &Limits) -> bool {
 }
 
 fn release_provider(conversation: &mut Conversation) {
-    match conversation.provider_credit.take() {
-        Some(credit) => {
-            conversation.reserved =
-                conversation.reserved.checked_sub(credit).expect("actual provider right owned credit");
-        }
-        None => {}
+    if let Some(credit) = conversation.provider_credit.take() {
+        conversation.reserved = conversation.reserved.checked_sub(credit).expect("actual provider right owned credit");
     }
 }
 
@@ -2059,7 +2068,7 @@ fn spec_cost(model: &[u8], system: &[u8], delegated: &[Descriptor], content: &[B
 /// skeleton before provider work and separately reserves each batch's payloads
 /// before effects. The actual terminal transfers its credit into held bytes.
 /// Slot containers and their transient coexistence with assembled Block arrays
-/// are independently priced by worst_case; no Slot/Block size inequality is assumed.
+/// are independently priced by `worst_case`; no Slot/Block size inequality is assumed.
 ///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn held(content: &[Block], calls: u32) -> Option<u64> {
@@ -2106,7 +2115,9 @@ fn block_cost(block: &Block) -> Option<u64> {
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn payload_cost(block: &Block) -> Option<u64> {
     match block {
-        Block::Text { text, replay } | Block::Refusal { text, replay } => len(text)?.checked_add(replay_cost(replay)?),
+        Block::Text { text, replay } | Block::Refusal { text, replay } => {
+            len(text)?.checked_add(replay_cost(replay.as_ref())?)
+        }
         Block::Opaque { bytes } => len(bytes),
         Block::ToolCall { id, name, input, call, replay } => {
             // A delegated call is the opener's to hold.
@@ -2119,7 +2130,7 @@ fn payload_cost(block: &Block) -> Option<u64> {
                 .checked_add(len(name)?)?
                 .checked_add(len(input)?)?
                 .checked_add(decoded)?
-                .checked_add(replay_cost(replay)?)
+                .checked_add(replay_cost(replay.as_ref())?)
         }
         Block::ToolResult { id, result } => len(id)?.checked_add(returned_cost(result)?),
     }
@@ -2127,7 +2138,7 @@ fn payload_cost(block: &Block) -> Option<u64> {
 
 /// The replay wrapper is inline in Block; its owned envelope is additional.
 /// Contract: domain/session.md, sections 3 and 12.
-fn replay_cost(replay: &Option<crate::llm::Replay>) -> Option<u64> {
+fn replay_cost(replay: Option<&crate::llm::Replay>) -> Option<u64> {
     match replay {
         Some(replay) => len(&replay.bytes),
         None => Some(0),
@@ -2144,7 +2155,7 @@ fn returned_cost(result: &Returned) -> Option<u64> {
         Returned::Delegated { answer } => Some(answer.bytes),
         Returned::Invalid { problem } => problem_cost(problem),
         Returned::NotRun | Returned::Withdrawn => Some(0),
-        Returned::Text { text, replay, .. } => len(text)?.checked_add(replay_cost(replay)?),
+        Returned::Text { text, replay, .. } => len(text)?.checked_add(replay_cost(replay.as_ref())?),
     }
 }
 

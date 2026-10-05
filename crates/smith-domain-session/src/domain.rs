@@ -193,7 +193,7 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
         Event::Close { session } => session::close(domain, env, session, out),
         Event::Completed { owner, completion } => session::completed(domain, env, owner, completion, out),
         Event::Failed { owner, failure, evidence, detail } => {
-            session::failed(domain, env, owner, failure, evidence, detail, out)
+            session::failed(domain, env, owner, failure, evidence, detail, out);
         }
         Event::Cancelled { owner } => session::cancelled(domain, env, owner, out),
         Event::Done { owner, done } => session::io_done(domain, env, owner, done, out),

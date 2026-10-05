@@ -327,21 +327,7 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
             run::Event::Ended { conversation: opener, end: translate::end(end), spend: translate::spend(turns, usage) }
         }
         session::Request::Delegate { owner, opener, call, deadline, origin } => {
-            // The deadline is the session's expiry: the run runs the race, and
-            // returns the call once what it started has settled.
-            let id = peer(domain, opener);
-            let ask = domain.peers.get_mut(id).expect("found above").take(call);
-            domain.tickets = domain.tickets.saturating_sub(1);
-            let flight = Flight { peer: id, withdrawn: false, answer: Due::Waiting };
-            let fresh = domain.flights.insert(owner, flight).expect("room for a batch of each session");
-            assert!(fresh.is_none(), "a session names its calls in flight apart");
-            run::Event::Delegated {
-                conversation: opener,
-                call: owner,
-                ask,
-                deadline,
-                name: run::CallName { completion: origin.sequence, position: origin.position },
-            }
+            delegated(domain, owner, opener, call, deadline, origin)
         }
         session::Request::Withdraw { owner } => {
             let flight = domain.flights.get_mut(&owner).expect("a call is withdrawn while it is in flight");
@@ -356,6 +342,32 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
         }
     };
     run_step(domain, env, event);
+}
+
+/// Transfer one live ask into a pending terminal right, retaining its complete
+/// historical origin. The session's expiry bounds the call; only its actual
+/// terminal releases this flight. Contract: domain/run.md, sections 5 and 10.
+fn delegated(
+    domain: &mut Domain,
+    owner: Token,
+    opener: Token,
+    call: Token,
+    deadline: skein_lib::Time,
+    origin: session::record::Origin,
+) -> run::Event {
+    let id = peer(domain, opener);
+    let ask = domain.peers.get_mut(id).expect("found above").take(call);
+    domain.tickets = domain.tickets.saturating_sub(1);
+    let flight = Flight { peer: id, withdrawn: false, answer: Due::Waiting };
+    let fresh = domain.flights.insert(owner, flight).expect("room for a batch of each session");
+    assert!(fresh.is_none(), "a session names its calls in flight apart");
+    run::Event::Delegated {
+        conversation: opener,
+        call: owner,
+        ask,
+        deadline,
+        name: run::CallName { completion: origin.sequence, position: origin.position },
+    }
 }
 
 /// One of the run's requests: out to the protocol layer, or to the sessions.

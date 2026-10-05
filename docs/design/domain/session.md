@@ -59,8 +59,8 @@ What is still open is listed in section 11.
   as the durable host call name, scoped by the same logical run across restart
   (run.md, section 8.2). Checked sequence overflow refuses the next completion's
   effects before any tool or host submission. Resolving tickets changes neither
-  sequence nor position; later answered-after-transcript integration uses this
-  seam and remains separate from root restart implementation.
+  sequence nor position. Root V2 restart and concrete answered-after-transcript
+  restoration use that same origin without re-executing the old effect.
 - **Told as it ends.** Closing waits for actual terminal answers before
   telling the last turn, including answers that win a cancellation.
 - **Versioned.** Turns and transcripts are domain values with a version;
@@ -85,7 +85,12 @@ What is still open is listed in section 11.
 
 For V2, `completion_bytes` caps the full owning translated completion: Block
 cells, all text/id/name/input bytes, replay envelopes and decoded owning calls.
-`completion_blocks` independently caps the number of cells. The protocol
+`completion_blocks` independently caps the number of cells. Root and adapter
+additionally require a complete `Decoded` classification cell for every possible
+call before provider work, including payload-free TooLarge fallbacks. The actual
+completion reserves all of its call cells first, then counts dynamic decoded
+payloads against the residual allowance. Oversized early input cannot consume
+space needed to preserve a later refused classification. The protocol
 adapter checks its configured shared-client-to-domain worst case against both
 Request::Complete metadata caps before preparing a provider request. A client
 answer payload limit alone is not this owning bound. Replay is a complete opaque

@@ -546,12 +546,12 @@ impl Call {
             }
             Call::Shell { command, timeout: _ } => owned_len(command),
         };
-        u64::try_from(core::mem::size_of::<Self>()).ok()?.checked_add(payload?)
+        u64::try_from(size_of::<Self>()).ok()?.checked_add(payload?)
     }
 }
 
 fn owned_path(path: &Path) -> Option<u64> {
-    let parts = u64::try_from(core::mem::size_of::<Part>()).ok()?.checked_mul(u64::try_from(path.parts.len()).ok()?)?;
+    let parts = u64::try_from(size_of::<Part>()).ok()?.checked_mul(u64::try_from(path.parts.len()).ok()?)?;
     let mut cost = parts;
     for part in &path.parts {
         match part {

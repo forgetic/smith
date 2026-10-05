@@ -146,6 +146,7 @@ enum Asked {
         owner: Token,
         finish: bool,
         agents: bool,
+        receiving: Receiving,
         cancelled: bool,
     },
     Io {
@@ -165,7 +166,8 @@ enum Asked {
     },
     Delivery {
         owner: Token,
-        cancelled: bool,
+        worker: Token,
+        stopped: bool,
     },
 }
 
@@ -184,7 +186,16 @@ enum OpKind {
     Scan,
     Store,
     Spawn,
-    Search,
+    Search { hits: u32, byte_cap: u32 },
+}
+
+/// Receiving contract observed on this actual root request, independently of
+/// stored history capacity. Every terminal must fit all three allowances.
+#[derive(Clone, Copy, Debug)]
+struct Receiving {
+    bytes: u64,
+    blocks: u32,
+    decoded: u64,
 }
 
 /// The driver: what is in flight, and the runs, in containers allocated
@@ -192,11 +203,15 @@ enum OpKind {
 struct Driver {
     rng: Rng,
     asked: Vec<Asked>,
-    runs: Vec<Token>,
+    runs: Vec<(Token, Token)>,
     workers: u64,
     /// Requests seen, by kind: completions, io, looks, checks, pushes,
-    /// answers.
-    seen: [u32; 6],
+    /// Requests: completions, io, looks, checks, pushes, answers; then actual
+    /// full searches, passing/failing checks, delivered/stale/failed delivery,
+    /// delivery after parent cancellation, full provider terminals, invalid semantic
+    /// feedback, refused starts, provider terminals winning cancellation, and
+    /// invalid decoded-call feedback.
+    seen: [u32; 18],
 }
 
 impl Driver {
@@ -208,22 +223,40 @@ impl Driver {
                 Request::HostCall { .. } | Request::WithdrawHost { .. } => {
                     panic!("random legacy driver has no host declarations")
                 }
-                Request::Admitted { worker: _, run } => self.runs.push(run),
-                Request::Answer { .. } => self.seen[5] += 1,
+                Request::Admitted { worker, run } => self.runs.push((worker, run)),
+                Request::Answer { answer, .. } => {
+                    self.seen[5] += 1;
+                    if matches!(answer, run::Answer::Refused(_)) {
+                        self.seen[15] += 1;
+                    }
+                }
                 Request::Turn { .. }
                 | Request::Waiting { .. }
                 | Request::MessageBounced { .. }
                 | Request::Checking { .. }
                 | Request::Rejected { .. }
                 | Request::Exhausted { .. } => {}
-                Request::Deliver { owner, .. } => {
+                Request::Deliver { owner, worker, .. } => {
                     self.seen[4] += 1;
-                    self.ask(Asked::Delivery { owner, cancelled: false });
+                    self.ask(Asked::Delivery { owner, worker, stopped: false });
                 }
-                Request::Complete { owner, prompt, timeout: _, grant: _, .. } => {
+                Request::Complete {
+                    owner,
+                    prompt,
+                    max_completion_bytes,
+                    max_completion_blocks,
+                    decoded_call_bytes,
+                    ..
+                } => {
                     self.seen[0] += 1;
                     let (finish, agents) = served(&prompt);
-                    self.ask(Asked::Complete { owner, finish, agents, cancelled: false });
+                    self.observe_prompt(&prompt);
+                    let receiving = Receiving {
+                        bytes: max_completion_bytes,
+                        blocks: max_completion_blocks,
+                        decoded: decoded_call_bytes,
+                    };
+                    self.ask(Asked::Complete { owner, finish, agents, receiving, cancelled: false });
                 }
                 Request::Cancel { owner } => self.cancel(Family::Llm, owner),
                 Request::Io { owner, op, deadline: _ } => {
@@ -233,7 +266,7 @@ impl Driver {
                         Op::Scan { .. } => OpKind::Scan,
                         Op::Store { .. } => OpKind::Store,
                         Op::Spawn { .. } => OpKind::Spawn,
-                        Op::Search { .. } => OpKind::Search,
+                        Op::Search { hits, bytes: byte_cap, .. } => OpKind::Search { hits, byte_cap },
                     };
                     self.ask(Asked::Io { owner, op, cancelled: false });
                 }
@@ -255,6 +288,28 @@ impl Driver {
         }
     }
 
+    fn observe_prompt(&mut self, prompt: &Prompt) {
+        for message in &prompt.messages {
+            for block in &message.content {
+                if let smith_domain::llm::Block::ToolResult { result, .. } = block {
+                    match result {
+                        smith_domain::llm::Returned::Text { text, error: true, .. }
+                            if text.starts_with(b"rejected") || text.starts_with(b"refused") =>
+                        {
+                            self.seen[14] += 1;
+                        }
+                        smith_domain::llm::Returned::Invalid { .. } => self.seen[17] += 1,
+                        smith_domain::llm::Returned::Text { .. }
+                        | smith_domain::llm::Returned::Served { .. }
+                        | smith_domain::llm::Returned::Owned { .. }
+                        | smith_domain::llm::Returned::Withdrawn
+                        | smith_domain::llm::Returned::NotRun => {}
+                    }
+                }
+            }
+        }
+    }
+
     fn ask(&mut self, asked: Asked) {
         assert!(self.asked.len() < self.asked.capacity(), "the driver's room is allocated before the base");
         self.asked.push(asked);
@@ -268,7 +323,7 @@ impl Driver {
                 Asked::Complete { owner, cancelled, .. } => (Family::Llm, (owner, cancelled)),
                 Asked::Io { owner, cancelled, .. } => (Family::Io, (owner, cancelled)),
                 Asked::Check { owner, aborted } => (Family::Check, (owner, aborted)),
-                Asked::Delivery { owner, cancelled } => (Family::Delivery, (owner, cancelled)),
+                Asked::Delivery { owner, stopped, .. } => (Family::Delivery, (owner, stopped)),
                 Asked::Read { .. } | Asked::Probe { .. } => continue,
             };
             if of == family && *cancelled.0 == owner {
@@ -305,15 +360,28 @@ impl Driver {
         let asked = self.asked.swap_remove(index(&mut self.rng, self.asked.len()));
         Some(match asked {
             Asked::Complete { owner, cancelled: true, .. } if self.rng.chance(700) => Event::Cancelled { owner },
-            Asked::Complete { owner, finish, agents, .. } => match self.rng.below(10) {
-                0 => Event::Failed {
-                    owner,
-                    failure: Failure::Overloaded,
-                    evidence: smith_domain::llm::Evidence::Unknown,
-                    detail: Default::default(),
-                },
-                _ => Event::Completed { owner, completion: self.completion(limits, finish, agents) },
-            },
+            Asked::Complete { owner, finish, agents, receiving, cancelled } => {
+                if self.rng.below(10) == 0 {
+                    Event::Failed {
+                        owner,
+                        failure: Failure::Overloaded,
+                        evidence: smith_domain::llm::Evidence::Unknown,
+                        detail: Box::default(),
+                    }
+                } else {
+                    let completion = self.completion(limits, finish, agents, receiving);
+                    let (owned, decoded) = completion_owned(&completion);
+                    assert!(owned <= receiving.bytes && decoded <= receiving.decoded);
+                    assert!(completion.content.len() <= usize::try_from(receiving.blocks).expect("bounded blocks"));
+                    if owned == receiving.bytes {
+                        self.seen[13] += 1;
+                    }
+                    if cancelled {
+                        self.seen[16] += 1;
+                    }
+                    Event::Completed { owner, completion }
+                }
+            }
             Asked::Io { owner, cancelled: true, .. } if self.rng.chance(700) => {
                 Event::Done { owner, done: Done::Cancelled }
             }
@@ -329,16 +397,22 @@ impl Driver {
             Asked::Check { owner, aborted: true } if self.rng.chance(700) => Event::Aborted { owner },
             Asked::Check { owner, .. } => {
                 let exit = run::Exit::Code { code: u8::from(self.rng.chance(500)) };
+                self.seen[if exit == (run::Exit::Code { code: 0 }) { 7 } else { 8 }] += 1;
                 let ran = run::Ran { exit, output: bytes(u64::from(limits.run.check_tail)), cut: 1000 };
                 Event::Checked { owner, ran }
             }
-            Asked::Delivery { owner, .. } => {
+            Asked::Delivery { owner, stopped, .. } => {
+                let choice = index(&mut self.rng, 3);
                 let push = [
                     smith_agent_world::delivered(),
                     run::Delivery::Stale,
                     run::Delivery::Failed(run::DeliveryFailure::new(run::DeliveryReason::Unknown)),
-                ][index(&mut self.rng, 3)]
-                .clone();
+                ][choice]
+                    .clone();
+                self.seen[9 + choice] += 1;
+                if stopped {
+                    self.seen[12] += 1;
+                }
                 Event::Delivered { owner, push }
             }
         })
@@ -348,28 +422,67 @@ impl Driver {
         if self.runs.is_empty() {
             return None;
         }
-        let run = self.runs[index(&mut self.rng, self.runs.len())];
+        let pending_delivery = if self.rng.chance(500) {
+            self.asked.iter().find_map(|asked| match asked {
+                Asked::Delivery { worker, .. } => self.runs.iter().find(|(candidate, _)| candidate == worker).copied(),
+                Asked::Complete { .. }
+                | Asked::Io { .. }
+                | Asked::Read { .. }
+                | Asked::Probe { .. }
+                | Asked::Check { .. } => None,
+            })
+        } else {
+            None
+        };
+        // Actual submissions make this race reachable; the other half retains
+        // arbitrary stale parent cancellation handles from the original sweep.
+        let (worker, run) = pending_delivery.unwrap_or_else(|| self.runs[index(&mut self.rng, self.runs.len())]);
+        for asked in &mut self.asked {
+            if let Asked::Delivery { worker: delivery_worker, stopped, .. } = asked
+                && *delivery_worker == worker
+            {
+                *stopped = true;
+            }
+        }
         Some(Event::Cancel { run })
     }
 
-    /// A completion of up to two calls, of the tools or the run's, or text,
-    /// holding up to a quarter of what a session may.
-    fn completion(&mut self, limits: &Limits, finish: bool, agents: bool) -> Completion {
-        let most = limits.session.session_bytes / 4;
+    /// A real bounded terminal, independently pricing provider and decoded
+    /// ownership; history capacity cannot enlarge the advertised receiving cap.
+    fn completion(&mut self, limits: &Limits, finish: bool, agents: bool, receiving: Receiving) -> Completion {
+        let completion_cell_bytes = completion_cell();
         let usage = Usage { input_tokens: 100, output_tokens: 20, cache_read_tokens: 50, cache_write_tokens: 50 };
         if self.rng.chance(150) {
-            let text = Said::Text { text: bytes(self.rng.below(most)), replay: None };
+            let available =
+                receiving.bytes.checked_sub(completion_cell_bytes).expect("admitted receiving cap holds one block");
+            let size = if self.rng.chance(500) { available } else { self.rng.below(available + 1) };
+            let text = Said::Text { text: bytes(size), replay: None };
             return Completion { content: Box::new([text]), stop: Stop::EndTurn, usage };
         }
-        let count = 1 + self.rng.below(2);
+        let classification = u64::try_from(core::mem::size_of::<Decoded>()).expect("fixed cell");
+        let minimum = completion_cell_bytes + classification + 6;
+        let count = (1 + self.rng.below(2))
+            .min(u64::from(receiving.blocks))
+            .min(receiving.bytes / minimum)
+            .min(receiving.decoded / classification);
+        assert!(count > 0, "admitted receiving contract holds one call and its classification");
+        let decoded_cap = receiving.decoded / count;
+        let block_cap = receiving.bytes / count;
+        let most = block_cap.min(decoded_cap) / 4;
         let content = (0..count)
             .map(|at| {
-                let size = self.rng.below(most / 2);
-                let call = self.call(limits, size, finish, agents);
+                let size = self.rng.below(most + 1);
+                let mut call = self.call(limits, size, finish, agents);
+                let mut owned = call.owned_bytes().expect("bounded decoded fixture");
+                if owned > decoded_cap || completion_cell_bytes + 6 + owned > block_cap {
+                    call = Decoded::Invalid { problem: Problem::TooLarge };
+                    owned = classification;
+                }
+                let input_cap = block_cap - completion_cell_bytes - 6 - owned;
                 Said::ToolCall {
                     id: format!("c{at}").into_bytes().into(),
                     name: bytes(4),
-                    input: bytes(size),
+                    input: bytes(self.rng.below(input_cap + 1)),
                     call,
                     replay: None,
                 }
@@ -460,12 +573,57 @@ impl Driver {
                 let (head, tail) = (u64::from(tools.shell_head), u64::from(tools.shell_tail));
                 Done::Exited { exit: Exit::Code { code: 1 }, head: bytes(head), tail: bytes(tail), dropped: 100 }
             }
-            OpKind::Search => {
-                let hit = |line| Hit { path: bytes(6), line, text: bytes(u64::from(tools.search_bytes) / 4) };
-                Done::Found { hits: (0..tools.search_hits).map(hit).collect(), more: 1, timed_out: false }
+            OpKind::Search { hits, byte_cap } => {
+                assert!(hits > 0, "the fixture requests a nonempty search result");
+                let paths = 6 * u64::from(hits);
+                let remaining = u64::from(byte_cap).checked_sub(paths).expect("requested cap holds every hit path");
+                let per_hit = remaining / u64::from(hits);
+                let extra = remaining % u64::from(hits);
+                let found: Box<[Hit]> = (0..hits)
+                    .map(|line| Hit { path: bytes(6), line, text: bytes(per_hit + u64::from(u64::from(line) < extra)) })
+                    .collect();
+                assert_eq!(found.len(), usize::try_from(hits).expect("bounded requested hit count"));
+                assert_eq!(
+                    found.iter().map(|hit| hit.path.len() + hit.text.len()).sum::<usize>(),
+                    usize::try_from(byte_cap).expect("bounded requested path plus text cap"),
+                    "actual lower search result attains the full aggregate path and text bound"
+                );
+                self.seen[6] += 1;
+                Done::Found { hits: found, more: 1, timed_out: false }
             }
         }
     }
+}
+
+/// Full translated terminal cells reserve the larger root/session layout.
+fn completion_cell() -> u64 {
+    u64::try_from(core::mem::size_of::<Said>().max(core::mem::size_of::<smith_domain::session::llm::Block>()))
+        .expect("fixed translated block cell")
+}
+
+/// Price every original provider field, replay and decoded owning value, plus
+/// all translated cells. This boundary check precedes the actual step call.
+fn completion_owned(completion: &Completion) -> (u64, u64) {
+    let mut owned = completion_cell() * u64::try_from(completion.content.len()).expect("bounded actual cells");
+    let mut decoded = 0;
+    for block in &completion.content {
+        let payload = match block {
+            Said::Opaque { bytes } => u64::try_from(bytes.len()).expect("bounded opaque bytes"),
+            Said::Text { text, replay } | Said::Refusal { text, replay } => {
+                u64::try_from(text.len()).expect("bounded text")
+                    + replay.as_ref().map_or(0, |replay| u64::try_from(replay.bytes.len()).expect("bounded replay"))
+            }
+            Said::ToolCall { id, name, input, call, replay } => {
+                let call_bytes = call.owned_bytes().expect("bounded decoded ownership");
+                decoded += call_bytes;
+                u64::try_from(id.len() + name.len() + input.len()).expect("bounded provider fields")
+                    + replay.as_ref().map_or(0, |replay| u64::try_from(replay.bytes.len()).expect("bounded replay"))
+                    + call_bytes
+            }
+        };
+        owned += payload;
+    }
+    (owned, decoded)
 }
 
 /// Whether `prompt` offers the run's finish and sub-agents.
@@ -486,7 +644,7 @@ fn served(prompt: &Prompt) -> (bool, bool) {
 /// loop would: each round resumes what is ready, takes an event, and fires
 /// what is due, then reaches the reclaim point; checking the peak of the heap
 /// in every entry point against the worst case.
-fn churn(limits: &Limits, seed: u64, rounds: u32) -> [u32; 6] {
+fn churn(limits: &Limits, seed: u64, rounds: u32) -> [u32; 18] {
     let limits = *limits;
     let bound = worst_case(&limits).expect("the test limits fit");
     let mut env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
@@ -496,7 +654,7 @@ fn churn(limits: &Limits, seed: u64, rounds: u32) -> [u32; 6] {
         asked: Vec::with_capacity(4096),
         runs: Vec::with_capacity(usize::try_from(rounds).expect("small")),
         workers: 0,
-        seen: [0; 6],
+        seen: [0; 18],
     };
     let meter = Meter::new();
     let mut domain = Domain::new(&limits, seed);
@@ -562,14 +720,17 @@ fn a_domain_driven_at_random_stays_within_its_worst_case_at_every_entry_point() 
             ..LIMITS.session
         },
     };
-    let mut seen = [0; 6];
+    let mut seen = [0; 18];
     for seed in 0..12 {
         for limits in [LIMITS, wider] {
+            eprintln!("agent memory replay: seed={seed}, rounds=3000, limits={limits:?}");
             let counted = churn(&limits, seed, 3_000);
             for (all, one) in seen.iter_mut().zip(counted) {
                 *all += one;
             }
         }
     }
-    assert!(seen.iter().all(|count| *count > 10), "every kind of request was made: {seen:?}");
+    eprintln!("agent memory actual boundary coverage: {seen:?}");
+    assert!(seen[..7].iter().all(|count| *count > 10), "every kind of request was made: {seen:?}");
+    assert!(seen[7..].iter().all(|count| *count > 0), "actual terminal and refusal classes occurred: {seen:?}");
 }

@@ -83,12 +83,13 @@ impl Peer {
         // Every call keeps a classification cell even when decoding is refused.
         // Reserve the complete batch's cells first, so an oversized first call
         // cannot spend the allowance needed by a later TooLarge classification.
-        let cell = u64::try_from(size_of::<Decoded>()).expect("a classification cell fits a u64");
+        let classification_bytes = u64::try_from(size_of::<Decoded>()).expect("a classification cell fits a u64");
         let mut decoded_bytes = 0_u64;
         for said in &content {
             match said {
                 Said::ToolCall { .. } => {
-                    decoded_bytes = decoded_bytes.checked_add(cell).expect("completion cells fit in memory");
+                    decoded_bytes =
+                        decoded_bytes.checked_add(classification_bytes).expect("completion cells fit in memory");
                 }
                 Said::Text { .. } | Said::Refusal { .. } | Said::Opaque { .. } => {}
             }
@@ -100,7 +101,7 @@ impl Peer {
                 Said::Opaque { bytes } => sllm::Block::Opaque { bytes },
                 Said::ToolCall { id, name, input, call, replay } => {
                     let total = match call.owned_bytes() {
-                        Some(bytes) => match bytes.checked_sub(cell) {
+                        Some(bytes) => match bytes.checked_sub(classification_bytes) {
                             Some(payload) => decoded_bytes.checked_add(payload),
                             None => None,
                         },
@@ -207,7 +208,7 @@ impl Peer {
         for sllm::Message { role, content } in messages {
             let mut blocks = List::with_capacity(u32::try_from(content.len()).expect("a message fits in memory"));
             for block in content {
-                blocks.push(self.block(block)).expect("room for every block");
+                blocks.push(Self::block(block)).expect("room for every block");
             }
             resolved.push(Message { role, content: blocks.into_boxed() }).expect("room for every message");
         }
@@ -222,7 +223,7 @@ impl Peer {
         }
     }
 
-    fn block(&self, block: sllm::Block) -> Block {
+    fn block(block: sllm::Block) -> Block {
         match block {
             sllm::Block::Text { text, replay } => Block::Text { text, replay },
             sllm::Block::Refusal { text, replay } => Block::Refusal { text, replay },

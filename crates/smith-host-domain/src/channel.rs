@@ -173,7 +173,7 @@ pub enum CompletionFailure {
     RateLimited {
         /// Exact lower cooldown, without scheduling or recovery policy.
         /// Contract: domain/host.md, sections 2, 5 and 10.
-        retry_after: skein_lib::Duration,
+        retry_after: Duration,
     },
 
     /// Provider account allowance requires the retained cooldown.
@@ -181,7 +181,7 @@ pub enum CompletionFailure {
     Exhausted {
         /// Exact lower cooldown, without scheduling or recovery policy.
         /// Contract: domain/host.md, sections 2, 5 and 10.
-        retry_after: skein_lib::Duration,
+        retry_after: Duration,
     },
 }
 

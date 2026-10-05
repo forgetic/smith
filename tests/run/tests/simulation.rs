@@ -481,7 +481,10 @@ fn empty_reports_and_declared_failures_are_terminal_results_without_delivery() {
                 Answer::Accepted { outcome: Declared::Change(_) | Declared::Verdict(_), .. }
                 | Answer::Delivered { .. }
                 | Answer::Failed { .. }
-                | Answer::Refused(_) => panic!("expected a text result: {answer:?}"),
+                | Answer::Refused(_)
+                | Answer::Parked { .. } => {
+                    panic!("report/failure finish must produce its actual text result: {answer:?}")
+                }
             }
         }
         assert_eq!((world.stats().checks, world.stats().pushes), (0, 0));

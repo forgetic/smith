@@ -14,7 +14,7 @@ use crate::types::{Context, ResolvedCall, ToolKind};
 /// Consumes one actual shared completed value under its retained receiving contract.
 /// Full original fields, optional replay, stop and u64 usage survive. Host input
 /// gets real JSON-object attestation; non-host decoding is an explicit checked
-/// caller handoff. Excess decoded ownership becomes TooLarge without losing
+/// caller handoff. Excess decoded ownership becomes `TooLarge` without losing
 /// original provider bytes. Invalid caller handoff or incompatible replay is a
 /// typed translation refusal; an admitted actual Client replay fits its envelope.
 /// Contract: domain/client.md, sections 2, 4 and 6.
@@ -276,7 +276,7 @@ fn said_bytes(said: &llm::Said) -> Result<u64, Error> {
     match said {
         llm::Said::Text { text, replay } | llm::Said::Refusal { text, replay } => {
             held = held.checked_add(size(text.len())?).ok_or(Error::Limit)?;
-            held = held.checked_add(replay_bytes(replay)?).ok_or(Error::Limit)?;
+            held = held.checked_add(replay_bytes(replay.as_ref())?).ok_or(Error::Limit)?;
         }
         llm::Said::Opaque { bytes } => held = held.checked_add(size(bytes.len())?).ok_or(Error::Limit)?,
         llm::Said::ToolCall { id, name, input, call, replay } => {
@@ -286,13 +286,13 @@ fn said_bytes(said: &llm::Said) -> Result<u64, Error> {
             let decoded = call.owned_bytes().ok_or(Error::Limit)?;
             let inline = u64::try_from(size_of::<llm::Decoded>()).or(Err(Error::Limit))?;
             held = held.checked_add(decoded.checked_sub(inline).ok_or(Error::Limit)?).ok_or(Error::Limit)?;
-            held = held.checked_add(replay_bytes(replay)?).ok_or(Error::Limit)?;
+            held = held.checked_add(replay_bytes(replay.as_ref())?).ok_or(Error::Limit)?;
         }
     }
     Ok(held)
 }
 
-fn replay_bytes(replay: &Option<llm::Replay>) -> Result<u64, Error> {
+fn replay_bytes(replay: Option<&llm::Replay>) -> Result<u64, Error> {
     match replay {
         Some(replay) => size(replay.bytes.len()),
         None => Ok(0),

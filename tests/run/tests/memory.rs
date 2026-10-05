@@ -258,6 +258,11 @@ fn fill(limits: Limits) {
     let full = u64::from(limits.runs) * (charters + 2 * limits.outcome_bytes);
     assert!(held >= full, "{limits:?}: every run holds its byte limit");
 
+    refuse_oversized_charter(limits, &env, &mut out);
+}
+
+/// The positive full-cap run above precedes this exact one-byte-over control.
+fn refuse_oversized_charter(limits: Limits, env: &Env<Limits>, out: &mut Queue<Request>) {
     // A byte more is refused.
     let mut domain = Domain::new(&Limits { runs: 1, conversations: 2, ..limits });
     let worker = Token::new(0);
@@ -267,7 +272,7 @@ fn fill(limits: Limits) {
         charter: charter(limits.run_bytes + 1),
         transcript: None,
     };
-    smith_domain_run::step(&mut domain, &env, start, &mut out);
+    smith_domain_run::step(&mut domain, env, start, out);
     let Some(Request::Answer { to: _, answer }) = out.pop() else { panic!("expected an answer") };
     assert_eq!(answer, Answer::Refused(Refusal::Invalid(Invalid::TooLarge)));
 }
@@ -393,36 +398,7 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
     let mut out = Queue::with_capacity(MAX_OUT);
     let meter = Meter::new();
     let mut domain = Domain::new(&limits);
-    let repositories: Box<[Repository]> = (0..smith_domain_run::MAX_DIRECTORIES)
-        .map(|directory| Repository {
-            name: Box::new([u8::try_from(directory + 1).expect("64 distinct names")]),
-            root: Token::new(u64::from(directory)),
-            writable: true,
-        })
-        .collect();
-    let parts = u64::from(smith_domain_run::MAX_DIRECTORIES) * (size(size_of::<Repository>()) + 1) + 1;
-    let charter = Charter {
-        brief: bytes(limits.run_bytes - parts),
-        checkout: Checkout { repositories },
-        grants: Grants {
-            deliver: Some(ChangeSpec { fields: Box::new([]) }),
-            tools: Tools { inspect: true, modify: true, shell: true },
-
-            agents: false,
-            host_tools: Box::new([]),
-        },
-        outcome: OutcomeSpec {
-            change: None,
-            verdicts: Box::new([]),
-            report: Some(smith_domain_run::outcome::TextSpec { min: 0, max: 1, fields: Box::new([]) }),
-            failure: None,
-        },
-        budget: BUDGET,
-        llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 },
-        models: Box::new([]),
-        resume: false,
-        waiting: skein_lib::Duration::from_secs(30),
-    };
+    let charter = full_delivery_charter(limits);
     let worker = Token::new(10);
     let (owner, _) = delivery_memory_step(
         &mut domain,
@@ -490,6 +466,41 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
         Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO },
     );
     assert!(answered, "one typed interrupted-landing answer carries every receipt");
+}
+
+/// Complete caller-owned charter at the aggregate cap, with all directories
+/// writable and every exact receiving receipt slot exercised by the real path.
+fn full_delivery_charter(limits: Limits) -> Charter {
+    let repositories: Box<[Repository]> = (0..smith_domain_run::MAX_DIRECTORIES)
+        .map(|directory| Repository {
+            name: Box::new([u8::try_from(directory + 1).expect("64 distinct names")]),
+            root: Token::new(u64::from(directory)),
+            writable: true,
+        })
+        .collect();
+    let parts = u64::from(smith_domain_run::MAX_DIRECTORIES) * (size(size_of::<Repository>()) + 1) + 1;
+    Charter {
+        brief: bytes(limits.run_bytes - parts),
+        checkout: Checkout { repositories },
+        grants: Grants {
+            deliver: Some(ChangeSpec { fields: Box::new([]) }),
+            tools: Tools { inspect: true, modify: true, shell: true },
+
+            agents: false,
+            host_tools: Box::new([]),
+        },
+        outcome: OutcomeSpec {
+            change: None,
+            verdicts: Box::new([]),
+            report: Some(smith_domain_run::outcome::TextSpec { min: 0, max: 1, fields: Box::new([]) }),
+            failure: None,
+        },
+        budget: BUDGET,
+        llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 },
+        models: Box::new([]),
+        resume: false,
+        waiting: skein_lib::Duration::from_secs(30),
+    }
 }
 
 fn host_memory_take(

@@ -121,7 +121,7 @@ pub struct Limits {
 /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
-    let smallest_entry = u64::try_from(core::mem::size_of::<Entry>()).ok()?.checked_add(1)?;
+    let smallest_entry = u64::try_from(size_of::<Entry>()).ok()?.checked_add(1)?;
     if limits.list_bytes < smallest_entry {
         return None;
     }
@@ -153,13 +153,13 @@ pub fn result_worst_case(call: &Call, limits: &Limits) -> Option<u64> {
         Call::Read { .. } => Some(u64::from(limits.read_bytes)),
         Call::List { .. } => Some(limits.list_bytes),
         Call::Search { .. } => {
-            let cells = u64::try_from(core::mem::size_of::<Hit>()).ok()?;
+            let cells = u64::try_from(size_of::<Hit>()).ok()?;
             cells.checked_mul(u64::from(limits.search_hits))?.checked_add(u64::from(limits.search_bytes))
         }
         Call::Write { .. } => Some(0),
         Call::Edit { .. } => {
-            let cell = u64::try_from(core::mem::size_of::<u32>()).ok()?;
-            cell.checked_mul(u64::from(limits.match_lines))
+            let ambiguity_slot_bytes = u64::try_from(size_of::<u32>()).ok()?;
+            ambiguity_slot_bytes.checked_mul(u64::from(limits.match_lines))
         }
         Call::Shell { .. } => u64::from(limits.shell_head).checked_add(u64::from(limits.shell_tail)),
     }
