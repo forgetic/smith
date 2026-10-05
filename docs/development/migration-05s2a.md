@@ -75,7 +75,8 @@ until required shared and consumer acceptance permits their coherent removal.
 | Public boundary documentation | Smith edc583e | Reviewed; fmt/clippy pass; 489 focused / 1.937 s; 10 fuzzy / 4.294 s. |
 | Original root through actual shared Client | Smith 240838d | Reviewed; fmt/clippy pass; 490 focused / 1.983 s; 10 fuzzy / 4.310 s. |
 | Adapter owner, inventory and attestation controls | Smith 9b8630e | Reviewed; fmt/clippy pass; 496 focused / 1.968 s; 10 fuzzy / 4.219 s. |
-| Actual submitted delivery through the host | This temporary increment | Reviewed; fmt/clippy pass; 498 focused / 1.930 s; 10 fuzzy / 4.321 s. |
+| Actual submitted delivery through the host | Smith 9d2ec84 | Reviewed; fmt/clippy pass; 498 focused / 1.930 s; 10 fuzzy / 4.321 s. |
+| Attained root-entry and caller-copy memory | Smith 9d2ec84 plus test blob 634e3d7 | Reviewed; fmt/clippy pass; 499 focused / 2.047 s; 10 fuzzy / 4.305 s. |
 
 The adapter boundary increment adds six positive-first controls over actual native Clients
 in both configured wire formats. It preserves matching owners at Completed,
@@ -97,6 +98,16 @@ response. Both controls pass in 0.010 s; idle serial suites pass 498 focused /
 6.509 s and ten fuzzy / 8.016 s. Scope and named outside observations are in
 [migration-05s4-messages.md](migration-05s4-messages.md).
 
+The later root-memory control attains 12 Messages/six Turns and 28 Messages/14
+Turns from real native records, including an actual 8,192-byte person message.
+It verifies reservation-inclusive payload admission, independent count/byte
+refusals, root-entry allocation peaks and separately measured caller-copy/handoff
+peaks. It passes in 0.586 s; idle serial suites pass 499 focused / 6.900 s and
+ten fuzzy / 7.935 s, with zero skips and unchanged budgets. Native Client/peer
+allocation transients between root entries remain unmeasured; this is scoped
+memory evidence, not full combined memory acceptance. Exact source, observations
+and logs are recorded in the messages ledger.
+
 
 Skein's reviewed temporary fake mechanics restore query-cap, checked-overflow
 and random/scripted generation-scratch coverage. Its focused shared-client
@@ -109,7 +120,7 @@ Remaining replacement acceptance:
 
 - Retain explicit full usage/replay, refusal/reasoning and malformed-call
   no-effect feedback controls, alongside remaining failure classifications.
-- Finish attained root/handoff allocation evidence and an observed bounded
-  message schedule sweep.
+- Finish combined native Client/peer transient memory acceptance and an
+  observed bounded message schedule sweep.
 - Pass final shared/consumer gates and exact independent cleanup review before
   removing copied packages or advancing original main branches.

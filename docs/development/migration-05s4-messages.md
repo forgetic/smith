@@ -3,12 +3,14 @@
 This is the implementation ledger for the approved messages increment. Source
 is in progress; the early compiler checkpoint is
 `49d15601c4346251eb3c514a4ba68058b9da6f83`, rebased onto Smith `45a2eea`.
-The original author base was `51fdd24`. The frozen temporary host-delivery draft
-passes formatting, full workspace/all-target clippy, 498 focused tests and ten
-fuzzy tests, with idle serial measurements recorded below. Its root/Wire source,
-host-delivery composition, adapter ownership/inventory/attestation controls and
-public documentation backfill have independent scoped approval. Attained memory,
-observed message sweep and further adapter evidence remain pending. These
+The original author base was `51fdd24`. The current temporary draft is host
+checkpoint `9d2ec84` plus frozen root-memory test blob
+`634e3d7b6e71f53a40c180766e3bada709066ed5`. It passes formatting, full
+workspace/all-target clippy, 499 focused tests and ten fuzzy tests, with idle
+serial measurements recorded below. Its root/Wire source, host-delivery
+composition, adapter boundary controls, public documentation and root-entry/caller-copy
+memory control have independent scoped approval. Combined native Client/peer
+allocation peaks, observed message sweep and further adapter evidence remain pending. These
 results do not claim full replacement acceptance, a main merge, migration
 completion or legacy adapter removal.
 
@@ -186,9 +188,9 @@ is translated only after shared lower settlement. Root and Client/peer clocks
 come from the same iteration, including independently moved wall time, and
 immediate wire progress prevents a jump to the root deadline. Outside records
 have a finite 256-call ceiling and four lifecycle observations per binding;
-this is not an attained allocation measurement. Arbitrary application Finish
-decoding, remaining receiving continuation
-controls, full memory attainment and a bounded actual message schedule sweep
+this binding story is not an attained allocation measurement. Arbitrary application Finish
+decoding, remaining receiving continuation controls, combined native Client/peer
+transient allocation peaks and a bounded actual message schedule sweep
 remain pending. The passing gates cover the scoped increment; final replacement
 acceptance remains outstanding.
 
@@ -301,17 +303,48 @@ submissions after actual parent cancellation. Required passing/failing checks,
 delivered/stale/failed delivery, refusal feedback and cancellation races all
 occurred. A selected terminal submitted for an observed pending right is not
 by itself proof of a particular accepted downstream outcome; that requires
-separate actual Turn, prompt, answer or receipt observations. This driver does
-not replace the pending attained root/handoff memory story or message sweep.
+separate actual Turn, prompt, answer or receipt observations. The focused
+root-memory evidence below supplements this driver; the message sweep remains open.
+
+The passing `restored_root_arrays_payload_rewrites_and_turn_copies_stay_within_the_attained_bound`
+generates concrete records through original root entrances and actual native
+Anthropic Client terminals, with real Wait feedback and physical Close/Closed.
+Its two configurations attain 12 Messages across six Turns and 28 Messages
+across 14 Turns, including one actual 8,192-byte person message. Each generated
+Turn has one assistant; actual tool/result Turns have three Messages and text
+Turns have one. The whole-history User predecessors establish the reachable
+maximum of `messages - 4` historical Messages and half as many Turns, leaving
+waking/provider slots. The configured array ceiling is a conservative bound,
+not a claim that every Turn requires two Messages.
+
+The restored Start retains selected history through outstanding discovery.
+Exact reservation-inclusive payload admission emits rewritten Complete arrays
+of 13 and 29 Messages, preserving all observed fields and replay bytes. The
+actual native completion then emits a concrete Turn at sequence seven or 15,
+activation number one, before the settled ContextFull answer. A valid extra
+Message is refused with independent byte headroom; a separate extra historical
+text byte is refused at the exact payload cap. Both produce precise TooLarge
+with no provider or owned-tool effect.
+
+The shared allocator meters Domain construction and root-entry peaks, including
+rewrites and concrete Turn transients. Its persistent baseline counts retained
+source records, saved history, restored prompt copies and a caller-held Turn
+copy. Separate shared Meters check complete caller-copy and record-handoff
+construction peaks against public wrapper/payload/replay ownership; final
+reclamation returns held bytes to zero. This control passed in 0.586 seconds
+and has independent source approval. Native Client/peer allocation transients
+between root entries remain unmeasured, so full combined memory acceptance is
+still open.
 
 ## Remaining checkpoint work and validation
 
 The current checkpoint retains the approved actual wire/root binding composition,
-submitted-delivery extension of live host composition, adapter boundary controls
-and public documentation backfill. The attained many-tiny Message/Turn plus
-cap-filled payload transit memory driver and bounded randomized message race
-sweep with observed classification counts remain outstanding. All named source distinctions and
-existing tests remain in scope; no passing subset replaces these requirements. New public items continue
+submitted-delivery extension of live host composition, adapter boundary controls,
+public documentation and attained root-entry/caller-copy memory evidence.
+Combined native Client/peer transient memory and a bounded randomized message
+race sweep with observed classification counts remain outstanding. All named
+source distinctions and existing tests remain in scope; no passing subset
+replaces these requirements. New public items continue
 to require full module/type/variant/field/entry documentation and independent
 subset review alongside later integration work.
 
@@ -346,10 +379,10 @@ proof before cleanup settles. Its separate channel-loss control retains the
 parent right through actual withdrawal, process exit, empty tree and EOF, then
 consumes the parent's actual terminal without inventing an agent response.
 
-The remaining memory driver must attain independent Message and Turn array
-caps using many tiny records, alongside a cap-filled payload; selected Start
-history, restored input, concrete emitted Turn, rewritten provider input,
-translated terminal and caller-held observations are separately owned prices.
+The remaining memory acceptance must measure combined native Client/peer
+transient allocation peaks alongside the attained root-entry and caller-copy
+ownership. Actual physical settlement and retained input/terminal ownership
+do not by themselves price those native allocation transients.
 The bounded message sweep must count actual observed endings, read fences,
 bounces and terminal races, assert that its required classes occurred, and
 replay each seed through the shared kit. A seed's chosen scenario is not
@@ -362,16 +395,21 @@ The frozen temporary draft has the following parent-run evidence on 2026-10-05:
 | --- | --- |
 | `cargo fmt --check` | Passed. |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Passed. |
-| `cargo nextest run --workspace` | 498 passed, zero skipped, 1.930 seconds. |
-| `cargo nextest run --workspace --profile fuzzy` | Ten passed, zero skipped, 4.321 seconds. |
-| Idle serial focused measurement | 498 passed in 6.509 seconds. |
-| Idle serial fuzzy measurement | Ten passed in 8.016 seconds. |
+| `cargo nextest run --workspace` | 499 passed, zero skipped, 2.047 seconds. |
+| `cargo nextest run --workspace --profile fuzzy` | Ten passed, zero skipped, 4.305 seconds. |
+| Idle serial focused measurement | 499 passed, zero skipped, 6.900 seconds. |
+| Idle serial fuzzy measurement | Ten passed, zero skipped, 7.935 seconds. |
 
-Runtime logs are `/tmp/temper-next-migration/`'s
-`smith-host-delivery-default.log`, `smith-host-delivery-fuzzy.log`,
-`smith-host-delivery-serial-default.log` and `smith-host-delivery-serial-fuzzy.log`.
-Scoped host controls are recorded in `smith-host-delivery-focused-2.log`; final
-all-target clippy is recorded in `smith-host-delivery-clippy-final.log`.
+Latest logs are `/tmp/temper-next-migration/`'s
+`smith-root-memory-clippy-3.log`, `smith-root-memory-focused-2.log`,
+`smith-root-memory-default.log`, `smith-root-memory-fuzzy.log`,
+`smith-root-memory-serial-default.log` and `smith-root-memory-serial-fuzzy.log`.
+The earlier host-delivery draft passed 498 focused / 1.930 seconds and ten
+fuzzy / 4.321 seconds; its idle serial results were 498 focused / 6.509 seconds
+and ten fuzzy / 8.016 seconds. That historical evidence remains in
+`smith-host-delivery-{default,fuzzy,serial-default,serial-fuzzy}.log`;
+its scoped controls and clippy are in `smith-host-delivery-focused-2.log`
+and `smith-host-delivery-clippy-final.log`.
 The earlier messages checkpoint remains documented by
 `smith-client-messages-resume-default-6.log` and
 `smith-client-messages-resume-fuzzy-4.log`. Independent receiving/counter
