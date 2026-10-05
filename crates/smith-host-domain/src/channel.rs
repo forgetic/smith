@@ -1,0 +1,387 @@
+//! V2 typed host channel (domain/host.md, sections 2, 3, 6 and 7).
+//! Opaque payloads move; metadata controls sequence, spend, read fences and ACKs.
+//! No framing, secrets, policy decoding or V1 compatibility. All payloads are
+//! checked against receiving Limits before retained state changes. Durable decisions
+//! belong to the parent, which scopes `CallName` by the same logical run after restart.
+use crate::{Delivered, Delivery};
+use alloc::boxed::Box;
+use skein_lib::{Duration, Time, Token};
+
+/// Parent start moved to the first channel Send; process spawn has its own deadline (domain/host.md, sections 2–7).
+#[derive(PartialEq, Eq, Debug)]
+pub struct Start {
+    /// Stable parent run identity across restart, uninterpreted here (domain/host.md, sections 2–7).
+    pub logical_run: Token,
+    /// Optional prepared workspace resolved by the lower process adapter (domain/host.md, sections 2–7).
+    pub workspace: Option<Token>,
+    /// Opaque charter at most `Limits::charter_bytes` (domain/host.md, sections 2–7).
+    pub charter: Box<[u8]>,
+    /// Opaque V2 transcript at most `Limits::transcript_bytes` (domain/host.md, sections 2–7).
+    pub transcript: Option<Box<[u8]>>,
+    /// Opaque calls answered after transcript, at most `Limits::answered_bytes` (domain/host.md, sections 2–7).
+    pub answered: Box<[u8]>,
+    /// At most `Limits::directories` unique named mounts (domain/host.md, sections 2–7).
+    pub directories: Box<[Directory]>,
+    /// At most `Limits::accounts` distinct credential names; no values (domain/host.md, sections 2–7).
+    pub grants: Box<[Grant]>,
+}
+
+/// Parent mount descriptor forwarded without filesystem or delivery policy (domain/host.md, sections 2–7).
+#[derive(PartialEq, Eq, Debug)]
+pub struct Directory {
+    /// Unique nonempty opaque mount name bounded by `Limits::name_bytes` (domain/host.md, sections 2–7).
+    pub name: Box<[u8]>,
+    /// Parent write authority for the mount (domain/host.md, sections 2–7).
+    pub writable: bool,
+    /// At most `Limits::conflicts` bounded relative paths per writable mount (domain/host.md, sections 2–7).
+    pub conflicts: Box<[Box<[u8]>]>,
+}
+
+/// Credential name forwarded to the protocol; never credential bytes (domain/host.md, sections 2–7).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Grant {
+    /// Known parent credential account (domain/host.md, sections 2–7).
+    pub account: u32,
+    /// Positive increasing credential generation; rejected notices echo it (domain/host.md, sections 2–7).
+    pub generation: u64,
+    /// Relative lifetime; protocol resolves the actual secret (domain/host.md, sections 2–7).
+    pub valid: Duration,
+}
+
+/// Durable transcript-derived operation identity, separate from callback Token (domain/host.md, sections 2–7).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct CallName {
+    /// One-based accepted completion sequence, including restored V2 prefix (domain/host.md, sections 2–7).
+    pub completion: u32,
+    /// Zero-based assistant block ordinal; checked by the agent before effects (domain/host.md, sections 2–7).
+    pub position: u32,
+}
+
+/// Agent turn moved once to parent, which owns payload until exact commitment ACK (domain/host.md, sections 2–7).
+#[derive(PartialEq, Eq, Debug)]
+pub struct Turn {
+    /// Positive consecutive turn number from one; checked increment (domain/host.md, sections 2–7).
+    pub number: u32,
+    /// Cumulative priced host-unit spend; must not fall (domain/host.md, sections 2–7).
+    pub spent: u64,
+    /// Last named message actually sent and read; never a queued or unknown name (domain/host.md, sections 2–7).
+    pub read: Option<Token>,
+    /// Opaque transcript turn at most `Limits::turn_bytes` (domain/host.md, sections 2–7).
+    pub body: Box<[u8]>,
+}
+
+/// Agent-described host tool effect forwarded to durable parent policy (domain/host.md, sections 2–7).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Effect {
+    /// Read-only host tool; parent decides its meaning (domain/host.md, sections 2–7).
+    Read,
+    /// Writing host tool; parent must keep its durable decision (domain/host.md, sections 2–7).
+    Write,
+}
+
+/// Agent operation forwarded once to parent and answered once even after withdrawal (domain/host.md, sections 2–7).
+#[derive(PartialEq, Eq, Debug)]
+pub enum Ask {
+    /// Generic host tool; kit never decodes schema, body or policy (domain/host.md, sections 2–7).
+    Host {
+        /// Nonempty tool label bounded by `Limits::name_bytes` (domain/host.md, sections 2–7).
+        tool: Box<[u8]>,
+        /// Read/write classification supplied by the agent (domain/host.md, sections 2–7).
+        effect: Effect,
+        /// Opaque owned arguments bounded by `Limits::call_bytes` (domain/host.md, sections 2–7).
+        body: Box<[u8]>,
+    },
+    /// Actual delivery of checked workspace; no cancellation after submission (domain/host.md, sections 2–7).
+    Deliver {
+        /// Opaque generic metadata bounded by `Limits::call_bytes`, with no title/body assumption (domain/host.md, sections 2–7).
+        fields: Box<[u8]>,
+    },
+}
+
+/// Parent terminal forwarded through Send; delivery keeps its actual evidence (domain/host.md, sections 2–7).
+#[derive(PartialEq, Eq, Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "sealed host diagnostic keeps a fixed inline tail; queue/state bounds price the full variant"
+)]
+pub enum Reply {
+    /// Text tool result or error (domain/host.md, sections 2–7).
+    Host {
+        /// Parent classified error flag; body remains opaque (domain/host.md, sections 2–7).
+        error: bool,
+        /// Owned text result bounded by `Limits::answer_bytes` (domain/host.md, sections 2–7).
+        body: Box<[u8]>,
+    },
+    /// One full actual delivered/nothing/refused/failed/stale terminal (domain/host.md, sections 2–7).
+    Delivery(
+        /// Sealed typed boundary value; no hidden policy (domain/host.md, section 2).
+        Delivery,
+    ),
+    /// Predecision capacity refusal; callback still gets exactly one response (domain/host.md, sections 2–7).
+    Busy,
+    /// Transport could not provide an answer; durable effects are unknown here (domain/host.md, sections 2–7).
+    Unavailable,
+    /// Transport withdrawal terminal for generic tools; durable effects remain parent-owned (domain/host.md, sections 2–7).
+    Withdrawn,
+    /// Ordinary tool response exceeded receiving bytes (domain/host.md, sections 2–7).
+    TooLarge,
+}
+
+/// What kept an LLM from going on.
+///
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ModelFault {
+    /// The account spent its provider allowance. The host decides whether to retry after cooldown.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Exhausted,
+    /// Its provider failed for good: unreachable, overloaded past the
+    /// retries, or refusing the call or its credentials.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Provider,
+    /// The conversation outgrew the model's context, or the bytes a
+    /// conversation may hold.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    ContextFull,
+    /// It kept declining to answer.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Refused,
+    /// It kept running out of tokens mid-answer.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Truncated,
+    /// It kept asking for tools and naming none.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Malformed,
+}
+
+/// The part of a budget that ran out.
+///
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Exhausted {
+    /// The completion-count allowance is exhausted.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Turns,
+    /// The fresh input-token allowance is exhausted.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Input,
+    /// The output-token allowance is exhausted.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Output,
+    /// The cache-read token allowance is exhausted.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    CacheRead,
+    /// The cache-write token allowance is exhausted.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    CacheWrite,
+    /// The injected monotonic deadline is reached.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Time,
+}
+
+/// Why a run ended without an outcome: what the host parent acts on.
+///
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum RunFailure {
+    /// The LLM could not do the work.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Model(ModelFault),
+    /// The run's budget ran out.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Budget(Exhausted),
+    /// The LLM did not keep to the run's rules.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Policy(Policy),
+    /// The host parent cancelled the run.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Cancelled,
+    /// The host's delivery context moved: no later delivery from this run can
+    /// land. The host decides what context a new run receives.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Stale,
+}
+
+/// The run's rules, as the LLM broke them.
+///
+/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Policy {
+    /// It kept stopping without finishing, through `nudges` nudges, having
+    /// called `finish` with `rejected` outcomes that were refused.
+    ///
+    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    Unfinished {
+        /// Number of run nudges already given after unfinished turns.
+        ///
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+        nudges: u32,
+        /// Number of declared outcomes rejected by the charter contract.
+        ///
+        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+        rejected: u32,
+    },
+}
+
+/// Agent last-word result; Accepted bytes remain opaque to kit (domain/host.md, sections 2–7).
+#[derive(PartialEq, Eq, Debug)]
+pub enum RunResult {
+    /// Run refused before Admitted; requires zero turns/spend (domain/host.md, sections 2–7).
+    Refused {
+        /// Opaque admission refusal bounded by `Limits::outcome_bytes` (domain/host.md, sections 2–7).
+        detail: Box<[u8]>,
+    },
+    /// Agent-declared result allowed by its contract (domain/host.md, sections 2–7).
+    Accepted {
+        /// Opaque result bounded by `Limits::outcome_bytes` (domain/host.md, sections 2–7).
+        outcome: Box<[u8]>,
+    },
+    /// V2 parking resumes from transcript, with no snapshot (domain/host.md, sections 2–7).
+    Parked,
+    /// Typed run failure (domain/host.md, sections 2–7).
+    Failed {
+        /// Agent-declared stop kind (domain/host.md, sections 2–7).
+        failure: RunFailure,
+    },
+    /// Actual interrupted mid-run landing, not a declared accepted result (domain/host.md, sections 2–7).
+    Delivered {
+        /// Positive completion and assistant-block position, scoped by logical run (domain/host.md, sections 2–7).
+        name: CallName,
+        /// Sealed complete actual host receipts (domain/host.md, sections 2–7).
+        receipts: Delivered,
+        /// Already-decided stop observed while the actual delivery was pending (domain/host.md, sections 2–7).
+        stopped: RunFailure,
+    },
+}
+
+/// Agent final word forwarded once; process still owes Gone (domain/host.md, sections 2–7).
+#[derive(PartialEq, Eq, Debug)]
+pub struct Answer {
+    /// Exactly the observed numbered turn count (domain/host.md, sections 2–7).
+    pub turns: u32,
+    /// Final cumulative priced spend, at least previous turn spend (domain/host.md, sections 2–7).
+    pub spent: u64,
+    /// Opaque accepted result or typed refusal/parking/failure/actual delivery evidence (domain/host.md, sections 2–7).
+    pub result: RunResult,
+}
+
+/// Decoded V2 agent records; one record terminates each Read (domain/host.md, sections 2–7).
+#[derive(PartialEq, Eq, Debug)]
+pub enum Up {
+    /// Independent run admission after process Started, exactly once (domain/host.md, sections 2–7).
+    Admitted,
+    /// Generic named host operation; parent owes actual terminal (domain/host.md, sections 2–7).
+    Call {
+        /// Agent callback identity; separate from durable operation name (domain/host.md, sections 2–7).
+        call: Token,
+        /// Positive completion and assistant-block position, scoped by logical run (domain/host.md, sections 2–7).
+        name: CallName,
+        /// Agent deadline bounds watchdog pause, not abandonment (domain/host.md, sections 2–7).
+        deadline: Time,
+        /// Typed effect and opaque metadata (domain/host.md, sections 2–7).
+        ask: Ask,
+    },
+    /// Call withdrawn once; parent still owes terminal (domain/host.md, sections 2–7).
+    Withdraw {
+        /// Agent callback identity; separate from durable operation name (domain/host.md, sections 2–7).
+        call: Token,
+    },
+    /// Validated numbered turn moved to parent (domain/host.md, sections 2–7).
+    Turn {
+        /// Bounded turn metadata and owned transcript body (domain/host.md, sections 2–7).
+        turn: Turn,
+    },
+    /// Best-effort observation; valid receipt counts as progress (domain/host.md, sections 2–7).
+    Fact {
+        /// Opaque fact bounded by `Limits::fact_bytes` (domain/host.md, sections 2–7).
+        body: Box<[u8]>,
+    },
+    /// Bounded long operation stretches progress clock (domain/host.md, sections 2–7).
+    Long {
+        /// At most `Limits::long_span` (domain/host.md, sections 2–7).
+        span: Duration,
+    },
+    /// Ends the previously announced progress stretch (domain/host.md, sections 2–7).
+    LongDone,
+    /// Agent waits having read the specified sent-message prefix (domain/host.md, sections 2–7).
+    Waiting {
+        /// None before first message; known sent message thereafter (domain/host.md, sections 2–7).
+        read: Option<Token>,
+    },
+    /// Protocol rejected a named grant (domain/host.md, sections 2–7).
+    Rejected {
+        /// Known credential account (domain/host.md, sections 2–7).
+        account: u32,
+        /// Known positive generation (domain/host.md, sections 2–7).
+        generation: u64,
+    },
+    /// Protocol exhausted a known account (domain/host.md, sections 2–7).
+    Exhausted {
+        /// Known credential account (domain/host.md, sections 2–7).
+        account: u32,
+        /// Parent refresh/retry hint (domain/host.md, sections 2–7).
+        retry_after: Duration,
+    },
+    /// Agent last word; any subsequent record breaks rules (domain/host.md, sections 2–7).
+    Answer {
+        /// Checked final counts and opaque or typed result (domain/host.md, sections 2–7).
+        answer: Answer,
+    },
+}
+
+/// Owned V2 downlink; Start first, ordered controls and at most one Cancel (domain/host.md, sections 2–7).
+#[derive(PartialEq, Eq, Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "sealed host diagnostic keeps a fixed inline tail; queue/state bounds price the full variant"
+)]
+pub enum Down {
+    /// First and exactly once; opaque payloads moved from Spawn (domain/host.md, sections 2–7).
+    Start {
+        /// Validated parent start including post-transcript answers (domain/host.md, sections 2–7).
+        start: Start,
+    },
+    /// Named ordered parent message (domain/host.md, sections 2–7).
+    Message {
+        /// Opaque parent name; reserved until read fence covers it (domain/host.md, sections 2–7).
+        name: Token,
+        /// Opaque text bounded by `Limits::message_bytes` (domain/host.md, sections 2–7).
+        body: Box<[u8]>,
+    },
+    /// One actual response to agent callback (domain/host.md, sections 2–7).
+    Answer {
+        /// Agent callback identity; separate from durable operation name (domain/host.md, sections 2–7).
+        call: Token,
+        /// Exactly one matching actual parent terminal; never abandons delivery (domain/host.md, sections 2–7).
+        reply: Reply,
+    },
+    /// Exact parent commitment of one forwarded turn (domain/host.md, sections 2–7).
+    Acknowledge {
+        /// Outstanding exact numbered turn, never an inferred prefix (domain/host.md, sections 2–7).
+        turn: u32,
+    },
+    /// Coalesced known-account credential refresh (domain/host.md, sections 2–7).
+    Grant {
+        /// Names only; generation increases (domain/host.md, sections 2–7).
+        grant: Grant,
+    },
+    /// First polite stop, once; actual operations retain terminal rights (domain/host.md, sections 2–7).
+    Cancel,
+}

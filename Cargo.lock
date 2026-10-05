@@ -180,6 +180,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-host-domain"
+version = "0.0.0"
+dependencies = [
+ "skein-lib",
+]
+
+[[package]]
+name = "smith-host-world"
+version = "0.0.0"
+dependencies = [
+ "skein-lib",
+ "skein-world",
+ "smith-host-domain",
+]
+
+[[package]]
 name = "smith-llm-anthropic"
 version = "0.0.0"
 dependencies = [

@@ -17,9 +17,12 @@ including mid-run delivery and actual host evidence during shutdown.
 [Declared opaque host tools](docs/development/migration-05s4-host-tools.md)
 now carry bounded schemas, effects and exact input/result bytes through stable
 operation names and settled bounded recovery, retaining actual terminal rights
-during withdrawal and shutdown. Further generic host changes, live channel and
-provider protocol integration, host domains and the executable remain later
-increments of temper's `05s-smith.md` migration plan.
+during withdrawal and shutdown. The standalone
+[V2 host supervision kit](docs/development/migration-05s6-host.md) now relays
+opaque starts, messages and numbered turns, supervises contained agent processes
+and retains actual call/delivery rights through shutdown. Further generic host
+changes, live channel and provider protocol integration, the local host and the
+executable remain later increments of temper's `05s-smith.md` migration plan.
 
 ## Layout
 

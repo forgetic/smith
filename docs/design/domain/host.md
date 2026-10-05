@@ -34,7 +34,9 @@ Down, from the host:
 
 - **the start** first (run.md, 3.2): the charter, the workspace, the
   transcript and the calls answered after it, credential grants;
-- **messages,** named, in order (run.md, section 6);
+- **messages,** named uniquely for the active logical run, in order (run.md,
+  section 6); the kit retains outstanding names and the current read watermark,
+  not an unbounded history of older acknowledged opaque names;
 - **answers** to the run's calls: host tools' (text, as a result or an
   error), deliveries' (run.md, 8.2), busy, unavailable;
 - **credential grants,** refreshed (section 7);
@@ -72,6 +74,12 @@ What a host owes:
 - **Nothing written after a stop.** The host touches the workspace only
   once the run and everything it started are gone, but for the delivery
   it asked for.
+
+Busy is an entrance refusal before forwarding an operation. Unavailable and
+withdrawn are transport terminals, and do not prove that no durable effect
+occurred. An immutable durable name may be retried after the original relay's
+actual terminal; the parent's recorded decision wins. Neither withdrawal nor a
+transport loss lets the kit fabricate a delivery terminal.
 
 What breaks the channel's rules, an agent failure: a call name reused
 while in flight, a turn out of order, a spend that falls, a count in the
@@ -130,6 +138,77 @@ policy.
   time), each with bounded detail for operators, such as its error
   output's tail, never shown to an LLM.
 
+### 4.1 Typed child boundary and retained rights
+
+The extraction is V2 only. `Start` carries opaque charter, optional transcript,
+opaque calls answered after that transcript, optional workspace token, mount
+names/writability/relative conflict paths and credential grant names. The kit
+never reads charter or transcript contents. `Spawned` emits `Started`, moves
+`Start` into the first lower `Send`, requests `Wait` and `Reap`, and demands
+`Read`. The parent learns its agent token in `Started`; payload notices before
+that are refused. Messages may queue immediately afterwards while the lower
+adapter still owns the first Send, before the agent has read it. Start and queued
+payloads are exclusive in the kit; the caller must count its IO-owned Start
+alongside the queue.
+
+The parent inputs are `Spawn`, `Message`, `Answer`, `Acknowledge`, `Grant` and
+`Stop`. The lower terminals are `Spawned`/`Unspawned`, `Sent`/`Unsent`,
+`Received`/`Malformed`/`Hangup`, `Signalled`, `Exited` and `Reaped`. Each closes
+exactly one corresponding `Spawn`, `Send`, `Read`, `Signal`, `Wait` or `Reap`.
+`Reaped` follows `Exited` and proves the entire tree empty. Parent notifications
+are `Started`, `Admitted`, `Called`, `Withdrawn`, `Turn`, `Waiting`, `Rejected`,
+`Exhausted`, `Told`, `Answered`, `Faulted`, `Bounced` and `Gone`.
+
+A stable `CallName` contains positive main completion sequence and assistant
+block position, scoped by `Start.logical_run`; the callback token is only a
+transport right. `Called` carries that scope, name, deadline, tool/effect and
+opaque arguments. The bounded call table keeps name/kind/deadline/withdrawal and
+parent/queued/sending stage. Its reservation survives until the reply's actual
+`Sent`/`Unsent`, or the parent terminal when the channel is already unavailable.
+`Withdrawn` is notification once, never consumption of the parent answer right.
+A call's deadline bounds its watchdog pause; expiration resumes that clock and
+never synthesizes an operation terminal. The parent must finish its actual
+operation by its operation deadline, including an already landed result whose
+response transport is late. Gone cannot release a workspace ahead of that right.
+
+Generic host-tool replies carry opaque text and an error flag. Delivery carries
+the complete sealed `Delivered`/`Nothing`/`Refused`/`Failed`/`Stale` terminal from
+run.md section 8.2. At most one delivery is outstanding per agent. An agent final Answer cannot abandon a delivery whose actual terminal remains
+Parent-stage or queued; Sending may already have reached the agent. Reply capacity
+must fit the maximum sealed receipts before any operation is admitted; a real
+landing cannot be replaced with TooLarge. One additional bounded successful
+landing proof (stable name, receipts and issued downlink chronology) survives
+the call's Send terminal until the last word. Replacing it temporarily uses the
+Parent-stage call's reserved reply ownership; this and the separate withdrawal
+snapshot are priced in `worst_case`.
+
+A final `Delivered` must match real proof whose response was issued, preserving
+the complete `Model(Fault)`, `Budget(Exhausted)`, `Policy(Unfinished)`,
+`Cancelled` or `Stale` stop payload and cumulative spend. For Cancelled, the kit
+also checks that its Cancel was issued before that response. It does not infer a
+private agent stop decision or actual Cancel receipt from a parent's Stop.
+Therefore it cannot require Delivered for every call pending at parent Stop.
+An earlier ordinary landing followed by a later stop remains ordinary; the
+world's independent oracle observes the scripted agent's actual stop/receipt
+order to detect omitted, invented or misclassified interrupted evidence.
+
+`Gone` requires process exit, empty tree, EOF, no lower Send/Read/Signal right,
+no actual parent call/delivery right and no parent turn commitment. Calls and
+turn metadata are independent of the finite supervision phase and survive
+Cancelled, Draining, Exiting, Terminating and Killing. A last word and the
+containment terminal are separate. Once the parent explicitly stops a run,
+later channel breaches terminate the tree and emit a diagnostic fact without
+inventing a parent run fault; a first valid last word may still be heard.
+Wall-owned shutdown keeps its original failure cause, and a breach there is
+reported. After termination ordinary working traffic is discarded while final
+Answer and every actual lower/parent terminal remain receivable. Lower adapters settle every issued operation
+even after termination; no destructor abandons one.
+
+The parent reserves `max_out(limits)` free output slots before `step`/`fire`,
+repeats due timers and reclaims retired slab slots only at its iteration boundary
+(programming-model.md, sections 2, 4.5, 5 and 6). Facts are bounded content-free
+observations; dropped facts saturate a counter and change no decision.
+
 ## 5. What a host decides
 
 - **Which runs, with which charters,** and whether a run resumes;
@@ -154,10 +233,21 @@ policy.
   is room, its watchdog paused.
 - **Before the answer.** The answer says how many turns the run took and
   is sent after them.
-- **Held where?** Whether `smith-host-domain` holds turns for its parent,
-  or passes each on and leaves keeping it to the host, is open
-  (section 12); temper's worker holds them across its own channel's
-  losses.
+- **Held by the parent.** The kit moves each validated opaque turn body to
+  its parent once; it keeps bounded number/byte metadata until exact
+  `Acknowledge { turn }`. This is a durable commitment notice, not a cumulative
+  fence: acknowledging turn 2 cannot release turn 1. Repeated already committed
+  ACKs are inert. Metadata for a queued/sending ACK remains reserved through its
+  actual Send terminal. Gone retains every uncommitted turn even after EOF.
+- **Read credit reserved before demand.** A Read is issued only if metadata
+  count and the maximum next-turn bytes fit. Lack of credit pauses the watchdog;
+  downlink answers and ACKs still progress. During shutdown the channel is
+  drained, and further out-of-credit or malformed traffic is a rules failure.
+  The independent wall clock never pauses.
+- **Fenced metadata.** Turns begin at one, are consecutive and carry
+  nondecreasing cumulative spend. Final count matches exactly, and final spend
+  cannot fall. A read watermark advances only through the known sent-message
+  prefix; queued, unknown and regressing names fail the channel rules.
 
 ## 7. Credentials
 
@@ -165,7 +255,15 @@ policy.
   endpoints need as a grant on the channel, named by account and
   generation, refreshed before it lapses; the agent's protocol layer
   holds it, and the domain names only the grant. A notice of a rejected
-  credential or an exhausted account goes up for the host to act on.
+  credential or an exhausted account goes up for the host to act on. The kit
+  keeps each known account's latest queued generation and greatest generation
+  actually issued down the channel. Refreshes increase and coalesce per account
+  without displacing other traffic. Rejection of an older generation may cross
+  a queued refresh: it remains a stale notice for the parent, not an agent
+  fault. Zero, unknown account or a generation beyond those actually emitted
+  fails the channel. The parent owns the precise grant history, so it ignores
+  obsolete names or validates skipped historical generations against its own
+  record; the kit does not retain an unbounded generation history.
 - **Or the agent's own:** the local host signs in to a provider with
   `smith-oauth`, keeps the refresh token in the user's configuration
   directory, and lends the agent its grants the same way, so the agent
@@ -234,14 +332,17 @@ the terminal.
   relayed calls with names, spend, waiting), with temper's names gone:
   runs are a host's, push is delivery, and the engine's tools are host
   tools.
-- **`smith-host-domain`** is temper's worker's agent child domain, as
-  temper's `worker.md` described it: one process per run, the watchdog,
-  cancel then kill.
+- **`smith-host-domain`** extracts Temper
+  `19735a066cd485ca9d39e70ffb8ca8bd902ad55a`'s worker-agent behavior (05d,
+  `e2a6a719`), independently of its later frozen-agent rename: one process per
+  run, watchdog, cancel/terminate/kill, full V2 turns/transcripts/spend. Smith
+  delivery vocabulary is the merged `2a621a5` seam. Complete source-story
+  mappings and retained inventories are in
+  `docs/development/migration-05s6-host.md`.
 - **The local host and one process** are new.
 
 ## 12. Open questions
 
-- **Turns held by the host kit or by each host** (section 6).
 - **A host without a durable record** and host tools that write: refused
   by rule, as section 2 says, or allowed with a warning to the LLM.
 - **Containment in one process:** whether commands may still run under a

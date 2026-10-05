@@ -141,3 +141,15 @@ settled recovery, actual shutdown and the existing memory/replay sweeps remain.
 Workspace budgets are unchanged. Source `ab15cae` passed the exact-tip four
 gates before merging: 411 focused / 1.786 seconds and nine fuzzy / 3.111
 seconds, without skips; formatting and all-target clippy also passed.
+
+05s6 HOST was measured serially on 2026-10-05 from integration base
+`9b9b7c6` plus the independently reviewed typed host extraction. Section 2's
+commands passed 459 focused tests in 5.001 seconds and ten fuzzy tests in
+6.569 seconds, with no skips. The new host world contributes 45 focused
+tests / 0.145 seconds and one fuzzy test / 0.018 seconds; the host domain
+contributes three focused tests / 0.010 seconds. Shares sum rounded individual
+PASS durations. Four host memory drivers retain maximum starts, full queued
+messages/replies, caller-owned Start coexistence and sealed proof replacement.
+The 240-seed V2 sweep asserts actual ending classes and settlement, preserving
+mapped source behavior and new typed ownership controls. Budgets are unchanged.
+Exact source-commit four-gate results are recorded after validation.
