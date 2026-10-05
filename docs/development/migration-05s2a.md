@@ -40,11 +40,11 @@ been pushed. Detailed coverage, deliberate codec differences and review
 evidence are recorded in the source commit messages and Skein's
 `docs/design/fake-llm.md`, section 6.
 
-Both consumer lockfiles now select 2c725c2. Temper's matching advance,
+Both original consumer lockfiles select 2c725c2 at this merged checkpoint. Temper's matching advance,
 9e86d6d4, passed formatting, all-target clippy, 2,292 focused tests in
 10.339 seconds and 40 fuzzy tests in 26.092 seconds. The shared client preserves native
-call and item IDs in distinct bounded fields; Smith's actual adapter and its
-composed-world gate remain open.
+call and item IDs in distinct bounded fields. The temporary consumer evidence
+below continues Smith's adapter work; final replacement acceptance remains open.
 
 ## Implementation and evidence still open
 
@@ -56,5 +56,49 @@ composed-world gate remain open.
   OAuth and generic peer crates. Record exact source and suite evidence here.
 
 The original design correction, 51fdd24, changed Markdown only. The shared
-increments above are now merged, while the real Smith adapter and copied-crate
-removal remain open. This evidence companion changes Markdown only.
+increments above are merged; final consumer acceptance and copied-crate
+removal remain open. Their earlier evidence updates changed Markdown only.
+
+
+## Reviewed temporary consumer checkpoints
+
+The current session cannot write original repository metadata or Smith/Skein
+source. These reviewed checkpoints live under `/tmp/temper-smith-resume/`;
+original main branches have not moved. Canonical Smith dependencies in these
+checkpoints use shared revision `e86a7d69`, including raw argument history and
+`Exchange::at(now, wall)`. Provider codecs remain exclusively Skein-owned on
+the new runtime path. Copied packages have no application consumers and remain
+until required shared and consumer acceptance permits their coherent removal.
+
+| Increment | Source | Evidence |
+|---|---|---|
+| Public boundary documentation | Smith edc583e | Reviewed; fmt/clippy pass; 489 focused / 1.937 s; 10 fuzzy / 4.294 s. |
+| Original root through actual shared Client | Smith 240838d | Reviewed; fmt/clippy pass; 490 focused / 1.983 s; 10 fuzzy / 4.310 s. |
+| Adapter owner, inventory and attestation controls | This temporary increment | Reviewed; fmt/clippy pass; 496 focused / 1.968 s; 10 fuzzy / 4.219 s. |
+
+The last increment adds six positive-first controls over actual native Clients
+in both configured wire formats. It preserves matching owners at Completed,
+Failed and Cancelled entrances; literal overloaded class, response evidence and
+detail; exact schema and owned-result rendering inventories; and an actual
+text/Wait/text call's position, name, raw input, kind and unique consumption.
+Fresh actual terminals supply each corrupted-owner or attestation case.
+Physical Close/Closed and repeated-settlement observations remain separate
+from adapter context consumption. No application decoder or Finish policy is
+invented by these tests. Idle serial measurements are 496 focused / 6.433 s
+and ten fuzzy / 7.958 s, with zero skips and unchanged suite budgets.
+
+Skein's reviewed temporary fake mechanics restore query-cap, checked-overflow
+and random/scripted generation-scratch coverage. Its focused shared-client
+scope passes 132 tests / 0.838 s and full fuzzy diagnostic 64 / 18.997 s.
+The mandatory full SDK default gate is still blocked at `io_uring` setup with
+`EPERM`; diagnostics do not replace that gate. Earlier reviewed temporary checkpoints
+are preserved in verified bundles under Temper's `target/next-domain-handoff`.
+
+Remaining replacement acceptance:
+
+- Retain explicit full usage/replay, refusal/reasoning and malformed-call
+  no-effect feedback controls, alongside remaining failure classifications.
+- Finish actual submitted-delivery host composition, attained root/handoff
+  allocation evidence and an observed bounded message schedule sweep.
+- Pass final shared/consumer gates and exact independent cleanup review before
+  removing copied packages or advancing original main branches.
