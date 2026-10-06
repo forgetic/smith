@@ -4,7 +4,7 @@
 //! The EOF control stops driving the simulated root after actual process exit:
 //! it proves retained parent ownership, never a post-EOF receipt or root Turn.
 //! Contract: domain/run.md, sections 8.2, 10 and 14; domain/host.md, sections 2,
-//! 4.1, 6 and 9; testing-strategy.md, sections 2.3, 6 and 7.
+//! 4, 6 and 9; testing-strategy.md, sections 2.3, 6 and 7.
 
 use skein_lib::{Duration, Token};
 use skein_world::domain::Span;

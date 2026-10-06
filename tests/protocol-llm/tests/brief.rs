@@ -1,7 +1,7 @@
 //! Ordered host sections through actual main/child sessions and native restore.
 //! Expected system bodies are handwritten outside literals; concrete history,
 //! child results, usage and lower settlement come from the real composed routes.
-//! Contract: domain/run.md, sections 3.1, 3.3, 5.3, 6.2 and 13;
+//! Contract: domain/run.md, sections 3.1, 3.3, 5.3, 6 and 13;
 //! testing-strategy.md, sections 2.3, 6 and 7.
 
 use skein_fake_checkout::Checkout;

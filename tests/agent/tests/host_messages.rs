@@ -140,14 +140,14 @@ fn real_host_turn_ack_and_send_rights_survive_root_parking_and_exit_tree_empty_e
 }
 
 /// Compare the forwarded final fields with the actual root, never `Turn` metadata.
-/// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+/// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.
 fn assert_accounting(answer: &host::Answer, turns: u32, spent: run::Spend) {
     assert_eq!(answer.turns, turns, "only actual main Turns count as transmitted turns");
     assert_eq!(answer.spent, spent.units);
 }
 
 /// Translate the actual root final `Spend` without session usage or `Turn` metadata.
-/// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+/// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.
 fn final_accounting(turns: u32, spent: run::Spend, result: RunResult) -> host::Answer {
     host::Answer { turns, spent: spent.units, result }
 }

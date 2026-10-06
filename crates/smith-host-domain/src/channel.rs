@@ -33,16 +33,16 @@ pub struct Start {
 #[derive(PartialEq, Eq, Debug)]
 pub struct Directory {
     /// Unique safe single component bounded by `Limits::name_bytes`; the host
-    /// attests text encoding, and bytes move unchanged (domain/host.md, section 4.1).
+    /// attests text encoding, and bytes move unchanged (domain/host.md, section 4).
     pub name: Box<[u8]>,
     /// Parent write authority for the mount (domain/host.md, sections 2–7).
     pub writable: bool,
     /// Parent declares a git working tree; plain directories have no conflicts
-    /// (domain/host.md, section 4.1).
+    /// (domain/host.md, section 4).
     pub git: bool,
     /// At most `Limits::conflicts` unique bounded relative paths per git mount.
     /// Read-only git conflicts are informative and grant no writes. The host
-    /// attests text encoding (domain/host.md, section 4.1).
+    /// attests text encoding (domain/host.md, section 4).
     pub conflicts: Box<[Box<[u8]>]>,
 }
 
@@ -257,15 +257,15 @@ pub enum ModelFault {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Exhausted {
     /// Global completion count reached its cap; admitted current calls settle.
-    /// Contract: domain/run.md, section 9.3; domain/host.md, section 6.
+    /// Contract: domain/run.md, section 9; domain/host.md, section 6.
     Turns,
 
     /// Global host-unit charge reached its cap; admitted current calls settle.
-    /// Contract: domain/run.md, section 9.3; domain/host.md, section 6.
+    /// Contract: domain/run.md, section 9; domain/host.md, section 6.
     Spend,
 
     /// Monotonic run deadline expired; immediate close remains independent.
-    /// Contract: domain/run.md, section 9.3; domain/host.md, sections 4 and 6.
+    /// Contract: domain/run.md, section 9; domain/host.md, sections 4 and 6.
     Time,
 }
 
@@ -322,11 +322,11 @@ pub enum RunFailure {
     /// Agent currency arithmetic failed; the reported spend is what was
     /// charged before the failing completion.
     /// Actual already-landed delivery remains separate durable evidence.
-    /// Contract: domain/run.md, section 9.4; domain/host.md, sections 6 and 9.
+    /// Contract: domain/run.md, section 9; domain/host.md, sections 6 and 9.
     PriceOverflow,
 
     /// Agent raw-usage arithmetic failed before the completion's turn was told.
-    /// Contract: domain/run.md, section 9.4; domain/host.md, sections 6 and 9.
+    /// Contract: domain/run.md, section 9; domain/host.md, sections 6 and 9.
     UsageOverflow,
 
     /// A session receiving token cap stopped another completion; this does not
@@ -403,7 +403,7 @@ pub struct Answer {
 
     /// Final global host-unit spend, at least the previous Turn's spend;
     /// refused starts have zero.
-    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.
     pub spent: u64,
 
     /// Opaque accepted result or typed refusal/parking/failure/actual delivery evidence (domain/host.md, sections 2–7).

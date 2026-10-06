@@ -567,7 +567,7 @@ impl World {
     /// any provider effect. Success queues the original Start; its one Answer
     /// and every actual lower Closed remain owed while the caller drives it.
     /// Contract: scratch/client.md, sections 1, 3, 5 and 6; domain/run.md,
-    /// sections 3, 6.2, 10 and 14; domain/session.md, section 3.
+    /// sections 3, 6, 10 and 14; domain/session.md, section 3.
     #[must_use]
     pub fn with_wire(
         settings: Settings,

@@ -1,5 +1,5 @@
 //! Public canonical feedback controls with independently specified exact bytes.
-//! Contract: domain/run.md, sections 5.4, 7, 8 and 10;
+//! Contract: domain/run.md, sections 5.2, 7, 8 and 10;
 //! testing-strategy.md, section 7.
 
 use smith_domain::{Feedback, FeedbackRefusal, feedback, run};
