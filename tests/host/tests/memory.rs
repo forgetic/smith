@@ -223,6 +223,11 @@ fn maximum_v2_starts_and_full_queued_replies_fit_every_slot() {
                 Up::Answer {
                     answer: Answer {
                         turns: limits.turns,
+                        completions: u32::MAX,
+                        input: u64::MAX,
+                        output: u64::MAX,
+                        cache_read: u64::MAX,
+                        cache_write: u64::MAX,
                         spent: u64::from(limits.turns),
                         spend_overflow: false,
                         usage_overflow: false,
@@ -269,6 +274,11 @@ fn maximum_start_io_ownership_coexists_with_full_pre_read_message_queue() {
         Up::Answer {
             answer: Answer {
                 turns: 0,
+                completions: 0,
+                input: 0,
+                output: 0,
+                cache_read: 0,
+                cache_write: 0,
                 spent: 0,
                 spend_overflow: false,
                 usage_overflow: false,

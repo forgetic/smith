@@ -86,7 +86,20 @@ fn random_worlds_settle_and_reach_every_ending() {
 }
 
 fn last(world: &mut World, result: RunResult, spent: u64) {
-    world.up(Up::Answer { answer: Answer { turns: 0, spent, spend_overflow: false, usage_overflow: false, result } });
+    world.up(Up::Answer {
+        answer: Answer {
+            turns: 0,
+            completions: u32::from(spent > 0),
+            input: spent * 11,
+            output: spent * 13,
+            cache_read: spent * 17,
+            cache_write: spent * 19,
+            spent,
+            spend_overflow: false,
+            usage_overflow: false,
+            result,
+        },
+    });
 }
 
 fn assert_ending(world: &World, fate: u64, seed: u64) {

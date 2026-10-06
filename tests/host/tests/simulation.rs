@@ -24,7 +24,21 @@ fn reply(world: &mut World, callback: u64, response: Reply) {
     world.event(Event::Answer { agent: world.agent(), call: Token::new(callback), reply: response });
 }
 fn last(world: &mut World, result: RunResult, turns: u32, spent: u64) {
-    world.up(Up::Answer { answer: Answer { turns, spent, spend_overflow: false, usage_overflow: false, result } });
+    let completions = turns.max(u32::from(spent > 0));
+    world.up(Up::Answer {
+        answer: Answer {
+            turns,
+            completions,
+            input: u64::from(completions) * 11,
+            output: u64::from(completions) * 13,
+            cache_read: u64::from(completions) * 17,
+            cache_write: u64::from(completions) * 19,
+            spent,
+            spend_overflow: false,
+            usage_overflow: false,
+            result,
+        },
+    });
 }
 fn finish(world: &mut World) {
     last(world, RunResult::Parked, 0, 0);
@@ -354,6 +368,11 @@ fn payloads_beyond_the_limits_break_the_rules() {
         Up::Answer {
             answer: Answer {
                 turns: 0,
+                completions: 0,
+                input: 0,
+                output: 0,
+                cache_read: 0,
+                cache_write: 0,
                 spent: 0,
                 spend_overflow: false,
                 usage_overflow: false,
@@ -1051,7 +1070,18 @@ fn cancelled_and_draining_paths_keep_work_and_drop_answers_only_after_a_reported
     world.at(10);
     assert_eq!(world.seen.fault, Some(Fault::NoProgress));
     world.up(Up::Answer {
-        answer: Answer { turns: 0, spent: 10, spend_overflow: false, usage_overflow: false, result: RunResult::Parked },
+        answer: Answer {
+            turns: 0,
+            completions: 1,
+            input: 11,
+            output: 13,
+            cache_read: 17,
+            cache_write: 19,
+            spent: 10,
+            spend_overflow: false,
+            usage_overflow: false,
+            result: RunResult::Parked,
+        },
     });
     assert!(world.seen.answer.is_none());
     world.at(12);

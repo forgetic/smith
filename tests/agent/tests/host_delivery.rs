@@ -190,7 +190,8 @@ fn cancel(agent: &mut Agent, host: &mut Host, submission: &DeliverySubmission, n
 }
 
 fn final_answer(agent: &Agent) -> host::Answer {
-    let run::Answer::Delivered { name, receipts, stopped: run::Failure::Cancelled, turns, .. } = agent.answer() else {
+    let run::Answer::Delivered { name, receipts, stopped: run::Failure::Cancelled, turns, spent } = agent.answer()
+    else {
         panic!("actual late landing remains Delivered with the decided Cancelled stop")
     };
     assert_eq!(*name, run::CallName { completion: 2, position: 0 });
@@ -203,9 +204,14 @@ fn final_answer(agent: &Agent) -> host::Answer {
     }), "actual concrete Turn keeps exact paired opaque receipt feedback");
     host::Answer {
         turns: *turns,
-        spent: agent.turn_metadata().last().expect("actual global final metadata").2.units,
-        spend_overflow: agent.turn_metadata().last().expect("actual global final metadata").2.units_overflow,
-        usage_overflow: agent.turn_metadata().last().expect("actual global final metadata").2.usage_overflow,
+        completions: spent.turns,
+        input: spent.input,
+        output: spent.output,
+        cache_read: spent.cache_read,
+        cache_write: spent.cache_write,
+        spent: spent.units,
+        spend_overflow: spent.units_overflow,
+        usage_overflow: spent.usage_overflow,
         result: RunResult::Delivered {
             name: host::CallName { completion: name.completion, position: name.position },
             receipts: host_receipt(receipts),

@@ -260,6 +260,29 @@ observations; dropped facts saturate a counter and change no decision.
   count matches exactly, and final representable spend cannot fall. A read watermark advances only through the known sent-message
   prefix; queued, unknown and regressing names fail the channel rules.
 
+### 6.1 Final accounting
+
+The final Answer carries two different counts. `turns` is the exact number
+of main conversation Turns transmitted in this activation, used to settle
+their commitment rights. `completions` is the activation's global completion
+count across the main conversation and every child. It also carries the
+global raw `input`, `output`, `cache_read` and `cache_write` counters, the
+scalar `spent`, and independent currency and raw-usage overflow attestations.
+These are the actual final `Spend` from run.md, section 9.4. The protocol
+does not derive them from the last transmitted Turn, sum session bills, or
+reprice usage. Children can complete after that Turn or without producing
+a main Turn.
+
+When raw usage is representable, `completions` is at least `turns`. On raw
+overflow, the complete raw tuple, including completion count, is the last
+representable prefix frozen atomically by the agent; it can be smaller than
+the transmitted main count. The sticky attestation identifies that unknown
+total. Currency overflow remains independent. A refused start has no
+admitted work: both counts, all four raw counters and scalar spend are zero,
+and both attestations are false. These fixed inline values add no payload,
+acknowledgement or process right. The kit validates those relationships and
+forwards all final values unchanged to its parent.
+
 ## 7. Credentials
 
 - **Lent by the host:** an agent under a host gets each credential its
@@ -334,7 +357,9 @@ attestations from domain/run.md, section 9. The complete typed Turn body keeps
 its own inclusive session charge, exact per-completion usage and transcript
 sequence. Those are distinct views when parallel children have outstanding
 bills; neither the protocol face nor the host kit reprices tokens or adds a
-child bill. Waiting follows the real settled run notice; the kit may pause
+child bill. Final Answer forwards the root's complete final accounting as
+section 6.1 describes, even when it differs from the last Turn's metadata.
+Waiting follows the real settled run notice; the kit may pause
 no-progress monitoring then, while its independent wall clock runs. Budget
 implementation and gate status are recorded in
 `docs/development/migration-05s4-budget.md`.

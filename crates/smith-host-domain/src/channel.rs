@@ -450,6 +450,38 @@ pub enum RunResult {
 pub struct Answer {
     /// Exactly the observed numbered turn count (domain/host.md, sections 2–7).
     pub turns: u32,
+
+    /// Agent's final global actual completion count across main and every child,
+    /// copied from the root's `Spend` without recounting transmitted `Turn`s.
+    /// At least `turns` when raw totals are representable; `usage_overflow`
+    /// retains the last atomic prefix, which may be smaller. Zero for `Refused`.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+    pub completions: u32,
+
+    /// Agent's final global fresh-input tokens, copied from root `Spend`.
+    /// Exact without `usage_overflow`, otherwise the last atomic raw prefix;
+    /// never repriced by the host. Zero for `Refused`.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+    pub input: u64,
+
+    /// Agent's final global output tokens, copied from root `Spend`.
+    /// Exact without `usage_overflow`, otherwise the last atomic raw prefix;
+    /// never reconstructed from the last `Turn`. Zero for `Refused`.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+    pub output: u64,
+
+    /// Agent's final global cache-read tokens, copied from root `Spend`.
+    /// Exact without `usage_overflow`, otherwise the last atomic raw prefix;
+    /// independent of host-unit pricing. Zero for `Refused`.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+    pub cache_read: u64,
+
+    /// Agent's final global cache-write tokens, copied from root `Spend`.
+    /// Exact without `usage_overflow`, otherwise the last atomic raw prefix;
+    /// frozen with the other raw counters on overflow. Zero for `Refused`.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+    pub cache_write: u64,
+
     /// Final global host-unit spend, at least the previous Turn's representable
     /// prefix. Exact only without `spend_overflow`; refused starts have zero.
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
@@ -461,9 +493,11 @@ pub struct Answer {
     pub spend_overflow: bool,
 
     /// Sticky agent raw-usage-overflow attestation; cannot clear a Turn flag.
-    /// False for a refused start; independent of financial overflow.
+    /// False for a refused start; independent of financial overflow. The five
+    /// raw fields retain one atomic representable prefix once this is set.
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
     pub usage_overflow: bool,
+
     /// Opaque accepted result or typed refusal/parking/failure/actual delivery evidence (domain/host.md, sections 2–7).
     pub result: RunResult,
 }

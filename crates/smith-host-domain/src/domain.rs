@@ -1061,13 +1061,21 @@ fn valid_answer(agent: &Agent, answer: &crate::Answer, limits: &Limits) -> bool 
             }
         }
     }
-    if answer.turns != agent.number || !valid_spend(agent, answer.spent, answer.spend_overflow, answer.usage_overflow) {
+    if answer.turns != agent.number
+        || (!answer.usage_overflow && answer.completions < answer.turns)
+        || !valid_spend(agent, answer.spent, answer.spend_overflow, answer.usage_overflow)
+    {
         return false;
     }
     match &answer.result {
         RunResult::Refused { detail } => {
             !agent.admitted
                 && answer.turns == 0
+                && answer.completions == 0
+                && answer.input == 0
+                && answer.output == 0
+                && answer.cache_read == 0
+                && answer.cache_write == 0
                 && answer.spent == 0
                 && !answer.spend_overflow
                 && !answer.usage_overflow

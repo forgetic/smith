@@ -167,3 +167,16 @@ memory cases and new exact/full/one-short receiving controls remain. The
 parallel gate passed 567 focused / 3.138 seconds and eleven fuzzy / 3.917
 seconds; formatting and all-target Clippy passed. This is temporary-checkout
 validation; original-main acceptance still requires reconciliation and gates.
+
+05s6 FINAL ACCOUNTING was measured serially on 2026-10-06 from temporary
+parent `2f324b0` plus the frozen increment. Section 2's commands passed
+572 focused tests in 9.474 seconds and eleven fuzzy tests in 8.150 seconds,
+with no skips. The affected host world contributes 52 focused tests /
+0.170 seconds and one fuzzy test / 0.018 seconds; the host domain contributes
+four focused tests / 0.027 seconds. The agent world contributes 95 focused
+tests / 3.204 seconds and four fuzzy tests / 4.548 seconds. Shares sum rounded
+PASS durations before the suite summary. Existing payload maxima, four host
+memory drivers and the 240-seed host sweep remain. The parallel gate passed
+572 focused / 3.866 seconds and eleven fuzzy / 4.064 seconds; formatting and
+all-target Clippy passed. This validates the temporary checkout; original-main
+acceptance and shared SDK gates remain open.
