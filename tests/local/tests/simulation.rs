@@ -14,6 +14,16 @@ fn a_question_is_answered_and_the_chat_waits_for_the_next() {
 }
 
 #[test]
+fn a_chat_reads_and_edits_files_in_a_workspace_directory() {
+    let mut world = World::with_workspace(18);
+    world.line(b"Change the answer in work");
+    world.drive(400);
+    let (content, _) = world.disk().load(1, b"src/lib.rs", 4096).expect("workspace source remains present");
+    assert_eq!(content, b"pub fn answer() -> u32 { 43 }\n");
+    assert!(world.shown().iter().any(|text| text.as_ref() == b"The answer is 43."));
+}
+
+#[test]
 fn a_chat_with_no_workspace_waits_parks_and_resumes_on_the_next_invocation() {
     let mut first = World::new(21);
     first.line(b"Hello");

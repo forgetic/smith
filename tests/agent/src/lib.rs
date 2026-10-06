@@ -28,6 +28,9 @@ pub mod script;
 
 pub mod translate;
 
+/// Shared typed checkout translation used by the local-host world.
+pub use smith_tools_world::translate as checkout_io;
+
 mod world;
 
 pub use limits::{BUDGET, LIMITS, TIGHT};

@@ -3,10 +3,11 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use skein_fake_checkout::{Checkout, Exit as FakeExit, Program};
 use skein_fake_llm_domain as provider;
 use skein_lib::{Duration, Env, Queue, ReplyTo, Time, Token, Wall};
 use skein_world::domain::{Referee, Trace};
-use smith_agent_world::{self as agent_world, translate};
+use smith_agent_world::{self as agent_world, checkout_io, translate};
 use smith_domain::{self as agent, run, tools};
 use smith_local_domain::{self as local, AgentIo, ChatState, Contract, Event, ExitStatus, Request, StoreFailure};
 
@@ -112,6 +113,7 @@ pub struct World {
     provider: provider::Domain,
     provider_env: Env<provider::Config>,
     provider_out: Queue<provider::Request>,
+    disk: Checkout,
     pending: BTreeMap<Token, (tools::Grants, Box<[agent::llm::Served]>)>,
     cancelled: BTreeSet<Token>,
     events: VecDeque<Event>,
@@ -144,7 +146,7 @@ impl World {
     /// Same chat with no observation capacity; domain behavior must agree.
     #[must_use]
     pub fn without_facts(seed: u64) -> World {
-        let mut world = Self::with_capacity(seed, Store::default(), true, 2, 0);
+        let mut world = Self::with_capacity(seed, Store::default(), true, 2, 0, false);
         world.collect_facts = false;
         world
     }
@@ -152,7 +154,7 @@ impl World {
     /// A one-turn unsaved window for store-pressure stories.
     #[must_use]
     pub fn tight_unsaved(seed: u64) -> World {
-        Self::with_capacity(seed, Store::default(), true, 1, 64)
+        Self::with_capacity(seed, Store::default(), true, 1, 64, false)
     }
 
     /// A fresh local domain over an existing durable fake store.
@@ -168,10 +170,22 @@ impl World {
     }
 
     fn with_resume(seed: u64, store: Store, resume: bool) -> World {
-        Self::with_capacity(seed, store, resume, 2, 64)
+        Self::with_capacity(seed, store, resume, 2, 64, false)
     }
 
-    fn with_capacity(seed: u64, store: Store, resume: bool, unsaved: u32, facts: u32) -> World {
+    /// A writable plain directory with a source file and contained test command.
+    #[must_use]
+    pub fn with_workspace(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 2, 64, true)
+    }
+
+    /// The fake disk observed after the agent has settled its file operations.
+    #[must_use]
+    pub fn disk(&self) -> &Checkout {
+        &self.disk
+    }
+
+    fn with_capacity(seed: u64, store: Store, resume: bool, unsaved: u32, facts: u32, workspace: bool) -> World {
         let referee =
             Referee::new(Meeting::after(store.activation(), store.state.map_or(0, |state| state.next_message)));
         let limits = local::Limits {
@@ -186,9 +200,36 @@ impl World {
             unsaved,
             facts,
         };
+        let mut disk = Checkout::new();
+        let workspace = if workspace {
+            disk.write(b"work/src/lib.rs", b"pub fn answer() -> u32 { 42 }\n");
+            disk.program(
+                b"cargo test",
+                Program {
+                    duration: std::time::Duration::from_millis(1),
+                    output: b"test result: ok. 1 passed\n".to_vec(),
+                    exit: FakeExit::Code(0),
+                    changes: Vec::new(),
+                },
+            );
+            let root = disk.root(b"work");
+            Some(run::Workspace {
+                directories: Box::new([run::Directory {
+                    name: b"work".as_slice().into(),
+                    root: checkout_io::token(root),
+                    writable: true,
+                    git: false,
+                    conflicts: Box::new([]),
+                }]),
+            })
+        } else {
+            None
+        };
+        let instructions: &[u8] =
+            if workspace.is_some() { b"@local-workspace Assist the person." } else { b"@chat Assist the person." };
         let config = local::Config {
             chat: b"main".as_slice().into(),
-            instructions: b"@chat Assist the person.".as_slice().into(),
+            instructions: instructions.into(),
             brief: run::charter::Brief { sections: Box::new([]) },
             models: Box::new([run::charter::Llm {
                 prices: run::Prices { input: 0, cached: 0, output: 0, unit: 1 },
@@ -204,7 +245,7 @@ impl World {
             waiting: Duration::from_secs(30),
             resume,
             accounts: Box::new([0]),
-            workspace: None,
+            workspace,
         };
         let provider_config = smith_session_world::Settings::calm(seed).provider;
         let provider = agent_world::scripted_provider(&provider_config, seed ^ 0x25);
@@ -217,6 +258,7 @@ impl World {
             provider,
             provider_env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits: provider_config },
             provider_out: Queue::with_capacity(provider::MAX_OUT),
+            disk,
             pending: BTreeMap::new(),
             cancelled: BTreeSet::new(),
             events: VecDeque::new(),
@@ -573,6 +615,10 @@ impl World {
         self.referee.observe(self.env.now, seen, &mut Vec::new());
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one exhaustive typed adapter keeps each agent request beside its terminal"
+    )]
     fn agent_request(&mut self, request: agent::Request) {
         match request {
             agent::Request::Complete { owner, prompt, .. } => {
@@ -615,13 +661,59 @@ impl World {
                 self.cancelled.insert(owner);
                 self.events.push_back(Event::Agent(AgentIo::Cancelled { owner }));
             }
-            agent::Request::Io { .. }
-            | agent::Request::CancelIo { .. }
-            | agent::Request::Read { .. }
-            | agent::Request::Probe { .. }
-            | agent::Request::Check { .. }
-            | agent::Request::Abort { .. }
-            | agent::Request::Waiting { .. }
+            agent::Request::Io { owner, op, deadline: _ } => {
+                let done = match op {
+                    tools::Op::Spawn { cwd, command, env, roots, head, tail } => {
+                        match checkout_io::spawn(&self.disk, &cwd, &command, &env, &roots, (head, tail)) {
+                            Ok(started) => {
+                                self.disk.finish(&started.process);
+                                checkout_io::exited(
+                                    Some(started.process.program.exit),
+                                    &started.process.program.output,
+                                    head,
+                                    tail,
+                                )
+                            }
+                            Err(done) => done,
+                        }
+                    }
+                    op => checkout_io::perform(&mut self.disk, op),
+                };
+                self.events.push_back(Event::Agent(AgentIo::Done { owner, done }));
+            }
+            agent::Request::CancelIo { owner } => {
+                self.events.push_back(Event::Agent(AgentIo::Done { owner, done: tools::Done::Cancelled }));
+            }
+            agent::Request::Read { owner, at, max, deadline: _ } => {
+                let read = match self.disk.load(at.root.raw(), &at.path, u64::from(max)) {
+                    Ok((text, _)) => run::Read::Text { text: text.into(), whole: true },
+                    Err(_) => run::Read::Missing,
+                };
+                self.events.push_back(Event::Agent(AgentIo::Read { owner, read }));
+            }
+            agent::Request::Probe { owner, at, deadline: _ } => {
+                let executable =
+                    self.disk.load(at.root.raw(), &at.path, 4096).is_ok_and(|(text, _)| text.starts_with(b"#!"));
+                self.events.push_back(Event::Agent(AgentIo::Probed { owner, executable }));
+            }
+            agent::Request::Check { owner, program, deadline: _, tail } => {
+                let passed = self
+                    .disk
+                    .load(program.root.raw(), b"src/lib.rs", 4096)
+                    .is_ok_and(|(text, _)| text.windows(2).any(|part| part == b"43"));
+                let output = if passed { &b"ok: src/lib.rs\n"[..] } else { &b"FAILED: src/lib.rs\n"[..] };
+                let keep = usize::try_from(tail).expect("small check output").min(output.len());
+                let ran = run::Ran {
+                    exit: run::Exit::Code { code: u8::from(!passed) },
+                    output: output[output.len() - keep..].into(),
+                    cut: u64::try_from(output.len() - keep).expect("small output"),
+                };
+                self.events.push_back(Event::Agent(AgentIo::Checked { owner, ran }));
+            }
+            agent::Request::Abort { owner } => {
+                self.events.push_back(Event::Agent(AgentIo::Aborted { owner }));
+            }
+            agent::Request::Waiting { .. }
             | agent::Request::Turn { .. }
             | agent::Request::Admitted { .. }
             | agent::Request::Answer { .. }
@@ -630,7 +722,7 @@ impl World {
             | agent::Request::Exhausted { .. }
             | agent::Request::HostCall { .. }
             | agent::Request::WithdrawHost { .. }
-            | agent::Request::Deliver { .. } => unreachable!("workspace-free chat forwards only provider calls"),
+            | agent::Request::Deliver { .. } => unreachable!("host-only requests are consumed by the local domain"),
         }
     }
 }

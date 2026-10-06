@@ -102,6 +102,12 @@ impl Config {
         if self.accounts.len() > usize::try_from(limits.agent.accounts).expect("u32 fits usize") {
             return Err(Invalid::Accounts);
         }
+        if let Some(workspace) = &self.workspace
+            && (workspace.directories.is_empty()
+                || workspace.directories.len() > usize::try_from(limits.agent.run.directories).expect("u32 fits usize"))
+        {
+            return Err(Invalid::Limits);
+        }
         for (index, account) in self.accounts.iter().enumerate() {
             if self.accounts.get(index.saturating_add(1)..).unwrap_or_default().contains(account) {
                 return Err(Invalid::Accounts);
@@ -125,6 +131,15 @@ impl Config {
 /// Translate local choices into the agent's charter for one start.
 #[must_use]
 pub fn charter(config: &Config) -> charter::Charter {
+    let workspace = config.workspace.as_ref();
+    let mut writable = false;
+    if let Some(workspace) = workspace {
+        for directory in &workspace.directories {
+            if directory.writable {
+                writable = true;
+            }
+        }
+    }
     let report = match &config.contract {
         Contract::Report(spec) => Some(spec.clone()),
         Contract::Change(_) => None,
@@ -150,7 +165,7 @@ pub fn charter(config: &Config) -> charter::Charter {
         grants: charter::Grants {
             wait: true,
             deliver: None,
-            tools: charter::Tools { inspect: false, modify: false, shell: false },
+            tools: charter::Tools { inspect: workspace.is_some(), modify: writable, shell: workspace.is_some() },
             agents: false,
             host_tools: Box::new([]),
         },

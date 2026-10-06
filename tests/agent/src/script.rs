@@ -149,6 +149,7 @@ pub fn all() -> Box<[Script]> {
         script(b"@coding", coding()),
         script(b"@review", review()),
         script(b"@report", reporting()),
+        script(b"@local-workspace", local_workspace()),
         script(b"@failure", failing()),
         script(b"@delegate", delegating()),
         script(b"@spend", spending()),
@@ -240,6 +241,15 @@ fn reporting() -> Vec<Turn> {
     vec![
         calls(vec![read("README.md"), call("list", r#"{"path":"."}"#)]),
         calls(vec![call("finish", r#"{"report":"The answer is 42, and the checks want 43.","source":"README.md"}"#)]),
+    ]
+}
+
+fn local_workspace() -> Vec<Turn> {
+    vec![
+        calls(vec![read("src/lib.rs")]),
+        calls(vec![edit("42", "43")]),
+        calls(vec![call("shell", r#"{"command":"cargo test"}"#)]),
+        calls(vec![call("finish", r#"{"report":"The answer is 43."}"#)]),
     ]
 }
 
