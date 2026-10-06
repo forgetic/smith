@@ -502,12 +502,12 @@ fn empty_reports_and_declared_failures_are_terminal_results_without_delivery() {
 }
 
 #[test]
-fn a_bad_failure_reason_is_feedback_and_can_be_corrected_in_the_run_world() {
+fn an_empty_failure_reason_is_accepted_in_the_run_world() {
     let calm = Settings::calm(43);
     let host = host::Script { changes: 0, verdicts: 0, failures: 1000, ..calm.host };
     let partner = Script { finishes: 1000, yields: 0, changes: 0, failures: 1000, good: 500, ..calm.partner };
     let world = settled(&Settings { host, partner, ..calm });
-    assert!(world.stats().partner.rejected > 0);
+    assert_eq!(world.stats().partner.rejected, 0);
     assert_eq!(world.stats().partner.accepted, 4);
     assert_eq!((world.stats().checks, world.stats().pushes), (0, 0));
     assert!(answers(&world).iter().all(|answer| matches!(

@@ -580,12 +580,10 @@ impl Host {
                 }),
                 verdicts: verdicts.into(),
                 report: report.then_some(TextSpec {
-                    min: 0,
                     max: 1024,
                     fields: Box::new([FieldRule { name: b"source".as_slice().into(), max: 128 }]),
                 }),
                 failure: failure.then_some(TextSpec {
-                    min: 1,
                     max: 1024,
                     fields: Box::new([FieldRule { name: b"cause".as_slice().into(), max: 128 }]),
                 }),

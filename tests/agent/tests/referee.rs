@@ -135,11 +135,7 @@ fn a_duplicate_answer_is_rejected() {
 
 fn text_started(failure: bool, cap: u64) -> Referee<Meeting> {
     let mut referee = Referee::new(Meeting::default());
-    let rule = TextSpec {
-        min: u32::from(failure),
-        max: 8,
-        fields: Box::new([FieldRule { name: b"source".as_slice().into(), max: 3 }]),
-    };
+    let rule = TextSpec { max: 8, fields: Box::new([FieldRule { name: b"source".as_slice().into(), max: 3 }]) };
     referee.observe(
         Time::ZERO,
         Seen::Started {
@@ -176,9 +172,10 @@ fn an_accepted_report_that_omits_the_hosts_field_is_rejected() {
 }
 
 #[test]
-fn an_accepted_failure_with_no_required_reason_is_rejected() {
-    broken(
-        text_started(true, 1024),
+fn empty_failure_reason_with_required_field_is_accepted() {
+    let mut referee = text_started(true, 1024);
+    referee.observe(
+        Time::ZERO,
         Seen::Answered {
             answer: Answer::Accepted {
                 outcome: Declared::Failure(DeclaredFailure {
@@ -190,8 +187,9 @@ fn an_accepted_failure_with_no_required_reason_is_rejected() {
             },
             pending: 0,
         },
-        "an accepted result meets the host contract and byte cap",
+        &mut Vec::new(),
     );
+    assert_eq!(referee.judged().1, 1);
 }
 
 #[test]
@@ -230,7 +228,7 @@ fn mid_history() -> Referee<Meeting> {
                 change: None,
                 verdicts: Box::new([]),
                 failure: None,
-                report: Some(TextSpec { min: 0, max: 32, fields: Box::new([]) }),
+                report: Some(TextSpec { max: 32, fields: Box::new([]) }),
             },
         },
         Seen::Checking { owner, tree: b"checked".to_vec() },

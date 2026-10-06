@@ -36,7 +36,7 @@ run's main LLM unless you name one of these: `fake-2`.\n\n\
 ## Finishing\n\n\
 When the work is done, call `finish` with its result. A result outside the host's contract returns \
 typed feedback; fix it and call `finish` again. Stopping without `finish` does not finish the run.\n\n\
-Report: text from 0 through 1024 bytes, with these host-required fields:\n\
+Report: text up to 1024 bytes, with these host-required fields:\n\
 - `source`: nonempty, at most 128 bytes\n\
 Extra fields are allowed within the aggregate result byte limit; no field name may repeat.\n";
 const CHILD_MECHANICS: &str = "## Tools\n\n\
@@ -88,7 +88,6 @@ fn charter(settings: &Settings, instructions: &str) -> run::Charter {
             change: None,
             verdicts: Box::new([]),
             report: Some(TextSpec {
-                min: 0,
                 max: 1024,
                 fields: Box::new([FieldRule { name: b"source".as_slice().into(), max: 128 }]),
             }),

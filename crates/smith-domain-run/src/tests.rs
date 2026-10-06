@@ -1656,11 +1656,8 @@ fn failed_push_reason_and_diagnostics_return_to_the_finish_caller() {
 }
 
 fn text_charter(failure: bool) -> Charter {
-    let contract = crate::outcome::TextSpec {
-        min: u32::from(failure),
-        max: 8,
-        fields: Box::new([FieldRule { name: bytes(b"source"), max: 4 }]),
-    };
+    let contract =
+        crate::outcome::TextSpec { max: 8, fields: Box::new([FieldRule { name: bytes(b"source"), max: 4 }]) };
     Charter {
         outcome: OutcomeSpec {
             change: None,
@@ -1703,30 +1700,17 @@ fn reports_and_declared_failures_settle_once_without_checks_or_push() {
 }
 
 #[test]
-fn rejected_failure_reason_can_be_corrected_without_starting_delivery() {
+fn empty_failure_reason_is_accepted_without_starting_delivery() {
     let mut h = Harness::new(LIMITS);
     let (_, conversation) = h.running_on(1, 100, text_charter(true));
     let emitted = h.step(finish(conversation, 7, text_result(true, b"")));
-    assert_eq!(
-        &*emitted,
-        &[returned(
-            7,
-            Returned::Rejected {
-                problems: Problems {
-                    listed: Box::new([Problem::TextTooShort { form: crate::outcome::Form::Failure, min: 1 }]),
-                    more: 0
-                }
-            }
-        )]
-    );
-    let emitted = h.step(finish(conversation, 8, text_result(true, b"no")));
-    assert_eq!(&*emitted, &[returned(8, Returned::Accepted), Request::Close { peer: Token::new(100) }]);
+    assert_eq!(&*emitted, &[returned(7, Returned::Accepted), Request::Close { peer: Token::new(100) }]);
 }
 
 #[test]
 fn impossible_result_contracts_refuse_before_any_preparation_or_session() {
     let mut c = text_charter(false);
-    c.outcome.report.as_mut().unwrap().min = 9;
+    c.outcome.report.as_mut().unwrap().fields[0].max = 0;
     let mut h = Harness::new(LIMITS);
     assert_eq!(answered(h.start(1, c)), (1, Answer::Refused(Refusal::Invalid(Invalid::Outcome))));
     assert_eq!((h.domain.runs(), h.domain.conversations()), (0, 0));

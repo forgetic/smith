@@ -393,7 +393,7 @@ fn accepted(contract: &OutcomeSpec, value: &Declared, max: u64) -> bool {
 }
 
 fn text_fit(rule: &TextSpec, text: &[u8], fields: &[Field]) -> bool {
-    (u64::from(rule.min)..=u64::from(rule.max)).contains(&length(text.len())) && fields_fit(&rule.fields, fields)
+    length(text.len()) <= u64::from(rule.max) && fields_fit(&rule.fields, fields)
 }
 
 fn fields_fit(rules: &[FieldRule], fields: &[Field]) -> bool {

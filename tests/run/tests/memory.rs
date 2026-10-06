@@ -620,7 +620,7 @@ fn full_delivery_charter(limits: Limits) -> Charter {
         outcome: OutcomeSpec {
             change: None,
             verdicts: Box::new([]),
-            report: Some(smith_domain_run::outcome::TextSpec { min: 0, max: 1, fields: Box::new([]) }),
+            report: Some(smith_domain_run::outcome::TextSpec { max: 1, fields: Box::new([]) }),
             failure: None,
         },
         budget: BUDGET,

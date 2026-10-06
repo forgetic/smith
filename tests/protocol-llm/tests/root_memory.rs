@@ -184,7 +184,7 @@ fn charter(restoring: bool) -> run::Charter {
         outcome: run::outcome::OutcomeSpec {
             change: None,
             verdicts: Box::new([]),
-            report: Some(run::outcome::TextSpec { min: 0, max: 64, fields: Box::new([]) }),
+            report: Some(run::outcome::TextSpec { max: 64, fields: Box::new([]) }),
             failure: None,
         },
         budget: LIMITS.run.budget,

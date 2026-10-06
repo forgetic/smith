@@ -1776,7 +1776,6 @@ impl World {
     }
 }
 
-#[expect(clippy::too_many_lines, reason = "the fixture lists the complete caller charter in one place")]
 fn charter(settings: &Settings) -> run::Charter {
     use run::charter::{Endpoint, Grants, Llm, Tools};
 
@@ -1856,7 +1855,6 @@ fn charter(settings: &Settings) -> run::Charter {
             verdicts: if review { Box::new([rule]) } else { Box::new([]) },
             report: if !change && !review && settings.job != Job::Failing {
                 Some(TextSpec {
-                    min: 0,
                     max: 1024,
                     fields: Box::new([FieldRule { name: b"source".as_slice().into(), max: 128 }]),
                 })
@@ -1865,7 +1863,6 @@ fn charter(settings: &Settings) -> run::Charter {
             },
             failure: if settings.job == Job::Failing {
                 Some(TextSpec {
-                    min: 1,
                     max: 1024,
                     fields: Box::new([FieldRule { name: b"cause".as_slice().into(), max: 128 }]),
                 })

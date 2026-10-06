@@ -133,7 +133,6 @@ fn charter(settings: &Settings, cue: &[u8], rates: &[Rate]) -> run::Charter {
             change: None,
             verdicts: Box::new([]),
             report: Some(TextSpec {
-                min: 0,
                 max: 1024,
                 fields: Box::new([FieldRule { name: b"source".as_slice().into(), max: 128 }]),
             }),

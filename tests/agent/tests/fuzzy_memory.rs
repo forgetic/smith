@@ -154,8 +154,8 @@ fn charter(context_bytes: u64) -> Charter {
                 ]),
             }),
             verdicts: Box::new([rule]),
-            report: Some(TextSpec { min: 0, max: 512, fields: Box::new([]) }),
-            failure: Some(TextSpec { min: 1, max: 512, fields: Box::new([]) }),
+            report: Some(TextSpec { max: 512, fields: Box::new([]) }),
+            failure: Some(TextSpec { max: 512, fields: Box::new([]) }),
         },
         budget: run::Budget { turns: 12, ..TIGHT.run.budget },
         llm: Llm {

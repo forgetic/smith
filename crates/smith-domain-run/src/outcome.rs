@@ -70,15 +70,12 @@ pub struct ChangeSpec {
     pub fields: Box<[FieldRule]>,
 }
 
-/// The host's report or declared-failure contract. Its main text/reason obeys host-defined inclusive byte bounds, and its fields follow the same rules as every result.
+/// The host's report or declared-failure contract. Its text or reason has a
+/// maximum byte length; required fields are nonempty and bounded.
 ///
 /// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TextSpec {
-    /// Inclusive smallest report text or declared failure reason length in bytes; zero permits empty text.
-    ///
-    /// Contract: domain/run.md, section 7.1.
-    pub min: u32,
     /// Inclusive largest report text or declared failure reason length in bytes; aggregate ownership still obeys `Limits`.`outcome_bytes`.
     ///
     /// Contract: domain/run.md, section 7.1.
@@ -172,7 +169,7 @@ impl Change {
 /// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Report {
-    /// Report text within the host `TextSpec` minimum and maximum; its bytes count against aggregate ownership.
+    /// Report text within the host `TextSpec` maximum; its bytes count against aggregate ownership.
     ///
     /// Contract: domain/run.md, section 7.1.
     pub text: Box<[u8]>,
@@ -187,7 +184,7 @@ pub struct Report {
 /// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct DeclaredFailure {
-    /// LLM explanation within the host `TextSpec` minimum and maximum; the host interprets its meaning.
+    /// LLM explanation within the host `TextSpec` maximum; the host interprets its meaning.
     ///
     /// Contract: domain/run.md, section 7.1.
     pub reason: Box<[u8]>,
@@ -337,15 +334,6 @@ pub enum Problem {
     FailureNotAllowed,
     /// No byte-exact host verdict label matches. Contract: domain/run.md, section 7.1.
     UnknownVerdict,
-    /// Result text is shorter than its host-defined minimum. Contract: domain/run.md, section 7.1.
-    TextTooShort {
-        /// The text-bearing form rejected, never the text itself.
-        /// Contract: domain/run.md, section 7.1.
-        form: Form,
-        /// Inclusive host text/reason minimum byte length.
-        /// Contract: domain/run.md, section 7.1.
-        min: u32,
-    },
     /// Result text exceeds its host-defined individual byte cap. Contract: domain/run.md, section 7.1.
     TextTooLarge {
         /// The text-bearing form whose byte length exceeded the cap.
@@ -540,9 +528,6 @@ fn field_named(fields: &[Field], name: &[u8]) -> Option<usize> {
 }
 
 fn judge_text(rule: &TextSpec, text: &[u8], fields: &[Field], form: Form, found: &mut Found) {
-    if u64::try_from(text.len()).unwrap_or(u64::MAX) < u64::from(rule.min) {
-        found.add(Problem::TextTooShort { form, min: rule.min });
-    }
     if past(text.len(), rule.max) {
         found.add(Problem::TextTooLarge { form, max: rule.max });
     }
@@ -607,7 +592,7 @@ pub(crate) fn is_valid(spec: &OutcomeSpec, limits: &Limits) -> bool {
         return false;
     }
     for rule in [&spec.report, &spec.failure].into_iter().flatten() {
-        if rule.min > rule.max || !valid_fields(&rule.fields) || !fits(min_text(rule), limits.outcome_bytes) {
+        if !valid_fields(&rule.fields) || !fits(min_fields(&rule.fields), limits.outcome_bytes) {
             return false;
         }
     }
@@ -638,10 +623,6 @@ pub(crate) fn is_valid(spec: &OutcomeSpec, limits: &Limits) -> bool {
         }
     }
     true
-}
-
-fn min_text(rule: &TextSpec) -> Option<u64> {
-    min_fields(&rule.fields)?.checked_add(u64::from(rule.min))
 }
 
 fn fits(cost: Option<u64>, max: u64) -> bool {
@@ -793,8 +774,8 @@ mod tests {
     fn specification() -> OutcomeSpec {
         OutcomeSpec {
             change: Some(ChangeSpec { checks_must_pass: true, fields: rules(b"summary", 4) }),
-            report: Some(TextSpec { min: 0, max: 3, fields: rules(b"source", 3) }),
-            failure: Some(TextSpec { min: 1, max: 3, fields: rules(b"cause", 3) }),
+            report: Some(TextSpec { max: 3, fields: rules(b"source", 3) }),
+            failure: Some(TextSpec { max: 3, fields: rules(b"cause", 3) }),
             verdicts: Box::new([VerdictRule {
                 name: b"assess".as_slice().into(),
                 text_max: 3,
@@ -833,10 +814,7 @@ mod tests {
             assert_eq!(judge(&spec, &outcome), Ok(()), "{outcome:?}");
         }
         let outcome = Declared::Failure(DeclaredFailure { reason: Box::new([]), fields: fields(b"cause", b"why") });
-        assert_eq!(
-            judge(&spec, &outcome).unwrap_err().listed.as_ref(),
-            &[Problem::TextTooShort { form: Form::Failure, min: 1 }]
-        );
+        assert_eq!(judge(&spec, &outcome), Ok(()));
         let outcome = Declared::Report(Report { text: b"long".as_slice().into(), fields: fields(b"source", b"ref") });
         assert_eq!(
             judge(&spec, &outcome).unwrap_err().listed.as_ref(),
@@ -922,16 +900,16 @@ mod tests {
         let spec = OutcomeSpec {
             change: None,
             verdicts: Box::new([]),
-            report: Some(TextSpec { min: 2, max: 4, fields: rules(b"x", 1) }),
+            report: Some(TextSpec { max: 4, fields: rules(b"x", 1) }),
             failure: None,
         };
-        let min = u64::try_from(size_of::<Field>()).unwrap() + 1 + 1 + 2;
+        let min = u64::try_from(size_of::<Field>()).unwrap() + 1 + 1;
         assert!(is_valid(&spec, &Limits { outcome_bytes: min, ..LIMITS }));
         assert!(!is_valid(&spec, &Limits { outcome_bytes: min - 1, ..LIMITS }));
-        let empty = OutcomeSpec { report: Some(TextSpec { min: 0, max: 0, fields: Box::new([]) }), ..spec.clone() };
+        let empty = OutcomeSpec { report: Some(TextSpec { max: 0, fields: Box::new([]) }), ..spec.clone() };
         assert!(is_valid(&empty, &Limits { outcome_bytes: 0, ..LIMITS }));
-        let reversed = OutcomeSpec { report: Some(TextSpec { min: 2, max: 1, fields: Box::new([]) }), ..spec };
-        assert!(!is_valid(&reversed, &LIMITS));
+        let bounded = OutcomeSpec { report: Some(TextSpec { max: 1, fields: Box::new([]) }), ..spec };
+        assert!(is_valid(&bounded, &LIMITS));
     }
 
     #[test]

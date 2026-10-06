@@ -277,9 +277,7 @@ fn render_finishing(text: &mut Text, spec: &OutcomeSpec, checks: bool) {
 fn render_text_rule(text: &mut Text, form: &[u8], rule: &TextSpec) {
     text.put(b"\n");
     text.put(form);
-    text.put(b": text from ");
-    text.put_decimal(rule.min);
-    text.put(b" through ");
+    text.put(b": text up to ");
     text.put_decimal(rule.max);
     text.put(b" bytes, with these host-required fields:\n");
     render_fields(text, &rule.fields);
@@ -432,8 +430,8 @@ mod tests {
         let charter = Charter {
             outcome: OutcomeSpec {
                 change: Some(ChangeSpec { checks_must_pass: true, fields: fields(b"ticket", 17) }),
-                report: Some(TextSpec { min: 0, max: 32, fields: fields(b"source", 9) }),
-                failure: Some(TextSpec { min: 0, max: 24, fields: Box::new([]) }),
+                report: Some(TextSpec { max: 32, fields: fields(b"source", 9) }),
+                failure: Some(TextSpec { max: 24, fields: Box::new([]) }),
                 verdicts: Box::new([VerdictRule {
                     name: bytes(b"triaged"),
                     text_max: 11,
@@ -458,9 +456,9 @@ mod tests {
         assert!(brief < guide && guide < finish, "brief, guides then mechanics");
         for fragment in [
             "`ticket`: nonempty, at most 17 bytes",
-            "Report: text from 0 through 32 bytes",
+            "Report: text up to 32 bytes",
             "`source`: nonempty, at most 9 bytes",
-            "Declared failure: text from 0 through 24 bytes",
+            "Declared failure: text up to 24 bytes",
             "`triaged`: text at most 11 bytes",
             "`owner`: nonempty, at most 6 bytes",
             "Items: 1 to 2",
@@ -497,7 +495,7 @@ mod tests {
             outcome: OutcomeSpec {
                 change: None,
                 verdicts: Box::new([]),
-                report: Some(TextSpec { min: 0, max: 16, fields: Box::new([]) }),
+                report: Some(TextSpec { max: 16, fields: Box::new([]) }),
                 failure: None,
             },
             ..charter()
@@ -505,7 +503,7 @@ mod tests {
         let rendered = system(&charter, None, &Found::with_capacity(0));
         let rendered = text(&rendered);
         assert!(rendered.contains("There is no checkout."));
-        assert!(rendered.contains("Report: text from 0 through 16 bytes, with these host-required fields:\n(none)"));
+        assert!(rendered.contains("Report: text up to 16 bytes, with these host-required fields:\n(none)"));
         assert!(!rendered.contains("Change:") && !rendered.contains("Verdict:"));
     }
 

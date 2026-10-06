@@ -236,12 +236,6 @@ fn render_problem(text: &mut Text, problem: &Problem) {
         Problem::ReportNotAllowed => text.put(b"report-not-allowed"),
         Problem::FailureNotAllowed => text.put(b"failure-not-allowed"),
         Problem::UnknownVerdict => text.put(b"unknown-verdict"),
-        Problem::TextTooShort { form, min } => {
-            text.put(b"text-too-short form=");
-            render_form(text, *form);
-            text.put(b" min=");
-            text.number(u64::from(*min));
-        }
         Problem::TextTooLarge { form, max } => {
             text.put(b"text-too-large form=");
             render_form(text, *form);
