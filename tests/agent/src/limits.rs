@@ -43,7 +43,6 @@ pub const LIMITS: Limits = Limits {
         host_reply_bytes: 65_536,
         host_timeout: Duration::from_secs(60),
         host_backoff: Duration::from_millis(50),
-        host_attempts: 3,
         verdicts: 2,
         calls: 16,
         budget: BUDGET,

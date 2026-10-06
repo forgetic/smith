@@ -68,8 +68,6 @@ pub struct Limits {
     /// Positive deterministic backoff between settled retryable relays.
     pub host_backoff: Duration,
 
-    /// Maximum relay attempts per durable operation, including the first.
-    pub host_attempts: u32,
     /// Verdicts an outcome spec may list.
     pub verdicts: u32,
     /// Calls of conversations to the run in flight at once, across runs, each

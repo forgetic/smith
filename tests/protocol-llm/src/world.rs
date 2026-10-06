@@ -195,8 +195,6 @@ pub enum HostSchedule {
     Answer,
     /// Busy, lost committed answer, then replay first recorded answer. Contract: domain/run.md, section 5.2.
     Replay,
-    /// Lost then Busy until receiving cap. Contract: domain/run.md, section 5.2.
-    Unknown,
     /// Wait beyond declared deadline, settle withdrawn, then recover. Contract: domain/run.md, section 5.2.
     Withdraw,
     /// Wait for withdrawal, but replay actual recorded answer. Contract: domain/run.md, section 5.2.
@@ -1281,13 +1279,6 @@ impl World {
                         2 => run::HostReply::Unanswered(run::Unanswered::Lost),
                         _ => run::HostReply::Answered(answer),
                     },
-                    HostSchedule::Unknown => {
-                        if relay.attempt == 1 {
-                            run::HostReply::Unanswered(run::Unanswered::Lost)
-                        } else {
-                            run::HostReply::Busy
-                        }
-                    }
                     HostSchedule::Withdraw => {
                         if relay.attempt == 1 {
                             run::HostReply::Unanswered(run::Unanswered::Withdrawn)

@@ -42,13 +42,6 @@ fn host_busy_lost_then_replayed_answer_preserves_opaque_input_name_scope_and_exa
 }
 
 #[test]
-fn exhausted_lost_then_busy_keeps_unknown_and_continues_to_report() {
-    let world = story(HostSchedule::Unknown, 813);
-    assert_eq!(world.host_submissions().len(), 3);
-    assert!(world.prompts().iter().flat_map(|query| &query.messages).flat_map(|message| &message.parts).any(|part| matches!(part, skein_fake_llm_domain::api::Part::ToolOutput { output, is_error: true, .. } if output.as_ref() == b"host-unknown")));
-}
-
-#[test]
 fn declared_timeout_requests_withdrawal_then_terminal_allows_same_name_recovery() {
     let world = story(HostSchedule::Withdraw, 814);
     assert_eq!(world.host_submissions().len(), 2);

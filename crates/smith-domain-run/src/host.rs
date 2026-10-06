@@ -1,6 +1,6 @@
 //! Generic host-tool declarations and bounded relay lifecycle (domain/run.md,
 //! sections 3, 5.2 and 12). State retains one immutable operation name, tool,
-//! effect and protocol-attested input through bounded retries. It never knows
+//! effect and protocol-attested input through deadline-bounded retries. It never knows
 //! schemas' meaning, host policy, provider IDs or delivery state. A withdrawal
 //! requests relay settlement; only a terminal releases that relay.
 
@@ -133,7 +133,7 @@ pub struct RelayName {
     /// Live run-call callback generation; never a durable host operation name.
     pub owner: Token,
 
-    /// One-based bounded attempt number, incremented only after settlement.
+    /// One-based attempt number, incremented only after settlement.
     pub attempt: u32,
 }
 
@@ -159,7 +159,7 @@ pub enum HostReply {
         HostAnswer,
     ),
 
-    /// Predecision capacity refusal; eligible for bounded retry after backoff.
+    /// Predecision capacity refusal; eligible for retry after backoff.
     Busy,
 
     /// The relay terminal carries no learnable outcome yet.

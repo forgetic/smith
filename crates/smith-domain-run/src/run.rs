@@ -1871,9 +1871,12 @@ fn host_recover(
     exhausted: Returned,
 ) -> Option<Returned> {
     let at = env.now.saturating_add(env.limits.host_backoff);
-    if !active || relay.stopped.is_some() || attempt >= env.limits.host_attempts || at >= relay.caller_deadline {
+    if !active || relay.stopped.is_some() || at >= relay.caller_deadline {
         return Some(exhausted);
     }
-    relay.stage = HostStage::Backoff { attempt: attempt.checked_add(1).expect("bounded attempts"), at };
+    let Some(next) = attempt.checked_add(1) else {
+        return Some(exhausted);
+    };
+    relay.stage = HostStage::Backoff { attempt: next, at };
     None
 }

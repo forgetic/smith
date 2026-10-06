@@ -35,7 +35,6 @@ pub(crate) const LIMITS: Limits = Limits {
     host_reply_bytes: 65_536,
     host_timeout: Duration::from_secs(60),
     host_backoff: Duration::from_millis(50),
-    host_attempts: 3,
     verdicts: 2,
     calls: 2,
     budget: Budget { turns: 100, spend: 1_000_000, time: Duration::from_secs(3600) },
@@ -2134,13 +2133,31 @@ fn host_relay_retries_keep_the_call_name_and_input() {
 }
 
 #[test]
-fn host_uncertainty_survives_busy_until_cap_withdrawal_and_caller_expiry() {
+fn a_host_call_busy_many_times_keeps_its_name_until_it_succeeds() {
+    let mut h = Harness::new(LIMITS);
+    let (_, conversation) = h.running(71, 99);
+    let deadline = h.env.now.saturating_add(Duration::from_secs(30));
+    let mut relay = host_submission(&h.step(host_ask(conversation, 41, deadline)));
+    for attempt in 1..=8 {
+        assert_eq!(relay.attempt, attempt);
+        assert!(h.step(Event::HostReturned { relay, reply: crate::HostReply::Busy }).is_empty());
+        h.after(LIMITS.host_backoff);
+        relay = host_submission(&h.fire());
+    }
+    let answer = crate::HostAnswer::new(bytes(b"decided after eight busy attempts"), false).expect("bounded text");
+    assert_eq!(
+        &*h.step(Event::HostReturned { relay, reply: crate::HostReply::Answered(answer.clone()) }),
+        &[Request::Return { spent: 0, call: Token::new(41), result: Returned::HostAnswered(answer) }]
+    );
+}
+
+#[test]
+fn host_uncertainty_survives_busy_until_withdrawal_or_caller_expiry() {
     enum Stop {
-        RetryCap,
         Withdraw,
         CallerExpiry,
     }
-    for stop in [Stop::RetryCap, Stop::Withdraw, Stop::CallerExpiry] {
+    for stop in [Stop::Withdraw, Stop::CallerExpiry] {
         let mut h = Harness::new(LIMITS);
         let (_, conversation) = h.running(71, 99);
         let deadline = h.env.now.saturating_add(Duration::from_secs(30));
@@ -2153,11 +2170,6 @@ fn host_uncertainty_survives_busy_until_cap_withdrawal_and_caller_expiry() {
         let second = host_submission(&h.fire());
         assert!(h.step(Event::HostReturned { relay: second, reply: crate::HostReply::Busy }).is_empty());
         let emitted = match stop {
-            Stop::RetryCap => {
-                h.after(LIMITS.host_backoff);
-                let third = host_submission(&h.fire());
-                h.step(Event::HostReturned { relay: third, reply: crate::HostReply::Busy })
-            }
             Stop::Withdraw => h.step(Event::Withdraw { conversation, call: Token::new(41) }),
             Stop::CallerExpiry => {
                 h.env.now = deadline;
@@ -2250,7 +2262,7 @@ fn host_declarations_are_admitted_as_bounded_unique_contracts_before_io() {
         assert_eq!(answer, Answer::Refused(Refusal::Invalid(Invalid::Grants)));
         assert_eq!((h.domain.runs(), h.domain.conversations(), h.domain.calls()), (0, 0, 0));
     }
-    let mut h = Harness::new(Limits { host_attempts: 0, ..LIMITS });
+    let mut h = Harness::new(Limits { host_backoff: Duration::ZERO, ..LIMITS });
     let (_, answer) = answered(h.start(71, baseline));
     assert_eq!(answer, Answer::Refused(Refusal::Invalid(Invalid::Grants)));
 }
