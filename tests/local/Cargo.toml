@@ -1,0 +1,23 @@
+[package]
+name = "smith-local-world"
+description = "Scripted person, store and fake provider around the local domain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+skein-lib.workspace = true
+skein-fake-llm-domain.workspace = true
+smith-domain.workspace = true
+smith-local-domain.workspace = true
+smith-agent-world.workspace = true
+smith-session-world.workspace = true
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

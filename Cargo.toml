@@ -2,7 +2,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host"]
+members = ["crates/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local"]
 
 [workspace.package]
 version = "0.0.0"
@@ -24,6 +24,7 @@ skein-llm-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
 smith-host-domain = { path = "crates/smith-host-domain" }
 smith-local-domain = { path = "crates/smith-local-domain" }
 smith-host-world = { path = "tests/host" }
+smith-local-world = { path = "tests/local" }
 smith-agent-world = { path = "tests/agent" }
 smith-domain = { path = "crates/smith-domain" }
 smith-domain-run = { path = "crates/smith-domain-run" }

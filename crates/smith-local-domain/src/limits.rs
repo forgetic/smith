@@ -36,7 +36,7 @@ pub struct Limits {
 /// Bound on owned local state, including the child domain.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
-    if limits.models == 0 || limits.lines == 0 || limits.unsaved == 0 {
+    if limits.models == 0 || limits.lines == 0 || limits.unsaved == 0 || limits.show_bytes < 64 {
         return None;
     }
     let agent = agent::worst_case(&limits.agent)?;

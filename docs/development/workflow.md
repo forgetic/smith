@@ -219,3 +219,9 @@ the before run; suite wall times varied upward by 0.076 and 0.099 seconds.
 Skein owns the provider and fake LLM tests and recorded exchanges; Temper
 retains the OAuth codec tests until the shared OAuth client is built.
 The workspace budgets are unchanged.
+
+The local host's first scripted chat was measured serially on 2026-10-06
+with the `measure` profile and `-j 1`: the new local world has one focused
+story, passing in 0.004 seconds, and no fuzzy test yet. It runs the local
+domain and in-process agent against Skein's fake provider. The default and
+fuzzy workspace budgets are unchanged.

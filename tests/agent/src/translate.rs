@@ -9,7 +9,8 @@
 use skein_fake_llm_domain::api as provider;
 use smith_domain::{llm as agent, run, tools};
 
-pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
+#[must_use]
+pub fn query(prompt: agent::Prompt) -> provider::Query {
     let mut tools = Vec::new();
     let mut names = Vec::new();
     if prompt.tools.inspect {
@@ -105,11 +106,8 @@ fn part(block: agent::Block) -> provider::Part {
     }
 }
 
-pub(crate) fn completion(
-    answer: provider::Answer,
-    grants: tools::Grants,
-    served: &[agent::Served],
-) -> agent::Completion {
+#[must_use]
+pub fn completion(answer: provider::Answer, grants: tools::Grants, served: &[agent::Served]) -> agent::Completion {
     let stop = match answer.finish {
         provider::Finish::Stop => agent::Stop::EndTurn,
         provider::Finish::ToolCalls => agent::Stop::ToolUse,
@@ -138,7 +136,8 @@ pub(crate) fn completion(
     agent::Completion { content, stop, usage }
 }
 
-pub(crate) fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent::Served]) -> agent::Decoded {
+#[must_use]
+pub fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent::Served]) -> agent::Decoded {
     let invalid = || agent::Decoded::Invalid { problem: agent::Problem::UnknownTool };
     for tool in served {
         match tool {
@@ -270,7 +269,8 @@ fn field(arguments: &[u8], name: &[u8]) -> Option<Box<[u8]>> {
     Some(rest[..end].into())
 }
 
-pub(crate) fn failure(error: provider::Error) -> agent::Failure {
+#[must_use]
+pub fn failure(error: provider::Error) -> agent::Failure {
     match error {
         provider::Error::Overloaded => agent::Failure::Overloaded,
         provider::Error::RateLimited { retry_after } => agent::Failure::RateLimited { retry_after },

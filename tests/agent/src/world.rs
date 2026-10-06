@@ -265,13 +265,7 @@ enum Backend {
 impl Backend {
     fn typed(settings: &Settings) -> Self {
         Self::Typed {
-            provider: provider::Domain::configured(
-                &settings.provider,
-                settings.seed ^ 0x25,
-                script::all(),
-                smith_session_world::provider::menu(),
-            )
-            .expect("scripts and application menu obey provider admission"),
+            provider: crate::scripted_provider(&settings.provider, settings.seed ^ 0x25),
             stage: Stage::new(settings.provider, provider::MAX_OUT, provider::MAX_OUT + 3),
             calls: Ledger::new("fake provider call"),
         }

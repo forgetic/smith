@@ -219,6 +219,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-local-world"
+version = "0.0.0"
+dependencies = [
+ "skein-fake-llm-domain",
+ "skein-lib",
+ "smith-agent-world",
+ "smith-domain",
+ "smith-local-domain",
+ "smith-session-world",
+]
+
+[[package]]
 name = "smith-protocol-llm"
 version = "0.0.0"
 dependencies = [

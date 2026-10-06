@@ -26,7 +26,7 @@ pub mod referee;
 
 pub mod script;
 
-mod translate;
+pub mod translate;
 
 mod world;
 
@@ -38,3 +38,10 @@ pub use world::{
     Boundary, CompletionObservation, CompletionTerminal, DeliverySubmission, HostReply, HostSchedule, Settings, World,
     delivered,
 };
+
+/// Build the scripted fake provider used by agent and local-host worlds.
+#[must_use]
+pub fn scripted_provider(config: &skein_fake_llm_domain::Config, seed: u64) -> skein_fake_llm_domain::Domain {
+    skein_fake_llm_domain::Domain::configured(config, seed, script::all(), smith_session_world::provider::menu())
+        .expect("shared agent scripts fit fake provider limits")
+}
