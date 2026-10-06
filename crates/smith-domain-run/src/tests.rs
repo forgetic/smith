@@ -2095,7 +2095,12 @@ fn host_relay_retries_keep_the_call_name_and_input() {
 
 #[test]
 fn host_uncertainty_survives_busy_until_cap_withdrawal_and_caller_expiry() {
-    for stop in 0_u32..3 {
+    enum Stop {
+        RetryCap,
+        Withdraw,
+        CallerExpiry,
+    }
+    for stop in [Stop::RetryCap, Stop::Withdraw, Stop::CallerExpiry] {
         let mut h = Harness::new(LIMITS);
         let (_, conversation) = h.running(71, 99);
         let deadline = h.env.now.saturating_add(Duration::from_secs(30));
@@ -2107,15 +2112,17 @@ fn host_uncertainty_survives_busy_until_cap_withdrawal_and_caller_expiry() {
         h.after(LIMITS.host_backoff);
         let second = host_submission(&h.fire());
         assert!(h.step(Event::HostReturned { relay: second, reply: crate::HostReply::Busy }).is_empty());
-        let emitted = if stop == 0 {
-            h.after(LIMITS.host_backoff);
-            let third = host_submission(&h.fire());
-            h.step(Event::HostReturned { relay: third, reply: crate::HostReply::Busy })
-        } else if stop == 1 {
-            h.step(Event::Withdraw { conversation, call: Token::new(41) })
-        } else {
-            h.env.now = deadline;
-            h.fire()
+        let emitted = match stop {
+            Stop::RetryCap => {
+                h.after(LIMITS.host_backoff);
+                let third = host_submission(&h.fire());
+                h.step(Event::HostReturned { relay: third, reply: crate::HostReply::Busy })
+            }
+            Stop::Withdraw => h.step(Event::Withdraw { conversation, call: Token::new(41) }),
+            Stop::CallerExpiry => {
+                h.env.now = deadline;
+                h.fire()
+            }
         };
         assert_eq!(&*emitted, &[Request::Return { spent: 0, call: Token::new(41), result: Returned::HostUnknown }]);
         assert_eq!((h.domain.runs(), h.domain.conversations()), (1, 1), "call-only stop retains ordinary run");
@@ -2124,25 +2131,32 @@ fn host_uncertainty_survives_busy_until_cap_withdrawal_and_caller_expiry() {
 
 #[test]
 fn host_withdrawal_and_timeout_retain_relay_until_terminal_answer_wins() {
-    for stop in 0_u32..3 {
+    enum Stop {
+        Withdraw,
+        RelayTimeout,
+        CancelRun,
+    }
+    for stop in [Stop::Withdraw, Stop::RelayTimeout, Stop::CancelRun] {
         let mut h = Harness::new(LIMITS);
         let (run, conversation) = h.running(71, 99);
         let deadline = h.env.now.saturating_add(Duration::from_secs(30));
         let relay = host_submission(&h.step(host_ask(conversation, 41, deadline)));
-        if stop == 0 {
-            assert_eq!(
+        match stop {
+            Stop::Withdraw => assert_eq!(
                 &*h.step(Event::Withdraw { conversation, call: Token::new(41) }),
                 &[Request::WithdrawHost { relay }]
-            );
-        } else if stop == 1 {
-            h.after(Duration::from_secs(5));
-            assert_eq!(&*h.fire(), &[Request::WithdrawHost { relay }]);
-        } else {
-            assert_eq!(&*h.step(Event::Cancel { run }), &[Request::Close { peer: Token::new(99) }]);
-            assert_eq!(
-                &*h.step(Event::Withdraw { conversation, call: Token::new(41) }),
-                &[Request::WithdrawHost { relay }]
-            );
+            ),
+            Stop::RelayTimeout => {
+                h.after(Duration::from_secs(5));
+                assert_eq!(&*h.fire(), &[Request::WithdrawHost { relay }]);
+            }
+            Stop::CancelRun => {
+                assert_eq!(&*h.step(Event::Cancel { run }), &[Request::Close { peer: Token::new(99) }]);
+                assert_eq!(
+                    &*h.step(Event::Withdraw { conversation, call: Token::new(41) }),
+                    &[Request::WithdrawHost { relay }]
+                );
+            }
         }
         assert!(h.step(Event::Withdraw { conversation, call: Token::new(41) }).is_empty());
         assert_eq!(h.domain.calls(), 1, "withdrawal did not fabricate terminal");
@@ -2151,9 +2165,12 @@ fn host_withdrawal_and_timeout_retain_relay_until_terminal_answer_wins() {
             &*h.step(Event::HostReturned { relay, reply: crate::HostReply::Answered(actual.clone()) }),
             &[Request::Return { spent: 0, call: Token::new(41), result: Returned::HostAnswered(actual) }]
         );
-        if stop == 2 {
-            let (_, answer) = answered(h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO }));
-            assert_eq!(answer, failed(Failure::Cancelled, Spend::ZERO));
+        match stop {
+            Stop::CancelRun => {
+                let (_, answer) = answered(h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO }));
+                assert_eq!(answer, failed(Failure::Cancelled, Spend::ZERO));
+            }
+            Stop::Withdraw | Stop::RelayTimeout => {}
         }
     }
 }

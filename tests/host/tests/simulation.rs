@@ -777,7 +777,25 @@ fn every_delivery_terminal_survives_withdrawal_and_expired_deadline() {
         world.at(6);
         reply(&mut world, 20, Reply::Delivery(terminal.clone()));
         match world.seen.down.last().expect("delivery response") {
-            Down::Answer { reply: Reply::Delivery(actual), .. } => assert_eq!(*actual, terminal),
+            Down::Answer { reply: Reply::Delivery(received), .. } => {
+                assert_eq!(*received, terminal);
+                assert_eq!(received.status(), terminal.status());
+                match received {
+                    Delivery::Delivered(landed) => {
+                        let receipt = landed.receipts().first().expect("one changed mount");
+                        assert_eq!(receipt.directory(), 0);
+                        assert_eq!(receipt.text(), b"landed");
+                    }
+                    Delivery::Refused(refusal) => {
+                        assert!(refusal.explanation() == b"reason" || refusal.explanation() == b"resolve");
+                        if let Some(marker) = refusal.marker() {
+                            assert_eq!(marker.directory(), 0);
+                            assert_eq!(marker.path(), b"relative/file");
+                        }
+                    }
+                    Delivery::Nothing | Delivery::Failed(_) | Delivery::Stale => {}
+                }
+            }
             Down::Answer { .. }
             | Down::Start { .. }
             | Down::Message { .. }
