@@ -366,8 +366,7 @@ pub(crate) fn tell(
                 Fact::CheckStarted { run, deadline: *deadline }
             }
             Request::Answer { to: _, answer } => Fact::Answered { run, answer: answered(answer) },
-            Request::MessageBounced { .. }
-            | Request::Waiting { .. }
+            Request::Waiting { .. }
             | Request::Turn { .. }
             | Request::HostCall { .. }
             | Request::WithdrawHost { .. }

@@ -127,7 +127,7 @@ pub enum Event {
 
     /// Parent-labelled live message, FIFO and bounded before retention by
     /// `Limits.run.messages` and `Limits.run.message_bytes`. Accepted messages
-    /// emit no separate admission terminal; refusal emits `MessageBounced`.
+    /// emit no separate admission terminal; the read fence reports consumption.
     /// Contract: domain/run.md, section 6.
     Message {
         /// Admitted live run handle. Contract: domain/run.md, section 6.
@@ -291,19 +291,6 @@ pub enum Event {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(PartialEq, Eq, Debug)]
 pub enum Request {
-    /// Refused live message; existing FIFO and read state remain unchanged.
-    /// Contract: domain/run.md, section 6.
-    MessageBounced {
-        /// Supplied live run name. Contract: domain/run.md, section 6.
-        run: Token,
-
-        /// Unchanged parent name. Contract: domain/run.md, section 6.
-        name: Token,
-
-        /// Refusal before retention. Contract: domain/run.md, section 6.
-        reason: run::MessageRefusal,
-    },
-
     /// Settled main wait and yield with empty inbox; wall time keeps running.
     /// This observation to the parent owes no terminal; Start's reply right
     /// remains pending until the run's actual final Answer.

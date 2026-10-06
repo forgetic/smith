@@ -57,7 +57,6 @@ fn actual_wait_result_settles_before_waiting_then_opaque_fifo_names_cross_only_r
     assert_eq!(world.waiting()[1].1, Some(Token::new(99)));
     assert!(world.answered_at() >= world.waiting()[1].0.saturating_add(Duration::from_secs(1)));
     assert!(text_seen(&world, b"person: first") && text_seen(&world, b"person: second"));
-    assert!(world.bounces().is_empty());
     let result =
         world.turns().iter().flat_map(|turn| &turn.messages).flat_map(|message| &message.content).any(|block| {
             matches!(block, session::llm::Block::ToolResult {
@@ -69,29 +68,14 @@ fn actual_wait_result_settles_before_waiting_then_opaque_fifo_names_cross_only_r
 }
 
 #[test]
-fn bounded_message_refusals_keep_the_accepted_zero_name_and_wall_time_runs_while_waiting() {
+fn bounded_message_keeps_the_zero_name_and_wall_time_runs_while_waiting() {
     let calm = waiting(901);
     let limits =
         smith_domain::Limits { run: run::Limits { messages: 1, message_bytes: 4, ..calm.limits.run }, ..calm.limits };
     let mut world = World::new(Settings { limits, ..calm });
-    for (at, name, text) in [
-        (50, 0, b"full".as_slice()),
-        (51, 5, b"next".as_slice()),
-        (52, 0, b"same".as_slice()),
-        (53, 6, b"large".as_slice()),
-    ] {
-        world.message_at(Time::ZERO.saturating_add(Duration::from_millis(at)), Token::new(name), text.into());
-    }
+    world.message_at(Time::ZERO.saturating_add(Duration::from_millis(50)), Token::new(0), b"full".as_slice().into());
     world.run(2000);
-    assert_eq!(
-        world.bounces(),
-        [
-            (Token::new(5), run::MessageRefusal::Busy),
-            (Token::new(0), run::MessageRefusal::ReusedName),
-            (Token::new(6), run::MessageRefusal::TooLarge)
-        ]
-    );
-    assert!(text_seen(&world, b"full") && !text_seen(&world, b"next") && !text_seen(&world, b"large"));
+    assert!(text_seen(&world, b"full"));
     assert!(matches!(world.answer(), run::Answer::Parked { turns: 4, .. }));
     let mut wall = World::new(Settings {
         waiting: Duration::from_secs(20),

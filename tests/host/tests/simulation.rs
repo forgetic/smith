@@ -428,6 +428,22 @@ fn inbound_messages_are_ordered_bounded_and_named_opaquely() {
 }
 
 #[test]
+fn sent_message_at_run_end_stays_outside_the_read_fence() {
+    let mut world = World::new(59, limits());
+    world.live();
+    world.up(Up::Waiting { read: None });
+    message(&mut world, 77, 4);
+    world.sent();
+    last(&mut world, RunResult::Parked, 0, 0);
+    assert_eq!(world.seen.answer.as_ref().expect("final word").turns, 0);
+    assert_eq!(world.seen.fault, None);
+    message(&mut world, 78, 4);
+    assert_eq!(world.seen.bounces, [Bounce::Ending]);
+    world.cleanup();
+    world.settled();
+}
+
+#[test]
 fn read_watermarks_cover_only_sent_names_and_release_exact_prefix() {
     let mut world = World::new(25, limits());
     world.live();

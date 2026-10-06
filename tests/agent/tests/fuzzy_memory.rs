@@ -272,7 +272,6 @@ impl Driver {
                 }
                 Request::Turn { .. }
                 | Request::Waiting { .. }
-                | Request::MessageBounced { .. }
                 | Request::Checking { .. }
                 | Request::Rejected { .. }
                 | Request::Exhausted { .. } => {}

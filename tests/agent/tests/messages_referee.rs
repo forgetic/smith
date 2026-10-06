@@ -96,7 +96,7 @@ fn premature_waiting_wrong_wake_text_and_wrong_final_count_or_park_time_are_reje
             1 => {
                 let prompt = bad.iter_mut().find_map(|(_, seen)| match seen {
                     Seen::Prompt { query } if query.messages.last().is_some_and(|message| matches!(message.parts.as_ref(), [Part::Text { text }] if text.as_ref() == b"person: first")) => Some(query),
-                    Seen::Admitted | Seen::Input { .. } | Seen::Bounced { .. } | Seen::Prompt { .. } | Seen::Completed { .. }
+                    Seen::Admitted | Seen::Input { .. } | Seen::Prompt { .. } | Seen::Completed { .. }
                     | Seen::CompletionEnded | Seen::Turn { .. } | Seen::Waiting { .. } | Seen::Answer { .. } => None,
                 }).expect("actual first wake request");
                 prompt.messages.last_mut().expect("wake").parts[0] =
@@ -106,7 +106,6 @@ fn premature_waiting_wrong_wake_text_and_wrong_final_count_or_park_time_are_reje
                 Seen::Answer { turns, .. } => *turns -= 1,
                 Seen::Admitted
                 | Seen::Input { .. }
-                | Seen::Bounced { .. }
                 | Seen::Prompt { .. }
                 | Seen::Completed { .. }
                 | Seen::CompletionEnded
@@ -153,7 +152,6 @@ fn turn_fields(seen: &mut Seen) -> (&mut u32, &mut Option<Token>, &mut smith_dom
         Seen::Turn { number, read, turn, .. } => (number, read, turn),
         Seen::Admitted
         | Seen::Input { .. }
-        | Seen::Bounced { .. }
         | Seen::Prompt { .. }
         | Seen::Completed { .. }
         | Seen::CompletionEnded

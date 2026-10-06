@@ -100,7 +100,6 @@ fn forward(agent: &Agent, host: &mut Host, next: &mut usize) {
             }
             Seen::Answer { .. }
             | Seen::Input { .. }
-            | Seen::Bounced { .. }
             | Seen::Waiting { .. }
             | Seen::Prompt { .. }
             | Seen::Completed { .. }

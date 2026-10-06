@@ -419,7 +419,6 @@ pub struct World {
     messages_seen: Vec<(Time, crate::messages_referee::Seen)>,
     turn_metadata: Vec<(u32, Option<Token>, run::Spend)>,
     waiting: Vec<(Time, Option<Token>)>,
-    bounces: Vec<(Token, run::MessageRefusal)>,
     facts: Vec<Fact>,
     trace: Trace,
     referee: Referee<Meeting>,
@@ -548,7 +547,6 @@ impl World {
             messages_seen: Vec::new(),
             turn_metadata: Vec::new(),
             waiting: Vec::new(),
-            bounces: Vec::new(),
             facts: Vec::new(),
             trace: Trace::default(),
             referee,
@@ -989,11 +987,6 @@ impl World {
                 assert_eq!(worker, Token::new(1));
                 self.messages_seen.push((self.now, crate::messages_referee::Seen::Waiting { read }));
                 self.waiting.push((self.now, read));
-            }
-            Request::MessageBounced { run, name, reason } => {
-                assert_eq!(Some(run), self.admitted);
-                self.messages_seen.push((self.now, crate::messages_referee::Seen::Bounced { name }));
-                self.bounces.push((name, reason));
             }
             Request::Admitted { worker, run } => {
                 assert_eq!(worker, Token::new(1), "the host's admitted identity is echoed");
@@ -1656,12 +1649,6 @@ impl World {
     #[must_use]
     pub fn turn_metadata(&self) -> &[(u32, Option<Token>, run::Spend)] {
         &self.turn_metadata
-    }
-
-    /// Exact entrance decisions for scripted parent messages. Contract: domain/run.md, section 6.
-    #[must_use]
-    pub fn bounces(&self) -> &[(Token, run::MessageRefusal)] {
-        &self.bounces
     }
 
     /// Actual settled Waiting notices. Contract: domain/run.md, section 6.

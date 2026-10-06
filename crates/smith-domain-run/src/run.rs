@@ -20,8 +20,7 @@ use skein_lib::{Deadlines, Duration, Env, Id, Queue, ReplyTo, Slab, Time, Token}
 
 use crate::agent::{self, Child, Means};
 use crate::boundary::{
-    Answer, Ask, AskRefusal, End, Failure, Fault, Invalid, MessageRefusal, Opening, Policy, Ran, Read, Refusal,
-    Request, Returned, Stop,
+    Answer, Ask, AskRefusal, End, Failure, Fault, Invalid, Opening, Policy, Ran, Read, Refusal, Request, Returned, Stop,
 };
 use crate::budget::{Exhausted, Spend};
 use crate::call::{Call, Calls, Withdrawal, Work};
@@ -299,7 +298,8 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
     follow(runs, alarms, id);
 }
 
-/// Admit labelled text before retaining bytes; input is processed before idle alarms.
+/// Retain a host-bounded named message while the run can read it; a message
+/// arriving during shutdown remains unread. Input precedes idle alarms.
 /// Contract: domain/run.md, sections 6 and 14.
 pub(crate) fn message(
     domain: &mut Domain,
@@ -310,14 +310,22 @@ pub(crate) fn message(
     out: &mut Queue<Request>,
 ) {
     let id = Id::<Run>::from_token(token);
-    let reason = match domain.runs.get(id) {
-        Some(run) => message_refusal(run, name, text.len(), &env.limits),
-        None => Some(MessageRefusal::Inactive),
-    };
-    if let Some(reason) = reason {
-        out.push(Request::MessageBounced { run: token, name, reason });
+    let Some(run) = domain.runs.get(id) else {
         return;
+    };
+    match run.state {
+        State::Stopping { .. } | State::Winding { .. } | State::Closed => return,
+        State::Preparing { .. } | State::Working { .. } | State::Waiting { .. } | State::Over { .. } => {}
     }
+    assert!(
+        u64::try_from(text.len()).expect("owned length fits") <= u64::from(env.limits.message_bytes),
+        "host message exceeds run limit"
+    );
+    assert!(run.offered != Some(name) && run.read != Some(name), "host reused a message name");
+    for queued in &run.inbox {
+        assert!(queued.name != name, "host reused a queued message name");
+    }
+    assert!(run.inbox.room() > 0, "host exceeded run message count");
     domain.facts.about(token);
     let run = domain.runs.get_mut(id).expect("checked live run above");
     run.inbox.push(Message { name, text });
@@ -335,33 +343,9 @@ pub(crate) fn message(
             continue_message(run, reply_to, main, peer, message, out)
         }
         state @ (State::Preparing { .. } | State::Working { .. } | State::Over { .. }) => state,
-        State::Stopping { .. } | State::Winding { .. } | State::Closed => {
-            unreachable!("inactive runs refuse before retaining text")
-        }
+        State::Stopping { .. } | State::Winding { .. } | State::Closed => unreachable!("checked active run"),
     };
     follow(&mut domain.runs, &mut domain.alarms, id);
-}
-
-fn message_refusal(run: &Run, name: Token, bytes: usize, limits: &Limits) -> Option<MessageRefusal> {
-    match run.state {
-        State::Preparing { .. } | State::Working { .. } | State::Waiting { .. } | State::Over { .. } => {}
-        State::Stopping { .. } | State::Winding { .. } | State::Closed => return Some(MessageRefusal::Inactive),
-    }
-    if u64::try_from(bytes).expect("owned length fits") > u64::from(limits.message_bytes) {
-        return Some(MessageRefusal::TooLarge);
-    }
-    if run.offered == Some(name) || run.read == Some(name) {
-        return Some(MessageRefusal::ReusedName);
-    }
-    for message in &run.inbox {
-        if message.name == name {
-            return Some(MessageRefusal::ReusedName);
-        }
-    }
-    if run.inbox.len() == run.inbox.capacity() {
-        return Some(MessageRefusal::Busy);
-    }
-    None
 }
 
 fn continue_message(

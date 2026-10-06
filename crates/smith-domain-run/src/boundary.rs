@@ -335,19 +335,6 @@ pub enum Event {
 #[derive(PartialEq, Eq, Debug)]
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Request {
-    /// A refused live message; refusal never advances the read fence.
-    /// Contract: domain/run.md, section 6.
-    MessageBounced {
-        /// Supplied live run name. Contract: domain/run.md, section 6.
-        run: Token,
-
-        /// Unchanged parent message name. Contract: domain/run.md, section 6.
-        name: Token,
-
-        /// Entrance refusal, before bytes are retained. Contract: domain/run.md, section 6.
-        reason: MessageRefusal,
-    },
-
     /// Main yielded after a settled wait with an empty inbox. No terminal is owed.
     /// Contract: domain/run.md, sections 6 and 10.
     Waiting {
@@ -1412,24 +1399,6 @@ pub enum Policy {
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         rejected: u32,
     },
-}
-
-/// Live-message entrance refusals; no accepted message or read state changes.
-/// Contract: domain/run.md, section 6.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum MessageRefusal {
-    /// FIFO capacity is exhausted. Contract: domain/run.md, section 6.
-    Busy,
-
-    /// Attested bytes exceed the configured cap. Contract: domain/run.md, section 6.
-    TooLarge,
-
-    /// Run has stopped or the live name is stale. Contract: domain/run.md, section 6.
-    Inactive,
-
-    /// Name equals a queued, offered or current-read name. Older names rely on
-    /// the parent's active-run uniqueness promise. Contract: domain/run.md, section 6.
-    ReusedName,
 }
 
 /// Exact concrete-history entrance classification, independent of the sibling type.

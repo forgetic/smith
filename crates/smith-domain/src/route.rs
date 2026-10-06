@@ -392,9 +392,6 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
             domain.starts.retire(id);
             return out.push(Request::Answer { to, answer });
         }
-        run::Request::MessageBounced { run, name, reason } => {
-            return out.push(Request::MessageBounced { run, name, reason });
-        }
         run::Request::Waiting { worker, read } => return out.push(Request::Waiting { worker, read }),
         run::Request::Turn { worker, record, number, read, spent } => {
             let id = Id::<TurnHandoff>::from_token(record);

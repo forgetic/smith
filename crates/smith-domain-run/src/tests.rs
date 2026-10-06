@@ -2335,10 +2335,6 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
             );
         }
     }
-    assert_eq!(
-        &*h.step(Event::Message { run, name: Token::new(7), text: bytes(b"reused") }),
-        &[Request::MessageBounced { run, name: Token::new(7), reason: crate::MessageRefusal::ReusedName }]
-    );
     let wait = Event::Delegated {
         conversation,
         call,
@@ -2357,10 +2353,7 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
         answered(h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })),
         (1, Answer::Parked { spent: Spend::ZERO, turns: 4 })
     );
-    assert_eq!(
-        &*h.step(Event::Message { run, name: Token::new(8), text: bytes(b"late") }),
-        &[Request::MessageBounced { run, name: Token::new(8), reason: crate::MessageRefusal::Inactive }]
-    );
+    assert!(h.step(Event::Message { run, name: Token::new(8), text: bytes(b"late") }).is_empty());
     h.domain.reclaim();
     assert_eq!((h.domain.runs(), h.domain.conversations(), h.domain.calls()), (0, 0, 0));
 }
@@ -2405,21 +2398,11 @@ fn zero_waiting_time_parks_when_main_yields() {
 }
 
 #[test]
-fn bounded_messages_and_input_at_idle_deadline_preserve_existing_fifo() {
+fn bounded_message_and_input_at_idle_deadline_preserve_existing_fifo() {
     let limits = Limits { messages: 1, message_bytes: 4, ..LIMITS };
     let mut h = Harness::new(limits);
     let (run, conversation) = h.running(1, 9);
     assert!(h.step(Event::Message { run, name: Token::new(5), text: bytes(b"full") }).is_empty());
-    for (name, text, reason) in [
-        (5, b"x".as_slice(), crate::MessageRefusal::ReusedName),
-        (6, b"x".as_slice(), crate::MessageRefusal::Busy),
-        (6, b"large".as_slice(), crate::MessageRefusal::TooLarge),
-    ] {
-        assert_eq!(
-            &*h.step(Event::Message { run, name: Token::new(name), text: bytes(text) }),
-            &[Request::MessageBounced { run, name: Token::new(name), reason }]
-        );
-    }
     assert_eq!(
         &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"done") }),
         &[Request::Say { peer: Token::new(9), text: bytes(b"full") }]

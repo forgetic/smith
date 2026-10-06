@@ -906,8 +906,7 @@ impl Counted {
                 | Request::Io { .. }
                 | Request::CancelIo { .. }
                 | Request::Check { .. }
-                | Request::Abort { .. }
-                | Request::MessageBounced { .. } => {
+                | Request::Abort { .. } => {
                     panic!("this positive Wait/text fixture owes only discovery, provider and parent observations")
                 }
             }

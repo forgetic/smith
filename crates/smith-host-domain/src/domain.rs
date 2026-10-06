@@ -3,8 +3,8 @@
 //! The kit knows channel send order, not private agent stop
 //! decisions; policy and durable decisions remain in the parent.
 use crate::{
-    Ask, Bounce, CallName, Down, End, Event, Fact, Fault, Grant, Invalid, Limits, MessageRefusal, Reply, Request,
-    RunFailure, RunResult, Signal, Start, Up,
+    Ask, Bounce, CallName, Down, End, Event, Fact, Fault, Grant, Invalid, Limits, Reply, Request, RunFailure,
+    RunResult, Signal, Start, Up,
 };
 use alloc::boxed::Box;
 use skein_lib::{Deadlines, Env, Id, Map, Queue, Slab, Time, Token};
@@ -73,7 +73,7 @@ pub(crate) struct Account {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Sent {
     Start,
-    Message(Token),
+    Message,
     Call(Token),
     Busy { call: Token, name: CallName },
     Ack(u32),
@@ -108,7 +108,7 @@ pub(crate) struct Agent {
     turns: Map<u32, TurnMeta>,
     accounts: Map<u32, Account>,
     messages: u32,
-    sent: Queue<Token>,
+    unread: Queue<Token>,
     read: Option<Token>,
     number: u32,
     spent: u64,
@@ -119,7 +119,7 @@ pub(crate) struct Agent {
     cancel_sent: bool,
     progress: Time,
     long: Time,
-    // Latest actual Waiting claim; queued/issued wakes suspend its effective pause.
+    // Paused only while the run waits with no message still queued or unread.
     waiting: bool,
     paused: bool,
     wall: Time,
@@ -188,9 +188,9 @@ impl Domain {
     }
 }
 
-/// Reserve these free output slots for one step/fire: full call withdrawal fanout
-/// plus lower/process notifications, or one issued-message refusal and the
-/// ordinary next Send/Read; payload bytes priced separately (domain/host.md, sections 2 and 4.2).
+/// Reserve these free output slots for one step/fire: full call withdrawal fanout,
+/// lower/process notifications and the next Send/Read; payload bytes priced
+/// separately (domain/host.md, sections 2 and 4).
 #[must_use]
 pub fn max_out(limits: &Limits) -> u32 {
     limits.calls.saturating_add(8)
@@ -453,7 +453,7 @@ fn spawn(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<R
         turns: Map::with_capacity(env.limits.turns),
         accounts,
         messages: 0,
-        sent: Queue::with_capacity(env.limits.messages),
+        unread: Queue::with_capacity(env.limits.messages),
         read: None,
         number: 0,
         spent: 0,
@@ -616,23 +616,10 @@ fn listens(agent: &Agent) -> bool {
 }
 
 fn named_message(agent: &Agent, name: Token) -> bool {
-    match agent.sending {
-        Some(Sent::Message(pending)) if pending == name => return true,
-        Some(
-            Sent::Start
-            | Sent::Message(_)
-            | Sent::Call(_)
-            | Sent::Busy { .. }
-            | Sent::Ack(_)
-            | Sent::Grant
-            | Sent::Cancel,
-        )
-        | None => {}
-    }
     if agent.read == Some(name) {
         return true;
     }
-    for old in &agent.sent {
+    for old in &agent.unread {
         if *old == name {
             return true;
         }
@@ -658,7 +645,7 @@ fn message(agent: &mut Agent, name: Token, body: Box<[u8]>, env: &Env<Limits>, o
         Some(Bounce::Ending)
     } else if named_message(agent, name) {
         Some(Bounce::ReusedName)
-    } else if agent.messages.saturating_add(agent.sent.len()) >= env.limits.messages {
+    } else if agent.messages.saturating_add(agent.unread.len()) >= env.limits.messages {
         Some(Bounce::Full)
     } else {
         None
@@ -668,6 +655,7 @@ fn message(agent: &mut Agent, name: Token, body: Box<[u8]>, env: &Env<Limits>, o
         return;
     }
     agent.messages = agent.messages.checked_add(1).expect("bounded messages");
+    agent.waiting = false;
     agent.outbox.push(Down::Message { name, body });
 }
 
@@ -678,7 +666,7 @@ fn known_read(agent: &Agent, read: Option<Token>) -> bool {
             if agent.read == Some(name) {
                 return true;
             }
-            for sent in &agent.sent {
+            for sent in &agent.unread {
                 if *sent == name {
                     return true;
                 }
@@ -691,9 +679,9 @@ fn known_read(agent: &Agent, read: Option<Token>) -> bool {
 fn mark_read(agent: &mut Agent, read: Option<Token>) {
     match read {
         Some(name) if agent.read != Some(name) => {
-            let count = agent.sent.len();
+            let count = agent.unread.len();
             for _ in 0..count {
-                let sent = agent.sent.pop().expect("known read prefix");
+                let sent = agent.unread.pop().expect("known read prefix");
                 agent.read = Some(sent);
                 if sent == name {
                     break;
@@ -782,66 +770,7 @@ fn answered(agent: &mut Agent, callback: Token, reply: Reply, env: &Env<Limits>)
     }
 }
 
-// Eligibility is the issued ledger, never the separate pending Send/name guard.
-fn issued_message(agent: &Agent, name: Token) -> bool {
-    let mut matching_names = 0_u32;
-    for issued in &agent.sent {
-        if *issued == name {
-            matching_names = matching_names.checked_add(1).expect("bounded issued messages");
-        }
-    }
-    matching_names == 1
-}
-
-fn receive_refusal(agent: &mut Agent, owner: Token, message: &Up, env: &Env<Limits>, out: &mut Queue<Request>) -> bool {
-    match message {
-        Up::MessageBounced { name, reason } => {
-            if !issued_message(agent, *name) {
-                fail(agent, owner, Fault::Rules, env, out);
-                return true;
-            }
-            settle_refusal(agent, *name, *reason, env, out);
-            true
-        }
-        Up::Admitted
-        | Up::Call { .. }
-        | Up::Withdraw { .. }
-        | Up::Turn { .. }
-        | Up::Fact { .. }
-        | Up::Long { .. }
-        | Up::LongDone
-        | Up::Waiting { .. }
-        | Up::Rejected { .. }
-        | Up::Exhausted { .. }
-        | Up::Answer { .. } => false,
-    }
-}
-
-fn settle_refusal(agent: &mut Agent, name: Token, reason: MessageRefusal, env: &Env<Limits>, out: &mut Queue<Request>) {
-    let count = agent.sent.len();
-    for _ in 0..count {
-        let issued = agent.sent.pop().expect("validated bounded issued snapshot");
-        if issued != name {
-            agent.sent.push(issued);
-        }
-    }
-    match agent.phase {
-        Phase::Starting | Phase::Live => agent.progress = env.now,
-        Phase::Spawning
-        | Phase::Cancelled
-        | Phase::Draining
-        | Phase::Exiting
-        | Phase::Terminating
-        | Phase::Killing
-        | Phase::Closed => {}
-    }
-    out.push(Request::MessageBounced { client: agent.client, name, reason });
-}
-
 fn receive(agent: &mut Agent, owner: Token, message: Up, env: &Env<Limits>, out: &mut Queue<Request>) {
-    if receive_refusal(agent, owner, &message, env, out) {
-        return;
-    }
     if agent.last_word {
         fail(agent, owner, Fault::Rules, env, out);
         return;
@@ -859,7 +788,6 @@ fn receive(agent: &mut Agent, owner: Token, message: Up, env: &Env<Limits>, out:
     }
     agent.progress = env.now;
     match message {
-        Up::MessageBounced { .. } => unreachable!("issued message refusal handled before lifecycle gates"),
         Up::Admitted => {
             agent.admitted = true;
             if agent.phase == Phase::Starting {
@@ -914,7 +842,7 @@ fn receive(agent: &mut Agent, owner: Token, message: Up, env: &Env<Limits>, out:
         }
         Up::Waiting { read } => {
             mark_read(agent, read);
-            agent.waiting = true;
+            agent.waiting = agent.messages == 0 && agent.unread.is_empty();
             out.push(Request::Waiting { client: agent.client, read });
         }
         Up::Long { span } => {
@@ -938,7 +866,7 @@ fn receive(agent: &mut Agent, owner: Token, message: Up, env: &Env<Limits>, out:
 fn discarded_work(agent: &Agent, message: &Up) -> bool {
     match agent.phase {
         Phase::Terminating | Phase::Killing => match message {
-            Up::MessageBounced { .. } | Up::Answer { .. } => false,
+            Up::Answer { .. } => false,
             Up::Admitted
             | Up::Call { .. }
             | Up::Withdraw { .. }
@@ -1001,8 +929,7 @@ fn too_large(message: &Up, limits: &Limits) -> bool {
             RunResult::Accepted { outcome } => !within(outcome, limits.outcome_bytes),
             RunResult::Parked | RunResult::Failed { .. } => false,
         },
-        Up::MessageBounced { .. }
-        | Up::Admitted
+        Up::Admitted
         | Up::Withdraw { .. }
         | Up::Long { .. }
         | Up::LongDone
@@ -1015,7 +942,6 @@ fn too_large(message: &Up, limits: &Limits) -> bool {
 fn valid_record(agent: &Agent, message: &Up, env: &Env<Limits>) -> bool {
     let limits = &env.limits;
     match message {
-        Up::MessageBounced { name, .. } => issued_message(agent, *name),
         Up::Admitted => !agent.admitted && !agent.last_word,
         Up::Answer { answer } => valid_answer(agent, answer, limits),
         Up::Call { call, name, deadline, ask } => {
@@ -1054,7 +980,7 @@ fn valid_record(agent: &Agent, message: &Up, env: &Env<Limits>) -> bool {
                             return false;
                         }
                     }
-                    Sent::Start | Sent::Message(_) | Sent::Call(_) | Sent::Ack(_) | Sent::Grant | Sent::Cancel => {
+                    Sent::Start | Sent::Message | Sent::Call(_) | Sent::Ack(_) | Sent::Grant | Sent::Cancel => {
                         unreachable!("busy queue only stores overflow rights")
                     }
                 }
@@ -1065,7 +991,7 @@ fn valid_record(agent: &Agent, message: &Up, env: &Env<Limits>) -> bool {
                         return false;
                     }
                 }
-                Some(Sent::Start | Sent::Message(_) | Sent::Call(_) | Sent::Ack(_) | Sent::Grant | Sent::Cancel)
+                Some(Sent::Start | Sent::Message | Sent::Call(_) | Sent::Ack(_) | Sent::Grant | Sent::Cancel)
                 | None => {}
             }
             true
@@ -1153,7 +1079,7 @@ fn settle_send(agent: &mut Agent, sent: Sent) {
             let turn = agent.turns.remove(&number).expect("ACK transmission still reserved");
             assert!(turn.stage == TurnStage::Sending, "ACK send terminal owns metadata");
         }
-        Sent::Start | Sent::Message(_) | Sent::Busy { .. } | Sent::Grant | Sent::Cancel => {}
+        Sent::Start | Sent::Message | Sent::Busy { .. } | Sent::Grant | Sent::Cancel => {}
     }
 }
 
@@ -1235,10 +1161,7 @@ fn turn_room(agent: &Agent, limits: &Limits) -> bool {
 }
 
 fn pause(agent: &Agent, env: &Env<Limits>) -> bool {
-    if (agent.waiting && agent.messages == 0 && agent.sent.is_empty())
-        || !turn_room(agent, &env.limits)
-        || agent.busy.room() == 0
-    {
+    if agent.waiting || !turn_room(agent, &env.limits) || agent.busy.room() == 0 {
         return true;
     }
     for (_, call) in &agent.calls {
@@ -1257,7 +1180,7 @@ fn send_next(agent: &mut Agent, owner: Token, out: &mut Queue<Request>) {
         Some(sent) => {
             let call = match sent {
                 Sent::Busy { call, .. } => call,
-                Sent::Start | Sent::Message(_) | Sent::Call(_) | Sent::Ack(_) | Sent::Grant | Sent::Cancel => {
+                Sent::Start | Sent::Message | Sent::Call(_) | Sent::Ack(_) | Sent::Grant | Sent::Cancel => {
                     unreachable!("overflow queue")
                 }
             };
@@ -1271,8 +1194,8 @@ fn send_next(agent: &mut Agent, owner: Token, out: &mut Queue<Request>) {
                 Down::Start { .. } => unreachable!("Start sent directly once"),
                 Down::Message { name, .. } => {
                     agent.messages = agent.messages.checked_sub(1).expect("queued message count");
-                    agent.sent.push(*name);
-                    Sent::Message(*name)
+                    agent.unread.push(*name);
+                    Sent::Message
                 }
                 Down::Answer { call, .. } => {
                     let entry = agent.calls.get_mut(call).expect("answer retains callback until Sent");
@@ -1457,7 +1380,6 @@ fn observations(domain: &mut Domain, out: &Queue<Request>, before: u32) {
                 | Request::Rejected { .. }
                 | Request::Exhausted { .. }
                 | Request::Told { .. }
-                | Request::MessageBounced { .. }
                 | Request::Bounced { .. }
                 | Request::Spawn { .. }
                 | Request::Send { .. }

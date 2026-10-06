@@ -20,9 +20,6 @@ pub enum Seen {
     /// Actual named parent input, before any bounce. Contract: domain/run.md, section 6.
     Input { name: Token, text: Box<[u8]> },
 
-    /// Actual entrance refusal consumes no read fence. Contract: domain/run.md, section 6.
-    Bounced { name: Token },
-
     /// The fake sees this exact completion request. Contract: domain/run.md, section 13.
     Prompt { query: Query },
 
@@ -218,13 +215,6 @@ impl Expectations for Meeting {
         match seen {
             Seen::Admitted => {}
             Seen::Input { name, text } => self.queued.push_back((name, text)),
-            Seen::Bounced { name } => {
-                let found = self.queued.iter().rposition(|(actual, _)| *actual == name);
-                judge.check(found.is_some(), "bounce preserves the actual refused input name");
-                if let Some(position) = found {
-                    self.queued.remove(position);
-                }
-            }
             Seen::Prompt { query } => self.prompt(&query, judge),
             Seen::Completed { parts } => {
                 judge.check(self.calling && self.expected.is_none(), "provider terminal belongs to its actual request");

@@ -352,7 +352,7 @@ fn settled(world: &World, settings: &Settings) {
     assert!(world.answered_at() >= world.waiting()[0].0.saturating_add(settings.waiting));
     assert!(world.host_submissions().is_empty() && world.host_terminals().is_empty());
     assert_eq!(world.host_decisions(), 0);
-    assert!(world.checked().is_empty() && world.pushes().is_empty() && world.bounces().is_empty());
+    assert!(world.checked().is_empty() && world.pushes().is_empty());
     assert_eq!(world.wire_bindings().len(), world.turns().len());
     for binding in world.wire_bindings() {
         assert_eq!(binding.receiving.max_completion_bytes, settings.limits.session.completion_bytes);

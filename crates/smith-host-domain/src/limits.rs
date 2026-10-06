@@ -17,7 +17,7 @@ pub struct Limits {
     /// Conflict paths per mount (domain/host.md, sections 2–7).
     pub conflicts: u32,
     /// Relative conflict path bytes, at most 4096; larger configurations are
-    /// refused by admission and `worst_case` (domain/host.md, section 4.1).
+    /// checked by admission and `worst_case` (domain/host.md, section 4).
     pub path_bytes: u32,
     /// Mount and generic tool label bytes (domain/host.md, sections 2–7).
     pub name_bytes: u32,
@@ -71,9 +71,6 @@ pub struct Limits {
 /// receipt copy. Start stays here only before Started, which emits its Send;
 /// Spawning rejects messages, so retained Start and queued messages are exclusive.
 /// The disconnect snapshot follows draining queued payloads and is counted separately.
-/// A refused issued message may still own its pending lower Send body while
-/// newly released credit fills the entire queued message payload allowance.
-/// That old lower-owned body is the caller's to count independently (domain/host.md, section 4.2).
 /// Emitted/lower-owned bytes are the caller's to count. None for
 /// invalid/unrepresentable limits (domain/host.md, sections 3, 4 and 6).
 #[must_use]

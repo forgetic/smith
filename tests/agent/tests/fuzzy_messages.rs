@@ -1,6 +1,6 @@
 //! Bounded real message interleavings and replay on the existing root world.
 //! Fixture choices inject inputs; actual boundaries alone classify the endings,
-//! refusals, read fences and cancellation chronology. The existing message
+//! read fences and cancellation chronology. The existing message
 //! referee checks complete positive histories unchanged; no generic scheduler,
 //! referee or provider script is copied here. Two accepted names per world fit
 //! the existing six-turn script: observed 0→99 and 99→7 pairs span the sweep,
@@ -17,13 +17,10 @@ use smith_agent_world::{
 use smith_domain::run;
 
 const SEEDS: [u64; 16] = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987];
-const CLASSES: [&str; 19] = [
+const CLASSES: [&str; 16] = [
     "Parked",
     "Budget(Time)",
     "Cancelled",
-    "Busy",
-    "ReusedName",
-    "TooLarge",
     "read zero",
     "descending99→7",
     "read advances",
@@ -49,10 +46,9 @@ enum Fixture {
 
 #[derive(Debug, PartialEq, Eq)]
 struct Outcome {
-    counts: [u64; 19],
+    counts: [u64; 16],
     answer: String,
     fences: Vec<Option<Token>>,
-    bounces: Vec<(Token, run::MessageRefusal)>,
     answered_at: Time,
 }
 
@@ -64,7 +60,7 @@ fn settings(seed: u64, fixture: Fixture) -> Settings {
         waiting: Duration::from_secs(if wall { 10 } else { 3 }),
         budget: run::Budget { time: if wall { Duration::from_secs(2) } else { calm.budget.time }, ..calm.budget },
         limits: smith_domain::Limits {
-            run: run::Limits { messages: 1, message_bytes: 16, ..calm.limits.run },
+            run: run::Limits { messages: 2, message_bytes: 16, ..calm.limits.run },
             ..calm.limits
         },
         provider: skein_fake_llm_domain::Config {
@@ -84,13 +80,17 @@ fn inputs(seed: u64, late: bool) -> Vec<(Time, Token, Box<[u8]>)> {
     let next = if first == 0 { 99 } else { 7 };
     let burst = 50 + rng.below(10);
     let mut inputs = Vec::new();
-    for (offset, name, text) in [
-        (0, first, b"person: first".as_slice()),
-        (1, next, b"person: busy".as_slice()),
-        (2, first, b"person: reused".as_slice()),
-        (3, 555, b"0123456789abcdefg".as_slice()),
-    ] {
-        inputs.push((Time::ZERO.saturating_add(Duration::from_millis(burst + offset)), Token::new(name), text.into()));
+    inputs.push((
+        Time::ZERO.saturating_add(Duration::from_millis(burst)),
+        Token::new(first),
+        b"person: first".as_slice().into(),
+    ));
+    if !late {
+        inputs.push((
+            Time::ZERO.saturating_add(Duration::from_millis(burst + 1)),
+            Token::new(next),
+            b"person: second".as_slice().into(),
+        ));
     }
     if late {
         inputs.push((
@@ -146,7 +146,7 @@ fn cancellation_anchor(seed: u64, fixture: Fixture, late: bool) -> Option<Durati
     Some(cancel.saturating_since(Time::ZERO))
 }
 
-fn chronology(world: &World, counts: &mut [u64; 19]) {
+fn chronology(world: &World, counts: &mut [u64; 16]) {
     // This literal is the original root's parent Cancel entrance. It cannot
     // match an outgoing provider callback Cancel or a tools cancellation.
     let cancels = world
@@ -158,21 +158,21 @@ fn chronology(world: &World, counts: &mut [u64; 19]) {
         .collect::<Vec<_>>();
     assert!(cancels.len() <= 1, "one actual parent Cancel for the original admitted run");
     if let Some(cancel) = cancels.first() {
-        counts[11] += u64::try_from(
+        counts[8] += u64::try_from(
             world.trace()[cancel + 1..].iter().filter(|line| line.contains("agent <- Completed { owner: ")).count(),
         )
         .expect("bounded late completions");
-        counts[12] += u64::try_from(
+        counts[9] += u64::try_from(
             world.trace()[cancel + 1..].iter().filter(|line| line.contains("agent <- Cancelled { owner: ")).count(),
         )
         .expect("bounded cancellation terminals");
     }
 }
 
-fn observations(world: &World, seed: u64, idle: Duration) -> [u64; 19] {
+fn observations(world: &World, seed: u64, idle: Duration) -> [u64; 16] {
     let mut referee = Referee::new(Meeting::new(0, idle));
     let mut stimuli = Vec::new();
-    let mut counts = [0; 19];
+    let mut counts = [0; 16];
     let (mut calling, mut waiting, mut completed) = (false, false, false);
     let mut read = None;
     let answer = world
@@ -185,10 +185,10 @@ fn observations(world: &World, seed: u64, idle: Duration) -> [u64; 19] {
         match seen {
             Seen::Input { .. } => {
                 assert!(index < answer, "seed {seed}: every actual input precedes the actual final Answer");
-                counts[13] += 1;
-                counts[9] += u64::from(calling);
-                counts[10] += u64::from(waiting);
-                counts[16 + usize::from(completed)] += 1;
+                counts[10] += 1;
+                counts[6] += u64::from(calling);
+                counts[7] += u64::from(waiting);
+                counts[13 + usize::from(completed)] += 1;
                 waiting = false;
             }
             Seen::Prompt { .. } => {
@@ -202,32 +202,24 @@ fn observations(world: &World, seed: u64, idle: Duration) -> [u64; 19] {
             Seen::CompletionEnded => calling = false,
             Seen::Waiting { .. } => {
                 waiting = true;
-                counts[15] += 1;
+                counts[12] += 1;
             }
             Seen::Turn { read: actual, .. } => {
-                counts[14] += 1;
+                counts[11] += 1;
                 if *actual != read {
-                    counts[8] += 1;
-                    counts[6] += u64::from(*actual == Some(Token::new(0)));
-                    counts[7] += u64::from(read == Some(Token::new(99)) && *actual == Some(Token::new(7)));
-                    counts[18] += u64::from(read == Some(Token::new(0)) && *actual == Some(Token::new(99)));
+                    counts[5] += 1;
+                    counts[3] += u64::from(*actual == Some(Token::new(0)));
+                    counts[4] += u64::from(read == Some(Token::new(99)) && *actual == Some(Token::new(7)));
+                    counts[15] += u64::from(read == Some(Token::new(0)) && *actual == Some(Token::new(99)));
                     read = *actual;
                 }
             }
-            Seen::Admitted | Seen::Bounced { .. } | Seen::Answer { .. } => {}
+            Seen::Admitted | Seen::Answer { .. } => {}
         }
         referee.assert_holding(seed);
     }
     referee.assert_passed(seed);
     assert!(stimuli.is_empty(), "existing message oracle chooses no alternate schedule");
-    for (_, refusal) in world.bounces() {
-        match refusal {
-            run::MessageRefusal::Busy => counts[3] += 1,
-            run::MessageRefusal::ReusedName => counts[4] += 1,
-            run::MessageRefusal::TooLarge => counts[5] += 1,
-            run::MessageRefusal::Inactive => panic!("seed {seed}: all inputs arrive while the actual run is active"),
-        }
-    }
     match world.answer() {
         run::Answer::Parked { .. } => counts[0] += 1,
         run::Answer::Failed { failure: run::Failure::Budget(run::Exhausted::Time), .. } => counts[1] += 1,
@@ -253,7 +245,6 @@ fn run(seed: u64, fixture: Fixture) -> (Vec<String>, Outcome) {
         .filter_map(|(at, seen)| match seen {
             Seen::Input { name, text } => Some((*at, *name, text.clone())),
             Seen::Admitted
-            | Seen::Bounced { .. }
             | Seen::Prompt { .. }
             | Seen::Completed { .. }
             | Seen::CompletionEnded
@@ -267,7 +258,6 @@ fn run(seed: u64, fixture: Fixture) -> (Vec<String>, Outcome) {
         counts: observations(&world, seed, settings(seed, fixture).waiting),
         answer: format!("{:?}", world.answer()),
         fences: world.turn_metadata().iter().map(|(_, read, _)| *read).collect(),
-        bounces: world.bounces().into(),
         answered_at: world.answered_at(),
     };
     (world.trace().into(), outcome)
@@ -275,7 +265,7 @@ fn run(seed: u64, fixture: Fixture) -> (Vec<String>, Outcome) {
 
 #[test]
 fn bounded_message_schedules_replay_with_every_required_actual_class() {
-    let mut observed = [0_u64; 19];
+    let mut observed = [0_u64; 16];
     for seed in SEEDS {
         for fixture in [Fixture::Idle, Fixture::Wall, Fixture::WakeCancel, Fixture::EarlyCancel] {
             eprintln!("message sweep seed {seed}, fixture {fixture:?}");

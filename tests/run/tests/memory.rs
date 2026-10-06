@@ -236,7 +236,6 @@ fn observed_request(request: Request, selected: Option<&smith_domain_run::Conven
         | Request::WithdrawHost { .. }
         | Request::Turn { .. }
         | Request::Waiting { .. }
-        | Request::MessageBounced { .. }
         | Request::Admitted { .. }
         | Request::Say { .. }
         | Request::Close { .. }
@@ -492,7 +491,6 @@ fn delivery_memory_step(
             }
             Request::Turn { .. }
             | Request::Waiting { .. }
-            | Request::MessageBounced { .. }
             | Request::Admitted { .. }
             | Request::Checking { .. }
             | Request::Close { .. } => {}
@@ -685,7 +683,6 @@ fn host_memory_take(
             }
             Request::Turn { .. }
             | Request::Waiting { .. }
-            | Request::MessageBounced { .. }
             | Request::Admitted { .. }
             | Request::WithdrawHost { .. }
             | Request::Close { .. }

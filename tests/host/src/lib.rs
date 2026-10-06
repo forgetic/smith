@@ -67,9 +67,6 @@ pub struct Seen {
     pub down: Vec<Down>,
     /// Message names bounced by the kit.
     pub bounces: Vec<host::Bounce>,
-    /// Exact client/name/reason from actual issued-message settlement; separate
-    /// from local bounces (domain/host.md, section 4.2; testing-strategy.md, section 6).
-    pub message_bounces: Vec<(Token, Token, host::MessageRefusal)>,
     /// Notices the parent actually heard.
     pub rejected: Vec<(u32, u64)>,
     /// Generic facts forwarded without interpretation.
@@ -382,9 +379,6 @@ impl World {
                         host::Signal::Kill => Lower::Kill,
                     };
                     self.lower.open(key, owner);
-                }
-                Request::MessageBounced { client, name, reason } => {
-                    self.seen.message_bounces.push((client, name, reason));
                 }
                 Request::Bounced { bounce, .. } => self.seen.bounces.push(bounce),
                 Request::Rejected { account, generation, .. } => self.seen.rejected.push((account, generation)),

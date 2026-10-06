@@ -498,23 +498,6 @@ pub struct Answer {
     pub result: RunResult,
 }
 
-/// Actual agent refusal of an already issued named message; the host settles
-/// only that issued reservation and preserves read/IO rights (domain/host.md, section 4.2).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum MessageRefusal {
-    /// Agent receiving message count is full; no payload retained (domain/host.md, section 4.2).
-    Busy,
-
-    /// Agent receiving message bytes exceed its cap; no payload retained (domain/host.md, section 4.2).
-    TooLarge,
-
-    /// The bound agent run no longer accepts input (domain/host.md, section 4.2).
-    Inactive,
-
-    /// The message name is already active at the agent (domain/host.md, section 4.2).
-    ReusedName,
-}
-
 /// Decoded V2 agent records; one record terminates each Read (domain/host.md, sections 2–7).
 #[derive(PartialEq, Eq, Debug)]
 pub enum Up {
@@ -553,8 +536,8 @@ pub enum Up {
     },
     /// Ends the previously announced progress stretch (domain/host.md, sections 2–7).
     LongDone,
-    /// Actual waiting claim with a known read prefix. Queued/issued wakes suspend
-    /// its pause; valid Call/Long/Turn invalidate it (domain/host.md, section 4.2).
+    /// Waiting with a known read prefix pauses the watchdog until a message arrives
+    /// (domain/host.md, sections 2 and 4).
     Waiting {
         /// None before first message; known sent message thereafter (domain/host.md, sections 2–7).
         read: Option<Token>,
@@ -573,17 +556,7 @@ pub enum Up {
         /// Parent refresh/retry hint (domain/host.md, sections 2–7).
         retry_after: Duration,
     },
-    /// Settle exactly one still-issued message name with the actual agent reason.
-    /// Receivable after Answer or fault during real channel draining; no new
-    /// read, Turn or operation right (domain/host.md, section 4.2).
-    MessageBounced {
-        /// Exact issued opaque name, including zero; unknown/read/duplicate is Rules (domain/host.md, section 4.2).
-        name: Token,
-        /// Actual agent reason, forwarded without inference (domain/host.md, section 4.2).
-        reason: MessageRefusal,
-    },
-    /// Agent last word; only exact issued-message refusal settlement may follow
-    /// before actual EOF, with all lower rights retained (domain/host.md, sections 4.2 and 6).
+    /// Agent last word; no further records may follow before EOF (domain/host.md, sections 2 and 4).
     Answer {
         /// Checked final counts and opaque or typed result (domain/host.md, sections 2–7).
         answer: Answer,

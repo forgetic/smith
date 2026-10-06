@@ -807,11 +807,6 @@ impl World {
                 );
                 current = Some(run);
             }
-            run::Request::MessageBounced { run, name: _, reason: _ } => {
-                // The exact bounced input is already retained in the boundary
-                // trace. It owns no operation or read-fence advancement.
-                current = Some(run);
-            }
             run::Request::HostCall { .. } | run::Request::WithdrawHost { .. } => {
                 panic!("legacy run scripts do not invoke generic host tools")
             }
@@ -970,7 +965,6 @@ impl World {
             | run::Request::WithdrawHost { .. }
             | run::Request::Turn { .. }
             | run::Request::Waiting { .. }
-            | run::Request::MessageBounced { .. }
             | run::Request::Admitted { .. }
             | run::Request::Answer { .. }
             | run::Request::Open { .. }
