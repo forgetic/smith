@@ -72,6 +72,9 @@ pub struct Limits {
 /// Spawning rejects messages, so retained Start and queued messages are exclusive.
 /// A replacement proof clone uses its Parent-stage call's unoccupied reply reserve.
 /// The disconnect snapshot follows draining queued payloads and is counted separately.
+/// A refused issued message may still own its pending lower Send body while
+/// newly released credit fills the entire queued message payload allowance.
+/// That old lower-owned body is the caller's to count independently (domain/host.md, section 4.2).
 /// Emitted/lower-owned bytes are the caller's to count. None for
 /// invalid/unrepresentable limits (domain/host.md, sections 3, 4 and 6).
 #[must_use]

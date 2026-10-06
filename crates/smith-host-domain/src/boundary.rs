@@ -2,7 +2,7 @@
 //! Spawn ends in Gone; Started only names the process binding, Admitted names
 //! the run's independent acceptance. Parent call rights survive channel loss;
 //! Gone waits for IO proof, all IO terminals and exact parent commitments.
-use crate::{Answer, Ask, CallName, Down, Grant, Reply, Start, Turn, Up};
+use crate::{Answer, Ask, CallName, Down, Grant, MessageRefusal, Reply, Start, Turn, Up};
 use alloc::boxed::Box;
 use skein_lib::{Time, Token};
 
@@ -219,6 +219,16 @@ pub enum Request {
         name: Token,
         /// Admission reason (domain/host.md, sections 2–7).
         bounce: Bounce,
+    },
+    /// Actual agent refusal settles one issued message credit; independent from
+    /// local prequeue Bounced and from the lower Send terminal (domain/host.md, section 4.2).
+    MessageBounced {
+        /// Original parent owner, echoed even during channel draining (domain/host.md, section 4.2).
+        client: Token,
+        /// Exact issued opaque name whose one credit was retired (domain/host.md, section 4.2).
+        name: Token,
+        /// Actual agent reason; never inferred from host phase or payload (domain/host.md, section 4.2).
+        reason: MessageRefusal,
     },
     /// Spawn terminal; all process and parent rights settled (domain/host.md, sections 2–7).
     Gone {

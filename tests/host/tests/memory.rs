@@ -60,10 +60,13 @@ struct Measured {
     meter: Meter,
     bound: u64,
     held_start: Option<Start>,
+    held_messages: Vec<Box<[u8]>>,
+    retain_message: bool,
 }
 impl Measured {
     fn new(limits: Limits, caller_reserve: u64) -> Self {
         let out = Queue::with_capacity(host::max_out(&limits));
+        let held_messages = Vec::with_capacity(usize::try_from(limits.agents).expect("finite agent count"));
         let meter = Meter::new();
         let domain = host::Domain::new(&limits);
         Self {
@@ -73,6 +76,8 @@ impl Measured {
             meter,
             bound: host::worst_case(&limits).expect("valid").checked_add(caller_reserve).expect("small"),
             held_start: None,
+            held_messages,
+            retain_message: false,
         }
     }
     fn step(&mut self, event: Event, retain_start: bool) -> Option<Token> {
@@ -98,6 +103,10 @@ impl Measured {
                     Down::Start { start } if retain_start => {
                         assert!(self.held_start.replace(start).is_none());
                     }
+                    Down::Message { body, .. } if self.retain_message => {
+                        assert!(self.held_messages.len() < self.held_messages.capacity());
+                        self.held_messages.push(body);
+                    }
                     Down::Start { .. }
                     | Down::Message { .. }
                     | Down::Answer { .. }
@@ -116,6 +125,7 @@ impl Measured {
                 | Request::Told { .. }
                 | Request::Answered { .. }
                 | Request::Faulted { .. }
+                | Request::MessageBounced { .. }
                 | Request::Bounced { .. }
                 | Request::Gone { .. }
                 | Request::Read { .. }
@@ -358,4 +368,53 @@ fn checked_capacity_arithmetic_refuses_unrepresentable_or_incompatible_caps() {
     limits = smith_host_world::limits();
     limits.turns = 0;
     assert_eq!(host::worst_case(&limits), None);
+}
+
+#[test]
+fn a_refused_in_flight_message_body_coexists_with_the_full_new_queued_payload_budget() {
+    for agents in [1, 8, 32] {
+        let limits = Limits { agents, message_bytes: 16_384, ..smith_host_world::limits() };
+        let caller = u64::from(agents).checked_mul(limits.message_bytes).expect("exact old bodies at caller");
+        let mut measured = Measured::new(limits, caller);
+        let owners: Vec<Token> = (1..=u64::from(agents)).map(|client| measured.spawn(client)).collect();
+        for owner in &owners {
+            measured.start(*owner);
+            measured.step(Event::Sent { owner: *owner }, false);
+            measured.retain_message = true;
+            measured.step(
+                Event::Message { agent: *owner, name: Token::new(100), body: bytes(limits.message_bytes) },
+                false,
+            );
+            measured.retain_message = false;
+            measured.up(*owner, Up::MessageBounced { name: Token::new(100), reason: host::MessageRefusal::Busy });
+            for name in 0..limits.messages {
+                measured.step(
+                    Event::Message {
+                        agent: *owner,
+                        name: Token::new(u64::from(name)),
+                        body: bytes(limits.message_bytes),
+                    },
+                    false,
+                );
+            }
+        }
+        assert_eq!(measured.held_messages.len(), usize::try_from(agents).expect("finite actual callers"));
+        let full = caller
+            .checked_mul(u64::from(limits.messages).checked_add(1).expect("queued plus actual old body"))
+            .expect("finite payload sum");
+        assert!(measured.meter.held() >= full, "actual old in-flight bodies and all new maximum queued bodies coexist");
+        for owner in &owners {
+            measured.step(Event::Sent { owner: *owner }, false);
+        }
+        // Only those actual terminals release the caller's old payload ownership.
+        measured.held_messages.clear();
+        for owner in owners {
+            for _ in 0..limits.messages {
+                measured.step(Event::Sent { owner }, false);
+            }
+            measured.step(Event::Stop { agent: owner }, false);
+            measured.cleanup(owner, 0, true);
+        }
+        assert_eq!(measured.domain.agents(), 0);
+    }
 }

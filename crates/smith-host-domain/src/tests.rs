@@ -67,6 +67,7 @@ fn a_spawn_beyond_the_slots_is_refused_as_busy_without_displacing_the_active_own
         | Request::Told { .. }
         | Request::Answered { .. }
         | Request::Faulted { .. }
+        | Request::MessageBounced { .. }
         | Request::Bounced { .. }
         | Request::Gone { .. }
         | Request::Send { .. }
@@ -94,6 +95,7 @@ fn a_spawn_beyond_the_slots_is_refused_as_busy_without_displacing_the_active_own
         | Request::Told { .. }
         | Request::Answered { .. }
         | Request::Faulted { .. }
+        | Request::MessageBounced { .. }
         | Request::Bounced { .. }
         | Request::Send { .. }
         | Request::Read { .. }
@@ -144,6 +146,7 @@ fn host_mount_metadata_admission_agrees_with_optional_workspace_and_git_kind() {
         | Request::Told { .. }
         | Request::Answered { .. }
         | Request::Faulted { .. }
+        | Request::MessageBounced { .. }
         | Request::Bounced { .. }
         | Request::Gone { .. }
         | Request::Send { .. }
@@ -187,6 +190,7 @@ fn host_mount_metadata_admission_agrees_with_optional_workspace_and_git_kind() {
             | Request::Told { .. }
             | Request::Answered { .. }
             | Request::Faulted { .. }
+            | Request::MessageBounced { .. }
             | Request::Bounced { .. }
             | Request::Send { .. }
             | Request::Read { .. }

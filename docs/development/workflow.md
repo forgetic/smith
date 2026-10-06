@@ -180,3 +180,17 @@ memory drivers and the 240-seed host sweep remain. The parallel gate passed
 572 focused / 3.866 seconds and eleven fuzzy / 4.064 seconds; formatting and
 all-target Clippy passed. This validates the temporary checkout; original-main
 acceptance and shared SDK gates remain open.
+
+05s6 MESSAGE REFUSALS was measured serially on 2026-10-06 from temporary
+parent `1b62e06` plus the frozen increment. Section 2's commands passed
+589 focused tests in 9.217 seconds and eleven fuzzy tests in 8.163 seconds,
+with no skips. The host world contributes 66 focused tests / 0.207 seconds
+and one fuzzy test / 0.019 seconds; the host domain contributes four focused
+tests / 0.017 seconds. The agent world contributes 98 focused tests /
+3.218 seconds and four fuzzy tests / 4.559 seconds. Shares sum rounded PASS
+durations before the first suite summary. Original 240 host seeds, all eleven
+endings, four host memory drivers, payload maxima and existing agent stories
+remain; seventeen focused controls supplement them. The parallel gate passed
+589 focused / 3.262 seconds and eleven fuzzy / 3.804 seconds; formatting and
+all-target Clippy passed. This validates the temporary checkout; original-main
+acceptance and shared SDK gates remain open.

@@ -5,6 +5,8 @@
 //! are names only. No IO, frame codec, durable policy record or agent internal state.
 //! `step` and `fire` consume typed events and injected clocks; the parent reserves
 //! `max_out` output slots and settles every issued operation, including during shutdown.
+//! Exact agent message refusals settle issued names even while draining; pending
+//! Send names protect reuse, and only actual Waiting establishes a watchdog claim.
 //! Turns move to the parent, with exact commitment ACK metadata retained here.
 //! Actual deliveries survive EOF and tree cleanup; `Gone` is the separate process
 //! containment terminal, after every outstanding right. Reclaim at the iteration boundary
@@ -32,7 +34,8 @@ pub use boundary::{Bounce, End, Event, Fault, Invalid, Request, Signal};
 
 pub use channel::{
     Answer, Ask, CallName, CompletionEvidence, CompletionFailure, Directory, Down, Effect, Exhausted, Grant,
-    ModelFault, Policy, ReceivingLimit, Reply, RunFailure, RunResult, Start, TranscriptRefusal, Turn, Up,
+    MessageRefusal, ModelFault, Policy, ReceivingLimit, Reply, RunFailure, RunResult, Start, TranscriptRefusal, Turn,
+    Up,
 };
 
 pub use delivery::{

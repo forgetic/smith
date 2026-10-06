@@ -53,6 +53,8 @@ Up, from the run:
 - **facts,** best effort (run.md, section 11), and **a long operation**,
   its span bounded by the limits, and its end;
 - **waiting,** with the last message read;
+- **message refusals,** naming an already issued message and the actual root
+  reason: Busy, TooLarge, Inactive or ReusedName (section 4.2);
 - **notices** that a credential was rejected or an account exhausted;
 - **the answer,** its last word, with its turn count and its spend
   (run.md, section 10). An interrupted mid-run landing answers delivered with
@@ -83,8 +85,10 @@ transport loss lets the kit fabricate a delivery terminal.
 
 What breaks the channel's rules, an agent failure: a call name reused
 while in flight, a turn out of order, a spend that falls, a count in the
-answer that is not the turns told, anything after the last word, a
-payload beyond the limits, or a message that does not decode.
+answer that is not the turns told, working traffic after the last word, a
+payload beyond the limits, or a message that does not decode. An exact
+refusal settling an already issued message remains receivable after the last
+word (section 4.2); it cannot create another answer or admit new work.
 
 ## 3. The channel
 
@@ -165,7 +169,8 @@ The parent inputs are `Spawn`, `Message`, `Answer`, `Acknowledge`, `Grant` and
 exactly one corresponding `Spawn`, `Send`, `Read`, `Signal`, `Wait` or `Reap`.
 `Reaped` follows `Exited` and proves the entire tree empty. Parent notifications
 are `Started`, `Admitted`, `Called`, `Withdrawn`, `Turn`, `Waiting`, `Rejected`,
-`Exhausted`, `Told`, `Answered`, `Faulted`, `Bounced` and `Gone`.
+`Exhausted`, `Told`, `Answered`, `Faulted`, local `Bounced`, agent
+`MessageBounced` and `Gone`.
 
 A stable `CallName` contains positive main completion sequence and assistant
 block position, scoped by `Start.logical_run`; the callback token is only a
@@ -210,13 +215,64 @@ later channel breaches terminate the tree and emit a diagnostic fact without
 inventing a parent run fault; a first valid last word may still be heard.
 Wall-owned shutdown keeps its original failure cause, and a breach there is
 reported. After termination ordinary working traffic is discarded while final
-Answer and every actual lower/parent terminal remain receivable. Lower adapters settle every issued operation
+Answer, exact issued-message refusals and every actual lower/parent terminal
+remain receivable. Lower adapters settle every issued operation
 even after termination; no destructor abandons one.
 
 The parent reserves `max_out(limits)` free output slots before `step`/`fire`,
 repeats due timers and reclaims retired slab slots only at its iteration boundary
 (programming-model.md, sections 2, 4.5, 5 and 6). Facts are bounded content-free
 observations; dropped facts saturate a counter and change no decision.
+
+### 4.2 Agent refusal of an issued message
+
+`Up::MessageBounced { name, reason }` forwards the root's actual Busy,
+TooLarge, Inactive or ReusedName as the distinct parent
+`Request::MessageBounced { client, name, reason }`. Local `Bounced` still
+means the host refused before queueing; its Full and Ending are not the
+agent's Busy and Inactive. No reason is inferred from bytes, phase or timing.
+
+Only this agent's currently issued, unread name is eligible. Remove exactly
+that name from the bounded issued queue, preserving the other names' FIFO
+order. Do not advance the read watermark or manufacture a Turn, Waiting,
+Send terminal, acknowledgement or answer. Unknown, queued-only, already read
+or already refused names are Rules. Names are opaque, including zero and the
+maximum Token; numeric order conveys nothing. The parent promises uniqueness
+for the active logical run. The kit retains no historical name table.
+
+The pending lower Message Send retains its name until its actual Sent or
+Unsent, even if a read or refusal has already settled message credit. That
+name guards local reuse; it never grants eligibility for a second refusal.
+Released credit can admit a different name while that original Send remains
+pending. The old body is still owned by the caller/lower adapter, so the
+caller prices it alongside the newly full queued payload. A Send terminal
+and agent message credit are independent rights; Unsent does not itself prove
+that no bytes reached the peer.
+
+A valid notice is a narrow settlement exception before the ordinary last-word,
+reported-fault and termination gates. It remains receivable through an actual
+Read terminal after Answer or a reported fault, including Terminating and
+Killing. It cannot revive admission, replace the answer or accounting, report
+a second final fault, or change the original shutdown cause, grace or wall
+bound. Ordinary working traffic keeps its existing rules. Invalid settlement
+uses the existing Rules handling without restarting termination deadlines.
+
+The watchdog remembers the latest genuine Waiting claim. Queued or issued
+messages suspend its effective pause without erasing that claim. A valid actual
+Call, Long or main Turn clears it; a new actual Waiting establishes it. If
+exact refusals settle every attempted wake, the prior genuine claim can pause
+again only with no queued or issued messages. A remaining accepted message
+keeps the watchdog running. No synthetic Waiting or read advance restores it;
+the independent wall bound always runs.
+
+The concrete producer forwards root output in order, verifies the root run
+against the activation's local binding, and retains that bounded binding
+through draining and late refusals. An Answer does not finish a framing output
+that still owes those notices. EOF may leave issued names without possible
+peer terminals: Gone waits for every real IO, process, parent call and turn
+commitment right, then drops the bounded ledger rather than fabricating reads
+or waiting forever for individual refusals. Concrete codec and producer-wire
+verification belong to the protocol increment.
 
 ## 5. What a host decides
 
