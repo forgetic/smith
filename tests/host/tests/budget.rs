@@ -14,7 +14,15 @@ fn recorded(number: u32, spent: u64) -> Up {
 }
 
 fn ended(turns: u32, spent: u64) -> Up {
-    Up::Answer { answer: Answer { turns, spent, result: RunResult::Failed { failure: RunFailure::PriceOverflow } } }
+    Up::Answer {
+        answer: Answer {
+            turns,
+            spent,
+            result: RunResult::Failed {
+                failure: RunFailure::Budget(smith_host_domain::Exhausted::Overflow(smith_host_domain::Overflow::Spend)),
+            },
+        },
+    }
 }
 
 #[test]

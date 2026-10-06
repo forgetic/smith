@@ -240,6 +240,19 @@ pub enum Exhausted {
 
     /// Monotonic run deadline expired; immediate close remains independent.
     Time,
+    /// A session exceeded its receiving token ceiling for one kind.
+    Tokens(ReceivingLimit),
+    /// Checked priced or raw usage arithmetic could not represent the total.
+    Overflow(Overflow),
+}
+
+/// Which checked budget arithmetic overflowed.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Overflow {
+    /// Priced spend could not be represented.
+    Spend,
+    /// Raw completion usage could not be represented.
+    Usage,
 }
 
 /// Session receiving token ceiling reported by the agent, separate from the
@@ -286,21 +299,6 @@ pub enum TranscriptRefusal {
 /// Why a run ended without an outcome: what the host parent acts on.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RunFailure {
-    /// Agent currency arithmetic failed; the reported spend is what was
-    /// charged before the failing completion.
-    /// Actual already-landed delivery remains separate durable evidence.
-    PriceOverflow,
-
-    /// Agent raw-usage arithmetic failed before the completion's turn was told.
-    UsageOverflow,
-
-    /// A session receiving token cap stopped another completion; this does not
-    /// reinterpret that cap as a run-wide scalar financial budget.
-    Receiving(
-        /// Exact per-kind ceiling reported by the agent; no host repricing.
-        ReceivingLimit,
-    ),
-
     /// Exact transient history refusal before unsupported work starts.
     Transcript(
         /// Exact content-free history-admission classification sent by the agent

@@ -72,16 +72,12 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
             let conversation = domain.peers.get(id).expect("a peer lives as its session").conversation;
             let overflow = match session::preview_completion(&domain.session, owner, completion.usage) {
                 Err(end) => Some(end),
-                Ok(price) => match run::completion_overflow(
+                Ok(price) => priced_overflow(run::completion_overflow(
                     &domain.run,
                     conversation,
                     price,
                     translate::spend(1, completion.usage),
-                ) {
-                    Some(run::Failure::PriceOverflow) => Some(session::End::PriceOverflow),
-                    Some(run::Failure::UsageOverflow) => Some(session::End::UsageOverflow),
-                    Some(_) | None => None,
-                },
+                )),
             };
             if let Some(end) = overflow {
                 return session_step(domain, env, session::Event::Overflowed { owner, end });
@@ -132,6 +128,14 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
         }
     };
     run_step(domain, env, event);
+}
+
+fn priced_overflow(failure: Option<run::Failure>) -> Option<session::End> {
+    match failure {
+        Some(run::Failure::Budget(run::Exhausted::Overflow(run::Overflow::Spend))) => Some(session::End::PriceOverflow),
+        Some(run::Failure::Budget(run::Exhausted::Overflow(run::Overflow::Usage))) => Some(session::End::UsageOverflow),
+        Some(_) | None => None,
+    }
 }
 
 fn endpoints_known(domain: &Domain, charter: &run::Charter) -> bool {
@@ -474,6 +478,9 @@ fn complete(domain: &mut Domain, env: &Env<Limits>, pending: PendingCompletion, 
                 run::Exhausted::Turns => session::BudgetDenial::Turns,
                 run::Exhausted::Spend => session::BudgetDenial::Spend,
                 run::Exhausted::Time => unreachable!("time closes the run through its alarm"),
+                run::Exhausted::Tokens(_) | run::Exhausted::Overflow(_) => {
+                    unreachable!("receiving and overflow failures close the run")
+                }
             };
             return session_step(domain, env, session::Event::BudgetDenied { owner, reason });
         }

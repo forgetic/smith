@@ -59,7 +59,7 @@ pub use boundary::{
     Answer, Ask, AskRefusal, CompletionEvidence, CompletionFailure, End, Event, Exit, Failure, Fault, Invalid, Opening,
     Place, Policy, Ran, Read, Refusal, Request, Returned, Stop, TranscriptRefusal,
 };
-pub use budget::{Budget, CompletionPermit, Exhausted, Prices, ReceivingLimit, Share, Spend};
+pub use budget::{Budget, CompletionPermit, Exhausted, Overflow, Prices, ReceivingLimit, Share, Spend};
 pub use charter::{Brief, Charter, Conventions, Section};
 pub use domain::{Domain, MAX_OUT, completion_overflow, completion_permit, fire, step};
 pub use limits::{Limits, worst_case};

@@ -1741,7 +1741,7 @@ fn overflowing_completion_runs_no_calls_and_tells_no_turn() {
     let [Request::Answer { answer: run::Answer::Failed { failure, spent, turns }, .. }] = emitted.as_ref() else {
         panic!("overflow settles with a typed answer: {emitted:?}");
     };
-    assert_eq!(*failure, run::Failure::PriceOverflow);
+    assert_eq!(*failure, run::Failure::Budget(run::Exhausted::Overflow(run::Overflow::Spend)));
     assert_eq!((spent.units, spent.turns, *turns), (0, 0, 0));
     assert!(harness.turns.is_empty());
     assert_eq!(harness.domain.flights(), 0);

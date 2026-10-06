@@ -333,11 +333,22 @@ fn render_end(text: &mut Text, end: run::End) {
         }
         run::End::Budget(exhausted) => {
             text.put(b"budget:");
-            text.put(match exhausted {
-                run::Exhausted::Turns => b"turns",
-                run::Exhausted::Spend => b"spend",
-                run::Exhausted::Time => b"time",
-            });
+            match exhausted {
+                run::Exhausted::Turns => text.put(b"turns"),
+                run::Exhausted::Spend => text.put(b"spend"),
+                run::Exhausted::Time => text.put(b"time"),
+                run::Exhausted::Tokens(kind) => {
+                    text.put(b"tokens:");
+                    text.put(match kind {
+                        run::ReceivingLimit::Input => b"input",
+                        run::ReceivingLimit::Output => b"output",
+                        run::ReceivingLimit::CacheRead => b"cache-read",
+                        run::ReceivingLimit::CacheWrite => b"cache-write",
+                    });
+                }
+                run::Exhausted::Overflow(run::Overflow::Spend) => text.put(b"overflow:spend"),
+                run::Exhausted::Overflow(run::Overflow::Usage) => text.put(b"overflow:usage"),
+            }
         }
     }
 }

@@ -557,7 +557,7 @@ pub fn completion_overflow(domain: &Domain, conversation: Token, price: u64, usa
         domain.conversations.get(Id::from_token(conversation)).expect("provider owner has a live run conversation");
     let run = domain.runs.get(conversation.run).expect("conversation retains its run");
     if run.spent.units.checked_add(price).is_none() {
-        return Some(Failure::PriceOverflow);
+        return Some(Failure::Budget(Exhausted::Overflow(crate::Overflow::Spend)));
     }
     if run.spent.turns.checked_add(usage.turns).is_none()
         || run.spent.input.checked_add(usage.input).is_none()
@@ -565,7 +565,7 @@ pub fn completion_overflow(domain: &Domain, conversation: Token, price: u64, usa
         || run.spent.cache_read.checked_add(usage.cache_read).is_none()
         || run.spent.cache_write.checked_add(usage.cache_write).is_none()
     {
-        return Some(Failure::UsageOverflow);
+        return Some(Failure::Budget(Exhausted::Overflow(crate::Overflow::Usage)));
     }
     None
 }
@@ -589,7 +589,12 @@ pub(crate) fn priced(domain: &mut Domain, conversation: Token, own: u64, subtree
     let run = domain.runs.get_mut(run_id).expect("conversation retains run");
     let Some(total) = run.spent.accumulate(Spend { units: delta, ..Spend::ZERO }) else {
         let state = mem::replace(&mut run.state, State::Closed);
-        run.state = hard_stop(state, &mut domain.conversations, Failure::PriceOverflow, out);
+        run.state = hard_stop(
+            state,
+            &mut domain.conversations,
+            Failure::Budget(Exhausted::Overflow(crate::Overflow::Spend)),
+            out,
+        );
         follow(&mut domain.runs, &mut domain.alarms, run_id);
         return;
     };
@@ -618,7 +623,12 @@ pub(crate) fn used(domain: &mut Domain, conversation: Token, spend: Spend, out: 
     };
     let Some((conversation_total, run_total)) = added else {
         let state = mem::replace(&mut run.state, State::Closed);
-        run.state = hard_stop(state, &mut domain.conversations, Failure::UsageOverflow, out);
+        run.state = hard_stop(
+            state,
+            &mut domain.conversations,
+            Failure::Budget(Exhausted::Overflow(crate::Overflow::Usage)),
+            out,
+        );
         follow(&mut domain.runs, &mut domain.alarms, run_id);
         return;
     };
@@ -668,9 +678,8 @@ fn hard_stop(
 
 fn hard_ending(ending: Ending, failure: Failure) -> Ending {
     match failure {
-        Failure::PriceOverflow | Failure::UsageOverflow => Ending::Failed(failure),
-        Failure::Receiving(_)
-        | Failure::Transcript(_)
+        Failure::Budget(Exhausted::Overflow(_)) => Ending::Failed(failure),
+        Failure::Transcript(_)
         | Failure::Model(_)
         | Failure::Budget(_)
         | Failure::Policy(_)
@@ -921,8 +930,8 @@ pub(crate) fn ended(domain: &mut Domain, conversation: Token, end: End, spend: S
     let run = runs.get_mut(run_id).expect("a run lives until its conversations have ended");
     run.spent = run.spent.accumulate(unaccounted).expect("terminal usage was checked before it was reported");
     let failure = match end {
-        End::PriceOverflow => Some(Failure::PriceOverflow),
-        End::UsageOverflow => Some(Failure::UsageOverflow),
+        End::PriceOverflow => Some(Failure::Budget(Exhausted::Overflow(crate::Overflow::Spend))),
+        End::UsageOverflow => Some(Failure::Budget(Exhausted::Overflow(crate::Overflow::Usage))),
         End::Receiving(_)
         | End::TranscriptRefused { .. }
         | End::Closed
@@ -1552,9 +1561,13 @@ fn opening(
 /// having spent `spent`.
 fn ending(end: End, spent: Spend, turns: u32) -> Answer {
     match end {
-        End::PriceOverflow => Answer::Failed { failure: Failure::PriceOverflow, spent, turns },
-        End::UsageOverflow => Answer::Failed { failure: Failure::UsageOverflow, spent, turns },
-        End::Receiving(limit) => Answer::Failed { failure: Failure::Receiving(limit), spent, turns },
+        End::PriceOverflow => {
+            Answer::Failed { failure: Failure::Budget(Exhausted::Overflow(crate::Overflow::Spend)), spent, turns }
+        }
+        End::UsageOverflow => {
+            Answer::Failed { failure: Failure::Budget(Exhausted::Overflow(crate::Overflow::Usage)), spent, turns }
+        }
+        End::Receiving(limit) => Answer::Failed { failure: Failure::Budget(Exhausted::Tokens(limit)), spent, turns },
         End::TranscriptRefused { reason } => Answer::Failed { failure: Failure::Transcript(reason), spent, turns },
         End::Busy => Answer::Refused(Refusal::Busy),
         End::Invalid => Answer::Refused(Refusal::Invalid(Invalid::Conversation)),

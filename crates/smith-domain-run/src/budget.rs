@@ -81,6 +81,19 @@ pub enum Exhausted {
 
     /// Monotonic deadline reached.
     Time,
+    /// A session exceeded its receiving token ceiling for one kind.
+    Tokens(ReceivingLimit),
+    /// Checked priced or raw usage arithmetic could not represent the total.
+    Overflow(Overflow),
+}
+
+/// Which checked budget arithmetic overflowed.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Overflow {
+    /// Priced spend could not be represented.
+    Spend,
+    /// Raw completion usage could not be represented.
+    Usage,
 }
 
 /// Session receiving token cap, distinct from the run's scalar ceiling.

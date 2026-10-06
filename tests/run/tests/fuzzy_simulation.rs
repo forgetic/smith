@@ -55,10 +55,10 @@ fn random_worlds_settle_with_every_start_answered_once() {
                     Failure::Budget(Exhausted::Turns) => "turns",
                     Failure::Budget(Exhausted::Time) => "time",
                     Failure::Budget(Exhausted::Spend) => "spend",
-                    Failure::PriceOverflow | Failure::UsageOverflow => {
+                    Failure::Budget(Exhausted::Overflow(_)) => {
                         panic!("bounded random partner usage and prices remain representable")
                     }
-                    Failure::Receiving(_) => panic!("source random partner has no receiving refusal"),
+                    Failure::Budget(Exhausted::Tokens(_)) => panic!("source random partner has no receiving refusal"),
                     Failure::Policy(Policy::Unfinished { .. }) => "unfinished",
                     Failure::Cancelled => "cancelled",
                     Failure::Stale => "stale",

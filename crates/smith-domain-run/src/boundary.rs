@@ -814,18 +814,6 @@ pub enum Invalid {
 /// Why a run ended without an outcome: what the host acts on.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Failure {
-    /// Actual priced total cannot be represented; a prefix remains attested.
-    PriceOverflow,
-
-    /// Actual cumulative raw usage cannot be represented; a prefix remains attested.
-    UsageOverflow,
-
-    /// Session per-kind receiving cap, independent of scalar run exhaustion.
-    Receiving(
-        /// Exact receiving dimension.
-        crate::ReceivingLimit,
-    ),
-
     /// Exact transient history refusal; never silently starts fresh.
     Transcript(
         /// Session admission classification, translated exhaustively by root.
