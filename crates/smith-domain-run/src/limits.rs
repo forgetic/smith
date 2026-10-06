@@ -79,9 +79,6 @@ pub struct Limits {
     pub max_tokens: u32,
     /// The LLMs a charter may list for sub-agents.
     pub models: u32,
-    /// How deep sub-agents may nest: main is at depth zero, a sub-agent one
-    /// deeper than its asker.
-    pub depth: u32,
     /// Conversations a run may have at once, main included.
     pub run_conversations: u32,
     /// The most bytes of a sub-agent's last message its asker is given.

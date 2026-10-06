@@ -95,21 +95,35 @@ fn a_report_only_run_with_a_writable_directory_is_told_of_its_checks() {
 }
 
 #[test]
-fn sub_agents_nest_and_return_results_to_their_askers() {
+fn sub_agents_return_results_and_a_child_gets_no_sub_agent_tool() {
     let world = settled(&Settings { job: Job::Delegating, ..Settings::calm(3) });
     assert!(matches!(world.answer(), Answer::Accepted { outcome: Declared::Change(_), .. }));
     assert_eq!(world.checked(), [true]);
     assert_eq!(world.landed(), FIXED);
     assert_eq!(
         count(&world, |fact| matches!(fact, run::facts::Fact::Called { ask: run::facts::Asked::SubAgent, .. })),
-        4
+        3
     );
     assert_eq!(
         count(&world, |fact| matches!(fact, run::facts::Fact::Returned { result: run::facts::Return::Answered, .. })),
-        4
+        3
     );
-    assert_eq!(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { .. })), 5);
-    assert_eq!(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { depth: 2, .. })), 1);
+    assert_eq!(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { .. })), 4);
+    let fixer = world
+        .prompts()
+        .iter()
+        .filter(|query| query.system.windows(b"@fix".len()).any(|part| part == b"@fix"))
+        .collect::<Vec<_>>();
+    assert!(!fixer.is_empty());
+    assert!(fixer.iter().all(|query| !query.tools.iter().any(|tool| tool.name.as_ref() == b"sub_agent")));
+    assert!(
+        fixer
+            .iter()
+            .flat_map(|query| &query.messages)
+            .flat_map(|message| &message.parts)
+            .any(|part| { matches!(part, skein_fake_llm_domain::api::Part::ToolOutput { is_error: true, .. }) }),
+        "an unoffered sub-agent call receives the ordinary refusal"
+    );
     assert_eq!(
         count(&world, |fact| matches!(fact, run::facts::Fact::Called { ask: run::facts::Asked::Finish, .. })),
         1,
@@ -175,7 +189,7 @@ fn host_cancellation_at_many_moments_closes_the_whole_tree() {
             Answer::Failed { failure: Failure::Cancelled, .. } => {
                 cancelled += 1;
                 nested +=
-                    usize::from(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { depth: 1, .. })) > 0);
+                    usize::from(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { child: true, .. })) > 0);
             }
             Answer::Accepted { .. } => done += 1,
             answer @ (Answer::Parked { .. } | Answer::Refused(_) | Answer::Failed { .. }) => {
@@ -199,7 +213,7 @@ fn a_deadline_mid_tree_answers_only_after_the_tree_settles() {
             ..Settings::calm(700 + seed)
         });
         assert!(matches!(world.answer(), Answer::Failed { failure: Failure::Budget(Exhausted::Time), .. }));
-        nested += usize::from(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { depth: 1, .. })) > 0);
+        nested += usize::from(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { child: true, .. })) > 0);
         assert!(world.answered_at() <= skein_lib::Time::ZERO.saturating_add(Duration::from_secs(5)));
     }
     assert!(nested > 0, "some deadlines crossed nested work");

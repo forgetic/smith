@@ -208,7 +208,6 @@ const fn calm_run_limits() -> run::Limits {
         budget: run::Budget { turns: 1000, spend: 1 << 32, time: Duration::from_secs(24 * 3600) },
         max_tokens: 8192,
         models: 4,
-        depth: 2,
         run_conversations: 4,
         answer_bytes: 512,
         nudges: 2,

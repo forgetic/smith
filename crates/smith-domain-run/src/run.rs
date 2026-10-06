@@ -169,10 +169,8 @@ pub(crate) struct Conversation {
     run: Id<Run>,
     /// The sub-agent call it serves, if it is a sub-agent.
     asker: Option<Id<Call>>,
-    /// Its families of tools, and how deep it is: main is at zero, a sub-agent
-    /// one deeper than its asker.
+    /// Its families of tools.
     families: Families,
-    depth: u32,
     /// What it has spent, by its `Used` so far.
     spent: Spend,
     subtree_spent: u64,
@@ -284,7 +282,6 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         run: id,
         asker: None,
         families,
-        depth: 0,
         spent: Spend::ZERO,
         subtree_spent: 0,
         calls: 0,
@@ -1000,20 +997,20 @@ pub(crate) fn deadline(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request
     follow(runs, alarms, id);
 }
 
-/// How deep the conversation `conversation` is, and for main what its run
+/// Whether `conversation` is a child, and for main what its run
 /// found in its checkout (its guides, and its repositories with checks), for
 /// their facts.
 pub(crate) fn opened(
     runs: &Slab<Run>,
     conversations: &Slab<Conversation>,
     conversation: Token,
-) -> (u32, Option<(u32, u32)>) {
+) -> (bool, Option<(u32, u32)>) {
     let conversation = conversations.get(Id::from_token(conversation)).expect("a conversation is told of as it opens");
-    if conversation.depth > 0 {
-        return (conversation.depth, None);
+    if conversation.asker.is_some() {
+        return (true, None);
     }
     let run = runs.get(conversation.run).expect("a run outlives its conversations");
-    (0, Some((run.found.guides.len(), run.found.checks.len())))
+    (false, Some((run.found.guides.len(), run.found.checks.len())))
 }
 
 /// What a run's state implies, applied after every transition: whether its
@@ -1379,7 +1376,6 @@ fn sub_agent(
         &run.charter,
         means,
         asking.families,
-        asking.depth,
         wanted.families,
         wanted.llm.as_deref(),
         wanted.share,
@@ -1404,7 +1400,6 @@ fn sub_agent(
         run: run_id,
         asker: Some(id),
         families: plan.families,
-        depth: plan.depth,
         spent: Spend::ZERO,
         subtree_spent: 0,
         calls: 0,

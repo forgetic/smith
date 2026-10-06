@@ -20,8 +20,7 @@ const CEILING: session::Budget = session::Budget {
 };
 
 /// An agent process's limits in the calm world: room for the one run it
-/// carries, with a few conversations, sub-agents nested two deep beneath
-/// main.
+/// carries, with room for main and several child conversations.
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 pub const LIMITS: Limits = Limits {
@@ -48,7 +47,6 @@ pub const LIMITS: Limits = Limits {
         budget: BUDGET,
         max_tokens: 4096,
         models: 2,
-        depth: 2,
         run_conversations: 6,
         answer_bytes: 1024,
         nudges: 1,

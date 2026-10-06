@@ -8,8 +8,7 @@
 //! yielding returns how it ended, as a tool error for its asker to read, not a
 //! failure of the run. Either way, the call returns only once the child has
 //! ended. Withdrawing the call, or its deadline passing, closes the child, and
-//! a closing child withdraws its own calls in turn: closing cascades down the
-//! tree, each owner closing what it owns, one event at a time. A child's time
+//! a closing child settles its calls. A child's time
 //! runs out no later than its call's deadline. A refused ask is a tool error
 //! too.
 //!
@@ -66,7 +65,6 @@ pub(crate) enum Child {
 pub(crate) struct Plan {
     pub(crate) llm: Llm,
     pub(crate) families: Families,
-    pub(crate) depth: u32,
     pub(crate) budget: Budget,
 }
 
@@ -79,15 +77,13 @@ pub(crate) struct Means {
     pub(crate) left: Duration,
 }
 
-/// What a conversation with `families` at `depth` may be given when it asks
+/// What a conversation with `families` may be given when it asks
 /// for a sub-agent with `wanted` families, on the LLM named `llm`, with a
 /// share of at most `share`; or why not.
-#[expect(clippy::too_many_arguments, reason = "an ask is checked against everything it is about")]
 pub(crate) fn plan(
     charter: &Charter,
     means: Means,
     families: Families,
-    depth: u32,
     wanted: Families,
     llm: Option<&[u8]>,
     share: Option<crate::Share>,
@@ -95,10 +91,6 @@ pub(crate) fn plan(
 ) -> Result<Plan, AskRefusal> {
     if !families.agents || !wanted.within(families) {
         return Err(AskRefusal::NotGranted);
-    }
-    let depth = depth.saturating_add(1);
-    if depth > limits.depth {
-        return Err(AskRefusal::TooDeep);
     }
     if means.conversations >= limits.run_conversations {
         return Err(AskRefusal::TooMany);
@@ -117,7 +109,7 @@ pub(crate) fn plan(
     if !budget.is_workable() {
         return Err(AskRefusal::Unworkable);
     }
-    Ok(Plan { llm, families: wanted, depth, budget })
+    Ok(Plan { llm, families: Families { tools: wanted.tools, agents: false }, budget })
 }
 
 /// The child `child` of a call that just began.

@@ -71,7 +71,6 @@ const LIMITS: Limits = Limits {
     budget: BUDGET,
     max_tokens: 1024,
     models: 1,
-    depth: 1,
     run_conversations: 2,
     answer_bytes: 128,
     nudges: 1,

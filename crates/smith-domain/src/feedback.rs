@@ -169,7 +169,6 @@ fn render(text: &mut Text, returned: &Returned) {
             text.put(match refusal {
                 run::AskRefusal::Name => b"name",
                 run::AskRefusal::NotGranted => b"not-granted",
-                run::AskRefusal::TooDeep => b"too-deep",
                 run::AskRefusal::TooMany => b"too-many",
                 run::AskRefusal::UnknownLlm => b"unknown-llm",
                 run::AskRefusal::Unworkable => b"unworkable",

@@ -52,7 +52,6 @@ const LIMITS: Limits = Limits {
         budget: run::Budget { turns: CEILING.turns, spend: 1, time: CEILING.time },
         max_tokens: 1024,
         models: 1,
-        depth: 2,
         run_conversations: 3,
         answer_bytes: 64,
         nudges: 1,
@@ -945,7 +944,7 @@ fn a_sub_agent_opens_a_child_session_whose_last_message_answers_the_call() {
     let (child, prompt) = completing(h.answer(main, Box::new([served(b"a1", sub_agent(b"Find the bug."))])));
     assert_ne!(child, main);
     assert_eq!(prompt.tools, tools::Grants { inspect: true, modify: false, shell: false }, "the families asked for");
-    assert_eq!(&*prompt.served, &[Served::SubAgent], "a child never finishes");
+    assert!(prompt.served.is_empty(), "a child receives workspace tools only");
     assert_eq!((h.domain.peers(), h.domain.flights()), (2, 1));
 
     // The child calls finish, which it was not offered: no call. Its next
@@ -1108,36 +1107,6 @@ fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_bytes()
         u64::from(limits.run.answer_bytes).checked_mul(2).expect("two exact child answers")
             <= limits::uncharged(&limits).expect("priced queued payload")
     );
-}
-
-#[test]
-fn a_cancel_cascades_down_a_two_level_tree_one_level_an_iteration() {
-    let mut h = Harness::new();
-    let (run, main, _) = h.admit(7, charter());
-    let (child, _) = completing(h.answer(main, Box::new([served(b"a1", sub_agent(b"Look around."))])));
-    let (grandchild, _) = completing(h.answer(child, Box::new([served(b"a2", sub_agent(b"Look closer."))])));
-    assert_eq!((h.domain.peers(), h.domain.flights()), (3, 2));
-
-    // Each close withdraws the call whose sub-agent the run closes next, an
-    // iteration later; the grandchild cancels its call to the LLM.
-    assert!(h.step(Event::Cancel { run }).is_empty());
-    assert!(h.next().is_empty(), "main closes, withdrawing its call");
-    assert!(h.next().is_empty(), "the child closes, withdrawing its call");
-    assert_eq!(&*h.next(), &[Request::Cancel { owner: grandchild }]);
-
-    // The ends come back up the same way, each answer from the ready list.
-    assert!(h.step(Event::Cancelled { owner: grandchild }).is_empty());
-    assert!(h.next().is_empty(), "the child's call is answered cancelled, and it ends");
-    let emitted = h.next();
-    let [Request::Answer { to: _, answer: run::Answer::Failed { failure: run::Failure::Cancelled, spent, .. } }] =
-        &*emitted
-    else {
-        panic!("expected the run cancelled, got {emitted:?}");
-    };
-    assert_eq!(spent.turns, 2, "main's turn and the child's; the grandchild's was cancelled");
-    h.domain.reclaim();
-    assert_eq!((h.domain.peers(), h.domain.flights(), h.domain.tickets()), (0, 0, 0), "every ticket freed");
-    assert_eq!((h.domain.run().runs(), h.domain.session().sessions()), (0, 0));
 }
 
 #[test]

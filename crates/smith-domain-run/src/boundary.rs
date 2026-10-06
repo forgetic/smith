@@ -482,8 +482,6 @@ pub enum AskRefusal {
     /// The asker lacks this mid-run delivery or sub-agent grant, or asked for families of tools
     /// it does not have itself.
     NotGranted,
-    /// The sub-agent would be nested deeper than a run's limit.
-    TooDeep,
     /// The run has as many conversations as it may have at once.
     TooMany,
     /// The charter has no LLM of that name for sub-agents.

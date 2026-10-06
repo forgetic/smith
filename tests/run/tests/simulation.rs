@@ -646,8 +646,7 @@ fn deadlines_find_runs_in_every_state_they_run_in() {
     }
 }
 
-/// A world where the LLM asks for sub-agents, nested, and finishes now and
-/// then.
+/// A world where the LLM asks for sub-agents and finishes now and then.
 fn asking(seed: u64) -> Settings {
     let calm = Settings::calm(seed);
     Settings {
@@ -676,8 +675,6 @@ fn asks_the_run_cannot_grant_are_refused_and_the_llm_goes_on() {
     let world = settled(&Settings { partner: Script { bad_asks: 1000, ..settings.partner }, ..settings });
     let stats = world.stats();
     assert!(stats.partner.ask_refused > 0 && stats.children == 0, "{stats:?}");
-    let shallow = Settings { run: Limits { depth: 0, ..settings.run }, ..settings };
-    assert_eq!(settled(&shallow).stats().children, 0, "no sub-agent at depth zero");
 }
 
 #[test]

@@ -92,11 +92,10 @@ pub fn noisy(seed: u64) -> Settings {
         ..run
     };
     let inject = small(pick(0, 150));
-    // Sub-agents: room for a few, nested a little.
+    // Sub-agents: room for a few children beside main.
     let run = Limits {
         conversations: run.conversations.saturating_mul(small(pick(1, 3))),
         calls: small(pick(1, 8)),
-        depth: small(pick(0, 3)),
         run_conversations: small(pick(1, 4)),
         answer_bytes: small(pick(0, 200)),
         facts: small(pick(0, 64)),

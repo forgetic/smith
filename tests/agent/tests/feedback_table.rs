@@ -77,7 +77,6 @@ fn host_and_ask_refusal_variants_keep_their_names() {
     for (refusal, label) in [
         (run::AskRefusal::Name, "name"),
         (run::AskRefusal::NotGranted, "not-granted"),
-        (run::AskRefusal::TooDeep, "too-deep"),
         (run::AskRefusal::TooMany, "too-many"),
         (run::AskRefusal::UnknownLlm, "unknown-llm"),
         (run::AskRefusal::Unworkable, "unworkable"),

@@ -40,7 +40,6 @@ pub(crate) const LIMITS: Limits = Limits {
     budget: Budget { turns: 100, spend: 1_000_000, time: Duration::from_secs(3600) },
     max_tokens: 4096,
     models: 2,
-    depth: 2,
     run_conversations: 3,
     answer_bytes: 16,
     nudges: 2,
@@ -1402,6 +1401,20 @@ fn a_sub_agent_answers_with_its_last_message_once_it_has_ended() {
 }
 
 #[test]
+fn a_child_opening_has_workspace_tools_only_even_when_the_ask_requests_agents() {
+    let mut h = Harness::new(LIMITS);
+    let (_, main) = h.running_on(1, 100, agents());
+    let (child, opening) = h.child(main, 7, families(true, false, true), 101);
+    assert_eq!(opening.families, families(true, false, false));
+    assert!(!opening.finish && !opening.deliver && !opening.wait);
+    assert!(opening.host_tools.is_empty());
+    assert_eq!(
+        &*h.step(ask(child, 8, families(true, false, false), None, None)),
+        &[returned(8, refused(AskRefusal::NotGranted))]
+    );
+}
+
+#[test]
 fn a_sub_agent_runs_on_the_llm_named_for_it_among_the_charters() {
     let mut h = Harness::new(LIMITS);
     let (_, main) = h.running_on(1, 100, agents());
@@ -1441,14 +1454,7 @@ fn an_ask_the_run_cannot_grant_returns_why_and_the_run_goes_on() {
         &[returned(10, refused(AskRefusal::Unworkable))]
     );
 
-    // Too deep, and too many.
-    let mut h = Harness::new(Limits { depth: 1, ..LIMITS });
-    let (_, main) = h.running_on(1, 100, agents());
-    let (child, _) = h.child(main, 7, families(true, false, true), 101);
-    assert_eq!(
-        &*h.step(ask(child, 8, families(true, false, false), None, None)),
-        &[returned(8, refused(AskRefusal::TooDeep))]
-    );
+    // Too many.
     let mut h = Harness::new(Limits { run_conversations: 2, ..LIMITS });
     let (_, main) = h.running_on(1, 100, agents());
     drop(h.child(main, 7, families(true, false, false), 101));
@@ -1545,34 +1551,6 @@ fn a_sub_agent_past_its_deadline_is_closed_and_returns_timed_out_once_it_has_end
 }
 
 #[test]
-fn a_cancel_closes_the_tree_one_owner_at_a_time() {
-    let mut h = Harness::new(LIMITS);
-    let (run, main) = h.running_on(1, 100, agents());
-    let (child, _) = h.child(main, 7, families(true, false, true), 101);
-    let (grandchild, _) = h.child(child, 8, families(true, false, false), 102);
-    // The run closes main only; each closing conversation withdraws its calls.
-    assert_eq!(&*h.step(Event::Cancel { run }), &[Request::Close { peer: Token::new(100) }]);
-    assert_eq!(
-        &*h.step(Event::Withdraw { conversation: main, call: Token::new(7) }),
-        &[Request::Close { peer: Token::new(101) }]
-    );
-    // A call that crosses its conversation's close returns at once, and opens
-    // nothing.
-    let crossed = ask(child, 9, families(true, false, false), None, None);
-    assert_eq!(&*h.step(crossed), &[returned(9, Returned::Cancelled)]);
-    assert_eq!(
-        &*h.step(Event::Withdraw { conversation: child, call: Token::new(8) }),
-        &[Request::Close { peer: Token::new(102) }]
-    );
-    let emitted = h.step(Event::Ended { conversation: grandchild, end: End::Closed, spend: Spend::ZERO });
-    assert_eq!(&*emitted, &[returned(8, Returned::Cancelled)]);
-    let emitted = h.step(Event::Ended { conversation: child, end: End::Closed, spend: Spend::ZERO });
-    assert_eq!(&*emitted, &[returned(7, Returned::Cancelled)]);
-    let emitted = h.step(Event::Ended { conversation: main, end: End::Closed, spend: Spend::ZERO });
-    assert_eq!(answered(emitted), (1, cancelled()));
-}
-
-#[test]
 fn a_sub_agent_that_spends_past_the_budget_winds_the_run_down() {
     let mut h = Harness::new(LIMITS);
     let (_, main) = h.running_on(1, 100, agents());
@@ -1616,9 +1594,9 @@ fn a_run_tells_what_it_did_as_content_free_facts() {
     let expected = [
         Fact::Admitted { run },
         Fact::Prepared { run, guides: 1, checks: 0 },
-        Fact::Opened { run, conversation: main, depth: 0 },
+        Fact::Opened { run, conversation: main, child: false },
         Fact::Called { run, conversation: main, call: Token::new(7), ask: Asked::SubAgent },
-        Fact::Opened { run, conversation: child, depth: 1 },
+        Fact::Opened { run, conversation: child, child: true },
         Fact::Ended { run, conversation: child, end: End::Closed },
         Fact::Returned { run, call: Token::new(7), result: Return::Answered },
         Fact::Called { run, conversation: main, call: Token::new(8), ask: Asked::Finish },
@@ -2718,7 +2696,7 @@ fn initial_conflicts_require_git_unique_relative_paths_and_independent_caps() {
 }
 
 #[test]
-fn exact_workspace_limits_and_aggregate_price_include_every_nested_owner() {
+fn exact_workspace_limits_and_aggregate_price_include_every_owner() {
     let limits = Limits { directories: 2, directory_name_bytes: 9, conflicts: 1, conflict_path_bytes: 12, ..LIMITS };
     let mounted = mixed_workspace();
     let directory_cells = 2 * u64::try_from(size_of::<Directory>()).unwrap();
@@ -2836,34 +2814,6 @@ fn empty_main_instructions_and_brief_are_valid_even_with_zero_section_limit() {
 
 fn priced(conversation: Token, own_spent: u64, subtree_spent: u64) -> Event {
     Event::Priced { conversation, own_spent, subtree_spent }
-}
-
-#[test]
-fn own_units_are_conserved_once_while_nested_terminal_bills_roll_up() {
-    let mut harness = Harness::new(LIMITS);
-    let (_, main) = harness.running_on(1, 100, agents());
-    let (child, _) = harness.child(main, 7, families(true, false, true), 101);
-    let (grandchild, _) = harness.child(child, 8, families(true, false, false), 102);
-    assert!(harness.step(priced(main, 4, 4)).is_empty());
-    assert!(harness.step(priced(child, 7, 7)).is_empty());
-    assert!(harness.step(priced(grandchild, 11, 11)).is_empty());
-    let end = End::Fault(Fault::ContextFull);
-    assert_eq!(
-        harness.step(Event::Ended { conversation: grandchild, end, spend: Spend::ZERO }).as_ref(),
-        &[Request::Return { call: Token::new(8), result: Returned::Unanswered { end }, spent: 11 }]
-    );
-    assert!(harness.step(priced(child, 7, 18)).is_empty(), "inclusive child rollup adds no own charge");
-    assert!(harness.step(priced(grandchild, 99, 99)).is_empty(), "retired child price is stale");
-    assert!(harness.step(Event::Ended { conversation: grandchild, end, spend: Spend::ZERO }).is_empty());
-    assert_eq!(
-        harness.step(Event::Ended { conversation: child, end, spend: Spend::ZERO }).as_ref(),
-        &[Request::Return { call: Token::new(7), result: Returned::Unanswered { end }, spent: 18 }]
-    );
-    assert!(harness.step(priced(main, 4, 22)).is_empty());
-    assert!(harness.step(priced(main, 4, 22)).is_empty(), "duplicate cumulative price has zero delta");
-    let expected = Spend { units: 22, ..Spend::ZERO };
-    let answer = answered(harness.step(Event::Ended { conversation: main, end, spend: Spend::ZERO })).1;
-    assert_eq!(answer, failed(Failure::Model(Fault::ContextFull), expected));
 }
 
 #[test]

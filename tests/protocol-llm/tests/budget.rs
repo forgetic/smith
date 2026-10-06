@@ -18,8 +18,7 @@ use smith_protocol_llm_world::{
 
 const BEGIN: &[u8] = b"Begin the work your brief describes.";
 const ID: &[u8] = b"call_0000000000000001";
-const CHILD: &[u8] = b"BUDGET-CHILD: actual nested result.";
-const GRANDCHILD: &[u8] = b"BUDGET-GRANDCHILD: actual leaf result.";
+const CHILD: &[u8] = b"BUDGET-CHILD: actual child result.";
 const CHILD_INPUT: &[u8] = br#"{"brief":"@budget-child own task","tools":["inspect"],"agents":true,"llm":"fake-2"}"#;
 const GRAND_INPUT: &[u8] = br#"{"brief":"@budget-grand own task","tools":["inspect"],"llm":"fake-3"}"#;
 const REPORT: &[u8] = br#"{"report":"Budget work finished.","source":"actual-checkout"}"#;
@@ -39,7 +38,7 @@ struct Rate {
     unit: u32,
 }
 
-const NESTED_RATES: [Rate; 3] = [
+const MODEL_RATES: [Rate; 3] = [
     Rate { model: b"fake-1", input: 2, cached: 3, output: 5, unit: 7 },
     Rate { model: b"fake-2", input: 7, cached: 11, output: 13, unit: 10 },
     Rate { model: b"fake-3", input: 17, cached: 19, output: 23, unit: 29 },
@@ -51,7 +50,7 @@ const PARALLEL_RATES: [Rate; 3] = [
     Rate { model: b"fake-3", input: 0, cached: 0, output: 1, unit: 1 },
 ];
 const RESUMED_RATES: [Rate; 2] =
-    [Rate { model: b"fake-1", input: 31, cached: 37, output: 41, unit: 13 }, NESTED_RATES[1]];
+    [Rate { model: b"fake-1", input: 31, cached: 37, output: 41, unit: 13 }, MODEL_RATES[1]];
 
 fn charge(usage: skein_llm::Usage, rate: Rate) -> u64 {
     // One combined numerator is rounded once. This oracle uses no domain
@@ -306,7 +305,7 @@ fn turn_usage(actual: skein_llm::Usage) -> llm::Usage {
 }
 
 #[test]
-fn three_priced_models_and_seven_nested_completions_conserve_global_own_charges() {
+fn two_priced_models_and_a_refused_child_delegate_conserve_global_own_charges() {
     let scripts = Box::new([
         script(
             b"@budget-main",
@@ -324,24 +323,23 @@ fn three_priced_models_and_seven_nested_completions_conserve_global_own_charges(
                 says(CHILD, 17),
             ],
         ),
-        script(b"@budget-grand", vec![says(GRANDCHILD, 19)]),
     ]);
     let settings = settings(701, false, false);
-    let mut world = typed_world(&settings, b"@budget-main MAIN-INSTRUCTIONS", &NESTED_RATES, scripts);
+    let mut world = typed_world(&settings, b"@budget-main MAIN-INSTRUCTIONS", &MODEL_RATES, scripts);
     world.run(20_000);
-    let expected = conservation(&world, &NESTED_RATES);
-    assert_eq!(expected.turns, 7);
-    assert_eq!(expected.output, 75);
+    let expected = conservation(&world, &MODEL_RATES);
+    assert_eq!(expected.turns, 6);
+    assert_eq!(expected.output, 56);
     assert!(expected.cache_read > 0 && expected.cache_write > 0);
     assert_eq!(world.turns().len(), 3, "only main's settled Turns cross the host boundary");
     let main = model_calls(&world, b"fake-1");
     let child = model_calls(&world, b"fake-2");
-    let grandchild = model_calls(&world, b"fake-3");
-    assert_eq!((main.len(), child.len(), grandchild.len()), (3, 3, 1));
-    let child_bill = own_units(&child, NESTED_RATES[1]) + own_units(&grandchild, NESTED_RATES[2]);
+    assert!(model_calls(&world, b"fake-3").is_empty());
+    assert_eq!((main.len(), child.len()), (3, 3));
+    let child_bill = own_units(&child, MODEL_RATES[1]);
     let mut inclusive = child_bill;
     for (index, actual) in main.iter().enumerate() {
-        inclusive += charge(usage(actual), NESTED_RATES[0]);
+        inclusive += charge(usage(actual), MODEL_RATES[0]);
         assert_eq!(world.turns()[index].spent, inclusive, "main includes the child's whole subtree bill once");
         assert_eq!(world.turns()[index].usage, turn_usage(usage(actual)));
     }
@@ -349,15 +347,14 @@ fn three_priced_models_and_seven_nested_completions_conserve_global_own_charges(
     let main_queries = world.prompts().iter().filter(|query| query.model.as_ref() == b"fake-1").collect::<Vec<_>>();
     let child_queries = world.prompts().iter().filter(|query| query.model.as_ref() == b"fake-2").collect::<Vec<_>>();
     assert!(query_result(main_queries[1], b"sub_agent", CHILD_INPUT, CHILD));
-    assert!(query_result(child_queries[1], b"sub_agent", GRAND_INPUT, GRANDCHILD));
-    assert!(child_queries.iter().all(|query| query.system.starts_with(b"@budget-child own task\n\n")));
     assert!(
-        world
-            .prompts()
+        child_queries[1]
+            .messages
             .iter()
-            .filter(|query| query.model.as_ref() == b"fake-3")
-            .all(|query| query.system.starts_with(b"@budget-grand own task\n\n"))
+            .flat_map(|message| &message.parts)
+            .any(|part| { matches!(part, Part::ToolOutput { is_error: true, .. }) })
     );
+    assert!(child_queries.iter().all(|query| query.system.starts_with(b"@budget-child own task\n\n")));
     assert!(
         matches!(world.answer(), run::Answer::Accepted { outcome: run::outcome::Declared::Report(report), turns: 3, .. }
         if report.text.as_ref() == b"Budget work finished.")
@@ -365,7 +362,7 @@ fn three_priced_models_and_seven_nested_completions_conserve_global_own_charges(
     let mut duplicated = world.completions().to_vec();
     duplicated.push(duplicated[0].clone());
     assert_ne!(
-        total(&duplicated, &NESTED_RATES),
+        total(&duplicated, &MODEL_RATES),
         expected,
         "the whole positive conservation oracle detects double charging"
     );
@@ -673,23 +670,23 @@ fn parking_story(index: usize) {
     let mut first = native_world(
         settings(704, false, true),
         b"@budget-parking-main FIRST-INSTRUCTIONS",
-        &NESTED_RATES[..2],
+        &MODEL_RATES[..2],
         parking_scripts(),
         None,
         index,
     );
     first.run(100_000);
-    let first_total = parked_accounting(&first, &NESTED_RATES[..2], 0);
+    let first_total = parked_accounting(&first, &MODEL_RATES[..2], 0);
     assert_eq!((first_total.turns, first_total.output), (4, 32));
     assert_eq!(first.turns().len(), 3);
     let first_main = model_calls(&first, b"fake-1");
     let first_child = model_calls(&first, b"fake-2");
     assert_eq!((first_main.len(), first_child.len()), (3, 1));
-    let child_bill = own_units(&first_child, NESTED_RATES[1]);
+    let child_bill = own_units(&first_child, MODEL_RATES[1]);
     assert!(child_bill > 0);
     let mut inclusive = child_bill;
     for (turn, actual) in first.turns().iter().zip(first_main) {
-        inclusive += charge(usage(actual), NESTED_RATES[0]);
+        inclusive += charge(usage(actual), MODEL_RATES[0]);
         assert_eq!(turn.spent, inclusive);
         assert_eq!(turn.usage, turn_usage(usage(actual)));
     }

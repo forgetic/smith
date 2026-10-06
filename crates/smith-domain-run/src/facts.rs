@@ -35,12 +35,12 @@ pub enum Fact {
         /// Number of prepared repository check executables.
         checks: u32,
     },
-    /// It opened the conversation `conversation`, at `depth`: zero for main.
+    /// It opened the main conversation or a child conversation.
     Opened {
         run: Token,
         conversation: Token,
-        /// Nesting or JSON depth, bounded by the enclosing immutable limits.
-        depth: u32,
+        /// Whether this is a child conversation.
+        child: bool,
     },
     /// The conversation ended, or was refused at its entrance.
     Ended {
@@ -213,12 +213,12 @@ pub(crate) fn tell(
         let fact = match request {
             Request::Admitted { host_run: _, run } => Fact::Admitted { run: *run },
             Request::Open { conversation, opening: _ } => {
-                let (depth, prepared) = run::opened(runs, conversations, *conversation);
+                let (child, prepared) = run::opened(runs, conversations, *conversation);
                 // Main opens once its run has prepared.
                 if let Some((guides, checks)) = prepared {
                     facts.push(Fact::Prepared { run, guides, checks });
                 }
-                Fact::Opened { run, conversation: *conversation, depth }
+                Fact::Opened { run, conversation: *conversation, child }
             }
             Request::Return { call, result, .. } => Fact::Returned { run, call: *call, result: result_of(result) },
             Request::Check { owner: _, program: _, deadline, tail: _ } => {
