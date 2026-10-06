@@ -265,7 +265,7 @@ fn closing_a_resting_batch_keeps_its_result_and_marks_only_unstarted_calls() {
         0,
         llm::Block::ToolCall {
             id: b"denied-read".as_slice().into(),
-            name: b"read_file".as_slice().into(),
+            name: b"read".as_slice().into(),
             input: br#"{"path":"."}"#.as_slice().into(),
             call: llm::Decoded::Owned {
                 call: Call::Read {
@@ -331,7 +331,7 @@ fn owned_io_cancellation_keeps_terminal_results_in_the_turn() {
                 llm::Block::Opaque { bytes: recorded::OPAQUE.into() },
                 llm::Block::ToolCall {
                     id: b"owned-read".as_slice().into(),
-                    name: b"read_file".as_slice().into(),
+                    name: b"read".as_slice().into(),
                     input: br#"{"path":"data"}"#.as_slice().into(),
                     call: llm::Decoded::Owned {
                         call: Call::Read {
@@ -455,7 +455,7 @@ fn cap_filled_provider_credit_preserves_replay_completion_that_wins_cancel() {
     let call_payload = match &call {
         llm::Block::ToolCall { id, name, input, .. } => {
             assert_eq!(id.as_ref(), b"provider-call");
-            assert_eq!(name.as_ref(), b"subagent");
+            assert_eq!(name.as_ref(), b"sub_agent");
             assert_eq!(input.as_ref(), br#"{"task":"review"}"#);
             id.len() + name.len() + input.len()
         }

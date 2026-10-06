@@ -293,7 +293,7 @@ pub fn called() -> Box<[llm::Block]> {
         llm::Block::Opaque { bytes: OPAQUE.into() },
         llm::Block::ToolCall {
             id: b"provider-call".as_slice().into(),
-            name: b"subagent".as_slice().into(),
+            name: b"sub_agent".as_slice().into(),
             input: br#"{"task":"review"}"#.as_slice().into(),
             call: llm::Decoded::Delegated { ticket: Token::new(991), effect: Effect::Write },
             replay: None,

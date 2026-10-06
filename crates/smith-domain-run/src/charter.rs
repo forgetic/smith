@@ -322,6 +322,10 @@ pub(crate) fn len(bytes: &[u8]) -> Option<u64> {
     u64::try_from(bytes.len()).ok()
 }
 
+/// Smith-owned tool names that a host declaration cannot take (domain/run.md, section 5.1).
+pub(crate) const RESERVED_NAMES: [&[u8]; 10] =
+    [b"finish", b"deliver", b"wait", b"sub_agent", b"read", b"list", b"search", b"write", b"edit", b"shell"];
+
 fn valid_host_tools(tools: &[HostTool], limits: &Limits) -> bool {
     if !tools.is_empty()
         && (limits.host_attempts == 0
@@ -341,24 +345,7 @@ fn valid_host_tools(tools: &[HostTool], limits: &Limits) -> bool {
         {
             return false;
         }
-        for reserved in [
-            b"finish".as_slice(),
-            b"deliver",
-            b"wait",
-            b"subagent",
-            b"sub_agent",
-            b"read",
-            b"list",
-            b"search",
-            b"write",
-            b"edit",
-            b"shell",
-            b"read_file",
-            b"list_dir",
-            b"write_file",
-            b"edit_file",
-            b"run_shell",
-        ] {
+        for reserved in RESERVED_NAMES {
             if tool.name.as_ref() == reserved {
                 return false;
             }

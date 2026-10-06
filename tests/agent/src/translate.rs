@@ -191,12 +191,12 @@ pub(crate) fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, serve
         };
     }
     let (session_name, granted): (&[u8], bool) = match name {
-        b"read" => (b"read_file", grants.inspect),
-        b"list" => (b"list_dir", grants.inspect),
+        b"read" => (b"read", grants.inspect),
+        b"list" => (b"list", grants.inspect),
         b"search" => (b"search", grants.inspect),
-        b"write" => (b"write_file", grants.modify),
-        b"edit" => (b"edit_file", grants.modify),
-        b"shell" => (b"run_shell", grants.shell),
+        b"write" => (b"write", grants.modify),
+        b"edit" => (b"edit", grants.modify),
+        b"shell" => (b"shell", grants.shell),
         _ => return invalid(),
     };
     if !granted {

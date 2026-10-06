@@ -2216,6 +2216,26 @@ fn host_declarations_are_admitted_as_bounded_unique_contracts_before_io() {
 }
 
 #[test]
+fn host_declarations_reserve_only_smith_tool_names() {
+    for name in crate::charter::RESERVED_NAMES {
+        let mut declared = charter();
+        declared.grants.host_tools[0].name = name.into();
+        let mut h = Harness::new(LIMITS);
+        assert_eq!(answered(h.start(71, declared)), (71, Answer::Refused(Refusal::Invalid(Invalid::Grants))));
+    }
+    for name in [b"read_file".as_slice(), b"list_dir", b"write_file", b"edit_file", b"run_shell", b"subagent"] {
+        let mut declared = charter();
+        declared.grants.host_tools[0].name = name.into();
+        let mut h = Harness::new(LIMITS);
+        let emitted = h.start(71, declared);
+        match emitted.first() {
+            Some(Request::Admitted { .. }) => {}
+            _ => panic!("{name:?}: {emitted:?}"),
+        }
+    }
+}
+
+#[test]
 fn undeclared_host_and_effect_mismatch_are_refused_before_relay() {
     let mut h = Harness::new(LIMITS);
     let (_, conversation) = h.running(71, 99);

@@ -18,12 +18,12 @@ use smith_domain_tools::{Call, Effect, Exit, Grants, Name, Outcome, Part, Path};
 ///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 const TOOLS: [(&[u8], Family, &[u8]); 6] = [
-    (b"read_file", Family::Inspect, br#"{"path":"string"}"#),
-    (b"list_dir", Family::Inspect, br#"{"path":"string"}"#),
+    (b"read", Family::Inspect, br#"{"path":"string"}"#),
+    (b"list", Family::Inspect, br#"{"path":"string"}"#),
     (b"search", Family::Inspect, br#"{"path":"string","pattern":"string"}"#),
-    (b"write_file", Family::Modify, br#"{"path":"string","content":"string"}"#),
-    (b"edit_file", Family::Modify, br#"{"path":"string","old":"string","new":"string"}"#),
-    (b"run_shell", Family::Shell, br#"{"command":"string"}"#),
+    (b"write", Family::Modify, br#"{"path":"string","content":"string"}"#),
+    (b"edit", Family::Modify, br#"{"path":"string","old":"string","new":"string"}"#),
+    (b"shell", Family::Shell, br#"{"command":"string"}"#),
 ];
 
 #[derive(Clone, Copy)]
@@ -205,15 +205,15 @@ fn call(name: &[u8], arguments: &[u8]) -> Result<Call, agent::Problem> {
         fields.get(key).map(|value| value.as_slice().into()).ok_or(agent::Problem::Missing { field: key.into() })
     };
     match name {
-        b"read_file" => Ok(Call::Read { path: path(&field(b"path")?)?, skip: 0, lines: None }),
-        b"list_dir" => Ok(Call::List { path: path(&field(b"path")?)? }),
+        b"read" => Ok(Call::Read { path: path(&field(b"path")?)?, skip: 0, lines: None }),
+        b"list" => Ok(Call::List { path: path(&field(b"path")?)? }),
         b"search" => Ok(Call::Search { path: path(&field(b"path")?)?, pattern: field(b"pattern")?, glob: None }),
-        b"write_file" => Ok(Call::Write { path: path(&field(b"path")?)?, content: field(b"content")? }),
-        b"edit_file" => {
+        b"write" => Ok(Call::Write { path: path(&field(b"path")?)?, content: field(b"content")? }),
+        b"edit" => {
             let (old, new) = (field(b"old")?, field(b"new")?);
             Ok(Call::Edit { path: path(&field(b"path")?)?, old, new, all: false })
         }
-        b"run_shell" => Ok(Call::Shell { command: field(b"command")?, timeout: None }),
+        b"shell" => Ok(Call::Shell { command: field(b"command")?, timeout: None }),
         _ => Err(agent::Problem::UnknownTool),
     }
 }
