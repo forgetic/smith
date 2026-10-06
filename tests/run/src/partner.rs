@@ -10,14 +10,16 @@
 //!   actual turn. After its latency, the turn emits its cumulative own/subtree
 //!   `Priced` and exact single-completion `Used`. After each, the script draws what the LLM does next: fail
 //!   (`Ended` with a fault), call `finish` (`Delegated`, then wait for its
-//!   `Return`), ask for sub-agents (the same, for each), yield (`Yielded`,
-//!   then wait for `Say` or `Close`), or carry on. A finish declares an
+//!   `Return`), ask for sub-agents, call a declared host tool, deliver a
+//!   separate mid-run change, wait, yield (`Yielded`, then wait for `Say` or
+//!   `Close`), or carry on. A finish declares an
 //!   outcome that fits the host's charters or one that breaks them, a change,
 //!   verdict, report or declared failure. An ask may want more than the asker has, or an LLM
 //!   the charter does not list, and may ask for a small share. A sub-agent
 //!   may not finish: where main would, it yields its answer.
 //! - A write runs alone, as a session runs it: a finish, or an ask for a
-//!   sub-agent that may modify or run commands. Asks for sub-agents that may
+//!   sub-agent that may modify or run commands. A granted delivery and a host
+//!   write use that same exclusive schedule. Asks for sub-agents that may
 //!   only look are read-only, and a turn may make several, which the session
 //!   runs side by side: the LLM carries on once they have all returned.
 //! - It keeps to its share of the budget as a session keeps to its ceilings:
@@ -26,6 +28,9 @@
 //!   After a turn that went past any part of its share, it
 //!   settles that turn's call, if it made one, and ends out of budget. It
 //!   expires, out of time, when its time runs out.
+//! - `wait` first receives its own result; only then does the partner yield so
+//!   the run can park. Host calls may return busy, lose a decided answer, or
+//!   return the recorded answer on the original or a retry relay.
 //! - A call carries the conversation's expiry as its deadline, and the run
 //!   runs the race: the conversation waits for the call to return, past its
 //!   expiry too, then carries on, or ends out of time if it has expired.
@@ -44,7 +49,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use skein_lib::{Duration, Rng, Time, Token};
 use smith_domain_run::charter::Families;
 use smith_domain_run::outcome::{Change, Declared, DeclaredFailure, Field, Item, Report, Verdict};
-use smith_domain_run::{Ask, Budget, End, Event, Exhausted, Fault, Opening, Returned, Spend, Stop};
+use smith_domain_run::{
+    Ask, Budget, End, Event, Exhausted, Fault, HostEffect, HostInput, Opening, Returned, Spend, Stop,
+};
 
 use skein_world::domain::Span;
 
@@ -92,6 +99,12 @@ pub struct Script {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub asks: u32,
+    /// Chance per mille of a granted host-tool call after a turn.
+    pub host_calls: u32,
+    /// Chance per mille of a granted mid-run delivery after a turn.
+    pub deliveries: u32,
+    /// Chance per mille of a granted wait after a turn.
+    pub waits: u32,
     /// Chance per mille of a yield after a generated turn.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -190,6 +203,12 @@ pub struct Tally {
     /// Actual successful settled wait results, independent of accepted outcomes.
     /// Contract: domain/run.md, section 6.
     pub waiting: u32,
+    /// Mid-run delivery results returned to a continuing conversation.
+    pub delivered: u32,
+    /// Host results, unknown outcomes and pre-relay refusals returned to the partner.
+    pub host_answered: u32,
+    pub host_unknown: u32,
+    pub host_rejected: u32,
 
     /// Count of opened observed at this scripted boundary.
     ///
@@ -308,6 +327,7 @@ pub struct Partner {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     calls: BTreeMap<Token, Token>,
+    deliver_calls: BTreeSet<Token>,
     /// Names for conversations and calls.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -331,6 +351,9 @@ struct Talk {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     finish: bool,
+    wait: bool,
+    deliver: bool,
+    host_tools: Vec<(Box<[u8]>, HostEffect)>,
     families: Families,
     budget: Budget,
     expires: Time,
@@ -387,6 +410,7 @@ impl Partner {
             talks: BTreeMap::new(),
             ended: BTreeSet::new(),
             calls: BTreeMap::new(),
+            deliver_calls: BTreeSet::new(),
             serial: 0,
             spent: Spend::ZERO,
             tally: Tally::default(),
@@ -442,6 +466,9 @@ impl Partner {
         let talk = Talk {
             conversation,
             finish: opening.finish,
+            wait: opening.wait,
+            deliver: opening.deliver,
+            host_tools: opening.host_tools.iter().map(|tool| (tool.name.clone(), tool.effect)).collect(),
             families: opening.families,
             budget: opening.budget,
             expires,
@@ -507,11 +534,13 @@ impl Partner {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub fn returned(&mut self, now: Time, call: Token, result: &Returned, bill: u64, out: &mut Vec<Out>) {
         let peer = self.calls.remove(&call).expect("a return names a call in flight");
+        let mid_delivery = self.deliver_calls.remove(&call);
         match result {
-            Returned::HostAnswered(_) | Returned::HostUnknown | Returned::HostRejected(_) => {
-                panic!("legacy partner never calls a generic host tool")
-            }
+            Returned::HostAnswered(_) => self.tally.host_answered += 1,
+            Returned::HostUnknown => self.tally.host_unknown += 1,
+            Returned::HostRejected(_) => self.tally.host_rejected += 1,
             Returned::Waiting => self.tally.waiting += 1,
+            Returned::Delivered(_) if mid_delivery => self.tally.delivered += 1,
             Returned::Accepted | Returned::Delivered(_) => self.tally.accepted += 1,
             Returned::Nothing | Returned::DeliveryRefused(_) | Returned::DeliveryFailed { .. } => {
                 self.tally.unpushed += 1;
@@ -546,6 +575,17 @@ impl Partner {
             Phase::Calling { pending: _, over } => match over {
                 Some(exhausted) => self.end(peer, End::Budget(exhausted), out),
                 None if now >= expires => self.end(peer, End::Budget(Exhausted::Time), out),
+                None if *result == Returned::Waiting => {
+                    let talk = self.talks.get_mut(&peer).expect("a waiting main");
+                    talk.phase = Phase::Yielded;
+                    out.push(Out::Event(Event::Yielded {
+                        conversation: talk.conversation,
+                        stop: Stop::EndTurn,
+                        text: b"Waiting for a message."[..].into(),
+                    }));
+                    self.tally.yields += 1;
+                    self.wake(expires, peer, out);
+                }
                 None => self.carry_on(peer, out),
             },
             Phase::Withdrawn { pending: _ } => {
@@ -596,11 +636,15 @@ impl Partner {
         self.spend(peer, out);
         let talk = self.talks.get(&peer).expect("a turn is of a live conversation");
         let over = overspent(&talk.budget, talk.spent);
-        let (finish, agents) = (talk.finish, talk.families.agents);
+        let (finish, agents, wait, deliver, host_tools) =
+            (talk.finish, talk.families.agents, talk.wait, talk.deliver, !talk.host_tools.is_empty());
         let roll = u32::try_from(self.rng.below(1000)).expect("below 1000");
-        let Script { faults, finishes, asks, yields, .. } = self.script;
+        let Script { faults, finishes, asks, host_calls, deliveries, waits, yields, .. } = self.script;
         let finishing = faults.saturating_add(finishes);
         let asking = finishing.saturating_add(asks);
+        let hosting = asking.saturating_add(host_calls);
+        let delivering = hosting.saturating_add(deliveries);
+        let waiting = delivering.saturating_add(waits);
         if roll < faults {
             let fault = if self.rng.chance(500) { Fault::Provider } else { Fault::ContextFull };
             self.tally.faults += 1;
@@ -609,11 +653,17 @@ impl Partner {
             self.finish(peer, over, out);
         } else if roll >= finishing && roll < asking && agents && over.is_none() {
             self.ask(peer, out);
+        } else if roll >= asking && roll < hosting && host_tools && over.is_none() {
+            self.host_call(peer, out);
+        } else if roll >= hosting && roll < delivering && deliver && over.is_none() {
+            self.deliver(peer, out);
+        } else if roll >= delivering && roll < waiting && wait && over.is_none() {
+            self.call(peer, None, [Ask::Wait], out);
         } else if let Some(exhausted) = over {
             // Past its share with no call to settle: it ends.
             self.tally.ceilings += 1;
             self.end(peer, End::Budget(exhausted), out);
-        } else if roll < asking.saturating_add(yields) || roll < finishing {
+        } else if roll < waiting.saturating_add(yields) || roll < finishing {
             let stop = if self.rng.chance(self.script.odd_stops) {
                 match self.rng.below(3) {
                     0 => Stop::MaxTokens,
@@ -653,6 +703,24 @@ impl Partner {
         let asks: Vec<Ask> = (0..count).map(|_| self.sub_agent(peer, count > 1)).collect();
         self.tally.asks += u32::try_from(count).expect("a few");
         self.call(peer, None, asks, out);
+    }
+
+    fn host_call(&mut self, peer: Token, out: &mut Vec<Out>) {
+        let tools = &self.talks[&peer].host_tools;
+        let index = usize::try_from(self.rng.below(tools.len() as u64)).expect("bounded declarations");
+        let (tool, effect) = tools[index].clone();
+        let input = HostInput::attested(b"{}".as_slice().into()).expect("bounded object");
+        self.call(peer, None, [Ask::Host { tool, effect, input }], out);
+    }
+
+    fn deliver(&mut self, peer: Token, out: &mut Vec<Out>) {
+        let change = Change {
+            fields: Box::new([
+                Field { name: b"title".as_slice().into(), value: b"Update".as_slice().into() },
+                Field { name: b"body".as_slice().into(), value: b"The parser now passes.".as_slice().into() },
+            ]),
+        };
+        self.call(peer, None, [Ask::Deliver { change }], out);
     }
 
     /// An ask for a sub-agent, as the script draws it: `read_only`, if it may
@@ -699,6 +767,9 @@ impl Partner {
         let mut pending = 0;
         for ask in asks {
             let call = self.mint();
+            if matches!(ask, Ask::Deliver { .. }) {
+                self.deliver_calls.insert(call);
+            }
             let talk = &self.talks[&peer];
             let (conversation, deadline) = (talk.conversation, talk.expires);
             self.calls.insert(call, peer);

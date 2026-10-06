@@ -58,6 +58,9 @@ pub fn noisy(seed: u64) -> Settings {
         faults: small(pick(0, 100)),
         finishes: small(pick(0, 300)),
         asks: small(pick(0, 300)),
+        host_calls: small(pick(0, 150)),
+        deliveries: small(pick(0, 150)),
+        waits: small(pick(0, 150)),
         bad_asks: small(pick(0, 300)),
         shares: small(pick(0, 500)),
         parallel: small(pick(1, 4)),
@@ -99,7 +102,7 @@ pub fn noisy(seed: u64) -> Settings {
         facts: small(pick(0, 64)),
         ..run
     };
-    let host = host::Script { agents: small(pick(0, 1000)), reports: 700, failures: 700, ..host };
+    let host = feature_host(host, &mut pick);
     Settings {
         run,
         host,
@@ -109,5 +112,20 @@ pub fn noisy(seed: u64) -> Settings {
         races: small(pick(0, 1000)),
         inject,
         ..calm
+    }
+}
+
+fn feature_host(host: host::Script, pick: &mut impl FnMut(u64, u64) -> u64) -> host::Script {
+    let small = |n: u64| u32::try_from(n).expect("small numbers");
+    host::Script {
+        agents: small(pick(0, 1000)),
+        reports: 700,
+        failures: 700,
+        deliveries: small(pick(0, 1000)),
+        host_tools: small(pick(0, 1000)),
+        relay: Span::millis(0, pick(0, 8_000)),
+        relay_busy: small(pick(0, 400)),
+        relay_lost: small(pick(0, 400)),
+        ..host
     }
 }

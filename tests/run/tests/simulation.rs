@@ -302,7 +302,7 @@ fn tally(world: &World, cancels: &mut BTreeMap<&'static str, u32>, deadlines: &m
 #[test]
 fn cancels_find_runs_in_every_state() {
     let (mut cancels, mut deadlines) = (BTreeMap::new(), BTreeMap::new());
-    for seed in 0..200 {
+    for seed in 0..250 {
         tally(&settled(&noisy(seed)), &mut cancels, &mut deadlines);
     }
     // Cancelled twice while the run reads a slow checkout.
@@ -328,7 +328,59 @@ fn cancels_find_runs_in_every_state() {
         let settings = Settings { run, host, partner, checkout, inject: 20, ..landing };
         tally(&settled(&settings), &mut cancels, &mut deadlines);
     }
-    let cells = ["preparing", "stopping", "opening", "working", "landing", "over", "winding", "answered", "gone"];
+    // Grant one new operation at a time, so cancellation can find its retained
+    // phase rather than an unrelated completion or a denied charter.
+    for seed in 1000..1020 {
+        let calm = Settings::calm(seed);
+        let host = host::Script {
+            cancels: 1000,
+            cancel: Span::millis(100, 2_000),
+            time: Span::millis(60_000, 60_000),
+            ..calm.host
+        };
+        let partner = Script { waits: 1000, yields: 0, turn: Span::millis(10, 50), ..calm.partner };
+        tally(&settled(&Settings { host, partner, ..calm }), &mut cancels, &mut deadlines);
+
+        let host = host::Script {
+            cancels: 1000,
+            cancel: Span::millis(100, 6_000),
+            host_tools: 1000,
+            relay: Span::millis(8_000, 8_000),
+            relay_busy: 500,
+            relay_lost: 500,
+            time: Span::millis(60_000, 60_000),
+            ..calm.host
+        };
+        let partner = Script { host_calls: 1000, yields: 0, turn: Span::millis(10, 50), ..calm.partner };
+        tally(&settled(&Settings { host, partner, ..calm }), &mut cancels, &mut deadlines);
+
+        let host = host::Script {
+            cancels: 1000,
+            cancel: Span::millis(30, 600),
+            host_tools: 1000,
+            relay: Span::millis(1, 1),
+            relay_busy: 1000,
+            relay_lost: 0,
+            time: Span::millis(60_000, 60_000),
+            ..calm.host
+        };
+        tally(&settled(&Settings { host, partner, ..calm }), &mut cancels, &mut deadlines);
+    }
+    let cells = [
+        "preparing",
+        "stopping",
+        "opening",
+        "working",
+        "waiting",
+        "relay sending",
+        "relay withdrawing",
+        "relay backoff",
+        "landing",
+        "over",
+        "winding",
+        "answered",
+        "gone",
+    ];
     for cell in cells {
         assert!(cancels.get(cell).is_some_and(|count| *count > 0), "no cancel found a run {cell}: {cancels:?}");
     }
@@ -364,7 +416,40 @@ fn deadlines_find_runs_in_every_state_they_run_in() {
         let settings = Settings { run, host, partner, checkout, hop: Span::millis(0, 1_500), ..landing };
         tally(&settled(&settings), &mut cancels, &mut deadlines);
     }
-    for cell in ["preparing", "opening", "working", "landing", "over"] {
+    for seed in 2000..2020 {
+        let calm = Settings::calm(seed);
+        let partner = Script { waits: 1000, yields: 0, turn: Span::millis(10, 50), ..calm.partner };
+        let host = host::Script { time: Span::millis(100, 500), ..calm.host };
+        tally(&settled(&Settings { host, partner, ..calm }), &mut cancels, &mut deadlines);
+
+        let partner = Script { host_calls: 1000, yields: 0, turn: Span::millis(10, 50), ..calm.partner };
+        let host = host::Script {
+            host_tools: 1000,
+            relay: Span::millis(8_000, 8_000),
+            time: Span::millis(100, 6_000),
+            ..calm.host
+        };
+        tally(&settled(&Settings { host, partner, ..calm }), &mut cancels, &mut deadlines);
+        let host = host::Script {
+            host_tools: 1000,
+            relay: Span::millis(1, 1),
+            relay_busy: 1000,
+            time: Span::millis(30, 300),
+            ..calm.host
+        };
+        tally(&settled(&Settings { host, partner, ..calm }), &mut cancels, &mut deadlines);
+    }
+    for cell in [
+        "preparing",
+        "opening",
+        "working",
+        "waiting",
+        "relay sending",
+        "relay withdrawing",
+        "relay backoff",
+        "landing",
+        "over",
+    ] {
         assert!(deadlines.get(cell).is_some_and(|count| *count > 0), "no deadline found a run {cell}: {deadlines:?}");
     }
 }

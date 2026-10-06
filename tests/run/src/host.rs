@@ -149,6 +149,16 @@ pub struct Script {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub agents: u32,
+    /// Chance per mille of granting separately callable mid-run delivery.
+    pub deliveries: u32,
+    /// Chance per mille of declaring the scripted host tool.
+    pub host_tools: u32,
+    /// Delay before a host relay terminal, including one withdrawn in flight.
+    pub relay: Span,
+    /// Chance per mille of a predecision busy relay.
+    pub relay_busy: u32,
+    /// Chance per mille of a decided relay whose response is lost.
+    pub relay_lost: u32,
     /// The time to push.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -529,7 +539,7 @@ impl Host {
         }
         let tools = Tools { inspect: true, modify: self.rng.chance(500), shell: self.rng.chance(500) };
         let _retired_forge_draw = self.rng.chance(500);
-        let host_tools = if self.rng.chance(500) {
+        let host_tools = if self.rng.chance(script.host_tools) {
             vec![HostTool {
                 name: Box::from(&b"comment"[..]),
                 description: b"Host action".as_slice().into(),
@@ -569,7 +579,13 @@ impl Host {
                 sections: Box::new([smith_domain_run::Section { title: b"Task".as_slice().into(), text: brief }]),
             },
 
-            grants: Grants { wait: true, deliver: None, tools, agents, host_tools: host_tools.into() },
+            grants: Grants {
+                wait: true,
+                deliver: self.delivery_grant(script.deliveries),
+                tools,
+                agents,
+                host_tools: host_tools.into(),
+            },
             outcome: OutcomeSpec {
                 change: change.then_some(ChangeSpec {
                     checks_must_pass: true,
@@ -599,6 +615,19 @@ impl Host {
             waiting: skein_lib::Duration::from_secs(30),
         };
         (charter, workspace)
+    }
+
+    fn delivery_grant(&mut self, chance: u32) -> Option<ChangeSpec> {
+        if chance == 0 || !self.rng.chance(chance) {
+            return None;
+        }
+        Some(ChangeSpec {
+            checks_must_pass: true,
+            fields: Box::new([
+                FieldRule { name: b"title".as_slice().into(), max: 1024 },
+                FieldRule { name: b"body".as_slice().into(), max: 1024 },
+            ]),
+        })
     }
 }
 

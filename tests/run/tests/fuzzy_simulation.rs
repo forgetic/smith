@@ -25,6 +25,8 @@ fn answers(world: &World) -> Vec<&Answer> {
 fn random_worlds_settle_with_every_start_answered_once() {
     let mut seen = BTreeSet::new();
     let (mut cancels, mut races, mut stale, mut expired) = (0, 0, 0, 0);
+    let (mut waited, mut delivered, mut host_answered) = (0, 0, 0);
+    let (mut busy, mut lost, mut answered) = (0, 0, 0);
     for seed in 0..300 {
         let world = settled(&noisy(seed));
         let stats = world.stats();
@@ -32,9 +34,15 @@ fn random_worlds_settle_with_every_start_answered_once() {
         races += stats.partner.races;
         stale += stats.partner.stale;
         expired += stats.partner.expired;
+        waited += stats.partner.waiting;
+        delivered += stats.partner.delivered;
+        host_answered += stats.partner.host_answered;
+        busy += stats.relay_busy;
+        lost += stats.relay_lost;
+        answered += stats.relay_answered;
         for answer in answers(&world) {
             let kind = match answer {
-                Answer::Parked { .. } => panic!("source random partner does not request wait"),
+                Answer::Parked { .. } => "parked",
                 Answer::Accepted { .. } => "accepted",
                 Answer::Refused(Refusal::Busy) => "busy",
                 Answer::Refused(Refusal::Invalid(Invalid::Conversation)) => "conversation invalid",
@@ -67,6 +75,7 @@ fn random_worlds_settle_with_every_start_answered_once() {
         "conversation invalid",
         "fault",
         "invalid",
+        "parked",
         "stale",
         "stopped",
         "time",
@@ -79,4 +88,8 @@ fn random_worlds_settle_with_every_start_answered_once() {
     // And the races: turns spent after a close, a close or nudge crossing a
     // conversation's own end, conversations out of time, cancels.
     assert!(cancels > 0 && races > 0 && stale > 0 && expired > 0, "{cancels} {races} {stale} {expired}");
+    assert!(
+        waited > 0 && delivered > 0 && host_answered > 0 && busy > 0 && lost > 0 && answered > 0,
+        "wait {waited}, delivered {delivered}, host answered {host_answered}, relays {busy}/{lost}/{answered}"
+    );
 }

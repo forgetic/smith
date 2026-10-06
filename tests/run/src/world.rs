@@ -134,6 +134,11 @@ impl Settings {
                 failures: 0,
                 verdicts: 700,
                 agents: 0,
+                deliveries: 0,
+                host_tools: 500,
+                relay: Span::millis(10, 500),
+                relay_busy: 250,
+                relay_lost: 250,
                 push: Span::millis(10, 500),
                 moved: 0,
                 push_failures: 0,
@@ -148,6 +153,9 @@ impl Settings {
                 faults: 0,
                 finishes: 0,
                 asks: 0,
+                host_calls: 0,
+                deliveries: 0,
+                waits: 0,
                 yields: 200,
                 bad_asks: 0,
                 shares: 0,
@@ -251,6 +259,10 @@ pub struct Stats {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub pushes: u32,
+    /// Scripted host relay terminals by decision class.
+    pub relay_busy: u32,
+    pub relay_lost: u32,
+    pub relay_answered: u32,
     /// Conversations the run opened, sub-agents among them, nudges it said,
     /// and closes it sent.
     ///
@@ -419,6 +431,7 @@ struct RunView {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     main: Option<Token>,
     started: bool,
+    waiting: bool,
     /// Whether it decided how it ends: it closed main, or a cancel or its
     /// deadline came while it prepared or worked.
     ///
@@ -528,6 +541,11 @@ pub struct World {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pushes: Ledger<Token, Pushing>,
     pushed: BTreeSet<Token>,
+    /// Outstanding attempts and first decisions, kept by the scripted host.
+    relays: BTreeSet<(Token, u32)>,
+    relay_owner: BTreeMap<Token, Token>,
+    relay_stage: BTreeMap<Token, &'static str>,
+    host_decisions: BTreeMap<(Token, u64, u32, u32), run::HostAnswer>,
     /// The roots whose checks passed, for each landing call, until it pushes
     /// or its run answers.
     ///
@@ -601,6 +619,10 @@ impl World {
             checks: BTreeMap::new(),
             pushes: Ledger::new("push"),
             pushed: BTreeSet::new(),
+            relays: BTreeSet::new(),
+            relay_owner: BTreeMap::new(),
+            relay_stage: BTreeMap::new(),
+            host_decisions: BTreeMap::new(),
             passed: BTreeMap::new(),
             views: BTreeMap::new(),
             run_of_owner: BTreeMap::new(),
@@ -794,19 +816,23 @@ impl World {
             }
             run::Request::Waiting { host_run, read } => {
                 let run = self.run_of_owner[&host_run];
-                let view = &self.views[&run];
+                let view = self.views.get_mut(&run).expect("admitted run");
                 assert_eq!(read, view.read, "Waiting carries the actual last Turn fence");
-                assert!(view.started && !view.decided, "only a working main waits");
+                assert!(view.started && view.answered.is_none(), "only an admitted main waits before its answer");
                 assert!(
                     self.calls
                         .values()
                         .all(|call| { self.run_of_conversation[&call.conversation] != run || call.returned }),
                     "Waiting follows actual settlement of every call"
                 );
+                view.waiting = true;
                 current = Some(run);
             }
-            run::Request::HostCall { .. } | run::Request::WithdrawHost { .. } => {
-                panic!("legacy run scripts do not invoke generic host tools")
+            request @ run::Request::HostCall { .. } => {
+                self.host_call(request);
+            }
+            run::Request::WithdrawHost { relay } => {
+                self.withdraw_host(relay);
             }
             run::Request::Admitted { host_run, run } => {
                 self.admitted(host_run, run);
@@ -838,6 +864,13 @@ impl World {
                 let ledger = self.calls.get_mut(&call).expect("a return is of a call that was made");
                 assert!(!ledger.returned, "a call returns once");
                 ledger.returned = true;
+                if matches!(
+                    result,
+                    run::Returned::HostAnswered(_) | run::Returned::HostUnknown | run::Returned::HostRejected(_)
+                ) {
+                    let run = self.run_of_conversation[&ledger.conversation];
+                    self.relay_stage.remove(&run);
+                }
                 if let Some(child) = self.child_of_call.remove(&call) {
                     assert!(self.opens[&child].ended, "a sub-agent has ended before its call returns");
                 }
@@ -872,6 +905,42 @@ impl World {
         current
     }
 
+    fn host_call(&mut self, request: run::Request) {
+        let run::Request::HostCall { host_run, relay, name, tool, effect, input, deadline } = request else {
+            unreachable!("only a host call reaches this handler")
+        };
+        assert_eq!(tool.as_ref(), b"comment");
+        assert_eq!(effect, run::HostEffect::Read);
+        assert_eq!(input.bytes(), b"{}");
+        assert!(deadline <= self.now.saturating_add(self.settings.run.host_timeout));
+        let run = self.run_of_owner[&host_run];
+        assert!(self.relays.insert((relay.owner, relay.attempt)), "one terminal per host relay");
+        self.relay_owner.insert(relay.owner, run);
+        self.relay_stage.insert(run, "relay sending");
+        let key = (host_run, name.activation, name.completion, name.position);
+        let reply = if let Some(answer) = self.host_decisions.get(&key) {
+            run::HostReply::Answered(answer.clone())
+        } else if self.rng.chance(self.settings.host.relay_busy) {
+            run::HostReply::Busy
+        } else {
+            let answer = run::HostAnswer::new(b"recorded".as_slice().into(), false).expect("bounded host text");
+            self.host_decisions.insert(key, answer.clone());
+            if self.rng.chance(self.settings.host.relay_lost) {
+                run::HostReply::Unanswered(run::Unanswered::Lost)
+            } else {
+                run::HostReply::Answered(answer)
+            }
+        };
+        let delay = self.draw(self.settings.host.relay);
+        self.schedule(self.now.saturating_add(delay), Delivery::Host(run::Event::HostReturned { relay, reply }));
+    }
+
+    fn withdraw_host(&mut self, relay: run::RelayName) {
+        assert!(self.relays.contains(&(relay.owner, relay.attempt)), "withdraw only a live relay");
+        let run = self.relay_owner[&relay.owner];
+        self.relay_stage.insert(run, "relay withdrawing");
+    }
+
     /// Retain the independent start budget and checks at actual admission.
     /// Contract: domain/run.md, sections 3, 9 and 13.
     fn admitted(&mut self, host_run: Token, run: Token) {
@@ -882,6 +951,7 @@ impl World {
             deadline: self.now.saturating_add(budget.time),
             main: None,
             started: false,
+            waiting: false,
             decided: false,
             spent: run::Spend::ZERO,
             turns: 0,
@@ -902,6 +972,7 @@ impl World {
         assert_eq!(number, view.turns + 1, "actual main outputs are consecutive");
         assert_eq!(spent, view.spent, "Turn carries the observed cumulative spend");
         view.turns = number;
+        view.waiting = false;
         view.read = read;
         run
     }
@@ -979,7 +1050,7 @@ impl World {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn run_of(&self, event: &run::Event) -> Option<Token> {
         match event {
-            run::Event::HostReturned { .. } => panic!("generic-host terminals are driven by the focused agent world"),
+            run::Event::HostReturned { relay, .. } => self.relay_owner.get(&relay.owner).copied(),
             run::Event::Start { .. } => None,
             run::Event::Cancel { run } | run::Event::Message { run, .. } => Some(*run),
             run::Event::Read { owner, .. } | run::Event::Probed { owner, .. } => Some(*owner),
@@ -1053,6 +1124,8 @@ impl World {
             // Past its budget is a state of the run's own, landing or not.
             None if view.budget_spent() => "over",
             None if landing => "landing",
+            None if self.relay_stage.contains_key(&run) => self.relay_stage[&run],
+            None if view.waiting => "waiting",
             None => "working",
         }
     }
@@ -1145,10 +1218,10 @@ impl World {
         assert_eq!(turns, observed, "final count matches actual main outputs");
         let peak = self.run_of_owner.get(&owner).map_or(0, |run| self.views[run].peak);
         assert_within(&start.budget, &answer, self.partner.turn_max(), peak);
-        // A change is accepted only once it is pushed, and once it is pushed,
-        // whatever the run was winding down for.
+        // A final Change needs a settled push. A separate mid-run delivery
+        // may already have pushed before another kind of final answer.
         let change = matches!(&answer, run::Answer::Accepted { outcome: run::outcome::Declared::Change(_), .. });
-        assert_eq!(change, self.pushed.contains(&owner), "a change is accepted if and only if it is pushed");
+        assert!(!change || self.pushed.contains(&owner), "an accepted Change was pushed");
         // A run answers once its main conversation, if it opened one, and
         // every other conversation it opened have ended.
         if let Some(run) = self.run_of_owner.get(&owner) {
@@ -1281,7 +1354,27 @@ impl World {
                     self.start_delivery(reply_to, host_run, charter, workspace);
                 }
                 Delivery::Cancel { run } => self.run_stage.push(run::Event::Cancel { run }),
-                Delivery::Host(event) => self.hand(event),
+                Delivery::Host(event) => {
+                    if let run::Event::HostReturned { relay, reply } = &event {
+                        assert!(self.relays.remove(&(relay.owner, relay.attempt)), "relay returns once");
+                        let run = self.relay_owner[&relay.owner];
+                        match reply {
+                            run::HostReply::Answered(_) => {
+                                self.stats.relay_answered += 1;
+                                self.relay_stage.remove(&run);
+                            }
+                            run::HostReply::Busy => {
+                                self.stats.relay_busy += 1;
+                                self.relay_stage.insert(run, "relay backoff");
+                            }
+                            run::HostReply::Unanswered(_) => {
+                                self.stats.relay_lost += 1;
+                                self.relay_stage.insert(run, "relay backoff");
+                            }
+                        }
+                    }
+                    self.hand(event);
+                }
                 Delivery::Admitted { host_run, run } => self.host.admitted(self.now, host_run, run),
                 Delivery::Answered { host_run } => self.host.answered(self.now, host_run),
                 Delivery::Checking { host_run } => self.host.checking(host_run),
@@ -1571,6 +1664,7 @@ impl World {
             "io answered every operation"
         );
         assert!(self.pushes.is_empty(), "every push was answered");
+        assert!(self.relays.is_empty(), "every host relay was answered");
         assert!(self.passed.is_empty(), "every landing call returned");
         assert!(self.child_of_call.is_empty(), "every sub-agent's call returned");
         assert!(self.wire.is_empty() && !self.run_stage.has_events(), "nothing is on its way");
