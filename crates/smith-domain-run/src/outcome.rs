@@ -53,12 +53,17 @@ pub struct FieldRule {
 }
 
 /// Host field contract for a final Change or separately granted mid-run delivery.
-/// It grants no optional check policy: every discovered writable check must pass.
+/// The result contract decides whether failing checks block delivery.
 /// Minimum field/container storage is checked at charter admission.
 ///
 /// Contract: domain/run.md, sections 3.1, 7.1–7.3, 8.1, 8.4 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ChangeSpec {
+    /// Whether a failing workspace check blocks delivery. A mid-run delivery
+    /// without a Change result contract always requires passing checks.
+    /// Contract: domain/run.md, sections 7.1, 8.1 and 8.4.
+    pub checks_must_pass: bool,
+
     /// Required result fields with host-chosen byte names and individual value bounds; no title/body vocabulary is interpreted by smith.
     ///
     /// Contract: domain/run.md, section 7.1.
@@ -787,7 +792,7 @@ mod tests {
 
     fn specification() -> OutcomeSpec {
         OutcomeSpec {
-            change: Some(ChangeSpec { fields: rules(b"summary", 4) }),
+            change: Some(ChangeSpec { checks_must_pass: true, fields: rules(b"summary", 4) }),
             report: Some(TextSpec { min: 0, max: 3, fields: rules(b"source", 3) }),
             failure: Some(TextSpec { min: 1, max: 3, fields: rules(b"cause", 3) }),
             verdicts: Box::new([VerdictRule {
@@ -964,7 +969,7 @@ mod tests {
             rules.push(FieldRule { name: Box::new([index]), max: 1 }).expect("room for twenty distinct rules");
         }
         let spec = OutcomeSpec {
-            change: Some(ChangeSpec { fields: rules.into_boxed() }),
+            change: Some(ChangeSpec { checks_must_pass: true, fields: rules.into_boxed() }),
             verdicts: Box::new([]),
             report: None,
             failure: None,

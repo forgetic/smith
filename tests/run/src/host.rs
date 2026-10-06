@@ -572,6 +572,7 @@ impl Host {
             grants: Grants { wait: true, deliver: None, tools, agents, host_tools: host_tools.into() },
             outcome: OutcomeSpec {
                 change: change.then_some(ChangeSpec {
+                    checks_must_pass: true,
                     fields: Box::new([
                         smith_domain_run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
                         smith_domain_run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },

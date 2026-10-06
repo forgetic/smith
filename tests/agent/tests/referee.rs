@@ -16,7 +16,7 @@ fn started() -> Referee<Meeting> {
         Seen::Started {
             delivery: false,
             contract: OutcomeSpec {
-                change: Some(ChangeSpec { fields: Box::new([]) }),
+                change: Some(ChangeSpec { checks_must_pass: true, fields: Box::new([]) }),
                 verdicts: Box::new([]),
                 report: None,
                 failure: None,

@@ -1462,7 +1462,7 @@ fn maximum_convention_charter() -> run::Charter {
     run::Charter {
         conventions: Some(run::Conventions { guide: make_path(b'g'), checks: make_path(b'c') }),
         outcome: run::outcome::OutcomeSpec {
-            change: Some(run::outcome::ChangeSpec { fields: Box::new([]) }),
+            change: Some(run::outcome::ChangeSpec { checks_must_pass: true, fields: Box::new([]) }),
             ..charter(false).outcome
         },
         ..charter(false)

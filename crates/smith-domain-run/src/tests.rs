@@ -358,6 +358,7 @@ fn a_run_looks_for_checks_in_writable_repositories_when_a_change_must_pass_them(
     };
     let outcome = OutcomeSpec {
         change: Some(ChangeSpec {
+            checks_must_pass: true,
             fields: Box::new([
                 FieldRule { name: b"title".as_slice().into(), max: 1024 },
                 FieldRule { name: b"body".as_slice().into(), max: 1024 },
@@ -502,6 +503,7 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
         Charter {
             outcome: OutcomeSpec {
                 change: Some(ChangeSpec {
+                    checks_must_pass: true,
                     fields: Box::new([
                         FieldRule { name: b"title".as_slice().into(), max: 1024 },
                         FieldRule { name: b"body".as_slice().into(), max: 1024 },
@@ -755,6 +757,7 @@ fn coding() -> Charter {
     Charter {
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
+                checks_must_pass: true,
                 fields: Box::new([
                     FieldRule { name: b"title".as_slice().into(), max: 1024 },
                     FieldRule { name: b"body".as_slice().into(), max: 1024 },
@@ -772,7 +775,11 @@ impl Harness {
     /// Starts a run of `coding()` for call `call` whose repositories both have
     /// checks, and its main conversation as `peer`: the run's token and main's.
     fn coding(&mut self, call: u64, peer: u64) -> (Token, Token) {
-        let emitted = self.start(call, coding());
+        self.coding_policy(call, peer, coding())
+    }
+
+    fn coding_policy(&mut self, call: u64, peer: u64, policy: Charter) -> (Token, Token) {
+        let emitted = self.start(call, policy);
         let [Request::Admitted { run, .. }, Request::Read { .. }] = &*emitted else {
             panic!("expected a read, got {emitted:?}");
         };
@@ -902,6 +909,31 @@ fn a_change_that_fails_its_checks_or_its_push_goes_back_to_the_llm() {
         )]
     );
     assert!(h.step(end_turn(conversation)).len() == 1, "the run goes on: a nudge");
+}
+
+#[test]
+fn a_change_can_be_delivered_after_failing_checks_when_its_contract_allows_it() {
+    let mut harness = Harness::new(LIMITS);
+    let mut policy = coding();
+    policy.outcome.change.as_mut().expect("change contract").checks_must_pass = false;
+    let (_, conversation) = harness.coding_policy(1, 100, policy);
+    let owner = harness.land(conversation, 7);
+    let requests = harness.step(Event::Checked { owner, ran: ran(1, b"first failed") });
+    let [Request::Check { program, .. }, Request::Checking { .. }] = requests.as_ref() else {
+        panic!("the second check still runs: {requests:?}");
+    };
+    assert_eq!(program.root, Token::new(901));
+    let requests = harness
+        .step(Event::Checked { owner, ran: Ran { exit: Exit::Signalled, output: bytes(b"second failed"), cut: 0 } });
+    let [Request::Deliver { .. }] = requests.as_ref() else { panic!("delivery follows both checks: {requests:?}") };
+    assert_eq!(
+        harness.step(Event::Delivered { owner, push: delivered() }).as_ref(),
+        [returned(7, Returned::Delivered(receipts())), Request::Close { peer: Token::new(100) }]
+    );
+    assert_eq!(
+        answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })),
+        (1, Answer::Accepted { outcome: Declared::Change(change()), spent: Spend::ZERO, turns: 0 })
+    );
 }
 
 #[test]
@@ -1780,12 +1812,18 @@ fn delivered() -> Delivery {
 
 fn mid_report() -> Charter {
     let mut charter = text_charter(false);
-    charter.grants.deliver = Some(ChangeSpec { fields: Box::new([]) });
+    charter.grants.deliver = Some(ChangeSpec { checks_must_pass: true, fields: Box::new([]) });
     charter
 }
 
 fn mid_running(harness: &mut Harness) -> (Token, Token) {
-    let requests = harness.start(1, mid_report());
+    mid_running_policy(harness, mid_report())
+}
+
+fn mid_running_policy(harness: &mut Harness, policy: Charter) -> (Token, Token) {
+    let mut mounted = workspace();
+    mounted.directories[0].writable = true;
+    let requests = harness.start_workspace(1, policy, Some(mounted));
     let [Request::Admitted { run, .. }, Request::Read { .. }] = &*requests else { panic!("admitted read") };
     let run = *run;
     let requests = harness.step(Event::Read { owner: run, read: Read::Missing });
@@ -1798,6 +1836,41 @@ fn mid_running(harness: &mut Harness) -> (Token, Token) {
     let conversation = *conversation;
     drop(harness.step(Event::Started { conversation, peer: Token::new(100) }));
     (run, conversation)
+}
+
+#[test]
+fn a_mid_run_delivery_without_a_change_contract_needs_passing_checks() {
+    let mut harness = Harness::new(LIMITS);
+    let (_, conversation) = mid_running(&mut harness);
+    let requests = harness.step(mid_ask(conversation, 3));
+    let [Request::Check { owner, .. }, Request::Checking { .. }] = requests.as_ref() else {
+        panic!("discovered check runs: {requests:?}");
+    };
+    let owner = *owner;
+    let failing = ran(1, b"draft failed");
+    assert_eq!(
+        harness.step(Event::Checked { owner, ran: ran(1, b"draft failed") }).as_ref(),
+        [returned(50, Returned::ChecksFailed { repository: bytes(b"temper"), ran: failing })]
+    );
+}
+
+#[test]
+fn a_mid_run_delivery_uses_the_change_contracts_optional_checks() {
+    let mut harness = Harness::new(LIMITS);
+    let mut policy = mid_report();
+    policy.outcome.change = Some(ChangeSpec { checks_must_pass: false, fields: Box::new([]) });
+    let (_, conversation) = mid_running_policy(&mut harness, policy);
+    let requests = harness.step(mid_ask(conversation, 3));
+    let [Request::Check { owner, .. }, Request::Checking { .. }] = requests.as_ref() else {
+        panic!("discovered check runs: {requests:?}");
+    };
+    let owner = *owner;
+    let requests = harness.step(Event::Checked { owner, ran: ran(1, b"draft failed") });
+    let [Request::Deliver { .. }] = requests.as_ref() else { panic!("delivery follows the check: {requests:?}") };
+    assert_eq!(
+        harness.step(Event::Delivered { owner, push: delivered() }).as_ref(),
+        [returned(50, Returned::Delivered(receipts()))]
+    );
 }
 
 fn mid_ask(conversation: Token, completion: u32) -> Event {
@@ -1953,7 +2026,8 @@ fn generic_non_marker_host_refusal_is_feedback_and_report_can_finish() {
 #[test]
 fn impossible_delivery_grant_and_zero_host_deadline_refuse_before_preparation() {
     let mut charter = mid_report();
-    charter.grants.deliver = Some(ChangeSpec { fields: Box::new([FieldRule { name: bytes(b"ticket"), max: 0 }]) });
+    charter.grants.deliver =
+        Some(ChangeSpec { checks_must_pass: true, fields: Box::new([FieldRule { name: bytes(b"ticket"), max: 0 }]) });
     let mut harness = Harness::new(LIMITS);
     assert_eq!(answered(harness.start(1, charter)), (1, Answer::Refused(Refusal::Invalid(Invalid::Grants))));
     assert_eq!((harness.domain.runs(), harness.domain.conversations()), (0, 0));
@@ -2481,7 +2555,7 @@ fn accepted_mixed_workspace_drives_discovery_opening_and_child_metadata() {
     let mut harness = Harness::new(LIMITS);
     let mounted = mixed_workspace();
     let mut policy = charter();
-    policy.grants.deliver = Some(ChangeSpec { fields: Box::new([]) });
+    policy.grants.deliver = Some(ChangeSpec { checks_must_pass: true, fields: Box::new([]) });
     let emitted = harness.start_workspace(51, policy, Some(mounted.clone()));
     let [Request::Admitted { run, .. }, Request::Read { at, .. }] = emitted.as_ref() else {
         panic!("mixed workspace starts discovery: {emitted:?}");
@@ -2665,7 +2739,10 @@ fn contracts_requiring_writes_without_writable_directories_refuse_before_effects
     for mounted in [None, Some(workspace())] {
         let mut harness = Harness::new(LIMITS);
         let change = Charter {
-            outcome: OutcomeSpec { change: Some(ChangeSpec { fields: Box::new([]) }), ..charter().outcome },
+            outcome: OutcomeSpec {
+                change: Some(ChangeSpec { checks_must_pass: true, fields: Box::new([]) }),
+                ..charter().outcome
+            },
             ..charter()
         };
         assert_eq!(
@@ -2673,7 +2750,7 @@ fn contracts_requiring_writes_without_writable_directories_refuse_before_effects
             (54, Answer::Refused(Refusal::Invalid(Invalid::Outcome)))
         );
         let mut deliver = charter();
-        deliver.grants.deliver = Some(ChangeSpec { fields: Box::new([]) });
+        deliver.grants.deliver = Some(ChangeSpec { checks_must_pass: true, fields: Box::new([]) });
         assert_eq!(
             answered(harness.start_workspace(55, deliver, mounted)),
             (55, Answer::Refused(Refusal::Invalid(Invalid::Grants)))

@@ -66,20 +66,27 @@ pub(crate) fn checked(
 ) -> Settled {
     let stage = mem::replace(&mut landing.stage, Stage::Closed);
     match stage {
-        Stage::Checking { check } => match ran.exit {
-            Exit::Code { code: 0 } if may_finish && env.now < landing.deadline => {
+        Stage::Checking { check } => {
+            let passed = match ran.exit {
+                Exit::Code { code: 0 } => true,
+                Exit::Code { .. } | Exit::Signalled | Exit::TimedOut | Exit::Unstarted => false,
+            };
+            let required = match &run.charter.outcome.change {
+                Some(spec) => spec.checks_must_pass,
+                None => true,
+            };
+            if !passed && required {
+                let repository = copy_of(&repository(run, check).name);
+                back(owner, Returned::ChecksFailed { repository, ran }, Settled::Refused, out)
+            } else if env.now >= landing.deadline {
+                back(owner, Returned::TimedOut, Settled::Cancelled, out)
+            } else if !may_finish {
+                back(owner, Returned::Cancelled, Settled::Cancelled, out)
+            } else {
                 landing.stage = next(landing, id, run, check.checked_add(1).expect("bounded mounted checks"), env, out);
                 Settled::Going
             }
-            Exit::Code { code: 0 } if env.now >= landing.deadline => {
-                back(owner, Returned::TimedOut, Settled::Cancelled, out)
-            }
-            Exit::Code { code: 0 } => back(owner, Returned::Cancelled, Settled::Cancelled, out),
-            Exit::Code { .. } | Exit::Signalled | Exit::TimedOut | Exit::Unstarted => {
-                let repository = copy_of(&repository(run, check).name);
-                back(owner, Returned::ChecksFailed { repository, ran }, Settled::Refused, out)
-            }
-        },
+        }
         Stage::Aborting { why } => back(owner, call::stopped(why), Settled::Cancelled, out),
         Stage::Delivering | Stage::Closed => unreachable!("checks end only while they run"),
     }

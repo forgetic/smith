@@ -776,6 +776,7 @@ fn a_change_lands_through_the_worker_and_the_run_answers_with_it() {
     let mut h = Harness::new();
     let outcome = OutcomeSpec {
         change: Some(ChangeSpec {
+            checks_must_pass: true,
             fields: Box::new([
                 smith_domain_run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
                 smith_domain_run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
@@ -1202,7 +1203,7 @@ fn convention_main(harness: &mut Harness, selected: Option<run::Conventions>) ->
         conventions: selected,
 
         outcome: OutcomeSpec {
-            change: Some(ChangeSpec { fields: Box::new([]) }),
+            change: Some(ChangeSpec { checks_must_pass: true, fields: Box::new([]) }),
             verdicts: Box::new([]),
             report: None,
             failure: None,

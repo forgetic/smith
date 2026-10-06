@@ -147,6 +147,7 @@ fn charter(context_bytes: u64) -> Charter {
         grants: Grants { wait: true, deliver: None, tools: all, agents: true, host_tools: Box::new([]) },
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
+                checks_must_pass: true,
                 fields: Box::new([
                     smith_domain::run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
                     smith_domain::run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },

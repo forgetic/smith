@@ -125,7 +125,19 @@ fn render_system(
         if let Some(spec) = &charter.grants.deliver {
             text.put(b"\n## Delivery\n\nYou may call `deliver` during the run, then continue. Its opaque fields are: ");
             render_fields(text, &spec.fields);
-            text.put(b". Every discovered writable check must pass the exclusive snapshot. The host supplies receipts, nothing, named refusal, bounded failure or stale.\n");
+            if !found.checks.is_empty() {
+                match &charter.outcome.change {
+                    Some(change) if !change.checks_must_pass => {
+                        text.put(
+                            b". Discovered writable checks run before delivery; a failing check does not block it.",
+                        );
+                    }
+                    Some(_) | None => {
+                        text.put(b". Every discovered writable check must pass the exclusive snapshot.");
+                    }
+                }
+            }
+            text.put(b" The host supplies receipts, nothing, named refusal, bounded failure or stale.\n");
         }
     } else {
         text.put(b"## Answering\n\nWhen you are done, end your turn with your answer: your last message goes, as it ");
@@ -239,7 +251,11 @@ fn render_finishing(text: &mut Text, spec: &OutcomeSpec, checks: bool) {
         text.put(b"\nChange: the workspace changes, with these host-required result fields:\n");
         render_fields(text, &rule.fields);
         if checks {
-            text.put(b"Checks run before the host receives the change. A failed check returns its output so you can fix it.\n");
+            if rule.checks_must_pass {
+                text.put(b"Checks run before the host receives the change. A failed check returns its output so you can fix it.\n");
+            } else {
+                text.put(b"Checks run before the host receives the change. A failed check does not block delivery.\n");
+            }
         }
         text.put(b"The host pushes the checked state. A moved target ends this run; other refusals are feedback.\n");
     }
@@ -415,7 +431,7 @@ mod tests {
     fn host_names_and_individual_caps_are_rendered_without_builtin_change_fields() {
         let charter = Charter {
             outcome: OutcomeSpec {
-                change: Some(ChangeSpec { fields: fields(b"ticket", 17) }),
+                change: Some(ChangeSpec { checks_must_pass: true, fields: fields(b"ticket", 17) }),
                 report: Some(TextSpec { min: 0, max: 32, fields: fields(b"source", 9) }),
                 failure: Some(TextSpec { min: 0, max: 24, fields: Box::new([]) }),
                 verdicts: Box::new([VerdictRule {
@@ -457,6 +473,16 @@ mod tests {
             !rendered.contains("pull request") && !rendered.contains("`title`") && !rendered.contains("`body`"),
             "host names only"
         );
+    }
+
+    #[test]
+    fn optional_checks_are_described_for_final_and_mid_run_delivery() {
+        let mut charter = charter();
+        charter.outcome.change = Some(ChangeSpec { checks_must_pass: false, fields: Box::new([]) });
+        charter.grants.deliver = Some(ChangeSpec { checks_must_pass: true, fields: Box::new([]) });
+        let rendered = system(&charter, Some(&workspace()), &found());
+        assert!(skein_lib::bytes::find(&rendered, b"A failed check does not block delivery.").is_some());
+        assert!(skein_lib::bytes::find(&rendered, b"a failing check does not block it.").is_some());
     }
 
     #[test]

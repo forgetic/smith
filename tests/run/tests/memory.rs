@@ -136,6 +136,7 @@ fn charter(held: u64) -> Charter {
         },
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
+                checks_must_pass: true,
                 fields: Box::new([
                     smith_domain_run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
                     smith_domain_run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
@@ -627,7 +628,7 @@ fn full_delivery_charter(limits: Limits) -> Charter {
 
         grants: Grants {
             wait: true,
-            deliver: Some(ChangeSpec { fields: Box::new([]) }),
+            deliver: Some(ChangeSpec { checks_must_pass: true, fields: Box::new([]) }),
             tools: Tools { inspect: true, modify: true, shell: true },
 
             agents: false,

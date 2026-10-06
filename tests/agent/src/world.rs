@@ -1648,6 +1648,7 @@ impl World {
     }
 }
 
+#[expect(clippy::too_many_lines, reason = "the fixture lists the complete caller charter in one place")]
 fn charter(settings: &Settings) -> run::Charter {
     use run::charter::{Endpoint, Grants, Llm, Tools};
 
@@ -1690,7 +1691,10 @@ fn charter(settings: &Settings) -> run::Charter {
         grants: Grants {
             wait: true,
             deliver: if matches!(settings.job, Job::MidReport | Job::MidChange | Job::MarkerReport) {
-                Some(ChangeSpec { fields: Box::new([FieldRule { name: b"ticket".as_slice().into(), max: 128 }]) })
+                Some(ChangeSpec {
+                    checks_must_pass: true,
+                    fields: Box::new([FieldRule { name: b"ticket".as_slice().into(), max: 128 }]),
+                })
             } else {
                 None
             },
@@ -1712,6 +1716,7 @@ fn charter(settings: &Settings) -> run::Charter {
         outcome: OutcomeSpec {
             change: if change {
                 Some(ChangeSpec {
+                    checks_must_pass: true,
                     fields: Box::new([
                         smith_domain::run::outcome::FieldRule { name: b"title".as_slice().into(), max: 1024 },
                         smith_domain::run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
