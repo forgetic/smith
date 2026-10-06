@@ -19,8 +19,7 @@ What is still open is listed in section 11.
 - **Opened from a transcript,** a session goes on where an earlier one
   stopped, on the same provider and endpoint.
 - **Provider-neutral.** Nothing in a session depends on which provider
-  answers. Its protocol adapter uses the shared `skein-llm` client;
-  each provider's API belongs to skein.
+  answers; each provider's API is skein's shared LLM client's.
 - **Bounded:** turns, tokens, spend, time and bytes held, each a budget
   its opener gives it.
 
@@ -51,18 +50,6 @@ What is still open is listed in section 11.
   the completion used and cost. A withdrawn call has a result of its own
   kind. A historical call holds no ticket that means something only
   inside the session that made it.
-- **Delegated origin.** Every opener-served call carries its concrete accepted
-  completion sequence and zero-based assistant block position, in addition to
-  its live callback and temporary opener ticket. The sequence includes restored
-  transcript history and advances once per accepted completion. Provider ids
-  may repeat in different turns. The composing root pairs this origin with the
-  host-supplied activation number as the durable host call name, scoped by the
-  same logical run across restart (run.md, section 8.2). Checked sequence overflow
-  refuses the next completion's effects before any tool or host submission.
-  Resolving tickets changes neither
-  sequence nor position. A later activation can reuse the sequence and position
-  without reusing the old host call name. An old host answer whose completion is
-  absent from the transcript appears as waking message text (run.md, section 6).
 - **Told as it ends.** Closing waits for actual terminal answers before
   telling the last turn, including answers that win a cancellation.
 - **Versioned.** Turns and transcripts are domain values with a version;
@@ -76,88 +63,27 @@ What is still open is listed in section 11.
   turns; message and block bounds; roles and call and result ids; and no
   unresolved ticket. It must fit the message and byte limits with the
   waking prompt and room for a completion. Results the opener gives for
-  calls present in a yielded tail after the last turn are restored before the
-  waking prompt. An answered host call whose completion is absent from the
-  transcript appears in waking message text (run.md, section 6);
+  calls made after the last turn are restored before the waking prompt;
   an unanswered call in a yielded tail gets the same not-run result as an
   ordinary continuation.
 - **Refused transcripts.** Another version, endpoint or dialect, a
   malformed, unresolved or oversized history are distinct refusals; the
   run treats every one as a transient failure (run.md, section 6).
 
-### 3.1 Receiving room before work
-
-`completion_bytes` caps the full owning translated completion: Block
-cells, all text/id/name/input bytes, replay envelopes and decoded owning calls.
-`completion_blocks` independently caps the number of cells. Root and adapter
-additionally require a complete `Decoded` classification cell for every possible
-call before provider work, including payload-free TooLarge fallbacks. The actual
-completion reserves all of its call cells first, then counts dynamic decoded
-payloads against the residual allowance. Oversized early input cannot consume
-space needed to preserve a later refused classification. The protocol
-adapter checks its configured shared-client-to-domain worst case against both
-Request::Complete metadata caps before preparing a provider request. A client
-answer payload limit alone is not this owning bound. Replay is a complete opaque
-shared-client envelope; Text, Refusal and ToolCall keep their optional envelope,
-and Opaque keeps the complete reasoning or future-block envelope. Session never
-parses a provider tag or chooses a provider from these bytes.
-
-Before every provider effect, including retry and Continue, the session retains
-logical credit at least `P = 2*C + N*max(size_of(Block),size_of(Slot))`,
-checked for overflow, and the complete bounded failure terminal if larger,
-plus two free Message slots. C covers the actual assistant content;
-the second C covers copied provider IDs and invalid-result details, and the
-independent wrapper term covers every possible result skeleton. Calling and
-Closing retain this credit until the actual Completed/Failed/Cancelled
-terminal. Cancel emission cannot release it. An in-cap completion converts the
-credit into the actual assistant and full result skeleton once. A completion
-that wins cancellation records its actual assistant and NotRun for every
-unstarted call, usage and full last Turn before Ended. Insufficient room
-prevents the request; incompatible restoration is TooLarge before tools or a
-provider starts. Completion caps do not silently reduce the history payload
-ceiling: receiving room is an explicit pre-work requirement.
-
-Before dispatching any adjacent read batch or exclusive write, a bounded
-prescan reserves all maximum result payloads together. Each live call owns its
-credit through close until its one actual terminal converts credit into actual
-retained bytes. Delegates use `delegated_result_bytes`; owned tools use the
-exhaustive call-kind cap from tools Limits. Read, List, Search, Shell and edit
-ambiguity all have finite receiving bounds. Scan carries the aggregate Entry
-and name byte cap described in domain/tools.md, section 5. Invalid and unstarted
-result blocks and their provider IDs were secured before the provider request.
-Insufficient batch room starts no underlying effect; earlier actual results
-remain and only the unstarted tail becomes NotRun in the actual Turn before
-TranscriptFull. Normal and closing receiving paths cannot discard a valid
-actual result because later history filled the conversation.
-
-`session_bytes` counts Block wrappers and owning payloads, including secured
-result skeletons, separately from Message arrays. The worst case additionally
-prices Message storage, result Slot containers including their coexistence with
-an assembled result Block array, and restore Turn/Message staging. The single
-boxed Opening at the synchronous admission boundary adds its exact fixed node
-size to that staging; its bounded payload and restore envelopes are counted
-separately. The root includes this child bound and does not charge the node
-again. Root and
-caller price their concrete transcript/Turn output envelopes and transit copies
-independently. No logical reservation allocates bytes or abandons a terminal.
-
 ## 4. Providers and retries
 
 - **Any provider.** A session talks to the endpoint and model it was
-  opened with. `skein-llm` speaks the configured provider's API (HTTP,
-  server-sent events, JSON) and classifies its errors. Smith translates
-  conversation values and application tool schemas at that boundary.
+  opened with; skein's shared client speaks each provider's API (HTTP,
+  server-sent events, JSON) and its errors, and the protocol layer
+  translates the session's vocabulary and tool schemas to it.
 - **Retries are policy.** A session classifies a failed call
   (overloaded, rate limited, unavailable, timed out, context too long,
   invalid, unauthorised, an account exhausted), retries the transient ones
   after a jittered exponential backoff, and gives up when its retries run
   out. The protocol layer runs the attempt and its connect and idle
   deadlines.
-- **Credential bytes** are lent by the caller and bound to the configured
-  shared client by the protocol layer. Sign-in and refresh are the caller's
-  or a shared credential client's; smith owns no OAuth implementation.
-  A rejected credential or an exhausted account is a notice the session
-  raises, which the agent sends
+- **Credentials** are the protocol layer's. A rejected credential or an
+  exhausted account is a notice the session raises, which the agent sends
   to its host (host.md, section 7); an unauthorised failure is transient,
   so a refreshed credential may answer the retry.
 
@@ -173,76 +99,26 @@ independently. No logical reservation allocates bytes or abandons a terminal.
 
 ## 6. Budgets and prices
 
-The opener supplies turns, per-kind receiving token allowances, scalar spend
-and wall time, all within the session's receiving limits; bytes held obey the
-agent's ownership bounds. A finite turn, token or scalar crossing stops the next
-completion, preserving the calls of the completion in flight until their real
-terminals. Time expiry closes at once. Run-wide scalar spend and turn policy
-also gates the next actual provider request across concurrently open sessions
-(domain/run.md, section 9).
-
-Prices are integer input, cached and output amounts per positive `unit` tokens.
-Fresh input and cache writes use the input rate; cache reads use the cached rate.
-Output uses the output rate. The combined rational charge of each completion is
-rounded upwards once with checked arithmetic and must fit `u64`. Zero rates are
-valid; a zero divisor is refused before work. Session is the sole owner of this
-pricing calculation. Skein's provider-neutral fresh-input usage excludes both
-cached counters, so no cached input is charged twice.
-
-Recording keeps two independently checked cumulative currency sums:
-`own_spent` for this session's completions and inclusive `spent` for those plus
-its descendants. Each actual completion updates both; an answered, failed or
-withdrawn child terminal updates only inclusive spend. The existing call-identity
-and terminal guard runs before charging: duplicates, retired identities and
-stale generations change neither sum. Priced reports precede actual Usage and
-Turn routing. The run adds only monotonic own deltas to its global financial
-total; the parent uses a child's inclusive bill for its local share and Turn.
-Neither route adds a child's cost twice. Both sums start at zero for each
-activation; restored historical Turn charges remain data and are not spent
-again.
-
-Own and inclusive currency overflow are separate sticky attestations. A failed
-addition keeps the last representable prefix; a valid own charge still advances
-when the inclusive sum is already unknown. Unknown delegated bills carry their
-prefix and spend-overflow attestation through answered and withdrawn terminals.
-Raw cumulative usage similarly checks all four additions atomically, retaining
-the complete prior prefix with a sticky usage-overflow attestation. Per-completion
-Used and Turn usage remain actual and exact. Used carries that exact completion
-alongside an attestation about its cumulative receiver; Ended and directly
-derived cumulative facts retain the prefix and attestation instead of claiming
-a saturated sum is exact.
-
-A structurally valid accepted completion is told and its sequence advanced once
-before returning PriceOverflow or UsageOverflow; the Turn carries its inclusive
-spend-overflow attestation. If both fail, PriceOverflow takes precedence. These
-hard failures differ from ordinary finite budget exhaustion. Malformed origin,
-transcript or receiving records still follow their separate refusal paths and
-are not invented Turns.
-
-Root may deny an unsent next completion because another session exhausted the
-run-wide scalar or turn allowance. The typed denial applies only to the matching
-live Calling owner, before any Client or external effect. Session releases its
-reserved provider credit, closes the kit and emits Ended after the actual
-KitClosed terminal. It emits no Usage, price, Turn, retry or provider Cancel;
-a repeated or stale owner and a closed session are inert. This is distinct from
-a provider failure and from time or cancellation. If a run or conversation is
-already closing before root publishes its queued completion, root sends the
-separate `UnsentClosed` companion through the same live Calling-owner and credit
-release path. It ends as Closed without changing the run's authoritative stop.
-It applies before the deferred session Close; a Close already applied still owes
-its actual admitted provider terminal and is inert to the unsent companion. The denied child's real terminal bill still travels through deferred Return.
-The parent emits its Turn after all its admitted calls settle; denial itself
-creates no Turn.
-
-The typed 05s4 budget increment is tracked in
-`docs/development/migration-05s4-budget.md`. The single concrete entrance uses
-`Open { opener, opening }` for fresh and restored transcripts. Opener-served
-terminals use `Answered` with owned result bytes, its error bit and the inclusive
-child activation bill, or `AnswerCancelled` with the settled bill. Live tickets
-name pending work only; they never survive in a Turn. The retained transcript
-format version is 2; removing the older entrance does not change its encoding.
-The contraction and preserved source scenarios are recorded in
-`docs/development/migration-05s4-session-contraction.md`.
+- **Budgets:** turns, tokens (input, output, cache reads and writes, as
+  the provider counts them), spend in the host's unit, and time, given by
+  the opener at open; bytes held, against the agent's limits. Crossing a
+  budget stops the next completion, not the turn in flight: the calls of
+  the completion that crossed it still run and settle. Time is the
+  exception: when it runs out, the session closes at once.
+- **Prices** are integer input, cached and output amounts per positive
+  `unit` tokens. New input and cache writes use the input rate; cache
+  reads use the cached rate. The combined rational charge of **each
+  completion** is rounded upwards once, using checked arithmetic; the
+  result and the cumulative spend must fit `u64`. Overflow is a typed
+  failure ending the session with a report of it, never a saturated
+  charge.
+- **Spend is cumulative** within an activation, sub-agents included. A
+  delegated terminal, answered or withdrawn, carries the sub-agent's
+  cumulative spend once under its call's identity; a duplicate or stale
+  delivery cannot charge it again. Restoring history does not charge old
+  activations again. A run counts each child once, through the parent's
+  terminal answer, never adding both. Enforcing one aggregate budget
+  across concurrently open sessions is the run's (run.md, section 9).
 
 ## 7. Sub-agents
 
@@ -260,26 +136,18 @@ reaches the host's resume limit.
 
 ## 9. Below the domain
 
-- **LLM calls:** `smith-protocol-llm` translates to the actual
-  `skein-llm::client::Client`. The shared client owns provider codecs,
-  HTTP/SSE, wire failures and bounded replay envelopes. Smith owns application
-  schemas, typed tool decoding and result text; it never inspects provider
-  metadata. Whole tool schemas and raw argument bodies cross this boundary.
-- **Replay:** completed text, refusals and tool calls retain optional opaque
-  metadata; reasoning retains its complete opaque envelope. Smith preserves
-  these bytes and their order through turns, prompt copies and restore.
-  Skein checks their format and configured provider compatibility before use.
-- **Credentials:** caller-supplied endpoint and bearer/account data, lent
-  under the host grant contract (host.md, section 7). Smith neither signs
-  in nor refreshes credentials itself.
+- **LLM providers:** skein's shared client (`skein-llm`) for each
+  provider's API and its failures; smith's protocol layer for tool
+  schemas and decoding; credentials lent by the host (host.md,
+  section 7).
 - **Turns' encoding** (`smith-transcript`): a turn's bytes, with a
   version, and every provider's opaque blocks kept verbatim with the
   dialect and endpoint they came from.
 
 ## 10. The world
 
-A shared `skein-fake-llm-domain` whose completions a smith-supplied script
-draws (tool calls, malformed input, every class of failure, streaming), the tools domain
+skein's fake LLM provider, whose completions a script draws (tool calls,
+malformed input, every class of failure, streaming), the tools domain
 with the machine's faces, and a scripted opener that continues, closes,
 aborts and answers delegated calls. Its stories: a conversation that
 yields and is continued; reads in parallel and a write alone; every
@@ -288,11 +156,6 @@ opened from a transcript, and each refusal of one; a sub-agent's spend
 counted once. Its referee: every call answered once, in call order;
 turns told in order, each after its calls settled; budgets exceeded by at
 most one completion.
-
-Protocol worlds join the real shared Client to `skein-fake-llm-protocol`.
-Smith owns the application scripts and outside effect expectations. Generic
-codec fixtures, wire faults and peer mechanics are tested in skein rather
-than copied into smith.
 
 ## 11. Open questions
 
@@ -308,19 +171,3 @@ names resolved, transcripts versioned, prices and spend in a unit,
 history checked before a completion. temper's first version, which
 tickets made meaningful only inside its session, stays with temper's
 legacy run until temper's cutover; smith starts at the second.
-
-Migration 05s2 copied provider and OAuth crates to preserve the source baseline.
-05s2a replaces that temporary ownership with the existing shared `skein-llm`
-client and shared peers. The copy ledger remains historical evidence; the
-replacement audits its codec fixtures and stories before deleting the copies.
-
-Actual shared-client failures additionally distinguish Limit, Protocol and
-unsolicited Cancelled, all nonretryable. Failed carries exact transport Evidence
-(Unsent/Unknown/Response) and bounded diagnostic bytes, at most failure_bytes.
-Request::Complete advertises max_failure_bytes; the adapter checks its configured
-receiving diagnostic bound before prepare/effects. Root passes the exact actual
-terminal to session. Policy consumes and drops detail without text-driven retry,
-saved transcript text or diagnostic facts. Content-free CompletionFailed facts
-and End::Failed retain the exact class and evidence. Requested Cancel still owes
-one actual Completed, Failed or genuine Cancelled terminal; a failed or completed
-operation that wins Cancel is never replaced by an acknowledgement.

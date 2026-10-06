@@ -51,8 +51,7 @@ How smith is built from temper's code is temper's migration plan
   is the host's: smith asks for a delivery and tells the LLM how it
   went.
 - **Any model, any provider.** The conversation vocabulary is
-  provider-neutral. The protocol layer uses `skein-llm`'s shared client;
-  provider APIs, HTTP/SSE and replay metadata belong to skein.
+  provider-neutral; each provider's API is skein's shared LLM client's.
   A run starts on the model its charter names and may give its sub-agents
   others.
 - **Failures are visible.** The LLM sees what went wrong, bounded in size:
@@ -134,29 +133,15 @@ the `smith` binary runs.
 |---|---|---|
 | domain | `smith-domain` and its children | the agent in its worlds, or in its own process (host.md, section 9) |
 | domain | `smith-host-domain` | supervising agent processes, as its host's child |
-| protocol | `smith-protocol` | the agent process's protocol layer: the channel's agent half, application tools and routing |
-| protocol | `smith-protocol-llm` | translating the agent's conversation and application tools to the shared `skein-llm::client::Client` |
+| protocol | `smith-protocol` | the agent process's protocol layer: the channel's agent half, calls through skein's LLM client, tools' schemas and decoding |
 | protocol | `smith-channel` | the channel's frames and payloads, both halves, versioned |
 | protocol | `smith-transcript` | encoding and decoding turns, for a host that keeps or shows them |
-| shared protocol | `skein-llm` | provider-neutral calls, native provider codecs and opaque replay envelopes |
+| skein | `skein-llm` | providers' APIs, behind one shared client |
 | protocol | `smith-mcp`, later | MCP servers as a tool source |
-| shared testing | `skein-fake-llm-domain`, `skein-fake-llm-protocol` | generic scripted LLM and byte peers; smith supplies application scripts and expectations |
-| testing | a scripted agent, a scripted host | smith's own neighbours and application worlds |
+| testing | skein's fake LLM, a scripted agent, a scripted host | fakes for its own worlds |
 | binary | `smith` | the agent process a host spawns, and the local host with an agent |
 
 io is skein's: contained process trees, files, HTTP, pipes.
-
-The LLM adapter owns smith's tool declarations, application argument decoding
-and result translation. It owns no provider selection branches, provider wire
-fields, HTTP/SSE machine or sign-in client. Endpoint configuration and credential
-bytes arrive from the caller. Acquiring and refreshing those credentials belongs
-to the host or a shared credential client; smith receives grants and reports
-credential failures (host.md, section 7).
-
-The generic client and peer interfaces may change together with their consumers.
-An application translates at the boundary once; it does not copy a shared
-machine or add a callback to compensate for a missing shared entrance. Bounds
-cover both the shared values and smith's retained application data.
 
 **What goes to skein.** smith and temper share skein; what both would
 otherwise each keep goes there, as generic kit, when it is extracted:
@@ -164,15 +149,16 @@ otherwise each keep goes there, as generic kit, when it is extracted:
 - **framed channels:** frames, a hello with versions, bounds sealed by
   constructors, a channel's state machine; smith's and temper's channels
   keep only their payloads;
-- **an OAuth client:** sign-in, refresh, tokens kept as secrets; the
-  caller supplies endpoint configuration and lends credentials to smith;
+- **an OAuth client:** sign-in, refresh, tokens kept as secrets; smith's
+  local host and temper's forge sign-in add their endpoints;
 - **supervised processes:** spawning within a deadline, cancel then
   terminate then kill, proof that a tree is empty; `smith-host-domain`
   adds the channel's rules and the watchdog;
 - **worlds' common fakes,** such as a scripted peer on a channel.
 
-Conversation, tool and run policy stays in smith; generic LLM clients, codecs
-and wire peers belong to skein. Tasks, authority and connectors stay in temper.
+What is about conversations, tools or runs stays in smith; providers'
+APIs are skein's; what is about tasks, authority or connectors stays in
+temper.
 
 ## 5. How smith stays generic
 
@@ -207,9 +193,8 @@ What varies between agents, and between hosts, arrives as data:
 - **Conventions:** the guide and checks file names, from the charter,
   with smith's defaults (run.md, 8.1).
 - **The brief:** titled text sections. A host that keeps typed context
-  renders each body itself; smith preserves the titles and supplied order,
-  lays out those sections after the separate role instructions, and adds its
-  own workspace/mechanics sections (run.md, sections 3.1 and 3.3).
+  renders it itself; smith adds only the sections about its own
+  mechanics, which it enforces.
 - **Messages:** named, with a sender's label and text the host rendered;
   smith reads their order, never their kinds (run.md, section 6).
 - **Money:** a unit and each model's prices; smith prices, the host
@@ -269,9 +254,8 @@ What changes in becoming smith, for temper's migration:
 - **`.temper/pre-pr` and `AGENTS.md` are conventions** temper's charters
   name; smith's defaults are `.smith/check` and `AGENTS.md`.
 - **Verdict lists fixed in code go;** the contract carries them.
-- **The brief arrives as titled text.** Temper renders its typed context
-  into each section body; smith preserves the titles and order and lays out
-  the main prompt. The separate role instructions are also the host's.
+- **The brief arrives rendered.** Its typed sections and their rendering
+  are temper's.
 - **Budgets are in the host's unit,** with prices; the token split of
   temper's engine goes.
 - **The agent's protocol layer** is smith's, and its channel smith's own,

@@ -33,11 +33,9 @@ What a host and a run say to each other, in order.
 Down, from the host:
 
 - **the start** first (run.md, 3.2): the charter, the workspace, the
-  transcript, credential grants and a positive activation number unique for
-  this logical run;
-- **messages,** named uniquely for the active logical run, in order (run.md,
-  section 6); the kit retains outstanding names and the current read watermark,
-  not an unbounded history of older acknowledged opaque names;
+  transcript and the calls answered after it, credential grants, an
+  activation number;
+- **messages,** named, in order (run.md, section 6);
 - **answers** to the run's calls: host tools' (text, as a result or an
   error), deliveries' (run.md, 8.2), busy, unavailable;
 - **credential grants,** refreshed (section 7);
@@ -54,24 +52,18 @@ Up, from the run:
 - **facts,** best effort (run.md, section 11), and **a long operation**,
   its span bounded by the limits, and its end;
 - **waiting,** with the last message read;
-- **message refusals,** naming an already issued message and the actual root
-  reason: Busy, TooLarge, Inactive or ReusedName (section 4.2);
 - **notices** that a credential was rejected or an account exhausted;
 - **the answer,** its last word, with its turn count and its spend
-  (run.md, section 10). An interrupted mid-run landing answers delivered with
-  its real stable name and receipts, the already-decided stop and spend; it is
-  distinct from an LLM-declared accepted result, including for Report-only runs.
+  (run.md, section 10).
 
 What a host owes:
 
 - **Each call name is decided once.** A call asked again with the same
   name gets the answer the first had, from the host's record, never a
-  second decision (run.md, section 5.2). Delivery's concrete name is the main
-  activation number, accepted completion sequence and assistant block position,
-  scoped by the same host logical run across restart. The parent never reuses an
-  activation number within that run. Callback slabs, temporary tickets and raw
-  provider ids are not this identity (run.md, section 8.2). A host that cannot keep that promise
+  second decision (run.md, 5.2). A host that cannot keep that promise
   (one without a durable record) must offer no host tool that writes.
+  Names stay distinct across a run's starts: each start has a new
+  activation number, never reused, which every name carries.
 - **A delivery is never abandoned.** One in flight runs to its end, which
   its deadline bounds, and is answered with what it did, so one that
   landed is reported landed.
@@ -79,18 +71,10 @@ What a host owes:
   once the run and everything it started are gone, but for the delivery
   it asked for.
 
-Busy is an entrance refusal before forwarding an operation. Unavailable and
-withdrawn are transport terminals, and do not prove that no durable effect
-occurred. An immutable durable name may be retried after the original relay's
-actual terminal; the parent's recorded decision wins. Neither withdrawal nor a
-transport loss lets the kit fabricate a delivery terminal.
-
 What breaks the channel's rules, an agent failure: a call name reused
 while in flight, a turn out of order, a spend that falls, a count in the
-answer that is not the turns told, working traffic after the last word, a
-payload beyond the limits, or a message that does not decode. An exact
-refusal settling an already issued message remains receivable after the last
-word (section 4.2); it cannot create another answer or admit new work.
+answer that is not the turns told, anything after the last word, a
+payload beyond the limits, or a message that does not decode.
 
 ## 3. The channel
 
@@ -144,139 +128,6 @@ policy.
   time), each with bounded detail for operators, such as its error
   output's tail, never shown to an LLM.
 
-### 4.1 Typed child boundary and retained rights
-
-The extraction is V2 only. `Start` carries opaque charter, optional transcript,
-opaque calls answered after that transcript, optional workspace token, mount
-names/writability/git kind/relative conflict paths and credential grant names. The kit
-never reads charter or transcript contents. `Spawned` emits `Started`, moves
-`Start` into the first lower `Send`, requests `Wait` and `Reap`, and demands
-`Read`. The parent learns its agent token in `Started`; payload notices before
-that are refused. Messages may queue immediately afterwards while the lower
-adapter still owns the first Send, before the agent has read it. Start and queued
-payloads are exclusive in the kit; the caller must count its IO-owned Start
-alongside the queue.
-
-The mount descriptors carry git kind even though the kit does not execute git.
-Plain directories cannot carry conflict paths; a git directory may carry them
-whether writable or read-only. That information never changes write authority.
-The optional prepared workspace and its mount descriptors agree on presence;
-mount names are unique safe single components and conflict paths are unique,
-relative and bounded. The parent owns the actual merge and delivery policy,
-while the kit preserves admitted metadata unchanged through its Start Send.
-
-The parent inputs are `Spawn`, `Message`, `Answer`, `Acknowledge`, `Grant` and
-`Stop`. The lower terminals are `Spawned`/`Unspawned`, `Sent`/`Unsent`,
-`Received`/`Malformed`/`Hangup`, `Signalled`, `Exited` and `Reaped`. Each closes
-exactly one corresponding `Spawn`, `Send`, `Read`, `Signal`, `Wait` or `Reap`.
-`Reaped` follows `Exited` and proves the entire tree empty. Parent notifications
-are `Started`, `Admitted`, `Called`, `Withdrawn`, `Turn`, `Waiting`, `Rejected`,
-`Exhausted`, `Told`, `Answered`, `Faulted`, local `Bounced`, agent
-`MessageBounced` and `Gone`.
-
-A stable `CallName` contains `Start.activation`, positive main completion
-sequence and assistant block position, scoped by `Start.logical_run`; the
-callback token is only a transport right. `Called` carries that scope, name,
-deadline, tool/effect and
-opaque arguments. The bounded call table keeps name/kind/deadline/withdrawal and
-parent/queued/sending stage. Its reservation survives until the reply's actual
-`Sent`/`Unsent`, or the parent terminal when the channel is already unavailable.
-`Withdrawn` is notification once, never consumption of the parent answer right.
-A call's deadline bounds its watchdog pause; expiration resumes that clock and
-never synthesizes an operation terminal. The parent must finish its actual
-operation by its operation deadline, including an already landed result whose
-response transport is late. Gone cannot release a workspace ahead of that right.
-
-Generic host-tool replies carry opaque text and an error flag. Delivery carries
-the complete sealed `Delivered`/`Nothing`/`Refused`/`Failed`/`Stale` terminal from
-run.md section 8.2. At most one delivery is outstanding per agent. An agent final Answer cannot abandon a delivery whose actual terminal remains
-Parent-stage or queued; Sending may already have reached the agent. Reply capacity
-must fit the maximum sealed receipts before any operation is admitted; a real
-landing cannot be replaced with TooLarge. One additional bounded successful
-landing proof (stable name, receipts and issued downlink chronology) survives
-the call's Send terminal until the last word. Replacing it temporarily uses the
-Parent-stage call's reserved reply ownership; this and the separate withdrawal
-snapshot are priced in `worst_case`.
-
-A final `Delivered` must match real proof whose response was issued, preserving
-the complete `Model(Fault)`, `Budget(Exhausted)`, `Receiving(ReceivingLimit)`,
-`PriceOverflow`, `UsageOverflow`, `Policy(Unfinished)`, `Cancelled` or `Stale`
-stop payload and attested cumulative spend. For Cancelled, the kit
-also checks that its Cancel was issued before that response. It does not infer a
-private agent stop decision or actual Cancel receipt from a parent's Stop.
-Therefore it cannot require Delivered for every call pending at parent Stop.
-An earlier ordinary landing followed by a later stop remains ordinary; the
-world's independent oracle observes the scripted agent's actual stop/receipt
-order to detect omitted, invented or misclassified interrupted evidence.
-
-`Gone` requires process exit, empty tree, EOF, no lower Send/Read/Signal right,
-no actual parent call/delivery right and no parent turn commitment. Calls and
-turn metadata are independent of the finite supervision phase and survive
-Cancelled, Draining, Exiting, Terminating and Killing. A last word and the
-containment terminal are separate. Once the parent explicitly stops a run,
-later channel breaches terminate the tree and emit a diagnostic fact without
-inventing a parent run fault; a first valid last word may still be heard.
-Wall-owned shutdown keeps its original failure cause, and a breach there is
-reported. After termination ordinary working traffic is discarded while final
-Answer, exact issued-message refusals and every actual lower/parent terminal
-remain receivable. Lower adapters settle every issued operation
-even after termination; no destructor abandons one.
-
-The parent reserves `max_out(limits)` free output slots before `step`/`fire`,
-repeats due timers and reclaims retired slab slots only at its iteration boundary
-(programming-model.md, sections 2, 4.5, 5 and 6). Facts are bounded content-free
-observations; dropped facts saturate a counter and change no decision.
-
-### 4.2 Agent refusal of an issued message
-
-`Up::MessageBounced { name, reason }` forwards the root's actual Busy,
-TooLarge, Inactive or ReusedName as the distinct parent
-`Request::MessageBounced { client, name, reason }`. Local `Bounced` still
-means the host refused before queueing; its Full and Ending are not the
-agent's Busy and Inactive. No reason is inferred from bytes, phase or timing.
-
-Only this agent's currently issued, unread name is eligible. Remove exactly
-that name from the bounded issued queue, preserving the other names' FIFO
-order. Do not advance the read watermark or manufacture a Turn, Waiting,
-Send terminal, acknowledgement or answer. Unknown, queued-only, already read
-or already refused names are Rules. Names are opaque, including zero and the
-maximum Token; numeric order conveys nothing. The parent promises uniqueness
-for the active logical run. The kit retains no historical name table.
-
-The pending lower Message Send retains its name until its actual Sent or
-Unsent, even if a read or refusal has already settled message credit. That
-name guards local reuse; it never grants eligibility for a second refusal.
-Released credit can admit a different name while that original Send remains
-pending. The old body is still owned by the caller/lower adapter, so the
-caller prices it alongside the newly full queued payload. A Send terminal
-and agent message credit are independent rights; Unsent does not itself prove
-that no bytes reached the peer.
-
-A valid notice is a narrow settlement exception before the ordinary last-word,
-reported-fault and termination gates. It remains receivable through an actual
-Read terminal after Answer or a reported fault, including Terminating and
-Killing. It cannot revive admission, replace the answer or accounting, report
-a second final fault, or change the original shutdown cause, grace or wall
-bound. Ordinary working traffic keeps its existing rules. Invalid settlement
-uses the existing Rules handling without restarting termination deadlines.
-
-The watchdog remembers the latest genuine Waiting claim. Queued or issued
-messages suspend its effective pause without erasing that claim. A valid actual
-Call, Long or main Turn clears it; a new actual Waiting establishes it. If
-exact refusals settle every attempted wake, the prior genuine claim can pause
-again only with no queued or issued messages. A remaining accepted message
-keeps the watchdog running. No synthetic Waiting or read advance restores it;
-the independent wall bound always runs.
-
-The concrete producer forwards root output in order, verifies the root run
-against the activation's local binding, and retains that bounded binding
-through draining and late refusals. An Answer does not finish a framing output
-that still owes those notices. EOF may leave issued names without possible
-peer terminals: Gone waits for every real IO, process, parent call and turn
-commitment right, then drops the bounded ledger rather than fabricating reads
-or waiting forever for individual refusals. Concrete codec and producer-wire
-verification belong to the protocol increment.
-
 ## 5. What a host decides
 
 - **Which runs, with which charters,** and whether a run resumes;
@@ -301,46 +152,10 @@ verification belong to the protocol increment.
   is room, its watchdog paused.
 - **Before the answer.** The answer says how many turns the run took and
   is sent after them.
-- **Held by the parent.** The kit moves each validated opaque turn body to
-  its parent once; it keeps bounded number/byte metadata until exact
-  `Acknowledge { turn }`. This is a durable commitment notice, not a cumulative
-  fence: acknowledging turn 2 cannot release turn 1. Repeated already committed
-  ACKs are inert. Metadata for a queued/sending ACK remains reserved through its
-  actual Send terminal. Gone retains every uncommitted turn even after EOF.
-- **Read credit reserved before demand.** A Read is issued only if metadata
-  count and the maximum next-turn bytes fit. Lack of credit pauses the watchdog;
-  downlink answers and ACKs still progress. During shutdown the channel is
-  drained, and further out-of-credit or malformed traffic is a rules failure.
-  The independent wall clock never pauses.
-- **Fenced metadata.** Turns begin at one, are consecutive and carry
-  nondecreasing cumulative scalar spend. Currency and raw-usage overflow
-  attestations are sticky: an unknown total is a representable prefix, never an
-  exact charge. Neither Turn nor Answer may clear an observed attestation. Final
-  count matches exactly, and final representable spend cannot fall. A read watermark advances only through the known sent-message
-  prefix; queued, unknown and regressing names fail the channel rules.
-
-### 6.1 Final accounting
-
-The final Answer carries two different counts. `turns` is the exact number
-of main conversation Turns transmitted in this activation, used to settle
-their commitment rights. `completions` is the activation's global completion
-count across the main conversation and every child. It also carries the
-global raw `input`, `output`, `cache_read` and `cache_write` counters, the
-scalar `spent`, and independent currency and raw-usage overflow attestations.
-These are the actual final `Spend` from run.md, section 9.4. The protocol
-does not derive them from the last transmitted Turn, sum session bills, or
-reprice usage. Children can complete after that Turn or without producing
-a main Turn.
-
-When raw usage is representable, `completions` is at least `turns`. On raw
-overflow, the complete raw tuple, including completion count, is the last
-representable prefix frozen atomically by the agent; it can be smaller than
-the transmitted main count. The sticky attestation identifies that unknown
-total. Currency overflow remains independent. A refused start has no
-admitted work: both counts, all four raw counters and scalar spend are zero,
-and both attestations are false. These fixed inline values add no payload,
-acknowledgement or process right. The kit validates those relationships and
-forwards all final values unchanged to its parent.
+- **Held where?** Whether `smith-host-domain` holds turns for its parent,
+  or passes each on and leaves keeping it to the host, is open
+  (section 12); temper's worker holds them across its own channel's
+  losses.
 
 ## 7. Credentials
 
@@ -348,19 +163,11 @@ forwards all final values unchanged to its parent.
   endpoints need as a grant on the channel, named by account and
   generation, refreshed before it lapses; the agent's protocol layer
   holds it, and the domain names only the grant. A notice of a rejected
-  credential or an exhausted account goes up for the host to act on. The kit
-  keeps each known account's latest queued generation and greatest generation
-  actually issued down the channel. Refreshes increase and coalesce per account
-  without displacing other traffic. Rejection of an older generation may cross
-  a queued refresh: it remains a stale notice for the parent, not an agent
-  fault. Zero, unknown account or a generation beyond those actually emitted
-  fails the channel. The parent owns the precise grant history, so it ignores
-  obsolete names or validates skipped historical generations against its own
-  record; the kit does not retain an unbounded generation history.
-- **Or caller-configured:** a local host may obtain credentials through its
-  caller's sign-in/refresh mechanism and lend grants through the same boundary.
-  Smith's domains keep names only; provider authentication and credential bytes
-  belong to the caller or a shared credential client, not a Smith OAuth crate.
+  credential or an exhausted account goes up for the host to act on.
+- **Or the agent's own:** the local host signs in to a provider with
+  skein's OAuth client, keeps the refresh token in the user's
+  configuration directory, and lends the agent its grants the same way,
+  so the agent has one path for credentials.
 
 ## 8. The local host
 
@@ -403,26 +210,6 @@ in its own.
   person's machine, not a host that runs agents it does not trust with
   its own process.
 
-The composed root emits a concrete typed Turn and keeps no ACK table. Its
-parent owns the body after that output; a protocol face may encode it as the
-host kit's opaque Turn. The host kit retains number/byte/read/spend metadata
-through exact parent commitment and actual ACK Send completion, independently
-of root Answer, process exit, tree emptiness and channel EOF. Committing turn 2
-cannot commit turn 1. The composition world carries complete typed bodies via a
-test-only full-record encoding; it does not claim a production transcript codec.
-
-Root Turn metadata uses the actual global run scalar units and both overflow
-attestations from domain/run.md, section 9. The complete typed Turn body keeps
-its own inclusive session charge, exact per-completion usage and transcript
-sequence. Those are distinct views when parallel children have outstanding
-bills; neither the protocol face nor the host kit reprices tokens or adds a
-child bill. Final Answer forwards the root's complete final accounting as
-section 6.1 describes, even when it differs from the last Turn's metadata.
-Waiting follows the real settled run notice; the kit may pause
-no-progress monitoring then, while its independent wall clock runs. Budget
-implementation and gate status are recorded in
-`docs/development/migration-05s4-budget.md`.
-
 ## 10. The world
 
 `smith-host-domain`'s world runs it against a scripted agent (progress,
@@ -445,17 +232,14 @@ the terminal.
   relayed calls with names, spend, waiting), with temper's names gone:
   runs are a host's, push is delivery, and the engine's tools are host
   tools.
-- **`smith-host-domain`** extracts Temper
-  `19735a066cd485ca9d39e70ffb8ca8bd902ad55a`'s worker-agent behavior (05d,
-  `e2a6a719`), independently of its later frozen-agent rename: one process per
-  run, watchdog, cancel/terminate/kill, full V2 turns/transcripts/spend. Smith
-  delivery vocabulary is the merged `2a621a5` seam. Complete source-story
-  mappings and retained inventories are in
-  `docs/development/migration-05s6-host.md`.
+- **`smith-host-domain`** is temper's worker's agent child domain, as
+  temper's `worker.md` described it: one process per run, the watchdog,
+  cancel then kill.
 - **The local host and one process** are new.
 
 ## 12. Open questions
 
+- **Turns held by the host kit or by each host** (section 6).
 - **A host without a durable record** and host tools that write: refused
   by rule, as section 2 says, or allowed with a warning to the LLM.
 - **Containment in one process:** whether commands may still run under a

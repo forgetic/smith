@@ -4,9 +4,7 @@ Provisional, 2026-10-05. What a smith session does to its workspace, as
 a domain layer: read, list, search, write, edit and shell. It is the
 child domain `smith-domain-tools`, under the session (session.md). A run
 with no workspace has none of these tools; its LLM acts through its
-host's tools and MCP servers. In the typed run boundary, absent workspace
-suppresses inspect, modify and shell families; host and run tools remain under
-their own grants. What is still open is listed in section 8.
+host's tools and MCP servers. What is still open is listed in section 8.
 
 ## 1. In one page
 
@@ -34,9 +32,7 @@ their own grants. What is still open is listed in section 8.
   opens.
 - **A merge in progress** is a repository like any other, whose
   conflicted files hold their markers until the LLM resolves them
-  (run.md, 8.3). A read-only git directory may describe its initial conflicts,
-  but its metadata grants no permission to resolve them. Plain directories
-  carry no git conflict list.
+  (run.md, 8.3).
 
 ## 3. The tools
 
@@ -77,17 +73,6 @@ modify (`write`, `edit`), shell.
   edit that matched nothing), not a fixed message.
 
 ## 5. Search and shell
-
-Listings have both an entry count and an owned-byte bound. `Limits.list_bytes`
-and `Op::Scan.max_bytes` count every `Entry` array cell and its name bytes;
-names have no implicit filesystem length cap in this typed boundary. The lower
-adapter returns a name-order prefix satisfying both caps and the actual number
-of omitted entries in `Scanned.more`. It stops the prefix at the first entry
-that does not fit, including an empty prefix when that first name is too large.
-It never skips that name to return later names. An actual scan that wins its
-cancellation returns the same bounded prefix and omitted count. The session
-can therefore reserve its complete possible result before starting the call
-(session.md, section 3), and must retain the actual terminal through close.
 
 - **Search** is `rg`, run as a contained process: no configuration, the
   pattern and glob passed so that neither reads as an option, an empty
