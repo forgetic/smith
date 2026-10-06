@@ -48,6 +48,7 @@ const LIMITS: Limits = Limits {
         runs: 2,
         conversations: 4,
         run_bytes: 2048,
+        brief_sections: 4,
         run_conversations: 3,
         calls: 4,
         answer_bytes: 128,
@@ -85,7 +86,8 @@ const LIMITS: Limits = Limits {
     },
 };
 
-/// A charter of `brief` bytes of brief that grants everything, and wants a
+/// A charter with unchanged aggregate context filler distributed across role,
+/// maximum Section cells, titles and bodies, granting everything and wanting a
 /// change that passes its checks, a verdict, report or declared failure.
 fn workspace() -> Workspace {
     let repository = Directory {
@@ -98,7 +100,7 @@ fn workspace() -> Workspace {
     Workspace { directories: Box::new([repository]) }
 }
 
-fn charter(brief: u64) -> Charter {
+fn charter(context_bytes: u64) -> Charter {
     let all = Tools { inspect: true, modify: true, shell: true };
     let rule = VerdictRule {
         name: (*b"request-changes").into(),
@@ -124,8 +126,23 @@ fn charter(brief: u64) -> Charter {
             },
         },
     };
+    let count = usize::try_from(LIMITS.run.brief_sections).expect("bounded receiving section count");
+    let payload = context_bytes
+        - u64::try_from(std::mem::size_of::<run::Section>() * count).expect("bounded owning Section array fits u64");
+    let instructions = bytes(payload / 4);
+    let mut remainder = payload - u64::try_from(instructions.len()).expect("bounded instructions payload fits u64");
+    let mut sections = Vec::with_capacity(count);
+    for section in 0..count {
+        let remaining = u64::try_from(count - section).expect("bounded Section suffix count fits u64");
+        let title = bytes(remainder / remaining / 3);
+        let text = bytes(remainder / remaining - u64::try_from(title.len()).expect("bounded title payload fits u64"));
+        remainder -= u64::try_from(title.len() + text.len()).expect("bounded Section payloads fit u64");
+        sections.push(run::Section { title, text });
+    }
+    assert_eq!(remainder, 0, "unchanged aggregate filler owns every byte");
     Charter {
-        brief: bytes(brief),
+        instructions,
+        brief: run::Brief { sections: sections.into_boxed_slice() },
 
         grants: Grants { deliver: None, tools: all, agents: true, host_tools: Box::new([]) },
         outcome: OutcomeSpec {

@@ -44,10 +44,17 @@ pub struct Limits {
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub conversations: u32,
     /// Bytes a run holds beyond inline slab fields: its charter and separate
-    /// workspace, including every Directory cell, name, conflict Box cell and path.
+    /// workspace, including Brief cells, instructions, title/text payloads and every
+    /// Directory cell, name, conflict Box cell and path.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub run_bytes: u64,
+
+    /// Host-written main Brief sections. Exact count is checked before section
+    /// traversal, rendering or effects; excess refuses as `Invalid::TooLarge`.
+    /// Cells, instructions and all title/text payloads also fit `run_bytes`.
+    /// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
+    pub brief_sections: u32,
     /// Directories a present workspace may list; empty present workspaces refuse.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.

@@ -97,6 +97,7 @@ fn bounds(messages: u32) -> Limits {
             run_conversations: 1,
             calls: 1,
             run_bytes: 4096,
+            brief_sections: 4,
             directories: 1,
             directory_name_bytes: 64,
             conflicts: 64,
@@ -165,7 +166,13 @@ fn workspace() -> run::Workspace {
 
 fn charter(restoring: bool) -> run::Charter {
     run::Charter {
-        brief: b"@root-memory".as_slice().into(),
+        instructions: Box::new([]),
+        brief: run::Brief {
+            sections: Box::new([run::Section {
+                title: b"Task".as_slice().into(),
+                text: b"@root-memory".as_slice().into(),
+            }]),
+        },
 
         grants: run::charter::Grants {
             deliver: None,
@@ -217,7 +224,9 @@ fn charter_bytes(charter: &run::Charter) -> u64 {
     assert!(charter.outcome.change.as_ref().is_none_or(|spec| spec.fields.is_empty()));
     assert!(charter.outcome.report.as_ref().is_some_and(|spec| spec.fields.is_empty()));
     sum([
-        len(&charter.brief),
+        len(&charter.instructions),
+        cells::<run::Section>(charter.brief.sections.len()),
+        sum(charter.brief.sections.iter().map(|section| sum([len(&section.title), len(&section.text)]))),
         len(&charter.llm.model),
         charter.conventions.as_ref().map_or(0, |conventions| sum([len(&conventions.guide), len(&conventions.checks)])),
     ])
@@ -1404,8 +1413,61 @@ fn maximum_workspace(limits: &run::Limits) -> run::Workspace {
     mounted
 }
 
+/// Fill the existing Start aggregate, pricing independent public Section cells
+/// before redistributing its remaining bytes among role, titles and bodies.
+fn fill_main_context(charter: &mut run::Charter, workspace: Option<&run::Workspace>, limits: &run::Limits) {
+    let previous = sum([
+        len(&charter.instructions),
+        cells::<run::Section>(charter.brief.sections.len()),
+        sum(charter.brief.sections.iter().map(|section| sum([len(&section.title), len(&section.text)]))),
+    ]);
+    let fixed = charter_bytes(charter) - previous + workspace_bytes(workspace);
+    let count = usize::try_from(limits.brief_sections).expect("bounded receiving section count");
+    let payload = limits.run_bytes - fixed - cells::<run::Section>(count);
+    let instruction_bytes = usize::try_from(payload / 4).expect("bounded role payload");
+    let mut instructions = vec![b'i'; instruction_bytes];
+    instructions[..b"@root-memory".len()].copy_from_slice(b"@root-memory");
+    charter.instructions = instructions.into_boxed_slice();
+    let mut remainder = payload - len(&charter.instructions);
+    let mut sections = Vec::with_capacity(count);
+    for section in 0..count {
+        let remaining = u64::try_from(count - section).expect("bounded section suffix");
+        let title_bytes = usize::try_from(remainder / remaining / 3).expect("bounded title payload");
+        let text_bytes =
+            usize::try_from(remainder / remaining).expect("bounded Section payload fits usize") - title_bytes;
+        let title = vec![b't'; title_bytes].into_boxed_slice();
+        let text = vec![b's'; text_bytes].into_boxed_slice();
+        remainder -= len(&title) + len(&text);
+        sections.push(run::Section { title, text });
+    }
+    assert_eq!(remainder, 0, "every original aggregate byte is allocated exactly");
+    assert!(sections.iter().all(|section| !section.title.is_empty() && !section.text.is_empty()));
+    assert_eq!(sections.len(), count, "maximum receiving Section count is attained");
+    charter.brief = run::Brief { sections: sections.into_boxed_slice() };
+    assert_eq!(charter_bytes(charter) + workspace_bytes(workspace), limits.run_bytes);
+}
+
+fn maximum_convention_charter() -> run::Charter {
+    let path_bytes = run::Conventions::PATH_CAPACITY;
+    let make_path = |byte| {
+        let mut path = vec![byte; path_bytes];
+        for slash in (63..path_bytes - 1).step_by(64) {
+            path[slash] = b'/';
+        }
+        path.into_boxed_slice()
+    };
+    run::Charter {
+        conventions: Some(run::Conventions { guide: make_path(b'g'), checks: make_path(b'c') }),
+        outcome: run::outcome::OutcomeSpec {
+            change: Some(run::outcome::ChangeSpec { fields: Box::new([]) }),
+            ..charter(false).outcome
+        },
+        ..charter(false)
+    }
+}
+
 #[test]
-fn maximum_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapping_clients() {
+fn maximum_brief_and_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapping_clients() {
     let path_bytes = run::Conventions::PATH_CAPACITY;
     let mut receiving = bounds(16);
     receiving.run.run_bytes = 16_384;
@@ -1426,35 +1488,30 @@ fn maximum_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapp
     // completion/refusal tests keep wire_limits() unchanged; root caps stay fixed.
     counted.native_limits.client.dialect.string_bytes = 32_768;
     let configuration = counted.configuration();
-    let make_path = |byte| {
-        let mut path = vec![byte; path_bytes];
-        for slash in (63..path_bytes - 1).step_by(64) {
-            path[slash] = b'/';
-        }
-        path.into_boxed_slice()
-    };
-    let caller = run::Charter {
-        conventions: Some(run::Conventions { guide: make_path(b'g'), checks: make_path(b'c') }),
-
-        outcome: run::outcome::OutcomeSpec {
-            change: Some(run::outcome::ChangeSpec { fields: Box::new([]) }),
-            ..charter(false).outcome
-        },
-        ..charter(false)
-    };
+    let mut caller = maximum_convention_charter();
+    let mounted = Some(maximum_workspace(&receiving.run));
+    fill_main_context(&mut caller, mounted.as_ref(), &receiving.run);
     let caller_bytes = charter_bytes(&caller);
     let both_paths = path_bytes.checked_mul(2).expect("two bounded convention paths fit a fixture size");
     assert!(caller_bytes >= u64::try_from(both_paths).expect("bounded maximum convention payload fits u64"));
     let selected = caller.conventions.clone();
-    let mounted = Some(maximum_workspace(&receiving.run));
-    assert!(caller_bytes + workspace_bytes(mounted.as_ref()) <= receiving.run.run_bytes);
+    assert_eq!(caller_bytes + workspace_bytes(mounted.as_ref()), receiving.run.run_bytes);
     counted.caller_workspace = mounted.clone();
     let outcome = caller.outcome.clone();
+    let instructions = caller.instructions.clone();
+    let brief = run::Brief {
+        sections: caller
+            .brief
+            .sections
+            .iter()
+            .map(|section| run::Section { title: section.title.clone(), text: section.text.clone() })
+            .collect(),
+    };
     counted.caller_charter = Some(caller);
     counted.step(Event::Start {
         reply_to: ReplyTo::new(PARENT),
         worker: WORKER,
-        charter: run::Charter { conventions: selected, outcome, ..charter(false) },
+        charter: run::Charter { instructions, brief, conventions: selected, outcome, ..charter(false) },
         workspace: mounted,
         transcript: None,
         grants: Box::new([Grant { name: GrantName { account: 0, generation: 1 }, valid: Duration::from_secs(3600) }]),
@@ -1476,6 +1533,12 @@ fn maximum_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapp
     let first = counted.complete.as_ref().expect("actual first root Complete");
     assert!(first.prompt.system.len() > 16_384, "combined metadata exceeds the original native string cap");
     assert!(first.prompt.system.len() <= 32_768, "explicit native string cap fits the actual combined prompt");
+    let source = counted.caller_charter.as_ref().expect("original caller Start remains independently owned");
+    assert!(first.prompt.system.starts_with(&source.instructions), "actual native main receives full literal role");
+    assert_eq!(
+        source.brief.sections.len(),
+        usize::try_from(receiving.run.brief_sections).expect("bounded receiving Section count fits usize")
+    );
     let selected = counted
         .caller_charter
         .as_ref()

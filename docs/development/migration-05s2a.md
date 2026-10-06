@@ -84,7 +84,8 @@ until required shared and consumer acceptance permits their coherent removal.
 | Native continuation and host-origin oracle | Smith 8010bf4 | Reviewed; fmt/clippy pass; 504 focused / 2.103 s; 11 fuzzy / 4.403 s; 13 scoped controls / 0.075 s. |
 | Single-lifecycle combined native memory | Smith 1a0bdfee5c64fe3377033bf976f1f5a70dd3c72e | Exact source/lock reviewed; fmt/clippy pass; one scoped control / 0.672 s; 504 focused / 2.097 s; 11 fuzzy / 4.445 s. |
 | Overlapping physical component ownership | Smith f9c9981 | Source reviewed; fmt/clippy pass; 505 focused / 2.170 s; 11 fuzzy / 4.462 s. |
-| Caller conventions | Reviewed draft on f9c9981 | fmt/clippy pass; 512 focused / 2.233 s; 11 fuzzy / 3.993 s; [scope](migration-05s4-conventions.md). |
+| Caller conventions | Smith 48dba1d | fmt/clippy pass; 512 focused / 2.233 s; 11 fuzzy / 3.993 s; [scope](migration-05s4-conventions.md). |
+| Optional workspace and initial merge conflicts | Smith 37599ef | Reviewed; fmt/clippy pass; 522 focused / 2.114 s; 11 fuzzy / 4.021 s; [scope](migration-05s4-workspace.md). |
 | Genuine native root restore | Smith 5b4bc94 | Source reviewed; fmt/clippy pass; 505 focused / 2.285 s; 11 fuzzy / 4.958 s. |
 | Exclusive World backend ownership and session LLM documentation | Smith c645669 | Exact source reviewed; fmt/clippy pass; 504 focused / 2.094 s; 11 fuzzy / 4.410 s. |
 

@@ -414,7 +414,7 @@ impl World {
                 conflicts: Box::new([]),
             }]),
         });
-        Self::with_selected_backend(settings, transcript, workspace, disk, backend)
+        Self::with_selected_backend(settings, transcript, workspace, disk, backend, None)
     }
 
     fn with_selected_backend(
@@ -423,6 +423,7 @@ impl World {
         workspace: Option<run::Workspace>,
         disk: Checkout,
         backend: Backend,
+        selected_charter: Option<run::Charter>,
     ) -> World {
         let root = workspace
             .as_ref()
@@ -430,7 +431,7 @@ impl World {
             .map(|directory| directory.root.raw());
         let max_out = agent::max_out(&settings.limits);
         let mut stage = Stage::new(settings.limits, max_out, max_out + 3);
-        let charter = charter(settings);
+        let charter = selected_charter.unwrap_or_else(|| charter(settings));
         let observed_contract = charter.outcome.clone();
         stage.push(Event::Start {
             reply_to: ReplyTo::new(Token::new(1)),
@@ -553,7 +554,7 @@ impl World {
             }
             Backend::Wire(_) => unreachable!("typed constructor"),
         }
-        Self::with_selected_backend(&settings, transcript, workspace, disk, backend)
+        Self::with_selected_backend(&settings, transcript, workspace, disk, backend, None)
     }
 
     /// Caller-selected mounts and actual Client/byte-peer scripts, using the same
@@ -575,6 +576,64 @@ impl World {
             workspace,
             disk,
             Backend::Wire(wire::Composition::new(configuration, limits, scripts)),
+            None,
+        )
+    }
+
+    /// Caller supplies the complete typed Charter before the original Start;
+    /// sections and instructions are never derived from the job settings. The
+    /// real admission path decides refusal, or one terminal Answer after settling.
+    /// Existing receiving bounds, typed backend exclusivity and history apply.
+    /// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14.
+    #[must_use]
+    pub fn with_workspace_scripts_charter(
+        settings: Settings,
+        transcript: Option<agent::Transcript>,
+        workspace: Option<run::Workspace>,
+        disk: Checkout,
+        scripts: Box<[provider::api::Script]>,
+        charter: run::Charter,
+    ) -> World {
+        let mut backend = Backend::typed(&settings);
+        match &mut backend {
+            Backend::Typed { provider, .. } => {
+                *provider = provider::Domain::configured(
+                    &settings.provider,
+                    settings.seed ^ 0x25,
+                    scripts,
+                    smith_session_world::provider::menu(),
+                )
+                .expect("caller scripts obey provider admission");
+            }
+            Backend::Wire(_) => unreachable!("typed constructor"),
+        }
+        Self::with_selected_backend(&settings, transcript, workspace, disk, backend, Some(charter))
+    }
+
+    /// Caller-selected complete Charter, concrete saved history and native
+    /// configuration/limits use the original root Start, actual Client and byte
+    /// peer. Only the selected native backend exists; real receiving bounds and
+    /// all pending lower terminals apply through the one host Answer.
+    /// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14;
+    /// domain/client.md, sections 1, 3 and 5.
+    #[must_use]
+    pub fn with_workspace_wire_charter(
+        settings: Settings,
+        transcript: Option<agent::Transcript>,
+        workspace: Option<run::Workspace>,
+        disk: Checkout,
+        wire: (wire::Configuration, WireLimits),
+        scripts: Box<[provider::api::Script]>,
+        charter: run::Charter,
+    ) -> World {
+        let (configuration, limits) = wire;
+        Self::with_selected_backend(
+            &settings,
+            transcript,
+            workspace,
+            disk,
+            Backend::Wire(wire::Composition::new(configuration, limits, scripts)),
+            Some(charter),
         )
     }
 
@@ -1612,7 +1671,13 @@ fn charter(settings: &Settings) -> run::Charter {
     let llm =
         Llm { account: 0, endpoint: Endpoint(0), model: b"fake-1".as_slice().into(), max_tokens: 4096, dialect: 1 };
     run::Charter {
-        brief: script::cue(settings.job).unwrap_or(b"Look into the code.").into(),
+        instructions: Box::new([]),
+        brief: run::Brief {
+            sections: Box::new([run::Section {
+                title: b"Task".as_slice().into(),
+                text: script::cue(settings.job).unwrap_or(b"Look into the code.").into(),
+            }]),
+        },
 
         grants: Grants {
             deliver: if matches!(settings.job, Job::MidReport | Job::MidChange | Job::MarkerReport) {

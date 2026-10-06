@@ -25,6 +25,31 @@ fn size(of: usize) -> u64 {
     u64::try_from(of).expect("a size fits")
 }
 
+/// Redistribute the original aggregate filler across maximum Section cells and
+/// simultaneously nonempty instructions, titles and bodies, without adding bytes.
+fn context(held: u64) -> (Box<[u8]>, smith_domain_run::Brief) {
+    let count = usize::try_from(LIMITS.brief_sections).expect("bounded receiving count");
+    let payload = held.checked_sub(size(size_of::<smith_domain_run::Section>() * count)).expect("room for cells");
+    let instructions = bytes(payload / 4);
+    let mut remainder = payload - size(instructions.len());
+    let mut sections = Vec::with_capacity(count);
+    for section in 0..count {
+        let remaining = size(count - section);
+        let title = bytes(remainder / remaining / 3);
+        let text = bytes(remainder / remaining - size(title.len()));
+        remainder -= size(title.len() + text.len());
+        sections.push(smith_domain_run::Section { title, text });
+    }
+    assert_eq!(remainder, 0, "every original filler byte is owned exactly once");
+    (instructions, smith_domain_run::Brief { sections: sections.into_boxed_slice() })
+}
+
+fn context_bytes(charter: &Charter) -> u64 {
+    size(charter.instructions.len())
+        + size(size_of::<smith_domain_run::Section>() * charter.brief.sections.len())
+        + charter.brief.sections.iter().map(|section| size(section.title.len() + section.text.len())).sum::<u64>()
+}
+
 const BUDGET: Budget = Budget {
     turns: 10,
     input: 1000,
@@ -38,6 +63,7 @@ const LIMITS: Limits = Limits {
     runs: 1,
     conversations: 2,
     run_bytes: 1024,
+    brief_sections: 4,
     directories: 1,
     directory_name_bytes: 64,
     conflicts: 1,
@@ -71,7 +97,8 @@ const LIMITS: Limits = Limits {
 
 /// A charter that holds exactly `held` bytes, as the run counts them: one of
 /// every charter part held in a box and a workspace attaining every receiving
-/// directory/name/conflict/path cap; the brief occupies the aggregate remainder.
+/// directory/name/conflict/path cap; instructions, maximum Section cells and
+/// titles/bodies occupy the unchanged aggregate remainder.
 fn workspace() -> Workspace {
     Workspace {
         directories: Box::new([Directory {
@@ -95,8 +122,10 @@ fn charter(held: u64) -> Charter {
     let rule = size(size_of::<VerdictRule>()) + 1 + size(size_of::<ItemRule>()) + 1 + size(size_of::<FieldRule>()) + 1;
     let change_rules = 2 * size(size_of::<FieldRule>()) + 5 + 4;
     let convention_paths = size(b"AGENTS.md".len() + b".temper/pre-pr".len());
+    let (instructions, brief) = context(held - parts - rule - change_rules - convention_paths);
     Charter {
-        brief: bytes(held - parts - rule - change_rules - convention_paths),
+        instructions,
+        brief,
 
         grants: Grants {
             deliver: None,
@@ -259,7 +288,9 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
                     let selected_paths = size(selected.guide.len() + selected.checks.len());
                     // The same exact aggregate cap is attained: move byte room
                     // from the brief into the two maximum owning paths.
-                    charter.brief = bytes(size(charter.brief.len()) + previous_paths - selected_paths);
+                    let (instructions, brief) = context(context_bytes(&charter) + previous_paths - selected_paths);
+                    charter.instructions = instructions;
+                    charter.brief = brief;
                     charter.conventions = Some(selected.clone());
                 }
                 charter
@@ -464,6 +495,7 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
         conflicts: 64,
         conflict_path_bytes: 4096,
         run_bytes: 65_536,
+        brief_sections: 4,
         ..LIMITS
     };
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
@@ -565,8 +597,10 @@ fn full_delivery_charter(limits: Limits) -> Charter {
     let parts = u64::from(smith_domain_run::MAX_DIRECTORIES) * (size(size_of::<Directory>()) + 1)
         + 1
         + size(b"AGENTS.md".len() + b".temper/pre-pr".len());
+    let (instructions, brief) = context(limits.run_bytes - parts);
     Charter {
-        brief: bytes(limits.run_bytes - parts),
+        instructions,
+        brief,
 
         grants: Grants {
             deliver: Some(ChangeSpec { fields: Box::new([]) }),
@@ -662,10 +696,11 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
         retired_bytes += size(size_of::<FieldRule>()) + size(field.name.len());
     }
     drop(retired);
+    let retired_context = context_bytes(&charter);
     let tool = &mut charter.grants.host_tools[0];
-    tool.schema =
-        bytes(u64::try_from(tool.schema.len() + charter.brief.len()).expect("bounded declaration") + retired_bytes);
-    charter.brief = Box::new([]);
+    tool.schema = bytes(size(tool.schema.len()) + retired_context + retired_bytes);
+    charter.instructions = Box::new([]);
+    charter.brief = smith_domain_run::Brief { sections: Box::new([]) };
     let (run, _) = host_memory_take(
         &mut domain,
         &env,

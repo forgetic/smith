@@ -32,6 +32,7 @@ pub(crate) const LIMITS: Limits = Limits {
     runs: 2,
     conversations: 4,
     run_bytes: 4096,
+    brief_sections: 4,
     directories: 2,
     directory_name_bytes: 256,
     conflicts: 64,
@@ -208,7 +209,13 @@ pub(crate) fn workspace() -> Workspace {
 
 pub(crate) fn charter() -> Charter {
     Charter {
-        brief: bytes(b"Review the change."),
+        instructions: Box::new([]),
+        brief: crate::Brief {
+            sections: Box::new([crate::Section {
+                title: b"Task".as_slice().into(),
+                text: bytes(b"Review the change."),
+            }]),
+        },
 
         grants: Grants {
             deliver: None,
@@ -417,7 +424,7 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
         (Charter { llm: Llm { max_tokens: 0, ..charter().llm }, ..charter() }, Invalid::Llm),
         (Charter { llm: Llm { max_tokens: 4097, ..charter().llm }, ..charter() }, Invalid::Llm),
         (Charter { models, ..charter() }, Invalid::Llm),
-        (Charter { brief: Box::from([b'x'; 4096].as_slice()), ..charter() }, Invalid::TooLarge),
+        (Charter { instructions: Box::from([b'x'; 4096].as_slice()), ..charter() }, Invalid::TooLarge),
         (Charter { grants: Grants { host_tools, ..charter().grants }, ..charter() }, Invalid::Grants),
         (Charter { outcome: spec(Box::new([])), ..charter() }, Invalid::Outcome),
         (Charter { outcome: spec(Box::new([rule(b"a", 0, 0), rule(b"a", 1, 1)])), ..charter() }, Invalid::Outcome),
@@ -2292,8 +2299,8 @@ fn convention_path_payloads_fill_the_exact_charter_cap_and_cancel_discovery_sett
             guide: Box::new([b'g'; crate::Conventions::PATH_CAPACITY]),
             checks: Box::new([b'c'; crate::Conventions::PATH_CAPACITY]),
         }),
-        brief: {
-            let brief = charter().brief;
+        instructions: {
+            let brief = charter().instructions;
             let mut writer = skein_lib::Writer::new(brief.len().checked_add(1).unwrap());
             writer.put(&brief).expect("room for the original brief");
             writer.put(b"x").expect("one exact extra byte");
@@ -2488,4 +2495,75 @@ fn contracts_requiring_writes_without_writable_directories_refuse_before_effects
         );
         assert_eq!(harness.domain.runs(), 0);
     }
+}
+
+#[test]
+fn brief_section_count_refuses_before_discovery_even_when_aggregate_would_fit() {
+    let limits = Limits { brief_sections: 2, ..LIMITS };
+    let mut harness = Harness::new(limits);
+    let selected = Charter {
+        brief: crate::Brief {
+            sections: Box::new([
+                crate::Section { title: Box::new([]), text: Box::new([]) },
+                crate::Section { title: Box::new([]), text: Box::new([]) },
+                crate::Section { title: Box::new([]), text: Box::new([]) },
+            ]),
+        },
+        ..charter()
+    };
+    assert!(crate::charter::cost(&selected).unwrap() < limits.run_bytes);
+    assert_eq!(answered(harness.start(91, selected)), (91, Answer::Refused(Refusal::Invalid(Invalid::TooLarge))));
+    assert_eq!((harness.domain.runs(), harness.domain.conversations(), harness.domain.calls()), (0, 0, 0));
+}
+
+#[test]
+fn instructions_and_ordered_section_cells_titles_and_text_attain_the_exact_aggregate() {
+    let selected = Charter {
+        instructions: bytes(b"Literal role"),
+        brief: crate::Brief {
+            sections: Box::new([
+                crate::Section { title: bytes(b"Repeated"), text: bytes(b"first body") },
+                crate::Section { title: Box::new([]), text: bytes(b"empty title") },
+                crate::Section { title: bytes(b"Repeated"), text: Box::new([]) },
+            ]),
+        },
+        ..charter()
+    };
+    let empty = Charter { instructions: Box::new([]), brief: crate::Brief { sections: Box::new([]) }, ..charter() };
+    let expected_context = u64::try_from(
+        b"Literal role".len()
+            + 3 * size_of::<crate::Section>()
+            + 2 * b"Repeated".len()
+            + b"first body".len()
+            + b"empty title".len(),
+    )
+    .unwrap();
+    let expected =
+        crate::charter::cost(&empty).unwrap() + expected_context + crate::workspace::cost(Some(&workspace())).unwrap();
+    assert_eq!(
+        crate::charter::cost(&selected).unwrap() + crate::workspace::cost(Some(&workspace())).unwrap(),
+        expected
+    );
+    let limits = Limits { run_bytes: expected, brief_sections: 3, ..LIMITS };
+    assert_eq!(crate::charter::check(&selected, Some(&workspace()), &limits), Ok(()));
+    assert_eq!(
+        crate::charter::check(&selected, Some(&workspace()), &Limits { run_bytes: expected - 1, ..limits }),
+        Err(Invalid::TooLarge)
+    );
+    assert_eq!(
+        crate::charter::check(&selected, Some(&workspace()), &Limits { brief_sections: 2, ..limits }),
+        Err(Invalid::TooLarge)
+    );
+    let mut harness = Harness::new(limits);
+    let emitted = harness.start(92, selected);
+    match emitted.as_ref() {
+        [Request::Admitted { .. }, Request::Read { .. }] => {}
+        _ => panic!("exact count/byte cap admits before real discovery: {emitted:?}"),
+    }
+}
+
+#[test]
+fn empty_main_instructions_and_brief_are_valid_even_with_zero_section_limit() {
+    let selected = Charter { instructions: Box::new([]), brief: crate::Brief { sections: Box::new([]) }, ..charter() };
+    assert_eq!(crate::charter::check(&selected, Some(&workspace()), &Limits { brief_sections: 0, ..LIMITS }), Ok(()));
 }

@@ -43,6 +43,7 @@ const LIMITS: Limits = Limits {
         runs: 2,
         conversations: 4,
         run_bytes: 4096,
+        brief_sections: 4,
         directories: 2,
         directory_name_bytes: 64,
         conflicts: 64,
@@ -358,7 +359,13 @@ fn workspace() -> Workspace {
 
 fn charter() -> Charter {
     Charter {
-        brief: bytes(b"Review the change."),
+        instructions: Box::new([]),
+        brief: smith_domain_run::Brief {
+            sections: Box::new([smith_domain_run::Section {
+                title: b"Task".as_slice().into(),
+                text: bytes(b"Review the change."),
+            }]),
+        },
 
         grants: Grants { deliver: None, tools: TOOLS, agents: true, host_tools: Box::new([]) },
         outcome: OutcomeSpec { change: None, verdicts: Box::new([rule(b"approve")]), report: None, failure: None },
@@ -704,7 +711,7 @@ fn an_opening_larger_than_a_session_holds_refuses_main_as_invalid() {
         }]),
         reply_to: ReplyTo::new(Token::new(7)),
         worker: Token::new(7),
-        charter: Charter { brief, ..charter() },
+        charter: Charter { instructions: brief, ..charter() },
         transcript: None,
     });
     let [Request::Admitted { run, .. }, Request::Read { .. }] = &*emitted else {

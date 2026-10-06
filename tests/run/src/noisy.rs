@@ -21,6 +21,7 @@ pub fn noisy(seed: u64) -> Settings {
         runs: small(pick(1, 4)),
         conversations: small(pick(1, 4)),
         run_bytes: pick(1_000, 6_000),
+        brief_sections: 4,
         nudges: small(pick(0, 3)),
         budget: Budget { turns: 30, time: Duration::from_secs(3600), ..calm.run.budget },
         ..calm.run

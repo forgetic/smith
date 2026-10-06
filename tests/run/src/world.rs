@@ -185,6 +185,7 @@ const fn calm_run_limits() -> run::Limits {
         runs: 4,
         conversations: 16,
         run_bytes: 1 << 16,
+        brief_sections: 4,
         directories: 4,
         directory_name_bytes: 256,
         conflicts: 64,

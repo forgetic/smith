@@ -375,7 +375,8 @@ fn mixed_git_plain_and_readonly_mounts_share_discovery_and_child_authority() {
             assert!(contains(&query.system, metadata), "identical kind and write metadata in main and children");
         }
     }
-    let main = world.prompts().iter().filter(|query| query.system.starts_with(b"@midreport")).collect::<Vec<_>>();
+    let main =
+        world.prompts().iter().filter(|query| query.system.starts_with(b"## Task\n\n@midreport")).collect::<Vec<_>>();
     assert!(main.iter().any(|query| feedback_has(query, b"NotRead")));
     assert!(main.iter().any(|query| feedback_has(query, b"ReadOnly")));
     assert!(main.iter().any(|query| feedback_has(query, b"Protected")));

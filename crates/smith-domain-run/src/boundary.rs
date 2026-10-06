@@ -49,7 +49,6 @@ use crate::outcome::{Change, Declared, Problems};
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Debug)]
-#[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Event {
     /// Actual terminal of one host relay; old attempts and callback generations are inert.
     /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.

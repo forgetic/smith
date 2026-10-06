@@ -305,7 +305,7 @@ fn assert_conflict_read(world: &World, root: Token) {
         world
             .prompts()
             .iter()
-            .filter(|query| query.system.starts_with(b"@midreport"))
+            .filter(|query| query.system.starts_with(b"## Task\n\n@midreport"))
             .flat_map(|query| &query.messages)
             .flat_map(|message| &message.parts)
             .any(|part| matches!(part,
@@ -380,7 +380,8 @@ fn genuine_initial_merge_refusal_resolution_checks_and_two_parent_commit() {
     let child =
         world.prompts().iter().find(|query| query.system.starts_with(b"@initial-reader")).expect("actual child opened");
     assert!(child.tools.iter().all(|tool| [b"read".as_slice(), b"list", b"search"].contains(&tool.name.as_ref())));
-    let main = world.prompts().iter().filter(|query| query.system.starts_with(b"@midreport")).collect::<Vec<_>>();
+    let main =
+        world.prompts().iter().filter(|query| query.system.starts_with(b"## Task\n\n@midreport")).collect::<Vec<_>>();
     assert!(main.iter().any(|query| query.messages.iter().flat_map(|message| &message.parts).any(|part|
         matches!(part, Part::ToolOutput { output, is_error: true, .. }
             if output.as_ref() == b"delivery-refused explanation=\"initial merge still has actual markers\" marker-directory=0 marker-path=\"conflict.txt\""))),

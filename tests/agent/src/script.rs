@@ -1,7 +1,6 @@
 //! What the LLMs do: scripts the fake provider plays, each cued by a word in
 //! a conversation's system text. A run's main conversation is cued by its
-//! job's word, which starts the guidance of the step it runs for, and so its
-//! brief (which comes first in the system text); a sub-agent by the word its
+//! job's word inside its host-supplied Task section; a sub-agent by the word its
 //! asker writes at the start of its brief. A job with no word is played at
 //! random.
 //!

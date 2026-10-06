@@ -565,7 +565,10 @@ impl Host {
         };
         let workspace = Some(Workspace { directories: repositories.into_boxed_slice() });
         let charter = Charter {
-            brief,
+            instructions: Box::new([]),
+            brief: smith_domain_run::Brief {
+                sections: Box::new([smith_domain_run::Section { title: b"Task".as_slice().into(), text: brief }]),
+            },
 
             grants: Grants { deliver: None, tools, agents, host_tools: host_tools.into() },
             outcome: OutcomeSpec {

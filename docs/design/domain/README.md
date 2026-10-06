@@ -207,8 +207,9 @@ What varies between agents, and between hosts, arrives as data:
 - **Conventions:** the guide and checks file names, from the charter,
   with smith's defaults (run.md, 8.1).
 - **The brief:** titled text sections. A host that keeps typed context
-  renders it itself; smith adds only the sections about its own
-  mechanics, which it enforces.
+  renders each body itself; smith preserves the titles and supplied order,
+  lays out those sections after the separate role instructions, and adds its
+  own workspace/mechanics sections (run.md, sections 3.1 and 3.3).
 - **Messages:** named, with a sender's label and text the host rendered;
   smith reads their order, never their kinds (run.md, section 6).
 - **Money:** a unit and each model's prices; smith prices, the host
@@ -268,8 +269,9 @@ What changes in becoming smith, for temper's migration:
 - **`.temper/pre-pr` and `AGENTS.md` are conventions** temper's charters
   name; smith's defaults are `.smith/check` and `AGENTS.md`.
 - **Verdict lists fixed in code go;** the contract carries them.
-- **The brief arrives rendered.** Its typed sections and their rendering
-  are temper's.
+- **The brief arrives as titled text.** Temper renders its typed context
+  into each section body; smith preserves the titles and order and lays out
+  the main prompt. The separate role instructions are also the host's.
 - **Budgets are in the host's unit,** with prices; the token split of
   temper's engine goes.
 - **The agent's protocol layer** is smith's, and its channel smith's own,

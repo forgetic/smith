@@ -24,8 +24,8 @@
 //! Generic result contracts implement domain/run.md, section 7 in 05s4.
 //! Generic delivery implements domain/run.md, section 8; opaque host tools and
 //! bounded settled recovery implement section 5.2. Host-selected conventions
-//! implement sections 3.1, 3.3 and 8.1. The typed optional workspace implements section 3.2; titled brief and
-//! split token budget remain for subsequent increments (domain/run.md, section 14).
+//! implement sections 3.1, 3.3 and 8.1. The typed optional workspace implements section 3.2; literal instructions and
+//! ordered titled Brief implement sections 3.1, 3.3 and 5.3. The split token budget remains for subsequent increments (domain/run.md, section 14).
 
 //!
 //! The retained state is each admitted charter, conversation binding, shared
@@ -70,7 +70,7 @@ pub use boundary::{
     MessageRefusal, Opening, Place, Policy, Ran, Read, Refusal, Request, Returned, Stop, TranscriptRefusal,
 };
 pub use budget::{Budget, Exhausted, Spend};
-pub use charter::{Charter, Conventions};
+pub use charter::{Brief, Charter, Conventions, Section};
 pub use domain::{Domain, MAX_OUT, fire, step};
 pub use limits::{Limits, worst_case};
 pub use workspace::{Directory, Workspace};

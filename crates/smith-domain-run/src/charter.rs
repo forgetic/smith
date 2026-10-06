@@ -1,5 +1,6 @@
-//! The charter (domain/run.md, section 14): what the worker gives a run when it
-//! starts it, most of it from the engine's assignment.
+//! Host policy retained by one admitted run (domain/run.md, sections 3.1 and 14).
+//! Admission checks counts and owned bytes before effects; this module knows no
+//! task vocabulary, provider credentials or meaning behind the supplied text.
 //!
 //! It is policy as data. The run interprets no workflow vocabulary: the names
 //! in a charter (of repositories, host declarations, verdicts, kinds and fields) are
@@ -33,11 +34,19 @@ pub struct Charter {
     /// Contract: domain/run.md, sections 6 and 10.
     pub waiting: Duration,
 
-    /// Text for the LLM, rendered by the engine: the work item and its
-    /// lineage, the role, the action's guidance.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub brief: Box<[u8]>,
+    /// Host-attested UTF-8 role instructions for main, copied verbatim before its
+    /// Brief. Empty is allowed; children receive only their own raw task.
+    /// Payload counts against receiving `Limits.run_bytes`; excess refuses as
+    /// `Invalid::TooLarge` before effects. The rendered session cap still applies.
+    /// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14.
+    pub instructions: Box<[u8]>,
+
+    /// Host-written ordered context for main. Titles and text remain literal;
+    /// no role, tools or authority are inferred from them. Count and aggregate
+    /// ownership are admitted before discovery, or refuse as `Invalid::TooLarge`.
+    /// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14.
+    pub brief: Brief,
+
     /// Host-supplied relative guide/check paths, admitted before effects. None
     /// selects AGENTS.md and .smith/check. Both owning paths count in `run_bytes`;
     /// workspace authority and lower IO root confinement still apply.
@@ -66,6 +75,39 @@ pub struct Charter {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub models: Box<[Llm]>,
+}
+
+/// Host-written context for one main activation, retained with its Charter.
+/// No context is derived or reordered; empty context is valid. Section count
+/// and owning bytes are bounded at admission, with `Invalid::TooLarge` terminal
+/// refusal before effects. Children receive their caller's raw task instead.
+/// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14.
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub struct Brief {
+    /// Sections in host-supplied order, including empty or duplicate titles.
+    /// Array cells and every title/text payload count in `Limits.run_bytes`;
+    /// exact count above `Limits.brief_sections` refuses before traversal/effects.
+    /// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
+    pub sections: Box<[Section]>,
+}
+
+/// One host-attested UTF-8 title and text, rendered literally for main.
+/// Empty payloads and repeated titles are valid; owning bytes count against
+/// receiving `Limits.run_bytes`, or refuse before effects as `Invalid::TooLarge`.
+/// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
+#[derive(PartialEq, Eq, Hash, Debug)]
+pub struct Section {
+    /// Host-written title, emitted after `## ` without interpretation or escaping.
+    /// Empty and duplicate titles are allowed; payload counts in `Limits.run_bytes`.
+    /// Excess aggregate storage refuses at admission as `Invalid::TooLarge`.
+    /// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
+    pub title: Box<[u8]>,
+
+    /// Host-written section body, emitted verbatim with paragraph termination.
+    /// Empty text is allowed; payload counts in `Limits.run_bytes`. Excess
+    /// aggregate storage refuses before effects as `Invalid::TooLarge`.
+    /// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
+    pub text: Box<[u8]>,
 }
 
 /// What the LLM may do besides talking. Data, never derived from a role.
@@ -193,7 +235,13 @@ pub struct Endpoint(
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn check(charter: &Charter, workspace: Option<&crate::Workspace>, limits: &Limits) -> Result<(), Invalid> {
-    let Charter { brief: _, grants, outcome, budget, llm, models, resume: _, waiting, conventions } = charter;
+    let Charter { instructions: _, brief, grants, outcome, budget, llm, models, resume: _, waiting, conventions } =
+        charter;
+    // Exact conversion: an overflowing count must refuse even at a u32::MAX cap.
+    match u32::try_from(brief.sections.len()) {
+        Ok(sections) if sections <= limits.brief_sections => {}
+        Ok(_) | Err(_) => return Err(Invalid::TooLarge),
+    }
     if !budget.is_workable()
         || !budget.within(&limits.budget)
         || *waiting == Duration::ZERO
@@ -271,7 +319,13 @@ fn has_writable(workspace: Option<&crate::Workspace>) -> bool {
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn cost(charter: &Charter) -> Option<u64> {
-    let mut cost = len(&charter.brief)?.checked_add(len(&charter.llm.model)?)?;
+    let mut cost = len(&charter.instructions)?.checked_add(len(&charter.llm.model)?)?;
+    let section_bytes = u64::try_from(size_of::<Section>()).ok()?;
+    let sections = u64::try_from(charter.brief.sections.len()).ok()?;
+    cost = cost.checked_add(sections.checked_mul(section_bytes)?)?;
+    for section in &charter.brief.sections {
+        cost = cost.checked_add(len(&section.title)?)?.checked_add(len(&section.text)?)?;
+    }
     if let Some(conventions) = &charter.conventions {
         // The two Box wrappers live inline in Charter, priced by Slab<Run>.
         cost = cost.checked_add(len(&conventions.guide)?)?.checked_add(len(&conventions.checks)?)?;

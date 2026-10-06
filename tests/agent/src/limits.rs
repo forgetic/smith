@@ -39,6 +39,7 @@ pub const LIMITS: Limits = Limits {
         runs: 1,
         conversations: 6,
         run_bytes: 1 << 16,
+        brief_sections: 4,
         directories: 2,
         directory_name_bytes: 256,
         conflicts: 64,

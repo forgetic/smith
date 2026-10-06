@@ -1,11 +1,9 @@
-//! What a run tells its LLMs (domain/run.md, section 14): the system text, which is
-//! the brief (the charter's for main, the asker's for a sub-agent), then what
-//! the run found in its checkout (each repository's selected guide), then the
-//! sections on the run's own mechanics (its tools, its checkout, its
-//! sub-agents, and how to finish, or for a sub-agent how to answer); and the
-//! nudges. The brief and the guides go in as
-//! they came; the rest is rendered here from constant fragments and the
-//! charter's data, its labels verbatim.
+//! Main receives literal host instructions, then ordered titled Brief sections;
+//! a child receives only its caller's raw task (domain/run.md, sections 3.1,
+//! 3.3 and 5.3). Both then receive existing selected guides and run mechanics.
+//! No prompt state is retained here; title/text meaning and authority are never
+//! inferred. `system` and `child` consume only admitted immutable source data;
+//! session receiving bytes still decide whether the rendered opening fits.
 //!
 //! A text is rendered twice: once to measure it, then into a [`Writer`] of
 //! exactly that length (programming-model.md, section 8).
@@ -33,9 +31,11 @@ pub(crate) const BEGIN: &[u8] = b"Begin the work your brief describes.";
 pub(crate) fn system(charter: &Charter, mounted: Option<&Workspace>, found: &Found) -> Box<[u8]> {
     let families = workspace::families(mounted, Families::of(&charter.grants));
     let mut measured = Text::measuring();
-    render_system(&mut measured, charter, mounted, found, &charter.brief, families, true);
+    render_main_prefix(&mut measured, charter);
+    render_system(&mut measured, charter, mounted, found, families, true);
     let mut text = measured.writing();
-    render_system(&mut text, charter, mounted, found, &charter.brief, families, true);
+    render_main_prefix(&mut text, charter);
+    render_system(&mut text, charter, mounted, found, families, true);
     text.finish()
 }
 
@@ -50,9 +50,11 @@ pub(crate) fn child(
     families: Families,
 ) -> Box<[u8]> {
     let mut measured = Text::measuring();
-    render_system(&mut measured, charter, mounted, found, brief, families, false);
+    render_child_prefix(&mut measured, brief);
+    render_system(&mut measured, charter, mounted, found, families, false);
     let mut text = measured.writing();
-    render_system(&mut text, charter, mounted, found, brief, families, false);
+    render_child_prefix(&mut text, brief);
+    render_system(&mut text, charter, mounted, found, families, false);
     text.finish()
 }
 
@@ -68,22 +70,43 @@ pub(crate) fn nudge(stop: Stop, nudge: u32, nudges: u32) -> Box<[u8]> {
     text.finish()
 }
 
-/// The system text of main, or of a sub-agent: on `brief`, with `families`.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+/// Main's immutable literal prefix: instructions, then every section in order.
+/// Each section is `## {title}\n\n{text}` plus existing paragraph termination;
+/// the delimiter bound is two instruction LFs plus seven bytes per section.
+/// Contract: domain/run.md, sections 3.1, 3.3 and 14.
+fn render_main_prefix(text: &mut Text, charter: &Charter) {
+    if !charter.instructions.is_empty() {
+        text.put(&charter.instructions);
+        end_paragraph(text, &charter.instructions);
+    }
+    for section in &charter.brief.sections {
+        text.put(b"## ");
+        text.put(&section.title);
+        text.put(b"\n\n");
+        text.put(&section.text);
+        end_paragraph(text, &section.text);
+    }
+}
+
+/// A child's caller task, with no parent instructions or structured context.
+/// Contract: domain/run.md, sections 3.3 and 5.3.
+fn render_child_prefix(text: &mut Text, brief: &[u8]) {
+    if !brief.is_empty() {
+        text.put(brief);
+        end_paragraph(text, brief);
+    }
+}
+
+/// Shared guides/mechanics after the distinct main or raw child prefix.
+/// Contract: domain/run.md, sections 3.3, 5.3 and 14.
 fn render_system(
     text: &mut Text,
     charter: &Charter,
     mounted: Option<&Workspace>,
     found: &Found,
-    brief: &[u8],
     families: Families,
     main: bool,
 ) {
-    if !brief.is_empty() {
-        text.put(brief);
-        end_paragraph(text, brief);
-    }
     let repositories = workspace::directories(mounted);
     let families = workspace::families(mounted, families);
     for guide in &found.guides {
@@ -489,6 +512,53 @@ you, and you are done.
         assert_eq!(
             text(&child(&charter, Some(&workspace()), &found, b"Find where tabs are parsed.", families)),
             text(expected)
+        );
+    }
+
+    #[test]
+    fn main_literal_prefix_preserves_host_order_duplicates_and_empty_payloads() {
+        let selected = Charter {
+            instructions: bytes(b"literal role\n"),
+            brief: crate::Brief {
+                sections: Box::new([
+                    crate::Section { title: bytes(b"Repeated"), text: bytes(b"parent first body") },
+                    crate::Section { title: Box::new([]), text: Box::new([]) },
+                    crate::Section { title: bytes(b"Repeated"), text: bytes(b"parent last body\n") },
+                ]),
+            },
+            ..charter()
+        };
+        let main = system(&selected, None, &Found::with_capacity(0));
+        let prefix = b"literal role\n\n## Repeated\n\nparent first body\n\n## \n\n\n\n## Repeated\n\nparent last body\n\n## Tools\n\n";
+        assert!(main.starts_with(prefix), "host bytes and exact paragraph delimiters: {}", text(&main));
+        let child = child(
+            &selected,
+            None,
+            &Found::with_capacity(0),
+            b"own task\n",
+            Families { tools: Tools { inspect: false, modify: false, shell: false }, agents: false },
+        );
+        assert!(child.starts_with(b"own task\n\n## Tools\n\n"));
+        for inherited in [b"literal role".as_slice(), b"Repeated", b"parent first body", b"parent last body"] {
+            for window in child.windows(inherited.len()) {
+                assert_ne!(window, inherited, "child scope excludes parent text");
+            }
+        }
+    }
+
+    #[test]
+    fn empty_role_and_brief_emit_no_prefix_but_empty_sections_are_still_rendered() {
+        let selected =
+            Charter { instructions: Box::new([]), brief: crate::Brief { sections: Box::new([]) }, ..charter() };
+        assert!(system(&selected, None, &Found::with_capacity(0)).starts_with(b"## Tools\n\n"));
+        let selected = Charter {
+            instructions: bytes(b"role without LF"),
+            brief: crate::Brief { sections: Box::new([crate::Section { title: Box::new([]), text: Box::new([]) }]) },
+            ..selected
+        };
+        assert!(
+            system(&selected, None, &Found::with_capacity(0))
+                .starts_with(b"role without LF\n\n## \n\n\n\n## Tools\n\n")
         );
     }
 

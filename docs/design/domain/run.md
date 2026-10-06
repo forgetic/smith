@@ -87,6 +87,18 @@ What the host gives a run to set it up:
 - **Resuming:** whether the main session opens from the transcript in
   the start, when there is one.
 
+The typed charter supplies separate `instructions: Box<[u8]>` and
+`brief: Brief`, where `Brief.sections` is an ordered `Box<[Section]>` and
+each Section owns its `title` and `text`. The receiving `brief_sections`
+limit admits the exact section count before inspecting the sections or
+starting effects. The checked aggregate `run_bytes` includes instructions,
+all Section array cells and every title/text payload, alongside the other
+charter fields and Start workspace. Inline Box wrappers belong to retained
+run storage. Empty instructions and briefs are allowed; repeated titles
+keep their supplied order. The host attests UTF-8 as for other charter text.
+There are no additional per-title or per-text caps. Actual rendered
+openings still obey the receiving session byte bound.
+
 The typed charter supplies `conventions: Option<Conventions>`. A custom pair
 replaces both default paths unchanged, with no fallback to a legacy path.
 The host attests UTF-8 as for its other charter text. Each path is nonempty,
@@ -152,6 +164,19 @@ domain decides what each says and in which order; the protocol layer
 renders it. Workspace metadata distinguishes plain directories from git working
 trees and names the actual initial conflict paths. Those paths describe files;
 they are not executable instructions or authority grants.
+
+The current typed 05s4 entrance builds owned `Opening.system` bytes with the
+run's pure prompt renderer; the adapter carries that rendered system into the
+native request. Protocol extraction and rendering ownership remain part of
+05s5, rather than being established by this typed increment.
+
+The main prefix preserves supplied bytes: nonempty instructions first, then
+each section as `## `, its title, two newlines and its text. Each paragraph
+ends with one newline when the payload has none, followed by another
+newline. Empty section title/text still renders its section delimiter.
+No sections are sorted, merged or discarded. Extra delimiter ownership
+is bounded by two bytes plus seven bytes per admitted section; queued
+rendered openings coexist with the retained charter and caller input.
 
 A guide is read from each workspace directory at the path the
 conventions name,
@@ -302,6 +327,11 @@ Within a run, sub-agents: cheap, sharing its workspace and budget, ended
 with the call that asked for them. Work that should outlive the run, run
 elsewhere or have its own authority is the host's, which may offer a
 host tool for it, as temper's `delegate` does.
+
+A child receives the asking session's raw task text as its prompt prefix,
+followed by the shared workspace guides and the run's child mechanics.
+It does not inherit the main charter's instructions or titled Brief.
+The SubAgent call and its input/receiving contracts remain unchanged.
 
 Each main/child opening owns its optional workspace copy until authority
 translation moves its names into the tools' existing mount vocabulary. Prompt
@@ -731,7 +761,11 @@ exact source and full-suite evidence.
 The first 05s4 RESULTS and DELIVERY increments implement generic final forms,
 separately granted main delivery, all discovered writable checks, sealed actual
 host terminals and stable transcript-derived naming. The copied token-split
-budget and unstructured brief remain until subsequent increments. The CONVENTIONS increment replaces fixed discovery/check paths
+budget remains until its subsequent increment. The Instructions/Brief increment
+separates the main role from ordered titled sections (3.1 and 3.3), preserving
+the child's own raw task scope (5.3); its reviewed temporary source and gates
+are recorded in
+`docs/development/migration-05s4-brief.md`. The CONVENTIONS increment replaces fixed discovery/check paths
 with the bounded host-supplied pair described in section 3.1; Temper-style
 callers explicitly select `.temper/pre-pr`. The HOST TOOLS increment replaces closed forge
 and outlet grants with bounded declarations and opaque durable relays, settled
@@ -744,9 +778,9 @@ Provider-neutral canonical feedback lives in the root; shared Client/peer and
 replay codecs belong to Skein. The WORKSPACE increment separates optional workspace
 from the charter, carries git kind and initial conflict paths into main/child
 openings, and admits its aggregate ownership before effects (section 3.2).
-Its source and world evidence are tracked separately; titled brief, scalar run
-pricing, live channel/transcript codecs and the executable remain later
-increments. Source and validation status are recorded in
+Its source and world evidence are tracked separately. Scalar run pricing,
+system rendering extraction, live channel/transcript codecs and the executable
+remain open. Source and validation status are recorded in
 `docs/development/migration-05s4-messages.md` and
 `docs/development/migration-05s4-conventions.md`, and
 `docs/development/migration-05s4-workspace.md`; a source draft alone is not a

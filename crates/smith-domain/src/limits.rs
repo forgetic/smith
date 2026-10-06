@@ -142,7 +142,15 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
             directories.checked_add(1)?.checked_mul(u64::try_from(size_of::<smith_domain_tools::Name>()).ok()?)?,
         )?
         .checked_add(u64::from(run_limits.directory_name_bytes).min(run_limits.run_bytes))?;
-    let payload = payload.checked_add(convention_paths)?.checked_add(workspace_render)?.checked_add(authority_cells)?;
+    // A rendered main prefix adds at most two instruction LFs and seven
+    // delimiter/paragraph bytes per supplied Section. Charter ownership prices
+    // its cells and payloads separately; every queued/caller Open may coexist.
+    let brief_delimiters = u64::from(run_limits.brief_sections).checked_mul(7)?.checked_add(2)?;
+    let payload = payload
+        .checked_add(brief_delimiters)?
+        .checked_add(convention_paths)?
+        .checked_add(workspace_render)?
+        .checked_add(authority_cells)?;
     let run_out = Queue::<run::Request>::worst_case(run_out(limits))?
         .checked_add(u64::from(run_out(limits)).checked_mul(payload)?)?;
     // Every copied turn/prompt in the child queue and every separate handoff
