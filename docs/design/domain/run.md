@@ -6,6 +6,9 @@ it gives back. It is the child domain `smith-domain-run`, composed with
 its sessions by `smith-domain` (README.md, section 4). The mechanics are
 those of skein's `programming-model.md`. What is still open is listed in
 section 15.
+Durable recovery, including fresh effect scopes and pre-effect commitments,
+is specified in domain/recovery.md. Its scope entrance governs section 3 starts
+and section 6 fresh/resume behavior without resetting stable routing identity.
 
 ## 1. In one page
 
@@ -272,22 +275,24 @@ protocol-attested UTF-8; the domain never validates their encoding. This constru
 is not a general JSON parser. JSON-object parsing/attestation and provider wire formats
 remain the protocol's responsibility (section 12).
 
-`Start.worker` is a parent-supplied stable logical scope, retained across relay
-recovery and restarted activations. It is distinct from the live admitted run
-and callback slab tokens. `HostCall` forwards this scope, transcript-derived
+`Start.worker` is the parent-supplied stable routing identity. The separate
+`ScopeChoice` selects an explicit parent-issued durable `effect_scope`; resume
+retains the selected history scope, and fresh/reset work receives a never-used
+scope before admission (domain/recovery.md, section 2). Both are distinct from
+the live admitted run and callback slab tokens. `HostCall` forwards the effect scope, transcript-derived
 `CallName`, immutable tool/effect/input, a separate `RelayName { owner, attempt }`
 and the effective deadline. The deadline is the minimum of declared timeout,
 receiving `Limits.host_timeout` and remaining caller/run time. Every emitted
 attempt is owed exactly one actual `HostReturned` terminal. The host bounds the
 text by `Limits.host_reply_bytes`; `HostAnswer` preserves text and the error bit.
-A decided logical scope/name must replay exactly its first recorded answer:
+A decided effect scope/name must replay exactly its first recorded answer:
 recovery does not authorize another decision or effect.
 
 `HostReply::Busy` means this attempt made no decision. `Unanswered(Lost)` and
 `Unanswered(Withdrawn)` are actual settled attempts whose outcome cannot yet be
 learned. They permit recovery, while the run is working, only after the previous
 actual terminal and the positive `Limits.host_backoff`, up to
-`Limits.host_attempts` including the first. The next relay uses the same logical
+`Limits.host_attempts` including the first. The next relay uses the same effect
 scope/name/tool/effect/input and a new attempt-qualified callback. There is never
 a second live relay for that operation. A stale callback cannot answer a later
 attempt. `WithdrawHost` requests settlement; it does not supply a terminal,
@@ -303,7 +308,8 @@ predecision attempts may return Cancelled/TimedOut. The unknown answer does not
 claim that nothing happened. Submitted delivery ownership follows section 8
 unchanged. Root V2 transcript restart preserves the concrete settled result and
 its provider identity; a restored result is not another host effect. The stable
-logical scope remains the parent's across activations.
+effect scope remains the parent's across resumed activations; a fresh context
+uses a new scope while retaining stable worker routing.
 
 Retained memory is bounded by declaration count and aggregate charter bytes,
 call slots, one immutable name/tool/effect/body per logical call, fixed attempt
@@ -347,7 +353,7 @@ workspace is fabricated for a child of a workspace-free run.
 ### 5.4 Concrete application feedback
 
 The root translates a settled run result directly into the session's concrete
-`AnsweredV2` text/error terminal. `feedback(returned, max_bytes)` consumes one
+`Answered` text/error terminal. `feedback(returned, max_bytes)` consumes one
 semantic terminal and returns `Feedback { text, error }`, or `TooLarge` before
 allocation; `feedback_worst_case` supplies its checked receiving bound. This is
 a pure application translation using the same checked two-pass Writer pattern
@@ -400,11 +406,23 @@ actual admitted result cannot be substituted or truncated after an effect.
   what the next run starts from. A run that does not resume starts fresh
   from its brief, which carries what the host thinks it needs.
 
+Durable recovery also retains an accepted main ToolUse completion before its
+first executable call. Its one context checkpoint must be actually committed;
+channel admission is not commitment. SavedHistory and a separate answered
+supplement may overlap or fill complementary results. They normalize old
+context without fresh Turn, read credit or monetary charge. Exact commitment,
+lookup, accounting, named-input and correction rules are domain/recovery.md,
+sections 3–8. Old delivery evidence remains historical and cannot supply the
+current activation's landing/Answer proof.
+
 ### 6.1 Named input and settled waiting
 
 `Event::Message` names an admitted live run and an opaque parent-chosen Token,
-including zero. Parent names are unique for the active logical run; arrival order
-is FIFO and numeric token order carries no meaning. The receiver detects reuse
+including zero. Parent names are unique for the active effect scope; arrival
+order is FIFO and numeric token order carries no meaning. The current activation
+retains bounded queued/offered/read checks. Historical exact witnessed retry is
+the CoveredHistorical exception in domain/recovery.md, section 3; equal text or
+stable worker identity cannot establish it. The receiver detects reuse
 among queued, currently offered and current-read names. It does not retain an
 unbounded history of acknowledged names. Text already includes the parent's
 sender label and is attested UTF-8 at the protocol face.
@@ -428,7 +446,7 @@ cancel still require their real terminal; Waiting cannot manufacture settlement.
 
 ### 6.2 Concrete history and activation numbering
 
-Root starts every main and child session through OpenV2. It owns the original
+Root starts every main and child session through `Open { opener, opening }`. It owns the original
 Start reply right and any selected concrete Transcript while the run prepares;
 an opaque binding transfers the selected history only to main. False `resume`
 drops supplied history and starts from the brief. True with no history starts
@@ -581,8 +599,9 @@ is charged at container storage plus payload bytes.
 A submission carries two different names. The callback owner is a live slab
 name, used only for its actual terminal. Its durable host name is the accepted
 main completion sequence and the assistant block position (including non-call
-blocks before it), scoped by the host's logical run. The host must preserve that
-logical run identity across restart. Provider ids may repeat in different turns;
+blocks before it), scoped by the parent-issued effect scope. The host preserves
+that scope across resume; fresh context uses the explicit never-used scope
+entrance in domain/recovery.md, section 2. Provider ids may repeat in different turns;
 neither those ids, callback tokens nor translation tickets are durable names.
 Version-two sessions include the restored contiguous transcript prefix in the
 sequence; root V2 includes restored history while its live Turn count names

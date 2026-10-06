@@ -72,6 +72,8 @@ How smith is built from temper's code is temper's migration plan
 4. **tools.md:** what a session does to the workspace.
 5. **host.md:** the other side: what a host owes a run and is owed, the
    channel, supervising agent processes, the local host, one process.
+6. **recovery.md:** durable effect scopes, pre-effect commitments, late host
+   answers and bounded recovery across activations.
 
 ## 3. Names
 
