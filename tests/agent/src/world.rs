@@ -181,6 +181,8 @@ impl Settings {
 pub enum HostSchedule {
     /// Immediate first recorded answer. Contract: domain/run.md, section 5.2.
     Answer,
+    /// One decided write answer exceeds the receiving cap.
+    TooLarge,
     /// Busy, lost committed answer, then replay first recorded answer. Contract: domain/run.md, section 5.2.
     Replay,
     /// Wait beyond declared deadline, settle withdrawn, then recover. Contract: domain/run.md, section 5.2.
@@ -519,7 +521,7 @@ impl World {
             checked: Vec::new(),
             pushes: Vec::new(),
             delivery_names: Vec::new(),
-            host_history: crate::host_referee::History::default(),
+            host_history: crate::host_referee::History::with_reply_cap(settings.limits.run.host_reply_bytes),
             host_pending: BTreeMap::new(),
             host_decision: None,
             host_decisions: 0,
@@ -1133,10 +1135,19 @@ impl World {
                         deadline,
                     })
                     .expect("valid recovery history");
-                let answer = run::HostAnswer::new(b"opaque host answer: first decision".as_slice().into(), false)
-                    .expect("bounded host text");
+                let answer = match self.settings.host {
+                    HostSchedule::TooLarge => {
+                        run::HostAnswer::new(vec![b'x'; 128].into(), false).expect("bounded oversized host text")
+                    }
+                    HostSchedule::Answer | HostSchedule::Replay | HostSchedule::Withdraw | HostSchedule::LateAnswer => {
+                        run::HostAnswer::new(b"opaque host answer: first decision".as_slice().into(), false)
+                            .expect("bounded host text")
+                    }
+                };
                 let reply = match self.settings.host {
-                    HostSchedule::Answer | HostSchedule::LateAnswer => run::HostReply::Answered(answer),
+                    HostSchedule::Answer | HostSchedule::LateAnswer | HostSchedule::TooLarge => {
+                        run::HostReply::Answered(answer)
+                    }
                     HostSchedule::Replay => match relay.attempt {
                         1 => run::HostReply::Busy,
                         2 => run::HostReply::Unanswered(run::Unanswered::Lost),

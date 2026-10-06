@@ -865,7 +865,10 @@ impl World {
                 ledger.returned = true;
                 if matches!(
                     result,
-                    run::Returned::HostAnswered(_) | run::Returned::HostUnknown | run::Returned::HostRejected(_)
+                    run::Returned::HostAnswered(_)
+                        | run::Returned::HostTooLarge { .. }
+                        | run::Returned::HostUnknown
+                        | run::Returned::HostRejected(_)
                 ) {
                     let run = self.run_of_conversation[&ledger.conversation];
                     self.relay_stage.remove(&run);

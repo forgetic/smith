@@ -156,6 +156,10 @@ impl History {
         }
         let valid = match result {
             run::Returned::HostAnswered(answer) => self.answered.as_ref() == Some(answer),
+            run::Returned::HostTooLarge { bytes, max } => self
+                .answered
+                .as_ref()
+                .is_some_and(|answer| u32::try_from(answer.text().len()).ok() == Some(*bytes) && bytes > max),
             run::Returned::HostUnknown => self.answered.is_none() && self.uncertain,
             run::Returned::Busy | run::Returned::Cancelled | run::Returned::TimedOut => {
                 self.answered.is_none() && !self.uncertain
@@ -289,7 +293,8 @@ impl History {
             Some(llm::Returned::Served { returned, error }) => {
                 let expected_error = match returned {
                     run::Returned::HostAnswered(answer) => answer.error(),
-                    run::Returned::HostUnknown
+                    run::Returned::HostTooLarge { .. }
+                    | run::Returned::HostUnknown
                     | run::Returned::Busy
                     | run::Returned::Cancelled
                     | run::Returned::TimedOut => true,

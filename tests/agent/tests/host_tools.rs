@@ -56,6 +56,21 @@ fn answer_after_withdrawal_is_retained_without_another_relay() {
     assert!(world.trace().iter().any(|line| line.contains("WithdrawHost")));
 }
 
+#[test]
+fn a_write_tool_answer_over_the_cap_tells_the_llm_it_was_decided() {
+    let mut settings = Settings { job: Job::HostTools, host: HostSchedule::TooLarge, ..Settings::calm(816) };
+    settings.limits.run.host_reply_bytes = 64;
+    let mut world = World::new(settings);
+    world.run(20_000);
+    assert!(matches!(world.answer(), run::Answer::Accepted { .. }));
+    assert_eq!(world.host_decisions(), 1);
+    assert_eq!(world.host_submissions().len(), 1, "a decided write is never retried");
+    assert!(world.prompts().iter().flat_map(|query| &query.messages).flat_map(|message| &message.parts).any(|part| {
+        matches!(part, skein_fake_llm_domain::api::Part::ToolOutput { output, is_error: true, .. }
+            if output.as_ref() == b"host-decided answer-too-large bytes=128 max=64 answer-not-shown")
+    }));
+}
+
 fn submission(at: u64, attempt: u32, owner: u64) -> Submission {
     Submission {
         host_run: Token::new(91),

@@ -35,6 +35,7 @@ pub struct Submission {
 /// Contract: domain/run.md, sections 5.2, 13 and 14.
 #[derive(Debug, Default)]
 pub struct History {
+    reply_cap: Option<u32>,
     submissions: Vec<Submission>,
     live: Option<run::RelayName>,
     previous_terminal: Option<Time>,
@@ -55,6 +56,12 @@ struct ProviderCall {
 }
 
 impl History {
+    /// Observe the receiving cap supplied to the run by this world.
+    #[must_use]
+    pub fn with_reply_cap(max: u32) -> History {
+        History { reply_cap: Some(max), ..History::default() }
+    }
+
     /// Admission rejects live duplicates and mutable recovery input.
     /// Contract: domain/run.md, section 5.2.
     ///
@@ -156,6 +163,11 @@ impl History {
         }
         let valid = match result {
             run::Returned::HostAnswered(answer) => self.answered.as_ref() == Some(answer),
+            run::Returned::HostTooLarge { bytes, max } => self.answered.as_ref().is_some_and(|answer| {
+                u32::try_from(answer.text().len()).ok() == Some(*bytes)
+                    && bytes > max
+                    && self.reply_cap.is_none_or(|cap| cap == *max)
+            }),
             run::Returned::HostUnknown => self.answered.is_none() && self.uncertain,
             run::Returned::Busy | run::Returned::Cancelled | run::Returned::TimedOut => {
                 self.answered.is_none() && !self.uncertain
@@ -275,6 +287,20 @@ impl History {
                 if self.live.is_some() || replay.is_some() {
                     return Err("feedback precedes actual terminal or invents replay metadata");
                 }
+                if let (Some(answer), Some(max)) = (&self.answered, self.reply_cap)
+                    && answer.text().len() > usize::try_from(max).expect("cap fits")
+                {
+                    let expected = format!(
+                        "host-decided answer-too-large bytes={} max={} answer-not-shown",
+                        answer.text().len(),
+                        max
+                    );
+                    if text.as_ref() != expected.as_bytes() || !error {
+                        return Err("feedback erased or fabricated decided oversized host answer");
+                    }
+                    self.feedback = true;
+                    return Ok(());
+                }
                 let expected = match &self.answered {
                     Some(answer) => (answer.text(), answer.error()),
                     None if self.uncertain => (b"host-unknown".as_slice(), true),
@@ -289,7 +315,8 @@ impl History {
             Some(llm::Returned::Served { returned, error }) => {
                 let expected_error = match returned {
                     run::Returned::HostAnswered(answer) => answer.error(),
-                    run::Returned::HostUnknown
+                    run::Returned::HostTooLarge { .. }
+                    | run::Returned::HostUnknown
                     | run::Returned::Busy
                     | run::Returned::Cancelled
                     | run::Returned::TimedOut => true,

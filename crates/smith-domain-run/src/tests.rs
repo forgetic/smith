@@ -2152,6 +2152,20 @@ fn a_host_call_busy_many_times_keeps_its_name_until_it_succeeds() {
 }
 
 #[test]
+fn a_decided_host_answer_over_the_receiving_cap_is_not_unknown() {
+    let limits = Limits { host_reply_bytes: 8, ..LIMITS };
+    let mut h = Harness::new(limits);
+    let (_, conversation) = h.running(71, 99);
+    let deadline = h.env.now.saturating_add(Duration::from_secs(30));
+    let relay = host_submission(&h.step(host_ask(conversation, 41, deadline)));
+    let answer = crate::HostAnswer::new(bytes(b"nine bytes"), false).expect("constructor-bounded host text");
+    assert_eq!(
+        &*h.step(Event::HostReturned { relay, reply: crate::HostReply::Answered(answer) }),
+        &[Request::Return { spent: 0, call: Token::new(41), result: Returned::HostTooLarge { bytes: 10, max: 8 } }]
+    );
+}
+
+#[test]
 fn host_uncertainty_survives_busy_until_withdrawal_or_caller_expiry() {
     enum Stop {
         Withdraw,

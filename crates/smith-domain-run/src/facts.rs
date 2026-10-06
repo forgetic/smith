@@ -106,6 +106,8 @@ pub enum Return {
     Waiting,
     /// Actual bounded host text reached the caller.
     HostAnswered,
+    /// The host decided, but its answer exceeded the receiving cap.
+    HostTooLarge,
     /// Relay settled but no permitted recovery can learn its outcome.
     HostUnknown,
     /// Host declaration/input refused before effects.
@@ -243,6 +245,7 @@ fn result_of(result: &Returned) -> Return {
     match result {
         Returned::Waiting => Return::Waiting,
         Returned::HostAnswered(_) => Return::HostAnswered,
+        Returned::HostTooLarge { .. } => Return::HostTooLarge,
         Returned::HostUnknown => Return::HostUnknown,
         Returned::HostRejected(_) => Return::HostRejected,
         Returned::Delivered(_) => Return::Delivered,

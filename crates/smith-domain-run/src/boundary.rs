@@ -400,6 +400,8 @@ pub enum Returned {
         /// Exact constructor-bounded host text and error bit, at most receiving reply cap.
         crate::HostAnswer,
     ),
+    /// The host decided the call, but its answer exceeds the receiving text cap.
+    HostTooLarge { bytes: u32, max: u32 },
     /// No permissible recovery remains after the earlier relay settled. This
     /// means outcome unknown, never evidence of failure or permission to decide twice.
     HostUnknown,

@@ -1844,7 +1844,10 @@ pub(crate) fn host_returned(
             Some(if answer.text().len() <= usize::try_from(env.limits.host_reply_bytes).expect("cap fits") {
                 Returned::HostAnswered(answer)
             } else {
-                Returned::HostUnknown
+                Returned::HostTooLarge {
+                    bytes: u32::try_from(answer.text().len()).expect("constructor-bounded host answer"),
+                    max: env.limits.host_reply_bytes,
+                }
             })
         }
         HostReply::Busy => {
