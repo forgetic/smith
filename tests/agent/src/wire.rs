@@ -5,7 +5,7 @@
 //! Client until actual lower Closed. Composition routes active callbacks separately
 //! from retired outside observations; it never reads private domain state. Prepare,
 //! start, tick, cancel, close and settle are distinct entrances under caller clocks
-//! (domain/client.md, sections 1, 4, 5 and 6; programming-model.md, sections 5.2 and 9).
+//! (scratch/client.md, sections 1, 4, 5 and 6; programming-model.md, sections 5.2 and 9).
 
 use std::collections::BTreeMap;
 
@@ -17,31 +17,31 @@ use smith_protocol_llm::{self as adapter, Context, Limits, Receiving, ResolvedCa
 
 /// Caller-supplied endpoint and credential data for the real wire fixture.
 /// Caller owns this finite configuration; admission and terminals belong to Wire.
-/// Contract: domain/client.md, sections 1 and 6.
+/// Contract: scratch/client.md, sections 1 and 6.
 #[expect(missing_debug_implementations, reason = "fixture owns caller credential bytes")]
 pub struct Configuration {
     /// Whole shared endpoint configuration, supplied as neutral caller data.
-    /// Contract: domain/client.md, section 1.
+    /// Contract: scratch/client.md, section 1.
     pub endpoint: shared::Endpoint,
     /// Actual grant supplied to one Client and separately to its independent peer.
-    /// Contract: domain/client.md, sections 1 and 6.
+    /// Contract: scratch/client.md, sections 1 and 6.
     pub credential: shared::Credential,
     /// Independent outside expectation for a native error result's text prefix.
-    /// Contract: domain/client.md, section 3; testing-strategy.md, section 7.
+    /// Contract: scratch/client.md, section 3; testing-strategy.md, section 7.
     pub error_prefix: Box<[u8]>,
     /// Independent outside expectation for a native error result's parsed flag.
-    /// Contract: domain/client.md, section 3; testing-strategy.md, section 7.
+    /// Contract: scratch/client.md, section 3; testing-strategy.md, section 7.
     pub error_flag: bool,
     /// Handwritten outside expectation for this fixture's continued arguments.
     /// Incoming delta bytes remain exact at the root. A native embedded-object
     /// continuation may serialize object whitespace while preserving every field.
-    /// Contract: domain/client.md, section 3; testing-strategy.md, section 7.
+    /// Contract: scratch/client.md, section 3; testing-strategy.md, section 7.
     pub continuation_arguments: Box<[u8]>,
 }
 
 /// Native configurations are shared kit data, with no Smith dialect branching.
 /// Returns two caller fixtures; it starts no effect and carries outside literal
-/// expectations. Contract: domain/client.md, section 1; testing-strategy.md, section 7.
+/// expectations. Contract: scratch/client.md, section 1; testing-strategy.md, section 7.
 #[must_use]
 pub fn configurations() -> Box<[Configuration]> {
     Box::new([
@@ -68,72 +68,72 @@ pub fn configurations() -> Box<[Configuration]> {
 
 /// Finite actual lower chronology, without retaining another completion body.
 /// Shared Client emits these observations; at most four belong to one Wire.
-/// Contract: domain/client.md, sections 4 and 5.
+/// Contract: scratch/client.md, sections 4 and 5.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Observed {
-    /// Actual completed callback. Contract: domain/client.md, section 4.
+    /// Actual completed callback. Contract: scratch/client.md, section 4.
     Completed(
         /// Opaque root request owner supplied at preparation and echoed by the
-        /// actual Client's one terminal. Contract: domain/client.md, sections 1 and 4.
+        /// actual Client's one terminal. Contract: scratch/client.md, sections 1 and 4.
         Token,
     ),
 
-    /// Actual failed callback. Contract: domain/client.md, section 4.
+    /// Actual failed callback. Contract: scratch/client.md, section 4.
     Failed(
         /// Opaque root request owner supplied at preparation and echoed by the
-        /// actual Client's one terminal. Contract: domain/client.md, sections 1 and 4.
+        /// actual Client's one terminal. Contract: scratch/client.md, sections 1 and 4.
         Token,
     ),
 
-    /// Actual cancelled callback after settlement. Contract: domain/client.md, section 5.
+    /// Actual cancelled callback after settlement. Contract: scratch/client.md, section 5.
     Cancelled(
         /// Opaque root request owner supplied at preparation and echoed after
-        /// actual lower settlement. Contract: domain/client.md, sections 1 and 5.
+        /// actual lower settlement. Contract: scratch/client.md, sections 1 and 5.
         Token,
     ),
 
-    /// Terminal won; transport drainage permits reuse. Contract: domain/client.md, section 5.
+    /// Terminal won; transport drainage permits reuse. Contract: scratch/client.md, section 5.
     Reusable,
 
-    /// Lower physical Close requested. Contract: domain/client.md, section 5.
+    /// Lower physical Close requested. Contract: scratch/client.md, section 5.
     Close,
 
-    /// Actual lower Closed received; physical owner may retire. Contract: domain/client.md, section 5.
+    /// Actual lower Closed received; physical owner may retire. Contract: scratch/client.md, section 5.
     Closed,
 }
 
 /// One actual physical binding's outside lifecycle, retained after retirement.
 /// It keeps receiving metadata and content-free lower observations, not a second
-/// completion or a credential. Contract: domain/client.md, sections 1, 5 and 6;
+/// completion or a credential. Contract: scratch/client.md, sections 1, 5 and 6;
 /// domain/run.md, sections 3 and 14; testing-strategy.md, sections 2.3 and 6.
 #[derive(Debug)]
 pub struct Binding {
     /// Root-issued logical callback; later physical calls may reuse it.
-    /// Contract: domain/client.md, sections 1 and 5.
+    /// Contract: scratch/client.md, sections 1 and 5.
     pub owner: Token,
 
     /// Exact advertised root receiving contract used before actual preparation.
-    /// Contract: domain/client.md, sections 1 and 6.
+    /// Contract: scratch/client.md, sections 1 and 6.
     pub receiving: Receiving,
     /// Actual SDK terminal usage, before application translation.
-    /// Contract: domain/client.md, section 4; domain/run.md, section 9.
+    /// Contract: scratch/client.md, section 4; domain/run.md, section 9.
     pub accepted_usage: Option<shared::Usage>,
 
     /// Shared root/Client/peer iteration clock when this physical call started.
-    /// Contract: domain/client.md, section 1; programming-model.md, section 9.
+    /// Contract: scratch/client.md, section 1; programming-model.md, section 9.
     pub started: (Time, Wall),
 
     /// Other actual physical bindings still retained when this call started.
     /// This outside count includes older calls whose root terminal already won.
-    /// Contract: domain/client.md, section 5.
+    /// Contract: scratch/client.md, section 5.
     pub retained_at_start: u32,
 
     /// One terminal and bounded Reusable/Close/Closed chronology with clocks.
-    /// Contract: domain/client.md, sections 4 and 5.
+    /// Contract: scratch/client.md, sections 4 and 5.
     pub observed: Vec<(Time, Wall, Observed)>,
 
     /// Retirement clock, present only after actual lower Closed was observed.
-    /// Contract: domain/client.md, section 5; programming-model.md, section 5.2.
+    /// Contract: scratch/client.md, section 5; programming-model.md, section 5.2.
     pub retired: Option<(Time, Wall)>,
 
     wire: Option<Wire>,
@@ -143,7 +143,7 @@ pub struct Binding {
 /// Application-owned routing of actual Clients in the existing root world.
 /// Generic transport, peer progress and all clocks remain in shared Exchange.
 /// Active logical callbacks are separate from retained physical bindings.
-/// Contract: domain/client.md, sections 1 and 5; domain/run.md, section 14.
+/// Contract: scratch/client.md, sections 1 and 5; domain/run.md, section 14.
 pub(crate) struct Composition {
     configuration: Configuration,
     limits: Limits,
@@ -163,22 +163,22 @@ impl core::fmt::Debug for Composition {
 }
 
 /// Owned observations from one bounded shared-world progress round.
-/// Contract: domain/client.md, sections 4 and 5; testing-strategy.md, section 6.
+/// Contract: scratch/client.md, sections 4 and 5; testing-strategy.md, section 6.
 pub(crate) struct Progress {
     /// Actual protocol/close progress; prevents root timers skipping queued bytes.
-    /// Contract: domain/client.md, section 5; programming-model.md, section 9.
+    /// Contract: scratch/client.md, section 5; programming-model.md, section 9.
     pub(crate) immediate: bool,
     /// Actual adapter-translated terminals, each consuming its active callback.
-    /// Contract: domain/client.md, section 4.
+    /// Contract: scratch/client.md, section 4.
     pub(crate) terminals: Vec<(Token, Event)>,
     /// Actual byte-peer decoded queries, never reconstructed from a root prompt.
-    /// Contract: domain/client.md, section 3; testing-strategy.md, section 2.3.
+    /// Contract: scratch/client.md, section 3; testing-strategy.md, section 2.3.
     pub(crate) queries: Vec<skein_fake_llm_domain::api::Query>,
 }
 
 impl Composition {
     /// Caller data for an opt-in actual-wire fixture, with 256 physical calls
-    /// as its asserted finite story ceiling. Contract: domain/client.md, sections 1 and 6.
+    /// as its asserted finite story ceiling. Contract: scratch/client.md, sections 1 and 6.
     pub(crate) fn new(
         configuration: Configuration,
         limits: Limits,
@@ -188,7 +188,7 @@ impl Composition {
     }
 
     /// The actual root Complete supplies every receiving field and the owning
-    /// prompt. No wire starts before adapter admission. Contract: domain/client.md, sections 1 and 6.
+    /// prompt. No wire starts before adapter admission. Contract: scratch/client.md, sections 1 and 6.
     pub(crate) fn start(&mut self, owner: Token, prompt: llm::Prompt, receiving: Receiving, now: Time, wall: Wall) {
         assert!(self.bindings.len() < 256, "actual wire fixture has a finite physical-call ceiling");
         let retained_at_start = u32::try_from(self.bindings.iter().filter(|binding| binding.wire.is_some()).count())
@@ -213,7 +213,7 @@ impl Composition {
     }
 
     /// Actual root cancellation addresses only its current physical Client.
-    /// The terminal remains owed until genuine lower settlement. Contract: domain/client.md, 5.
+    /// The terminal remains owed until genuine lower settlement. Contract: scratch/client.md, 5.
     pub(crate) fn cancel(&mut self, owner: Token, now: Time, wall: Wall) {
         if let Some(index) = self.active.get(&owner) {
             let wire = self.bindings[*index].wire.as_mut().expect("an active physical binding is retained");
@@ -227,7 +227,7 @@ impl Composition {
     /// later lower Closed; the next call may coexist with that old close right.
     /// The fixture deliberately holds won Close until a new call or root answer;
     /// this is a selected lower settlement schedule, not application policy.
-    /// Contract: domain/client.md, sections 4 and 5; programming-model.md, sections 5.2 and 9.
+    /// Contract: scratch/client.md, sections 4 and 5; programming-model.md, sections 5.2 and 9.
     pub(crate) fn advance(&mut self, now: Time, wall: Wall, ending: bool) -> Progress {
         let mut progress = Progress { immediate: false, terminals: Vec::new(), queries: Vec::new() };
         for (index, binding) in self.bindings.iter_mut().enumerate() {
@@ -274,12 +274,12 @@ impl Composition {
     }
 
     /// Retained outside observations after actual lower progress; no domain
-    /// internals determine this chronology. Contract: domain/client.md, section 5.
+    /// internals determine this chronology. Contract: scratch/client.md, section 5.
     pub(crate) fn bindings(&self) -> &[Binding] {
         &self.bindings
     }
 
-    /// No active callback or retained Client remains. Contract: domain/client.md, section 5.
+    /// No active callback or retained Client remains. Contract: scratch/client.md, section 5.
     pub(crate) fn is_settled(&self) -> bool {
         self.active.is_empty() && self.bindings.iter().all(|binding| binding.wire.is_none())
     }
@@ -287,16 +287,16 @@ impl Composition {
 
 /// Owns the actual prepared machine and retained adapter context through settlement.
 /// Caller supplies receiving caps and clocks; there is at most one root terminal
-/// and four lifecycle observations. Contract: domain/client.md, sections 1, 4, 5 and 6.
+/// and four lifecycle observations. Contract: scratch/client.md, sections 1, 4, 5 and 6.
 pub struct Wire {
     /// The one actual Client, lower HTTP/SSE peer and shared script domain.
-    /// Contract: domain/client.md, sections 1 and 5.
+    /// Contract: scratch/client.md, sections 1 and 5.
     pub peer: Exchange,
     /// At most one terminal plus Reusable/Close/Closed, without diagnostic bodies.
-    /// Contract: domain/client.md, sections 4 and 5.
+    /// Contract: scratch/client.md, sections 4 and 5.
     pub observed: Vec<Observed>,
     /// Exact SDK usage copied before adapter translation; no duplicate body.
-    /// Contract: domain/client.md, section 4; domain/run.md, section 9.
+    /// Contract: scratch/client.md, section 4; domain/run.md, section 9.
     pub accepted_usage: Option<shared::Usage>,
     context: Option<Context>,
 }
@@ -317,7 +317,7 @@ impl Wire {
     /// The root's actual Complete request supplies owner/prompt/receiving metadata.
     /// Preparation is effect free; start is a separate real Client entrance.
     /// Success owns one prepared Client/context; failure starts nothing.
-    /// Contract: domain/client.md, sections 1 and 6.
+    /// Contract: scratch/client.md, sections 1 and 6.
     ///
     /// # Errors
     /// Returns the adapter's admission error when the complete prompt, application
@@ -361,7 +361,7 @@ impl Wire {
 
     /// Caller starts the admitted actual Client once under its installed clocks.
     /// Returns only actual translated events; no callback is fabricated.
-    /// Contract: domain/client.md, sections 1 and 4.
+    /// Contract: scratch/client.md, sections 1 and 4.
     pub fn start(&mut self) -> Vec<Event> {
         self.peer.start();
         self.take()
@@ -370,21 +370,21 @@ impl Wire {
     /// One real shared-world progress step. The root world may interleave timers,
     /// actual cancellation requests and other delegated effects between steps.
     /// Returns immediate progress and at most one actual root terminal, preserving
-    /// its complete receiving contract. Contract: domain/client.md, sections 4 and 5.
+    /// its complete receiving contract. Contract: scratch/client.md, sections 4 and 5.
     pub fn tick(&mut self) -> (bool, Vec<Event>) {
         let progress = self.peer.tick(true);
         (progress, self.take())
     }
 
     /// Root requests cancellation; the callback remains owed until actual lower
-    /// settlement. Returns only actual events. Contract: domain/client.md, section 5.
+    /// settlement. Returns only actual events. Contract: scratch/client.md, section 5.
     pub fn cancel(&mut self) -> Vec<Event> {
         self.peer.request(client::Request::Cancel);
         self.take()
     }
 
     /// Physical owner requests explicit Close after Reusable; no second root
-    /// terminal is invented. Contract: domain/client.md, section 5.
+    /// terminal is invented. Contract: scratch/client.md, section 5.
     pub fn close(&mut self) -> Vec<Event> {
         self.peer.request(client::Request::Close);
         self.take()
@@ -392,7 +392,7 @@ impl Wire {
 
     /// Called only after the world's observed lower Close has actually settled.
     /// Feeds shared lower Closed and returns any actual owed cancellation terminal.
-    /// Contract: domain/client.md, section 5; programming-model.md, section 5.2.
+    /// Contract: scratch/client.md, section 5; programming-model.md, section 5.2.
     pub fn settle(&mut self) -> Vec<Event> {
         self.peer.settle();
         self.take()
@@ -469,7 +469,7 @@ fn resolutions(context: &Context, completion: &shared::Completion) -> Box<[Resol
 /// Explicit whole schemas for this world's finite application fixture language.
 /// These are caller data, not provider grammar or production schema policy.
 /// Caller gets one descriptor per offered fixture capability; root/adapter
-/// admission bounds the whole inventory. Contract: domain/client.md, sections 1 and 3.
+/// admission bounds the whole inventory. Contract: scratch/client.md, sections 1 and 3.
 #[must_use]
 pub fn schemas(prompt: &llm::Prompt) -> Box<[ToolSchema]> {
     let mut descriptors = Vec::new();

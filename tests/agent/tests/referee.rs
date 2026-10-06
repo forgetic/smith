@@ -42,7 +42,7 @@ fn a_push_without_passing_checks_is_rejected() {
         started(),
         Seen::Pushing {
             finishing: true,
-            name: smith_domain::run::CallName { completion: 1, position: 0 },
+            name: smith_domain::run::CallName { activation: 1, completion: 1, position: 0 },
             owner: Token::new(2),
             tree: b"code".to_vec(),
         },
@@ -59,7 +59,7 @@ fn a_host_that_lands_different_bytes_is_rejected() {
         Time::ZERO,
         Seen::Pushing {
             finishing: true,
-            name: smith_domain::run::CallName { completion: 1, position: 0 },
+            name: smith_domain::run::CallName { activation: 1, completion: 1, position: 0 },
             owner: Token::new(2),
             tree: b"asked".to_vec(),
         },
@@ -219,7 +219,7 @@ fn extra_field_storage_cannot_be_omitted_from_the_referees_byte_charge() {
 fn mid_history(stopped: bool) -> Referee<Meeting> {
     let mut referee = Referee::new(Meeting::default());
     let owner = Token::new(70);
-    let name = smith_domain::run::CallName { completion: 2, position: 1 };
+    let name = smith_domain::run::CallName { activation: 1, completion: 2, position: 1 };
     let observations = [
         Seen::Started {
             delivery: true,
@@ -263,7 +263,7 @@ fn pending_host_answer(referee: &Referee<Meeting>) {
 fn interrupted_answer() -> Answer {
     let Delivery::Delivered(receipts) = smith_agent_world::delivered() else { unreachable!("fixture delivered") };
     Answer::Delivered {
-        name: smith_domain::run::CallName { completion: 2, position: 1 },
+        name: smith_domain::run::CallName { activation: 1, completion: 2, position: 1 },
         receipts,
         stopped: smith_domain::run::Failure::Cancelled,
         spent: Spend::ZERO,
@@ -357,7 +357,7 @@ fn duplicate_actual_terminal_and_reused_durable_name_are_rejected_after_positive
         Seen::Pushing {
             finishing: false,
             owner,
-            name: smith_domain::run::CallName { completion: 2, position: 1 },
+            name: smith_domain::run::CallName { activation: 1, completion: 2, position: 1 },
             tree: b"checked".to_vec(),
         },
         "durable names are nonzero and distinct across actual submissions",
@@ -376,7 +376,7 @@ fn changed_bytes_between_check_and_submission_are_rejected_after_positive_check(
         Seen::Pushing {
             finishing: true,
             owner,
-            name: smith_domain::run::CallName { completion: 4, position: 0 },
+            name: smith_domain::run::CallName { activation: 1, completion: 4, position: 0 },
             tree: b"later write".to_vec(),
         },
         "delivery is the exclusive checked snapshot",

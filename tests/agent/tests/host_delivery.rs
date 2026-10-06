@@ -133,7 +133,7 @@ fn submitted(agent: &mut Agent, host: &mut Host, next: &mut usize) -> DeliverySu
     }
     let [submission] = agent.delivery_submissions() else { panic!("one actual root delivery") };
     assert_eq!(submission.worker, Token::new(1));
-    assert_eq!(submission.name, run::CallName { completion: 2, position: 0 });
+    assert_eq!(submission.name, run::CallName { activation: 1, completion: 2, position: 0 });
     assert!(submission.at < submission.deadline);
     let [field] = submission.change.fields.as_ref() else { panic!("one whole caller field") };
     assert_eq!(field.name.as_ref(), b"ticket");
@@ -153,13 +153,17 @@ fn submitted(agent: &mut Agent, host: &mut Host, next: &mut usize) -> DeliverySu
         Token::new(1),
         Token::new(1),
         submission.owner,
-        host::CallName { completion: 2, position: 0 },
+        host::CallName { activation: 1, completion: 2, position: 0 },
         submission.deadline,
         fields
     );
     host.up(Up::Call {
         call: submission.owner,
-        name: host::CallName { completion: submission.name.completion, position: submission.name.position },
+        name: host::CallName {
+            activation: 1,
+            completion: submission.name.completion,
+            position: submission.name.position,
+        },
         deadline: submission.deadline,
         ask: host::Ask::Deliver { fields: fields.into() },
     });
@@ -194,7 +198,7 @@ fn final_answer(agent: &Agent) -> host::Answer {
     else {
         panic!("actual late landing remains Delivered with the decided Cancelled stop")
     };
-    assert_eq!(*name, run::CallName { completion: 2, position: 0 });
+    assert_eq!(*name, run::CallName { activation: 1, completion: 2, position: 0 });
     assert_eq!(receipts.receipts().len(), 1);
     assert_eq!(receipts.receipts()[0].directory(), 0);
     assert_eq!(receipts.receipts()[0].text(), RECEIPT);
@@ -213,7 +217,7 @@ fn final_answer(agent: &Agent) -> host::Answer {
         spend_overflow: spent.units_overflow,
         usage_overflow: spent.usage_overflow,
         result: RunResult::Delivered {
-            name: host::CallName { completion: name.completion, position: name.position },
+            name: host::CallName { activation: 1, completion: name.completion, position: name.position },
             receipts: host_receipt(receipts),
             stopped: host::RunFailure::Cancelled,
         },

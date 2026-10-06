@@ -319,7 +319,7 @@ fn genuine_initial_merge_refusal_resolution_checks_and_two_parent_commit() {
     let Fixture { mut world, mut store, readonly_git, readonly_plain, actual_conflicts, roots } = setup();
     let first = submitted(&mut world, 1);
     assert_eq!(world.checked(), [true, true]);
-    assert_eq!(world.delivery_submissions()[0].name, run::CallName { completion: 1, position: 1 });
+    assert_eq!(world.delivery_submissions()[0].name, run::CallName { activation: 1, completion: 1, position: 1 });
     let unresolved = git::commit_merging(&mut store, world.delivery_checkout(first), b"work", 2, 3);
     assert_eq!(unresolved, Err(CommitFailure::Unresolved { files: actual_conflicts.clone() }));
     assert_eq!(store.commits.len(), 3, "failed actual commit creates no object");
@@ -331,7 +331,7 @@ fn genuine_initial_merge_refusal_resolution_checks_and_two_parent_commit() {
     .expect("bounded actual host refusal");
     world.return_delivery(first, run::Delivery::Refused(refusal.clone())).expect("one actual refusal terminal");
     let second = submitted(&mut world, 2);
-    assert_eq!(world.delivery_submissions()[1].name, run::CallName { completion: 6, position: 1 });
+    assert_eq!(world.delivery_submissions()[1].name, run::CallName { activation: 1, completion: 6, position: 1 });
     assert_eq!(world.checked(), [true, true, true, true], "both writable checks rerun after actual resolution");
     assert_eq!(world.disk().content(b"work/conflict.txt"), Some(b"resolved by the actual LLM".as_slice()));
     assert_eq!(world.disk().content(b"notes/data.txt"), Some(b"delivered-plain".as_slice()));

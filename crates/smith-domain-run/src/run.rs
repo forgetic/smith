@@ -47,6 +47,9 @@ pub(crate) struct Run {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) worker: Token,
+    /// Host-supplied number that distinguishes this activation's call names.
+    /// Contract: domain/run.md, sections 3.2 and 8.2.
+    pub(crate) activation: u64,
     /// What its conversations have spent.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -218,6 +221,8 @@ pub(crate) struct Start {
 
     /// Host-selected worker identity (domain/run.md, sections 3.2 and 10).
     pub(crate) worker: Token,
+    /// Host-supplied positive activation number (domain/run.md, sections 3.2 and 8.2).
+    pub(crate) activation: u64,
 
     /// Immutable requested contract and budget (domain/run.md, sections 3.1 and 14).
     pub(crate) charter: Charter,
@@ -230,10 +235,14 @@ pub(crate) struct Start {
 }
 
 pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &mut Queue<Request>) {
-    let Start { reply_to, worker, charter, workspace, transcript } = start;
+    let Start { reply_to, worker, activation, charter, workspace, transcript } = start;
     let Domain { runs, conversations, calls: _, alarms, facts } = domain;
     // A charter that can never fit is invalid, room or not: busy invites a
     // retry.
+    if activation == 0 {
+        out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(Invalid::Conversation)) });
+        return;
+    }
     if let Err(invalid) = charter::check(&charter, workspace.as_ref(), &env.limits) {
         out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(invalid)) });
         return;
@@ -251,6 +260,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         workspace,
         found,
         worker,
+        activation,
         spent: Spend::ZERO,
         nudges: 0,
         rejected: 0,
@@ -1193,8 +1203,14 @@ fn open(
             unreachable!("main is opened once, when its run has prepared")
         }
     };
-    let mut opening =
-        opening(&run.charter, run.workspace.as_ref(), &run.found, run.spent, run.deadline.saturating_since(now));
+    let mut opening = opening(
+        &run.charter,
+        run.activation,
+        run.workspace.as_ref(),
+        &run.found,
+        run.spent,
+        run.deadline.saturating_since(now),
+    );
     opening.transcript = run.transcript.take();
     out.push(Request::Open { conversation: main.token(), opening });
     State::Working { reply_to, main }
@@ -1268,7 +1284,7 @@ fn finish(
             wind_down(conversations, reply_to, main, Ending::Accepted(completed), out)
         }
         Declared::Change(change) => {
-            if name.completion == 0 {
+            if name.activation != run.activation || name.completion == 0 {
                 out.push(Request::Return {
                     spent: 0,
                     spend_overflow: false,
@@ -1343,7 +1359,7 @@ fn deliver(
         out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Rejected { problems } });
         return;
     }
-    if name.completion == 0 {
+    if name.activation != run.activation || name.completion == 0 {
         out.push(Request::Return {
             spent: 0,
             spend_overflow: false,
@@ -1452,6 +1468,7 @@ fn sub_agent(
     asking.calls = asking.calls.saturating_add(1);
     run.conversations = run.conversations.saturating_add(1);
     let opening = Opening {
+        activation: run.activation,
         transcript: None,
         wait: false,
         host_tools: Box::new([]),
@@ -1585,12 +1602,14 @@ fn answer(reply_to: ReplyTo, answer: Answer, out: &mut Queue<Request>) -> State 
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn opening(
     charter: &Charter,
+    activation: u64,
     workspace: Option<&crate::Workspace>,
     found: &Found,
     spent: Spend,
     left: Duration,
 ) -> Opening {
     Opening {
+        activation,
         transcript: None,
         wait: true,
         host_tools: charter.grants.host_tools.clone(),
@@ -1740,7 +1759,7 @@ fn host_call(
         });
         return;
     }
-    if name.completion == 0 {
+    if name.activation != run.activation || name.completion == 0 {
         out.push(Request::Return {
             spent: 0,
             spend_overflow: false,

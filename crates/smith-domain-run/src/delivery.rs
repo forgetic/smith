@@ -8,12 +8,17 @@ use alloc::boxed::Box;
 use core::mem::size_of;
 
 /// Transcript-derived host operation name, supplied by the composing root.
-/// The host scopes it by the same logical run across restart; it is not a live
+/// The host scopes it by the same logical run and a distinct activation; it is not a live
 /// callback token. Zero completion is refused before checks or host effects.
 ///
 /// Contract: domain/run.md, section 8.2; domain/session.md, sections 3 and 5.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CallName {
+    /// Host-supplied activation number, unique for each start of a logical run.
+    /// The host never reuses it when a run restarts.
+    /// Contract: domain/run.md, sections 3.2 and 8.2; domain/host.md, section 2.
+    pub activation: u64,
+
     /// One-based accepted completion sequence, including restored V2 history.
     /// Exhaustion refuses effects before submission; V1 names only this activation.
     ///

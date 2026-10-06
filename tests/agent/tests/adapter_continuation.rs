@@ -3,7 +3,7 @@
 //! Restored no-effect history is a caller/adapter handoff, not a root restore
 //! or combined memory proof. The separate malformed-call story drives original
 //! root discovery, real byte peers, one corrected host effect and cancellation.
-//! Contract: domain/client.md, sections 1–7; domain/run.md, sections 5.2,
+//! Contract: scratch/client.md, sections 1–7; domain/run.md, sections 5.2,
 //! 10, 13 and 14; testing-strategy.md, sections 2.3, 2.4, 4.1 and 6.
 
 use skein_fake_llm_domain::api::{Finish, Line, Part, Query, Script, Turn};

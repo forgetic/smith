@@ -138,6 +138,7 @@ pub fn limits() -> Limits {
 pub fn start() -> Start {
     Start {
         logical_run: Token::new(7),
+        activation: 1,
         workspace: None,
         charter: Box::from(&b"charter"[..]),
         transcript: Some(Box::from(&b"transcript"[..])),

@@ -76,7 +76,7 @@ fn receipts() -> Delivered {
     Delivered::new(Box::new([Receipt::new(0, Box::from(&b"real landing"[..])).expect("receipt")])).expect("delivery")
 }
 fn name() -> CallName {
-    CallName { completion: 2, position: 3 }
+    CallName { activation: 1, completion: 2, position: 3 }
 }
 fn observe(referee: &mut Referee<Evidence>, observation: Observation) {
     referee.observe(Time::ZERO, observation, &mut Vec::new());
@@ -193,7 +193,7 @@ fn oracle_rejects_omitted_invented_mismatched_and_later_stop_landing_evidence() 
             RunResult::Failed { failure: RunFailure::Cancelled }
         } else {
             RunResult::Delivered {
-                name: if mutation == 2 { CallName { completion: 3, position: 3 } } else { name() },
+                name: if mutation == 2 { CallName { activation: 1, completion: 3, position: 3 } } else { name() },
                 receipts: if mutation == 3 {
                     Delivered::new(Box::new([Receipt::new(0, Box::from(&b"invented"[..])).expect("receipt")]))
                         .expect("delivery")

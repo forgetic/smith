@@ -7,7 +7,7 @@
 //! callback: the won closing Client and its replacement with one active context.
 //! Passive simulator, referee and composition bookkeeping are outside this
 //! component ownership contract (skein-world/src/heap.rs).
-//! Contract: domain/client.md, sections 1, 4, 5 and 6;
+//! Contract: scratch/client.md, sections 1, 4, 5 and 6;
 //! domain/run.md, sections 3, 6, 13 and 14; domain/session.md, section 3;
 //! programming-model.md, section 6.3; testing-strategy.md, sections 2.3 and 6.
 
@@ -946,6 +946,7 @@ impl Counted {
             workspace: Some(workspace()),
             reply_to: ReplyTo::new(PARENT),
             worker: WORKER,
+            activation: 1,
             charter: charter(restoring),
             transcript: history,
             grants: Box::new([Grant {
@@ -1512,6 +1513,7 @@ fn maximum_brief_and_convention_paths_coexist_with_caller_start_actual_prompt_an
     counted.step(Event::Start {
         reply_to: ReplyTo::new(PARENT),
         worker: WORKER,
+        activation: 1,
         charter: run::Charter { instructions, brief, conventions: selected, outcome, ..charter(false) },
         workspace: mounted,
         transcript: None,

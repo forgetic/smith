@@ -39,6 +39,7 @@ fn limits() -> crate::Limits {
 fn start() -> Start {
     Start {
         logical_run: Token::new(1),
+        activation: 1,
         workspace: None,
         charter: Box::new([]),
         transcript: None,

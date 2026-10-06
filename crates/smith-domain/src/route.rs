@@ -36,7 +36,7 @@ pub(crate) const fn session_env(env: &Env<Limits>) -> Env<session::Limits> {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
     let event = match event {
-        Event::Start { reply_to, worker, charter, workspace, grants, transcript } => {
+        Event::Start { reply_to, worker, activation, charter, workspace, grants, transcript } => {
             if !takes_grants(domain, &grants, env.limits.accounts) {
                 domain.notices.push(Request::Answer {
                     to: reply_to,
@@ -47,7 +47,7 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
             for grant in grants {
                 granted(domain, env, grant);
             }
-            return start(domain, env, reply_to, worker, charter, workspace, transcript);
+            return start(domain, env, reply_to, worker, activation, charter, workspace, transcript);
         }
         Event::Grant { grant } => return granted(domain, env, grant),
         Event::Message { run, name, text } => run::Event::Message { run, name, text },
@@ -141,11 +141,16 @@ pub(crate) fn deliver(domain: &mut Domain, env: &Env<Limits>, handoff: Handoff) 
     session_step(domain, env, event);
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Start keeps the host-issued activation with its concrete admission fields"
+)]
 fn start(
     domain: &mut Domain,
     env: &Env<Limits>,
     reply_to: ReplyTo,
     worker: Token,
+    activation: u64,
     charter: run::Charter,
     workspace: Option<run::Workspace>,
     transcript: Option<session::record::Transcript>,
@@ -185,6 +190,7 @@ fn start(
         run::Event::Start {
             reply_to: ReplyTo::new(id.token()),
             worker,
+            activation,
             charter,
             workspace,
             transcript: Some(id.token()),
@@ -353,6 +359,7 @@ fn delegated(
     origin: session::record::Origin,
 ) -> run::Event {
     let id = peer(domain, opener);
+    let activation = domain.peers.get(id).expect("found above").activation;
     let ask = domain.peers.get_mut(id).expect("found above").take(call);
     domain.tickets = domain.tickets.saturating_sub(1);
     let flight = Flight { peer: id, withdrawn: false, answer: Due::Waiting };
@@ -363,7 +370,7 @@ fn delegated(
         call: owner,
         ask,
         deadline,
-        name: run::CallName { completion: origin.sequence, position: origin.position },
+        name: run::CallName { activation, completion: origin.sequence, position: origin.position },
     }
 }
 
@@ -505,6 +512,7 @@ fn complete(domain: &mut Domain, env: &Env<Limits>, pending: PendingCompletion, 
 /// Session alone prices, while token ceilings remain receiving limits.
 /// Contract: domain/run.md, sections 3, 9, 13 and 14; domain/session.md, section 6.
 fn open(domain: &mut Domain, env: &Env<Limits>, conversation: Token, opening: run::Opening) {
+    let activation = opening.activation;
     let account = opening.llm.account;
     let dialect = opening.llm.dialect;
     let prices = opening.llm.prices;
@@ -534,7 +542,7 @@ fn open(domain: &mut Domain, env: &Env<Limits>, conversation: Token, opening: ru
         let ended = run::Event::Ended { conversation, end: run::End::Invalid, spend: Spend::ZERO };
         return run_step(domain, env, ended);
     };
-    let peer = Peer::new(conversation, account, offered, &env.limits.session);
+    let peer = Peer::new(conversation, activation, account, offered, &env.limits.session);
     let id = domain.peers.insert(peer).expect("a peer for every conversation the run has");
     let fresh = domain.conversations.insert(conversation, id).expect("a peer for every conversation");
     assert!(fresh.is_none(), "the run names its conversations apart");

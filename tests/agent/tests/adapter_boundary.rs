@@ -1,7 +1,7 @@
 //! Positive-first adapter boundary controls over actual shared Client terminals.
 //! Caller schemas, restored results and a literal Wait attestation are fixture
 //! data; no application decoder or Finish policy lives in this test.
-//! Contract: domain/client.md, sections 1–6; testing-strategy.md, sections 2.5 and 6.
+//! Contract: scratch/client.md, sections 1–6; testing-strategy.md, sections 2.5 and 6.
 
 use skein_fake_llm_domain::{self as fake, api};
 use skein_lib::{Env, Queue, Time, Token, Wall};

@@ -313,6 +313,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
             workspace: Some(workspace()),
             reply_to: ReplyTo::new(worker),
             worker,
+            activation: 1,
             charter: selected_charter(limits.run_bytes, selected),
             transcript: None,
         };
@@ -333,7 +334,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
         let families = Families { tools: Tools { inspect: true, modify: false, shell: false }, agents: false };
         let ask = Ask::SubAgent { brief: bytes(10), families, llm: Some(bytes(1)), share: None };
         let delegated = Event::Delegated {
-            name: smith_domain_run::CallName { completion: 1, position: 0 },
+            name: smith_domain_run::CallName { activation: 1, completion: 1, position: 0 },
             conversation,
             call: worker,
             ask,
@@ -357,7 +358,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
             call,
             ask,
             deadline: expiry,
-            name: smith_domain_run::CallName { completion: 1, position: 0 },
+            name: smith_domain_run::CallName { activation: 1, completion: 1, position: 0 },
         };
         let [Asked::Check { owner }, Asked::Other] = step(finish)[..] else {
             panic!("the change is being checked");
@@ -384,6 +385,7 @@ fn refuse_oversized_charter(limits: Limits, env: &Env<Limits>, out: &mut Queue<R
         workspace: Some(workspace()),
         reply_to: ReplyTo::new(worker),
         worker,
+        activation: 1,
         charter: charter(limits.run_bytes + 1),
         transcript: None,
     };
@@ -532,6 +534,7 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
             workspace: Some(full_delivery_workspace()),
             reply_to: ReplyTo::new(worker),
             worker,
+            activation: 1,
             charter,
             transcript: None,
         },
@@ -556,7 +559,7 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
         Event::Delegated {
             conversation,
             call: worker,
-            name: smith_domain_run::CallName { completion: 1, position: 0 },
+            name: smith_domain_run::CallName { activation: 1, completion: 1, position: 0 },
             ask: Ask::Deliver { change: Change { fields: Box::new([]) } },
             deadline: Time::ZERO.saturating_add(BUDGET.time),
         },
@@ -736,6 +739,7 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
             workspace: mounted,
             reply_to: ReplyTo::new(Token::new(88)),
             worker: Token::new(91),
+            activation: 1,
             charter,
             transcript: None,
         }),
@@ -763,7 +767,7 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
         Some(Event::Delegated {
             conversation,
             call: Token::new(101),
-            name: smith_domain_run::CallName { completion: 1, position: 0 },
+            name: smith_domain_run::CallName { activation: 1, completion: 1, position: 0 },
             ask: smith_domain_run::Ask::Host { tool: bytes(1), effect: smith_domain_run::HostEffect::Read, input },
             deadline: Time::ZERO.saturating_add(Duration::from_secs(30)),
         }),
@@ -796,6 +800,163 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
     );
     domain.reclaim();
     assert_eq!((domain.runs(), domain.conversations(), domain.calls()), (0, 0, 0));
+}
+
+// The parent owns the decision after a crash. The next activation gets a text
+// message because the answered call's completion never became a Turn.
+#[test]
+#[expect(clippy::too_many_lines, reason = "one crash story keeps the two activations and their host evidence together")]
+fn answered_host_call_before_turn_crash_wakes_as_text_with_a_new_call_namespace() {
+    fn take(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>, event: Event) -> Vec<Request> {
+        smith_domain_run::step(domain, env, event, out);
+        let mut requests = Vec::new();
+        while let Some(request) = out.pop() {
+            requests.push(request);
+        }
+        requests
+    }
+
+    fn open(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>, activation: u64) -> (Token, Token) {
+        let worker = Token::new(91);
+        let mut selected = charter(env.limits.run_bytes);
+        selected.resume = true;
+        let started = take(
+            domain,
+            env,
+            out,
+            Event::Start {
+                reply_to: ReplyTo::new(Token::new(88)),
+                worker,
+                activation,
+                charter: selected,
+                workspace: Some(workspace()),
+                transcript: None,
+            },
+        );
+        let Some(Request::Read { owner: run, .. }) =
+            started.iter().find(|request| matches!(request, Request::Read { .. }))
+        else {
+            panic!("admitted run prepares its main")
+        };
+        let run = *run;
+        let probe = take(domain, env, out, Event::Read { owner: run, read: Read::Missing });
+        let [Request::Probe { owner, .. }] = probe.as_slice() else { panic!("guide lookup leads to check probe") };
+        let prepared = take(domain, env, out, Event::Probed { owner: *owner, executable: false });
+        let Some(Request::Open { conversation, opening }) =
+            prepared.iter().find(|request| matches!(request, Request::Open { .. }))
+        else {
+            panic!("main opens without fabricated history")
+        };
+        assert_eq!(opening.activation, activation);
+        assert!(opening.transcript.is_none());
+        let conversation = *conversation;
+        assert!(take(domain, env, out, Event::Started { conversation, peer: Token::new(99) }).is_empty());
+        (run, conversation)
+    }
+
+    let limits = Limits { run_bytes: 4096, ..LIMITS };
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut out = Queue::with_capacity(MAX_OUT);
+    let mut first = Domain::new(&limits);
+    let (_, conversation) = open(&mut first, &env, &mut out, 1);
+    let old_name = smith_domain_run::CallName { activation: 1, completion: 1, position: 0 };
+    let called = take(
+        &mut first,
+        &env,
+        &mut out,
+        Event::Delegated {
+            conversation,
+            call: Token::new(101),
+            name: old_name,
+            ask: Ask::Host {
+                tool: b"x".as_slice().into(),
+                effect: smith_domain_run::HostEffect::Read,
+                input: smith_domain_run::HostInput::attested(b"{}".as_slice().into()).expect("object"),
+            },
+            deadline: Time::ZERO.saturating_add(Duration::from_secs(30)),
+        },
+    );
+    let [Request::HostCall { relay, name, .. }] = called.as_slice() else { panic!("one host operation") };
+    assert_eq!(*name, old_name);
+    let answer = smith_domain_run::HostAnswer::new(b"host accepted change".as_slice().into(), false)
+        .expect("bounded host answer");
+    let returned = take(
+        &mut first,
+        &env,
+        &mut out,
+        Event::HostReturned { relay: *relay, reply: smith_domain_run::HostReply::Answered(answer) },
+    );
+    assert!(matches!(
+        returned.as_slice(),
+        [Request::Return { result: smith_domain_run::Returned::HostAnswered(_), .. }]
+    ));
+    assert!(!returned.iter().any(|request| matches!(request, Request::Turn { .. })));
+    drop(first); // Crash before the answered completion reaches a Turn.
+
+    let mut resumed = Domain::new(&limits);
+    let (run, conversation) = open(&mut resumed, &env, &mut out, 2);
+    let notice = b"host: the previous host call was answered: host accepted change";
+    assert!(take(
+        &mut resumed,
+        &env,
+        &mut out,
+        Event::Message { run, name: Token::new(5), text: notice.as_slice().into() },
+    )
+    .is_empty());
+    let waking = take(
+        &mut resumed,
+        &env,
+        &mut out,
+        Event::Yielded { conversation, stop: Stop::EndTurn, text: b"ready".as_slice().into() },
+    );
+    assert!(
+        matches!(waking.as_slice(), [Request::Say { peer, text }] if *peer == Token::new(99) && text.as_ref() == notice)
+    );
+    assert!(!waking.iter().any(|request| matches!(request, Request::Return { .. } | Request::Turn { .. })));
+
+    let stale = take(
+        &mut resumed,
+        &env,
+        &mut out,
+        Event::Delegated {
+            conversation,
+            call: Token::new(103),
+            name: old_name,
+            ask: Ask::Host {
+                tool: b"x".as_slice().into(),
+                effect: smith_domain_run::HostEffect::Read,
+                input: smith_domain_run::HostInput::attested(b"{}".as_slice().into()).expect("object"),
+            },
+            deadline: Time::ZERO.saturating_add(Duration::from_secs(30)),
+        },
+    );
+    assert!(matches!(
+        stale.as_slice(),
+        [Request::Return {
+            result: smith_domain_run::Returned::Refused { refusal: smith_domain_run::AskRefusal::Name },
+            ..
+        }]
+    ));
+
+    let new_name = smith_domain_run::CallName { activation: 2, completion: 1, position: 0 };
+    assert_ne!(old_name, new_name);
+    let fresh = take(
+        &mut resumed,
+        &env,
+        &mut out,
+        Event::Delegated {
+            conversation,
+            call: Token::new(102),
+            name: new_name,
+            ask: Ask::Host {
+                tool: b"x".as_slice().into(),
+                effect: smith_domain_run::HostEffect::Read,
+                input: smith_domain_run::HostInput::attested(b"{}".as_slice().into()).expect("object"),
+            },
+            deadline: Time::ZERO.saturating_add(Duration::from_secs(30)),
+        },
+    );
+    assert!(matches!(fresh.as_slice(), [Request::HostCall { name, .. }] if *name == new_name));
 }
 
 #[test]

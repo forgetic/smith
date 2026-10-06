@@ -33,18 +33,15 @@ What a host and a run say to each other, in order.
 Down, from the host:
 
 - **the start** first (run.md, 3.2): the charter, the workspace, the
-  transcript and the calls answered after it, credential grants, explicit
-  Fresh/Resume effect scope and activation (domain/recovery.md, section 2);
-- **messages,** named uniquely for the active effect scope, in order (run.md,
-  section 6); the kit retains the current activation's outstanding names and read
-  watermark. Exact witnessed historical retry follows domain/recovery.md,
-  section 3; there is no unbounded older-name table;
+  transcript, credential grants and a positive activation number unique for
+  this logical run;
+- **messages,** named uniquely for the active logical run, in order (run.md,
+  section 6); the kit retains outstanding names and the current read watermark,
+  not an unbounded history of older acknowledged opaque names;
 - **answers** to the run's calls: host tools' (text, as a result or an
   error), deliveries' (run.md, 8.2), busy, unavailable;
 - **credential grants,** refreshed (section 7);
 - **acknowledgements** of turns, when the host keeps them (section 6);
-- **commitment and recovery-lookup terminals,** each answering its independent
-  named right (domain/recovery.md, sections 4 and 7);
 - **a cancel,** at most one.
 
 Up, from the run:
@@ -52,8 +49,6 @@ Up, from the run:
 - **admitted,** or a refusal;
 - **calls,** each named by the run and answered once, also once the run
   has withdrawn it; **withdrawals;**
-- **commitments and observational recovery lookups,** with their actual
-  withdrawals (domain/recovery.md, sections 4 and 7);
 - **turns,** numbered from one, consecutive, each with its cumulative
   spend and the last message read;
 - **facts,** best effort (run.md, section 11), and **a long operation**,
@@ -72,10 +67,9 @@ What a host owes:
 - **Each call name is decided once.** A call asked again with the same
   name gets the answer the first had, from the host's record, never a
   second decision (run.md, section 5.2). Delivery's concrete name is the main
-  accepted completion sequence and assistant block position, scoped by the
-  explicit parent-issued effect scope retained for Resume. Fresh work uses a
-  never-used scope while the worker keeps its stable routing identity
-  (domain/recovery.md, section 2). Callback slabs, temporary tickets and raw
+  activation number, accepted completion sequence and assistant block position,
+  scoped by the same host logical run across restart. The parent never reuses an
+  activation number within that run. Callback slabs, temporary tickets and raw
   provider ids are not this identity (run.md, section 8.2). A host that cannot keep that promise
   (one without a durable record) must offer no host tool that writes.
 - **A delivery is never abandoned.** One in flight runs to its end, which
@@ -97,16 +91,6 @@ answer that is not the turns told, working traffic after the last word, a
 payload beyond the limits, or a message that does not decode. An exact
 refusal settling an already issued message remains receivable after the last
 word (section 4.2); it cannot create another answer or admit new work.
-
-Durable recovery extends these obligations as domain/recovery.md specifies.
-The parent issues explicit never-used effect scopes for fresh contexts and
-retains exact old scopes for resume, separately from stable worker routing.
-It commits a main's accepted executable completion before effects and answers
-observational old-record lookups without deciding an effect again. Persistence,
-agent remote acknowledgement and lower Send are independent actual rights;
-EOF or process kill cannot consume the parent's persistence/lookup terminal.
-Gone waits for those rights as well as existing Turn/call/process ownership.
-Old recovered delivery evidence never enters the fresh activation's proof ledger.
 
 ## 3. The channel
 
@@ -145,9 +129,7 @@ policy.
   clock pauses while the run waits for a message, having read every one
   sent to it; while a call waits for its answer, which the run's own
   deadline for it bounds; and while a turn waits for room to be sent
-  (section 6). An actual pending parent commitment pauses progress only until
-  its original finite deadline (domain/recovery.md, section 4); independent wall
-  and operation deadlines continue. It stretches to the span of a long operation the run
+  (section 6). It stretches to the span of a long operation the run
   reports, such as its checks, until the run says it is done. A separate
   bound covers wall time.
 - **Cancel, then kill.** A cancel goes down the channel first, and the
@@ -192,10 +174,10 @@ are `Started`, `Admitted`, `Called`, `Withdrawn`, `Turn`, `Waiting`, `Rejected`,
 `Exhausted`, `Told`, `Answered`, `Faulted`, local `Bounced`, agent
 `MessageBounced` and `Gone`.
 
-A stable `CallName` contains positive main completion sequence and assistant
-block position, scoped by explicit `Start.effect_scope`; the stable routing
-worker is separate (domain/recovery.md, section 2). The callback token is only a
-transport right. `Called` carries that scope, name, deadline, tool/effect and
+A stable `CallName` contains `Start.activation`, positive main completion
+sequence and assistant block position, scoped by `Start.logical_run`; the
+callback token is only a transport right. `Called` carries that scope, name,
+deadline, tool/effect and
 opaque arguments. The bounded call table keeps name/kind/deadline/withdrawal and
 parent/queued/sending stage. Its reservation survives until the reply's actual
 `Sent`/`Unsent`, or the parent terminal when the channel is already unavailable.
@@ -228,10 +210,7 @@ world's independent oracle observes the scripted agent's actual stop/receipt
 order to detect omitted, invented or misclassified interrupted evidence.
 
 `Gone` requires process exit, empty tree, EOF, no lower Send/Read/Signal right,
-no actual parent call/delivery right and no parent Turn commitment, commitment
-parent/send metadata or recovery-lookup parent/transport right
-(domain/recovery.md, sections 4 and 7). EOF, kill, withdrawal or last word cannot
-consume those independent parent rights. Calls and
+no actual parent call/delivery right and no parent turn commitment. Calls and
 turn metadata are independent of the finite supervision phase and survive
 Cancelled, Draining, Exiting, Terminating and Killing. A last word and the
 containment terminal are separate. Once the parent explicitly stops a run,
@@ -262,9 +241,7 @@ order. Do not advance the read watermark or manufacture a Turn, Waiting,
 Send terminal, acknowledgement or answer. Unknown, queued-only, already read
 or already refused names are Rules. Names are opaque, including zero and the
 maximum Token; numeric order conveys nothing. The parent promises uniqueness
-for the active effect scope. The kit retains the current activation's bounded
-issued/queued/read ledger; exact witnessed historical retry follows
-domain/recovery.md, section 3, rather than a historical name table.
+for the active logical run. The kit retains no historical name table.
 
 The pending lower Message Send retains its name until its actual Sent or
 Unsent, even if a read or refusal has already settled message credit. That
@@ -285,7 +262,7 @@ uses the existing Rules handling without restarting termination deadlines.
 
 The watchdog remembers the latest genuine Waiting claim. Queued or issued
 messages suspend its effective pause without erasing that claim. A valid actual
-Call, Long, main Turn or valid Commit work clears it; a new actual Waiting establishes it. If
+Call, Long or main Turn clears it; a new actual Waiting establishes it. If
 exact refusals settle every attempted wake, the prior genuine claim can pause
 again only with no queued or issued messages. A remaining accepted message
 keeps the watchdog running. No synthetic Waiting or read advance restores it;

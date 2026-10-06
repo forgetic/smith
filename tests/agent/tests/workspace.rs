@@ -179,7 +179,7 @@ fn no_workspace_host_answer_wait_park_and_actual_native_transcript_resume() {
         accounting(&first, &[first_prefix, second_prefix, third_prefix.clone()], &[17, 11, 3], 0, index == 1);
         no_workspace(&first, &settings);
         assert_eq!(first.host_submissions().len(), 1);
-        assert_eq!(first.host_submissions()[0].name, run::CallName { completion: 1, position: 0 });
+        assert_eq!(first.host_submissions()[0].name, run::CallName { activation: 1, completion: 1, position: 0 });
         assert_eq!(first.host_submissions()[0].input.bytes(), INPUT);
         assert_eq!(first.host_decisions(), 1);
         assert!(

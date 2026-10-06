@@ -15,10 +15,23 @@ fn call(world: &mut World, callback: u64, completion: u32, delivery: bool, deadl
     };
     world.up(Up::Call {
         call: Token::new(callback),
-        name: CallName { completion, position: 2 },
+        name: CallName { activation: 1, completion, position: 2 },
         deadline: Time::ZERO.saturating_add(Duration::from_secs(deadline)),
         ask,
     });
+}
+
+#[test]
+fn call_from_a_different_activation_is_a_channel_rule_fault() {
+    let mut world = World::new(50, limits());
+    world.live();
+    world.up(Up::Call {
+        call: Token::new(20),
+        name: CallName { activation: 2, completion: 1, position: 0 },
+        deadline: Time::ZERO.saturating_add(Duration::from_secs(100)),
+        ask: Ask::Host { tool: b"tool".as_slice().into(), effect: Effect::Read, body: b"{}".as_slice().into() },
+    });
+    faulted(&mut world, Fault::Rules);
 }
 fn reply(world: &mut World, callback: u64, response: Reply) {
     world.event(Event::Answer { agent: world.agent(), call: Token::new(callback), reply: response });
@@ -361,7 +374,7 @@ fn payloads_beyond_the_limits_break_the_rules() {
         },
         Up::Call {
             call: Token::new(20),
-            name: CallName { completion: 1, position: 1 },
+            name: CallName { activation: 1, completion: 1, position: 1 },
             deadline: Time::ZERO,
             ask: Ask::Deliver { fields: vec![0; 129].into_boxed_slice() },
         },
@@ -773,7 +786,7 @@ fn interrupted_landing_proof_survives_reply_terminal_and_matches_last_word() {
         world.sent();
         reply(&mut world, 20, Reply::Delivery(Delivery::Delivered(receipt.clone())));
         world.sent();
-        let name = CallName { completion: if mutation == 1 { 2 } else { 1 }, position: 2 };
+        let name = CallName { activation: 1, completion: if mutation == 1 { 2 } else { 1 }, position: 2 };
         let final_receipts = if mutation == 2 { receipts(b"invented") } else { receipt.clone() };
         last(
             &mut world,
@@ -794,7 +807,7 @@ fn interrupted_landing_proof_survives_reply_terminal_and_matches_last_word() {
     last(
         &mut world,
         RunResult::Delivered {
-            name: CallName { completion: 1, position: 2 },
+            name: CallName { activation: 1, completion: 1, position: 2 },
             receipts: receipt,
             stopped: RunFailure::Budget(smith_host_domain::Exhausted::Time),
         },
@@ -973,7 +986,7 @@ fn final_answers_cannot_abandon_parent_or_queued_delivery_terminals() {
             RunResult::Accepted { outcome: Box::new([]) },
             RunResult::Failed { failure: RunFailure::Cancelled },
             RunResult::Delivered {
-                name: CallName { completion: 1, position: 2 },
+                name: CallName { activation: 1, completion: 1, position: 2 },
                 receipts: receipts(b"landed"),
                 stopped: RunFailure::Budget(smith_host_domain::Exhausted::Time),
             },
@@ -1005,7 +1018,7 @@ fn final_answers_cannot_abandon_parent_or_queued_delivery_terminals() {
     last(
         &mut world,
         RunResult::Delivered {
-            name: CallName { completion: 1, position: 2 },
+            name: CallName { activation: 1, completion: 1, position: 2 },
             receipts: receipts(b"landed"),
             stopped: RunFailure::Budget(smith_host_domain::Exhausted::Time),
         },

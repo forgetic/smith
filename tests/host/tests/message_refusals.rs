@@ -263,7 +263,7 @@ fn actual_call_long_and_main_turn_invalidate_the_old_waiting_claim() {
             0 => {
                 world.up(Up::Call {
                     call: Token::new(40),
-                    name: CallName { completion: 1, position: 0 },
+                    name: CallName { activation: 1, completion: 1, position: 0 },
                     deadline: world.stage.env.now,
                     ask: Ask::Host { tool: Box::from(&b"tool"[..]), effect: Effect::Read, body: Box::new([]) },
                 });
@@ -354,7 +354,7 @@ fn full_calls_and_messages_keep_exact_output_room_and_every_real_parent_terminal
     for position in 0..bounds.calls {
         world.up(Up::Call {
             call: Token::new(100 + u64::from(position)),
-            name: CallName { completion: 1, position },
+            name: CallName { activation: 1, completion: 1, position },
             deadline: world.stage.env.now.saturating_add(Duration::from_secs(100)),
             ask: Ask::Host { tool: b"tool".as_slice().into(), effect: Effect::Read, body: Box::new([]) },
         });

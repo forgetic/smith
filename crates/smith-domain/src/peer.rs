@@ -26,6 +26,9 @@ use crate::translate::{self, DELIVER, FINISH, FIRST, Offered, SUB_AGENT, WAIT};
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Debug)]
 pub(crate) struct Peer {
+    /// Host-supplied activation used in every name made by this conversation.
+    /// Contract: domain/run.md, sections 3.2 and 8.2.
+    pub(crate) activation: u64,
     /// The run's token for the conversation, which is its session's opener.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -49,9 +52,16 @@ pub(crate) struct Peer {
 }
 
 impl Peer {
-    pub(crate) fn new(conversation: Token, account: u32, offered: Offered, limits: &session::Limits) -> Peer {
+    pub(crate) fn new(
+        conversation: Token,
+        activation: u64,
+        account: u32,
+        offered: Offered,
+        limits: &session::Limits,
+    ) -> Peer {
         Peer {
             conversation,
+            activation,
             account,
             session: None,
             offered,

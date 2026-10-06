@@ -1,7 +1,7 @@
 //! Original root Start, opaque host effect and cancellation over actual byte peers.
 //! Observations stay outside the domains: native continued arguments have explicit
 //! handwritten expectations; incoming host input remains byte exact.
-//! Contract: domain/client.md, sections 1, 4, 5 and 6; domain/run.md,
+//! Contract: scratch/client.md, sections 1, 4, 5 and 6; domain/run.md,
 //! sections 5.2, 10, 13 and 14; testing-strategy.md, sections 2.3 and 6.
 
 use skein_fake_llm_domain::api::{Finish, Line, Part, Query, Script, Turn};

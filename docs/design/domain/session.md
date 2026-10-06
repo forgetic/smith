@@ -45,16 +45,6 @@ What is still open is listed in section 11.
 
 ## 3. Turns and transcripts
 
-A settled Turn is not enough to recover a completion whose host effect ran
-before its results settled. Domain/recovery.md specifies the one pre-effect
-checkpoint, actual commit/withdrawal terminals and complete context/evidence
-envelope. Main retains one commitment right; children retain their existing
-host-tool/delivery/wait/finish prohibition. Historical assembly never emits a
-runtime Turn or prices old usage again. Ordinary no-call yield and park keep
-their existing path. Financial producer seals/journals, late-answer provenance
-and named-context coverage follow that document's sections 4–8.
-
-
 - **What a turn is:** one completion, its surrounding user messages, the
   provider's blocks in position, the calls with their provider ids,
   names and input as written, their results as concrete bytes, and what
@@ -65,14 +55,14 @@ and named-context coverage follow that document's sections 4–8.
   completion sequence and zero-based assistant block position, in addition to
   its live callback and temporary opener ticket. The sequence includes restored
   transcript history and advances once per accepted completion. Provider ids
-  may repeat in different turns. The composing root preserves this fixed origin
-  as the durable host call name under the explicit effect scope retained across
-  resume (domain/run.md, section 8.2; domain/recovery.md, section 2). A fresh
-  context begins sequence1 in a never-used parent-issued scope, independent
-  of its stable worker routing identity. Checked sequence overflow refuses the next completion's
-  effects before any tool or host submission. Resolving tickets changes neither
-  sequence nor position. Root restart and concrete answered-after-transcript
-  restoration use that same origin without re-executing the old effect.
+  may repeat in different turns. The composing root pairs this origin with the
+  host-supplied activation number as the durable host call name, scoped by the
+  same logical run across restart (run.md, section 8.2). Checked sequence overflow
+  refuses the next completion's effects before any tool or host submission.
+  Resolving tickets changes neither
+  sequence nor position. A later activation can reuse the sequence and position
+  without reusing the old host call name. An old host answer whose completion is
+  absent from the transcript appears as waking message text (run.md, section 6).
 - **Told as it ends.** Closing waits for actual terminal answers before
   telling the last turn, including answers that win a cancellation.
 - **Versioned.** Turns and transcripts are domain values with a version;
@@ -86,7 +76,9 @@ and named-context coverage follow that document's sections 4–8.
   turns; message and block bounds; roles and call and result ids; and no
   unresolved ticket. It must fit the message and byte limits with the
   waking prompt and room for a completion. Results the opener gives for
-  calls made after the last turn are restored before the waking prompt;
+  calls present in a yielded tail after the last turn are restored before the
+  waking prompt. An answered host call whose completion is absent from the
+  transcript appears in waking message text (run.md, section 6);
   an unanswered call in a yielded tail gets the same not-run result as an
   ordinary continuation.
 - **Refused transcripts.** Another version, endpoint or dialect, a

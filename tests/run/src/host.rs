@@ -410,6 +410,7 @@ impl Host {
                 out.push(Event::Start {
                     reply_to: ReplyTo::new(job),
                     worker: job,
+                    activation: 1,
                     charter,
                     workspace,
                     transcript: None,

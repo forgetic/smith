@@ -75,6 +75,9 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         worker: Token,
+        /// Host-supplied positive activation number, unique within `worker` across starts.
+        /// Contract: domain/run.md, sections 3.2 and 8.2; domain/host.md, section 2.
+        activation: u64,
         /// Host-supplied admission policy, validated before the run starts.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -960,6 +963,10 @@ pub enum Read {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Opening {
+    /// Host-supplied activation shared by this run's main and child sessions.
+    /// Contract: domain/run.md, sections 3.2 and 8.2.
+    pub activation: u64,
+
     /// Root-owned restore binding for main, None for every child.
     /// Contract: domain/run.md, sections 3 and 13.
     pub transcript: Option<Token>,

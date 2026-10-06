@@ -122,7 +122,7 @@ fn decoded_batch_reserves_refusal_cells_before_any_payload() {
         agents: false,
         wait: true,
     };
-    let mut peer = crate::peer::Peer::new(Token::new(17), 0, offered, &LIMITS.session);
+    let mut peer = crate::peer::Peer::new(Token::new(17), 1, 0, offered, &LIMITS.session);
     let completion = Completion {
         content: Box::new([
             Said::ToolCall {
@@ -292,6 +292,7 @@ impl Harness {
             }]),
             reply_to: ReplyTo::new(Token::new(call)),
             worker: Token::new(call),
+            activation: 1,
             charter,
             transcript: None,
         });
@@ -536,6 +537,7 @@ fn no_grant_fails_locally_and_exhaustion_reports_the_account() {
         workspace: Some(workspace()),
         reply_to: ReplyTo::new(Token::new(7)),
         worker: Token::new(7),
+        activation: 1,
         charter: ungranted,
         grants: Box::new([]),
         transcript: None,
@@ -664,6 +666,7 @@ fn an_unsafe_workspace_mount_refuses_start_before_discovery() {
         }]),
         reply_to: ReplyTo::new(Token::new(7)),
         worker: Token::new(7),
+        activation: 1,
         charter: charter(),
         workspace: Some(checkout),
         transcript: None,
@@ -704,6 +707,7 @@ fn an_opening_larger_than_a_session_holds_refuses_main_as_invalid() {
         }]),
         reply_to: ReplyTo::new(Token::new(7)),
         worker: Token::new(7),
+        activation: 1,
         charter: Charter { instructions: brief, ..charter() },
         transcript: None,
     });
@@ -1208,6 +1212,7 @@ fn convention_main(harness: &mut Harness, selected: Option<run::Conventions>) ->
     let emitted = harness.step(Event::Start {
         reply_to: ReplyTo::new(Token::new(77)),
         worker: Token::new(77),
+        activation: 1,
         charter,
         workspace: mounted,
         transcript: None,
@@ -1394,6 +1399,7 @@ fn invalid_conventions_are_refused_at_original_root_start_before_any_effect() {
                 workspace: Some(workspace()),
                 reply_to: ReplyTo::new(Token::new(77)),
                 worker: Token::new(77),
+                activation: 1,
                 charter: Charter { conventions: Some(conventions), ..charter() },
                 transcript: None,
                 grants: Box::new([]),
@@ -1464,6 +1470,7 @@ fn maximum_custom_guide_headings_obey_the_actual_session_receiving_limit_after_d
         let emitted = harness.step(Event::Start {
             reply_to: ReplyTo::new(Token::new(7)),
             worker: Token::new(7),
+            activation: 1,
             workspace: Some(Workspace {
                 directories: Box::new([
                     Directory {

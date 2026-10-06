@@ -103,6 +103,9 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         worker: Token,
+        /// Host-supplied positive number, unique for each activation of `worker`.
+        /// Contract: domain/run.md, sections 3.2 and 8.2; domain/host.md, section 2.
+        activation: u64,
         /// Host-supplied admission policy, validated before the run starts.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.

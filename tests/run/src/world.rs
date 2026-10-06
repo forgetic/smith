@@ -1399,7 +1399,14 @@ impl World {
             }
         }
         self.starts.get_mut(&worker).expect("a start is tracked").checks = checks;
-        self.run_stage.push(run::Event::Start { reply_to, worker, charter, workspace, transcript: None });
+        self.run_stage.push(run::Event::Start {
+            reply_to,
+            worker,
+            activation: 1,
+            charter,
+            workspace,
+            transcript: None,
+        });
     }
 
     /// Reconstruct one accepted completion's exact accounting notices in order.

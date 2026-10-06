@@ -1,9 +1,11 @@
 # Concrete session record codecs
 
+Scratch proposal, outside the current domain contract and 05s plan.
+
 The protocol owns the complete lossless VERSION2 Turn and Transcript byte
 representation. This contract specifies receiving bounds and ownership; it
 confers no execution authority and leaves semantic restore admission in the
-domain. Durable SavedHistory and recovery checkpoint codecs remain separate.
+domain.
 
 The sections below incorporate independently approved codec contract revision 2.
 Contract approval does not establish source implementation, integration or
@@ -43,7 +45,7 @@ pub fn preflight_turn(bytes: &[u8], limits: &Limits) -> Result<Footprint, Error>
 // The same four concrete functions named *_optional_transcript for Option<record::Transcript>.
 ```
 
-`Footprint.owned` includes one actual root value cell plus every owned allocation; heap excludes that root inline cell. Nothing is resolved, repriced or counted as a new accepted completion. Functions borrowing typed inputs do not clone them. Functions borrowing raw input return a wholly owned graph after successful preflight. Exact final encode owns one box and writes directly into its exact allocation. No callback/generic protocol/trait/function pointer/glob/JSON encoder is required. Every public item, field and variant gets state/ownership/receiving/error documentation citing domain/session.md§3/12, domain/recovery.md§9 and lib.md's bounded encoding rules.
+`Footprint.owned` includes one actual root value cell plus every owned allocation; heap excludes that root inline cell. Nothing is resolved, repriced or counted as a new accepted completion. Functions borrowing typed inputs do not clone them. Functions borrowing raw input return a wholly owned graph after successful preflight. Exact final encode owns one box and writes directly into its exact allocation. No callback/generic protocol/trait/function pointer/glob/JSON encoder is required. Every public item, field and variant gets state/ownership/receiving/error documentation citing domain/session.md§3/12 and lib.md's bounded encoding rules.
 
 Limits have no arbitrary generous default. `turn_bytes` caps a standalone Turn; `transcript_bytes` caps a Transcript and the complete optional wrapper when that API is used. Aggregate counters count all turns, all messages including after, all Blocks and all nested Part/Entry/Hit/u32 ambiguity-list cells. `entries` is their aggregate nested-array cap, not a count per individually small array. Every ordinary byte field obeys field_bytes; every Replay payload obeys replay_bytes. Both contribute to aggregate payload_bytes. owned_bytes bounds actual cells plus payload, including empty-cell-array costs. Caller protocol limits must be derived to admit the original maximum source world records; no smaller codec allowance silently replaces old Session receiving limits. Domain identity/shape/effect/budget admission is still independent.
 
@@ -218,11 +220,11 @@ Codec limits bound H and the actual root cell independently of encoded size; raw
 
 A max API bound may be computed from the independent actual count/payload caps with checked products and sums, but exact preflight/measure values govern each entry. No old V1 unused allowance is recycled as an unproved record budget. Full/one-short controls independently exercise encoded bytes, owned cells/payload, aggregate counts, per-field and replay caps while other dimensions have room. Meter invalid preflight at zero allocation; admitted maximal decode at raw+decoded; encode at typed+exact output; three-owner roundtrip at their sum; explicit drops must return every owned allocation. Include all nested array variants, complete Replay Some, empty wrappers, maximum caller-owned plaintext/result bytes and real root transit alongside the record codec.
 
-## 6. Domain and recovery boundaries deliberately retained
+## 6. Domain boundaries deliberately retained
 
 Codec success proves structural representation and receiving ownership only. Endpoint/dialect match, contiguous sequence, role/call-result pairing, one assistant per turn, yielded unresolved tails, Historical execution prohibition, waking prompt/reservation admission and semantic restore classification remain in current Session/root. Current session admission gives Version/Endpoint/Dialect/Malformed/Unresolved/TooLarge distinctly. Codec error maps only Version/Malformed/TooLarge at the protocol entrance; it does not classify endpoint mismatch, re-execute Owned/Delegated, reprice usage/spent or fabricate scopes/financial witnesses.
 
-All four historical Usage values, cumulative spent and its sticky spend_overflow are copied exactly. No repricing, sum comparison, settlement-order inference or monotonic spend constraint is added. Restore begins new activation accounting under current source rules. Current Turn contains no Stop, activation, effect_scope, financial journal, usage_overflow or acceptance/context witness; this codec must not synthesize any. domain/recovery.md§2/5/8–10 still requires separate concrete SavedHistory/checkpoint/decision/provenance/correction/input/financial codecs and one canonical renderer/schema extraction. They are not solved by full settled Transcript encoding. Root must never import this codec/renderer and introduce a domain→protocol dependency cycle; future lower provider-neutral schema extraction and the trusted PreparedRecovery seam remain separate approved source work.
+All four historical Usage values, cumulative spent and its sticky spend_overflow are copied exactly. No repricing, sum comparison, settlement-order inference or monotonic spend constraint is added. Restore begins new activation accounting under current source rules. Current Turn contains no Stop, activation, financial journal or usage_overflow; this codec must not synthesize any. Root must never import this codec/renderer and introduce a domain→protocol dependency cycle.
 
 Returned::Text replay Some has mandatory positive codec coverage. The current real adapter in `smith-protocol-llm/src/prompt.rs::result_text` still returns Unsupported before Client preparation for Some because shared ToolResult has no replay field. Preserve that negative exactly. No stripped result replay, fabricated shared support or successful real provider request is claimed from codec roundtrip. Text/Refusal/ToolCall replay that the real adapter supports must also retain exact phase/id/unknown fields and pass the actual Client positive path.
 
@@ -273,8 +275,7 @@ Default≤15s and fuzzy≤60s remain unchanged. Before assigning source, parent 
 2. The closed SMTR/version2/kind grammar above is adopted as a **new unshipped format**, based on scoped evidence that no authoritative older full record codec was found. All 250 legacy fixtures/default byte/API evidence remain unchanged; discovery of a genuinely shipped incompatible full grammar still requires review rather than a compatibility claim.
 3. Single borrowed actual `tools::Name::valid(&[u8]) -> bool` is reused by `Name::new`, preflight and typed measure. Name rules are construction invariants with meaningful existing and new positive/negative controls; no independent duplicate predicate or preflight Name allocation. Text/Refusal UTF-8 is an explicit new protocol construction rule following typed text sender contracts, not a claim that Domain already rejects every directly constructed invalid typed value. Returned::Text/binary/Opaque/Replay remain arbitrary bytes.
 4. Concrete caps/API/error priority and R1 representability rules are required. Every prospective actual graph/output allocation must pass checked count conversion/product and Layout/isize representability before allocation, in addition to u64 graph sums, encoded u32 and independent receiving caps. Semantic empty/inconsistent/unresolved values remain codec-positive and retain precise existing Domain refusal classes.
-5. ReplaySome is codec-positive and preserved fully; actual sharedClient Unsupported remains its unchanged negative. No metadata is silently stripped. Future Rust docs cite `domain/session.md` and `domain/recovery.md` explicitly, never bare recovery.md; Skein `lib.md` references are permitted.
+5. ReplaySome is codec-positive and preserved fully; actual sharedClient Unsupported remains its unchanged negative. No metadata is silently stripped. Future Rust docs cite `domain/session.md`; Skein `lib.md` references are permitted.
 
-SavedHistory/context/financial/provenance/correction codecs, a canonical recovery renderer, schema extraction, trusted PreparedRecovery/root pre-effect commit gates and genuine partial-history assembly remain separate work. Full settled Transcript encoding does not solve them.
 
 Independent exact source review, fixture and ownership evidence, integration and all workflow gates are required before implementation acceptance. Contract approval does not satisfy them.

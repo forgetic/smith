@@ -1,5 +1,7 @@
 # Shared LLM client boundary
 
+Scratch reference, outside the current domain contract.
+
 ## 1. Role and preparation
 
 Smith's `smith-protocol-llm` translates the root's provider-neutral conversation

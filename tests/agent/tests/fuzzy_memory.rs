@@ -390,6 +390,7 @@ impl Driver {
                 }]),
                 reply_to: ReplyTo::new(worker),
                 worker,
+                activation: self.workers,
                 charter: charter(brief),
                 transcript: None,
             });

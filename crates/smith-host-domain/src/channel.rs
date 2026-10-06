@@ -12,6 +12,9 @@ use skein_lib::{Duration, Time, Token};
 pub struct Start {
     /// Stable parent run identity across restart, uninterpreted here (domain/host.md, sections 2–7).
     pub logical_run: Token,
+    /// Positive parent-issued number unique for every activation of `logical_run`.
+    /// Contract: domain/host.md, sections 2 and 4.
+    pub activation: u64,
     /// Optional prepared workspace resolved by the lower process adapter (domain/host.md, sections 2–7).
     pub workspace: Option<Token>,
     /// Opaque charter at most `Limits::charter_bytes` (domain/host.md, sections 2–7).
@@ -57,6 +60,8 @@ pub struct Grant {
 /// Durable transcript-derived operation identity, separate from callback Token (domain/host.md, sections 2–7).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CallName {
+    /// Host-supplied activation of the logical run (domain/host.md, sections 2 and 4).
+    pub activation: u64,
     /// One-based accepted completion sequence, including restored V2 prefix (domain/host.md, sections 2–7).
     pub completion: u32,
     /// Zero-based assistant block ordinal; checked by the agent before effects (domain/host.md, sections 2–7).

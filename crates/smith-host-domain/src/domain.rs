@@ -94,6 +94,7 @@ pub(crate) struct Proof {
 pub(crate) struct Agent {
     client: Token,
     logical_run: Token,
+    activation: u64,
     phase: Phase,
     start: Option<Start>,
     process: Option<Token>,
@@ -435,9 +436,11 @@ fn spawn(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<R
     }
     let workspace = start.workspace;
     let logical_run = start.logical_run;
+    let activation = start.activation;
     let agent = Agent {
         client,
         logical_run,
+        activation,
         phase: Phase::Spawning,
         start: Some(start),
         process: None,
@@ -485,6 +488,9 @@ fn spawn(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<R
 }
 
 fn valid_start(start: &Start, limits: &Limits) -> Option<Invalid> {
+    if start.activation == 0 {
+        return Some(Invalid::Limits);
+    }
     if !within(&start.charter, limits.charter_bytes) {
         return Some(Invalid::Charter);
     }
@@ -1039,7 +1045,7 @@ fn valid_record(agent: &Agent, message: &Up, env: &Env<Limits>) -> bool {
         Up::Admitted => !agent.admitted && !agent.last_word,
         Up::Answer { answer } => valid_answer(agent, answer, limits),
         Up::Call { call, name, deadline, ask } => {
-            if !agent.admitted || name.completion == 0 || *deadline < env.now {
+            if !agent.admitted || name.activation != agent.activation || name.completion == 0 || *deadline < env.now {
                 return false;
             }
             let kind = match ask {

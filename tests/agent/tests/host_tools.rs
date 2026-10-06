@@ -67,7 +67,7 @@ fn submission(at: u64, attempt: u32, owner: u64) -> Submission {
     Submission {
         worker: Token::new(91),
         relay: run::RelayName { owner: Token::new(owner), attempt },
-        name: run::CallName { completion: 4, position: 2 },
+        name: run::CallName { activation: 1, completion: 4, position: 2 },
         tool: b"opaque".as_slice().into(),
         effect: run::HostEffect::Write,
         input: run::HostInput::attested(b" {\"unchanged\":true} ".as_slice().into()).expect("attested fixture"),

@@ -9,7 +9,7 @@
 //! Exactly one backend is selected before construction: wire worlds retain no
 //! unused typed provider, provider queues or provider-call ledger.
 //! Entrances are original Start, bounded drive, parent message/cancel and wall
-//! injection (domain/client.md, sections 1, 4 and 5; programming-model.md, section 9).
+//! injection (scratch/client.md, sections 1, 4 and 5; programming-model.md, section 9).
 //! The separate parent-delivery entrance exposes whole actual submissions and
 //! retains their existing flight/snapshot until an actual outside terminal is
 //! scheduled. It never chooses that parent's durable decision or fabricates a
@@ -364,17 +364,17 @@ pub struct CompletionObservation {
 #[derive(Clone, Copy, Debug)]
 pub enum CompletionTerminal {
     /// All four exact accepted provider counters.
-    /// Contract: domain/run.md, section 9; domain/client.md, section 4.
+    /// Contract: domain/run.md, section 9; scratch/client.md, section 4.
     Completed(
         /// SDK usage shape copied at the genuine terminal.
-        /// Contract: domain/client.md, section 4.
+        /// Contract: scratch/client.md, section 4.
         skein_llm::Usage,
     ),
 
-    /// Genuine provider failure. Contract: domain/client.md, section 4.
+    /// Genuine provider failure. Contract: scratch/client.md, section 4.
     Failed,
 
-    /// Genuine settled cancellation. Contract: domain/client.md, section 5.
+    /// Genuine settled cancellation. Contract: scratch/client.md, section 5.
     Cancelled,
 }
 
@@ -382,7 +382,7 @@ pub enum CompletionTerminal {
 /// drives every boundary to settlement, then checks its ledgers, referee and facts.
 /// The selected backend owns only its corresponding provider state and queues.
 ///
-/// Scripted-world contract: domain/run.md, sections 13 and 14; domain/client.md,
+/// Scripted-world contract: domain/run.md, sections 13 and 14; scratch/client.md,
 /// sections 1 and 5; testing-strategy.md, section 7.
 #[derive(Debug)]
 pub struct World {
@@ -484,6 +484,7 @@ impl World {
         stage.push(Event::Start {
             reply_to: ReplyTo::new(Token::new(1)),
             worker: Token::new(1),
+            activation: 1,
             charter,
             workspace,
             grants: Box::new([Grant {
@@ -567,7 +568,7 @@ impl World {
     /// charter's resume flag selects it, and root/session admission precedes
     /// any provider effect. Success queues the original Start; its one Answer
     /// and every actual lower Closed remain owed while the caller drives it.
-    /// Contract: domain/client.md, sections 1, 3, 5 and 6; domain/run.md,
+    /// Contract: scratch/client.md, sections 1, 3, 5 and 6; domain/run.md,
     /// sections 3, 6.2, 10 and 14; domain/session.md, section 3.
     #[must_use]
     pub fn with_wire(
@@ -609,7 +610,7 @@ impl World {
 
     /// Caller-selected mounts and actual Client/byte-peer scripts, using the same
     /// receiving and settling paths as `with_wire`; no unused fixture root is seeded.
-    /// Contract: domain/run.md, sections 3.2 and 14; domain/client.md, sections 1 and 5.
+    /// Contract: domain/run.md, sections 3.2 and 14; scratch/client.md, sections 1 and 5.
     #[must_use]
     pub fn with_workspace_wire(
         settings: Settings,
@@ -665,7 +666,7 @@ impl World {
     /// peer. Only the selected native backend exists; real receiving bounds and
     /// all pending lower terminals apply through the one host Answer.
     /// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14;
-    /// domain/client.md, sections 1, 3 and 5.
+    /// scratch/client.md, sections 1, 3 and 5.
     #[must_use]
     pub fn with_workspace_wire_charter(
         settings: Settings,
@@ -721,7 +722,7 @@ impl World {
     /// Set the externally injected wall clock before the next iteration.
     /// Monotonic deadlines keep running independently; the same wall is handed
     /// to root, shared Client, scripted domain and byte peer.
-    /// Contract: domain/client.md, section 1; programming-model.md, section 9.
+    /// Contract: scratch/client.md, section 1; programming-model.md, section 9.
     pub fn wall_at(&mut self, wall: Wall) {
         self.stage.env.wall = wall;
         match &mut self.backend {
@@ -779,7 +780,7 @@ impl World {
 
     /// Queue a real parent cancellation for the admitted original run. Its
     /// Start reply and all actual lower terminals remain owed through close.
-    /// Contract: domain/run.md, sections 10 and 13; domain/client.md, section 5.
+    /// Contract: domain/run.md, sections 10 and 13; scratch/client.md, section 5.
     pub fn cancel_run(&mut self) {
         assert!(self.admitted.is_some(), "parent cancellation follows actual admission");
         self.schedule.send(self.now, Delivery::Cancel);
@@ -793,7 +794,7 @@ impl World {
     }
 
     /// Actual physical-binding observations; typed-only worlds expose none.
-    /// Retired records keep no Client or credential. Contract: domain/client.md,
+    /// Retired records keep no Client or credential. Contract: scratch/client.md,
     /// section 5; testing-strategy.md, sections 2.3 and 6.
     #[must_use]
     pub fn wire_bindings(&self) -> &[wire::Binding] {
@@ -1445,7 +1446,7 @@ impl World {
     /// Observe the original owner's real terminal before forwarding its event.
     /// Native usage comes directly from the matching SDK binding; typed usage
     /// is the exact callback value. No event or completion body is cloned.
-    /// Contract: domain/client.md, section 4; domain/run.md, sections 9 and 13.
+    /// Contract: scratch/client.md, section 4; domain/run.md, sections 9 and 13.
     fn observe_completion_terminal(&mut self, owner: Token, index: usize, event: &Event) {
         let outcome = match event {
             Event::Completed { completion, .. } => {
@@ -1931,7 +1932,7 @@ fn copy_answer(answer: &run::Answer) -> run::Answer {
 impl World {
     /// Bounded actual start/terminal chronology from real Complete and callbacks.
     /// Native exact SDK usage is also retained on each physical wire Binding.
-    /// Contract: domain/run.md, sections 9 and 14; domain/client.md, section 4.
+    /// Contract: domain/run.md, sections 9 and 14; scratch/client.md, section 4.
     #[must_use]
     pub fn completions(&self) -> &[CompletionObservation] {
         &self.completions

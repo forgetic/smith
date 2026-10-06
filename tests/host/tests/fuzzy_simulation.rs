@@ -31,7 +31,7 @@ fn random_worlds_settle_and_reach_every_ending() {
                 if seed.is_multiple_of(3) && ![2, 3, 4, 7, 8, 10].contains(&fate) {
                     world.up(Up::Call {
                         call: Token::new(20),
-                        name: CallName { completion: 1, position: 2 },
+                        name: CallName { activation: 1, completion: 1, position: 2 },
                         deadline: world.stage.env.now.saturating_add(Duration::from_secs(5)),
                         ask: Ask::Deliver { fields: Box::new([]) },
                     });
@@ -39,7 +39,7 @@ fn random_worlds_settle_and_reach_every_ending() {
                 } else {
                     world.up(Up::Call {
                         call: Token::new(20),
-                        name: CallName { completion: 1, position: 2 },
+                        name: CallName { activation: 1, completion: 1, position: 2 },
                         deadline: world.stage.env.now.saturating_add(Duration::from_secs(5)),
                         ask: Ask::Host { tool: Box::from(&b"tool"[..]), effect: Effect::Read, body: Box::new([]) },
                     });

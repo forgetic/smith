@@ -16,6 +16,7 @@ fn bytes(length: u64) -> Box<[u8]> {
 fn maximum_start(limits: Limits) -> Start {
     Start {
         logical_run: Token::new(7),
+        activation: 1,
         workspace: (limits.directories > 0).then_some(Token::new(8)),
         charter: bytes(limits.charter_bytes),
         transcript: Some(bytes(limits.transcript_bytes)),
@@ -181,7 +182,7 @@ fn maximum_v2_starts_and_full_queued_replies_fit_every_slot() {
                     owner,
                     Up::Call {
                         call: Token::new(20 + u64::from(position)),
-                        name: CallName { completion: 1, position },
+                        name: CallName { activation: 1, completion: 1, position },
                         deadline: Time::ZERO.saturating_add(Duration::from_secs(50)),
                         ask: Ask::Host {
                             tool: Box::from(&b"tool"[..]),
@@ -311,7 +312,7 @@ fn proof_replacement_clones_and_shutdown_rights_stay_priced() {
             owner,
             Up::Call {
                 call: Token::new(20),
-                name: CallName { completion, position: 0 },
+                name: CallName { activation: 1, completion, position: 0 },
                 deadline: Time::ZERO.saturating_add(Duration::from_secs(5)),
                 ask: Ask::Deliver { fields: bytes(limits.call_bytes) },
             },
@@ -332,7 +333,7 @@ fn proof_replacement_clones_and_shutdown_rights_stay_priced() {
         owner,
         Up::Call {
             call: Token::new(21),
-            name: CallName { completion: 3, position: 0 },
+            name: CallName { activation: 1, completion: 3, position: 0 },
             deadline: Time::ZERO.saturating_add(Duration::from_secs(5)),
             ask: Ask::Deliver { fields: bytes(limits.call_bytes) },
         },

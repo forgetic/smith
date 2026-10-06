@@ -3,7 +3,7 @@
 //! message/block origin and complete ID/name/input; IDs in other historical turns
 //! confer no authority. Entrances observe calls, submissions, terminals and the
 //! exact locally paired prompt; the judge never reads private domain state.
-//! Contract: domain/run.md, sections 5.2 and 13; domain/client.md, sections 3–5;
+//! Contract: domain/run.md, sections 5.2 and 13; scratch/client.md, sections 3–5;
 //! testing-strategy.md, section 7.
 
 use skein_lib::{Time, Token};
@@ -189,7 +189,7 @@ impl History {
     /// Other historical turns may reuse the same provider ID. This single-call
     /// story retains one origin and three caller-bounded byte fields.
     /// Contract: domain/run.md, sections 5.2 and 13; domain/session.md, section 3;
-    /// domain/client.md, sections 3–5.
+    /// scratch/client.md, sections 3–5.
     ///
     /// # Errors
     /// Rejects a second provider host-tool call in this single-operation story.
@@ -259,7 +259,7 @@ impl History {
     /// by exactly one matching result in its paired User message. Older turns
     /// with the same provider ID do not count. No feedback closes a live relay.
     /// Contract: domain/run.md, sections 5.2 and 13; domain/session.md, section 3;
-    /// domain/client.md, sections 3–5.
+    /// scratch/client.md, sections 3–5.
     ///
     /// # Errors
     /// Rejects changed/missing call origins, duplicate local call IDs,

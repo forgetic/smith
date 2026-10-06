@@ -131,7 +131,14 @@ impl Harness {
 
     fn start_workspace(&mut self, call: u64, charter: Charter, workspace: Option<Workspace>) -> Box<[Request]> {
         let reply_to = ReplyTo::new(Token::new(call));
-        self.step(Event::Start { reply_to, worker: Token::new(call), charter, workspace, transcript: None })
+        self.step(Event::Start {
+            reply_to,
+            worker: Token::new(call),
+            activation: 1,
+            charter,
+            workspace,
+            transcript: None,
+        })
     }
 
     /// Starts a run of the test charter for call `call`, which is admitted:
@@ -309,6 +316,7 @@ fn an_admitted_run_reads_its_checkout_then_opens_main_with_the_whole_budget() {
     let mut found = Found::with_capacity(1);
     found.guides.push(Guide { repository: 0, text: bytes(b"Run the tests."), whole: true }).expect("room");
     let expected = Opening {
+        activation: 1,
         host_tools: charter().grants.host_tools,
         deliver: false,
         llm: charter().llm,
@@ -686,7 +694,7 @@ fn finish(conversation: Token, call: u64, outcome: Declared) -> Event {
 /// The same, with the call due by `deadline`.
 fn finish_by(conversation: Token, call: u64, outcome: Declared, deadline: Time) -> Event {
     Event::Delegated {
-        name: crate::CallName { completion: 1, position: 0 },
+        name: crate::CallName { activation: 1, completion: 1, position: 0 },
         conversation,
         call: Token::new(call),
         ask: Ask::Finish { outcome },
@@ -856,7 +864,7 @@ fn a_change_runs_each_repositorys_checks_then_is_pushed_and_accepted() {
             worker: Token::new(1),
             owner,
             change: change(),
-            name: crate::CallName { completion: 1, position: 0 },
+            name: crate::CallName { activation: 1, completion: 1, position: 0 },
             deadline: h.env.now.saturating_add(LIMITS.delivery_timeout).min(EXPIRY)
         }]
     );
@@ -1281,7 +1289,7 @@ fn ask(
 ) -> Event {
     let ask = Ask::SubAgent { brief: bytes(b"Find the parser."), families: wanted, llm, share };
     Event::Delegated {
-        name: crate::CallName { completion: 1, position: 0 },
+        name: crate::CallName { activation: 1, completion: 1, position: 0 },
         conversation,
         call: Token::new(call),
         ask,
@@ -1295,7 +1303,7 @@ fn ask_by(conversation: Token, call: u64, deadline: Time) -> Event {
     let ask =
         Ask::SubAgent { brief: bytes(b"Find it."), families: families(true, false, false), llm: None, share: None };
     Event::Delegated {
-        name: crate::CallName { completion: 1, position: 0 },
+        name: crate::CallName { activation: 1, completion: 1, position: 0 },
         conversation,
         call: Token::new(call),
         ask,
@@ -1795,7 +1803,7 @@ fn mid_ask(conversation: Token, completion: u32) -> Event {
     Event::Delegated {
         conversation,
         call: Token::new(50),
-        name: crate::CallName { completion, position: 2 },
+        name: crate::CallName { activation: 1, completion, position: 2 },
         ask: Ask::Deliver { change: Change { fields: Box::new([]) } },
         deadline: EXPIRY,
     }
@@ -1807,7 +1815,7 @@ fn submit_mid(harness: &mut Harness, conversation: Token) -> Token {
     let owner = *owner;
     let requests = harness.step(Event::Checked { owner, ran: ran(0, b"passed") });
     let [Request::Deliver { name, deadline, .. }] = &*requests else { panic!("actual bounded submission") };
-    assert_eq!(*name, crate::CallName { completion: 3, position: 2 });
+    assert_eq!(*name, crate::CallName { activation: 1, completion: 3, position: 2 });
     assert_eq!(*deadline, harness.env.now.saturating_add(LIMITS.delivery_timeout).min(EXPIRY));
     owner
 }
@@ -1836,7 +1844,7 @@ fn mid_report_landing_continues_but_an_interrupted_landing_has_its_own_answer() 
             assert_eq!(
                 answer,
                 Answer::Delivered {
-                    name: crate::CallName { completion: 3, position: 2 },
+                    name: crate::CallName { activation: 1, completion: 3, position: 2 },
                     receipts: receipts(),
                     stopped: Failure::Cancelled,
                     spent: Spend::ZERO,
@@ -1915,7 +1923,7 @@ fn time_and_spend_shutdown_keep_an_already_submitted_mid_landing() {
         assert_eq!(
             answer,
             Answer::Delivered {
-                name: crate::CallName { completion: 3, position: 2 },
+                name: crate::CallName { activation: 1, completion: 3, position: 2 },
                 receipts: receipts(),
                 stopped: expected,
                 spent: expected_spend,
@@ -2007,7 +2015,7 @@ fn host_ask(conversation: Token, call: u64, deadline: Time) -> Event {
     Event::Delegated {
         conversation,
         call: Token::new(call),
-        name: crate::CallName { completion: 7, position: 3 },
+        name: crate::CallName { activation: 1, completion: 7, position: 3 },
         ask: Ask::Host {
             tool: bytes(b"comment"),
             effect: crate::HostEffect::Read,
@@ -2023,7 +2031,7 @@ fn host_submission(emitted: &[Request]) -> crate::RelayName {
         panic!("one opaque relay, got {emitted:?}");
     };
     assert_eq!(*worker, Token::new(71));
-    assert_eq!(*name, crate::CallName { completion: 7, position: 3 });
+    assert_eq!(*name, crate::CallName { activation: 1, completion: 7, position: 3 });
     assert_eq!(tool.as_ref(), b"comment");
     assert_eq!(*effect, crate::HostEffect::Read);
     assert_eq!(input.bytes(), br#" {"whole":{"opaque":[true,1]},"verbatim":"\u0041"} "#);
@@ -2198,7 +2206,7 @@ fn undeclared_host_and_effect_mismatch_are_refused_before_relay() {
         let event = Event::Delegated {
             conversation,
             call: Token::new(101),
-            name: crate::CallName { completion: 1, position: 0 },
+            name: crate::CallName { activation: 1, completion: 1, position: 0 },
             ask: Ask::Host {
                 tool: bytes(tool),
                 effect,
@@ -2224,7 +2232,7 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
     let mut h = Harness::new(LIMITS);
     let (run, conversation) = h.running(1, 9);
     let call = Token::new(20);
-    let made = crate::CallName { completion: 1, position: 0 };
+    let made = crate::CallName { activation: 1, completion: 1, position: 0 };
     assert_eq!(
         &*h.step(Event::Delegated {
             conversation,
@@ -2277,7 +2285,7 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
     let wait = Event::Delegated {
         conversation,
         call,
-        name: crate::CallName { completion: 4, position: 0 },
+        name: crate::CallName { activation: 1, completion: 4, position: 0 },
         ask: Ask::Wait,
         deadline: Time::from_nanos(u64::MAX),
     };
@@ -2334,7 +2342,7 @@ fn bounded_messages_and_input_at_idle_deadline_preserve_existing_fifo() {
         &*h.step(Event::Delegated {
             conversation,
             call: Token::new(20),
-            name: crate::CallName { completion: 1, position: 0 },
+            name: crate::CallName { activation: 1, completion: 1, position: 0 },
             ask: Ask::Wait,
             deadline: Time::from_nanos(u64::MAX),
         }),
@@ -2717,7 +2725,7 @@ fn reaching_the_scalar_cap_settles_wait_and_fails_only_after_yield() {
     let wait = Event::Delegated {
         conversation: main,
         call: Token::new(91),
-        name: crate::CallName { completion: 1, position: 0 },
+        name: crate::CallName { activation: 1, completion: 1, position: 0 },
         ask: Ask::Wait,
         deadline: EXPIRY,
     };
@@ -2860,7 +2868,7 @@ fn hard_overflow_retains_actual_final_and_interrupted_mid_delivery_evidence() {
     assert_eq!(
         answered(harness.step(Event::Ended { conversation: main, end: End::PriceOverflow, spend: actual })).1,
         Answer::Delivered {
-            name: crate::CallName { completion: 3, position: 2 },
+            name: crate::CallName { activation: 1, completion: 3, position: 2 },
             receipts: receipts(),
             stopped: Failure::PriceOverflow,
             spent,

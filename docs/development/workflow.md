@@ -194,3 +194,10 @@ remain; seventeen focused controls supplement them. The parallel gate passed
 589 focused / 3.262 seconds and eleven fuzzy / 3.804 seconds; formatting and
 all-target Clippy passed. This validates the temporary checkout; original-main
 acceptance and shared SDK gates remain open.
+
+05s4 CALL ACTIVATION was measured serially on 2026-10-06 with the `measure`
+commands in section 2 on an idle machine: 591 focused tests passed in
+9.488 seconds and eleven fuzzy tests passed in 9.102 seconds, with no skips.
+The run world adds the answered-host-call crash story, and the host world adds
+the wrong-activation rule control. The default 15-second and fuzzy 60-second
+budgets are unchanged.

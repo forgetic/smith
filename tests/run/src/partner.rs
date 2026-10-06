@@ -718,7 +718,7 @@ impl Partner {
                 call,
                 ask,
                 deadline,
-                name: smith_domain_run::CallName { completion: talk.spent.turns, position: pending },
+                name: smith_domain_run::CallName { activation: 1, completion: talk.spent.turns, position: pending },
             }));
             pending += 1;
         }

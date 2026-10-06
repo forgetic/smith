@@ -77,6 +77,7 @@ pub(crate) fn spec(opening: Opening, receiving: Budget) -> Option<(Spec, Offered
         deliver,
         families,
         wait,
+        activation: _,
         transcript: _,
     } = opening;
     let authority = authority(workspace, tools)?;
