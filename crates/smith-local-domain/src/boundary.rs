@@ -7,6 +7,51 @@ use alloc::boxed::Box;
 use skein_lib::Token;
 use smith_domain::{self as agent, run, tools};
 
+/// One durable decision for an agent delivery call name.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DeliveryRecord {
+    /// Transcript-derived name decided once by this host.
+    pub name: run::CallName,
+    /// Terminal to replay when the agent asks again.
+    pub delivery: run::Delivery,
+    /// Latest turn told before this decision; a later durable turn contains its answer.
+    pub after_turn: u32,
+    /// Whether a later turn carrying the answer became durable.
+    pub told: bool,
+}
+
+impl DeliveryRecord {
+    /// Return the first saved terminal only for its original call name.
+    #[must_use]
+    pub fn answer(&self, name: run::CallName) -> Option<run::Delivery> {
+        if self.name == name { Some(self.delivery.clone()) } else { None }
+    }
+}
+
+/// A typed operation on one configured git working tree.
+#[derive(Debug)]
+pub enum GitOp {
+    /// Discover changes and merge-conflicted paths.
+    Status,
+    /// Check original conflict paths for markers still present.
+    Markers { paths: Box<[Box<[u8]>]> },
+    /// Commit the checked tree with the configured result message.
+    Commit { message: Box<[u8]> },
+}
+
+/// One terminal for a typed git operation.
+#[derive(Debug)]
+pub enum GitResult {
+    /// Current working-tree state and any original merge conflicts.
+    Status { changed: bool, merging: Option<Box<[Box<[u8]>]>> },
+    /// First original conflict file still holding a marker, if any.
+    Markers { first: Option<Box<[u8]>> },
+    /// The new commit identity to show the agent and person.
+    Committed { receipt: Box<[u8]> },
+    /// Git operation failed with a bounded diagnostic tail.
+    Failed { reason: run::DeliveryReason, diagnostic: Box<run::Diagnostic> },
+}
+
 /// Chat metadata kept beside durable turns.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ChatState {
@@ -94,11 +139,17 @@ pub enum Event {
     /// The terminal closed; finish outstanding work, then leave.
     Closed,
     /// Terminal for Load, including a possibly empty saved chat.
-    Loaded { state: Option<ChatState>, transcript: Option<agent::Transcript> },
+    Loaded { state: Option<ChatState>, transcript: Option<agent::Transcript>, delivery: Option<Box<DeliveryRecord>> },
     /// Terminal for `SaveState`; names and activation are now durable.
     StateSaved,
     /// Terminal for `SaveTurn`; the named turn is now durable.
     TurnSaved { number: u32 },
+    /// Terminal for a saved delivery decision.
+    DeliverySaved { name: run::CallName },
+    /// Terminal for one workspace git operation.
+    Git { owner: Token, result: GitResult },
+    /// Terminal for a plain directory's changed-state query.
+    PlainStatus { owner: Token, changed: bool },
     /// Terminal for any outstanding store request that failed.
     StoreFailed { reason: StoreFailure },
     /// Terminal for one Credential request.
@@ -121,6 +172,12 @@ pub enum Request {
     SaveState { state: ChatState, fresh: bool },
     /// Append one numbered concrete turn and its read fence atomically; answered by `TurnSaved` or `StoreFailed`.
     SaveTurn { number: u32, read: Option<Token>, turn: agent::Turn },
+    /// Save a delivery's terminal before the child hears it.
+    SaveDelivery { record: Box<DeliveryRecord> },
+    /// Operate on one git directory within the delivery deadline.
+    Git { owner: Token, directory: u32, op: GitOp, deadline: skein_lib::Time },
+    /// Compare a plain directory with its start snapshot.
+    PlainStatus { owner: Token, directory: u32, deadline: skein_lib::Time },
     /// Fetch or refresh one account; answered by `Credential` or `NoCredential`.
     Credential { account: u32 },
     /// Forward one agent IO or LLM request unchanged.

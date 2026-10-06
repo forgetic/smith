@@ -37,6 +37,8 @@ fn a_local_domain_with_every_line_slot_full_stays_within_its_worst_case() {
         budget: smith_agent_world::BUDGET,
         conventions: None,
         contract: Contract::Report(outcome::TextSpec { max: 2048, fields: Box::new([]) }),
+        deliver: None,
+        title_field: b"title".as_slice().into(),
         waiting: Duration::from_secs(30),
         resume: true,
         accounts: Box::new([0]),

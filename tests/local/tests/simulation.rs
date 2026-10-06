@@ -24,6 +24,119 @@ fn a_chat_reads_and_edits_files_in_a_workspace_directory() {
 }
 
 #[test]
+fn a_change_to_a_plain_directory_keeps_its_files() {
+    let mut world = World::with_plain_change(19);
+    world.line(b"Make the answer 43");
+    world.drive(400);
+    let (content, _) = world.disk().load(1, b"src/lib.rs", 4096).expect("plain file is kept");
+    assert_eq!(content, b"pub fn answer() -> u32 { 43 }\n");
+    assert!(world.shown().iter().any(|text| text.as_ref() == b"Change delivered"));
+}
+
+#[test]
+fn a_delivery_with_no_changes_answers_nothing_and_the_llm_is_told() {
+    let mut world = World::with_plain_nothing(192);
+    world.line(b"Deliver the current state");
+    world.drive(400);
+    assert!(matches!(world.delivery(), Some(smith_domain::run::Delivery::Nothing)));
+    assert!(world.tool_results().iter().any(|text| text.windows(b"nothing".len()).any(|part| part == b"nothing")));
+}
+
+#[test]
+fn a_marker_left_in_a_conflicted_file_refuses_the_delivery_naming_it() {
+    let mut world = World::with_git_marker(193);
+    world.line(b"Deliver the merge");
+    world.drive(400);
+    let Some(smith_domain::run::Delivery::Refused(refusal)) = world.delivery() else {
+        panic!("marker refusal recorded")
+    };
+    assert_eq!(refusal.marker().expect("named marker").path(), b"src/lib.rs");
+    assert!(
+        world.tool_results().iter().any(|text| text.windows(b"src/lib.rs".len()).any(|part| part == b"src/lib.rs"))
+    );
+}
+
+#[test]
+fn a_commit_failing_in_the_second_directory_names_it_and_stops() {
+    let mut world = World::with_second_commit_failure(194);
+    world.line(b"Deliver both repositories");
+    world.drive(500);
+    let Some(smith_domain::run::Delivery::Failed(failure)) = world.delivery() else { panic!("failure recorded") };
+    assert_eq!(failure.directory, 1);
+    assert_eq!(failure.reason, smith_domain::run::DeliveryReason::Broken);
+    assert_eq!(failure.diagnostic.output(), b"simulated git commit failure");
+    assert!(world.commit_message().is_some(), "first directory committed before the second failed");
+}
+
+#[test]
+fn a_cancel_during_a_delivery_waits_for_it_and_still_answers_cancelled() {
+    let mut world = World::with_mid_report(195);
+    world.slow_git();
+    world.line(b"Make the answer 43");
+    assert!(!world.drive(500), "delivery pauses at its first git terminal");
+    world.interrupt();
+    assert!(!world.drive_to_cancelled(100), "cancel waits for the delivery terminal");
+    for _ in 0..4 {
+        if !world.release_git() {
+            break;
+        }
+        if world.drive_to_cancelled(500) {
+            break;
+        }
+    }
+    assert!(world.commit_message().is_some(), "the in-flight delivery completed");
+    assert!(
+        world.shown().iter().any(|text| text.as_ref() == b"Run cancelled"),
+        "shown: {:?}, delivery: {:?}",
+        world.shown(),
+        world.delivery()
+    );
+}
+
+#[test]
+fn a_change_is_checked_and_committed_in_place() {
+    let mut world = World::with_git_change(20);
+    world.line(b"Make the answer 43");
+    world.drive(500);
+    let (content, _) = world.disk().load(1, b"src/lib.rs", 4096).expect("committed source remains present");
+    assert_eq!(content, b"pub fn answer() -> u32 { 43 }\n");
+    assert_eq!(world.commit_message(), Some(b"Make the answer 43\n\nThe answer is 43 now.".as_slice()));
+    assert!(world.shown().iter().any(|text| text.as_ref() == b"Change delivered"));
+}
+
+#[test]
+fn a_crash_after_a_commit_before_its_turn_is_saved_tells_the_next_run_what_was_committed() {
+    let mut first = World::with_git_change(201);
+    first.line(b"Make the answer 43");
+    assert!(first.drive_to_cut(600, Cut::AfterSaveDelivery), "the commit and its decision become durable");
+    assert_eq!(first.commit_message(), Some(b"Make the answer 43\n\nThe answer is 43 now.".as_slice()));
+    let store = first.into_store();
+    let mut second = World::with_git_change_store(202, store);
+    second.line(b"What happened before the crash?");
+    second.drive(600);
+    assert!(second.prompt_texts().iter().any(|text| {
+        text.windows(b"Earlier delivery committed:".len()).any(|part| part == b"Earlier delivery committed:")
+    }));
+    assert!(second.prompt_texts().iter().any(|text| text.windows(b"commit 2".len()).any(|part| part == b"commit 2")));
+}
+
+#[test]
+fn a_delivery_asked_again_under_its_name_gets_its_first_answer() {
+    let mut world = World::with_git_change(203);
+    world.line(b"Make the answer 43");
+    world.drive(500);
+    let commit = world.commit_message().expect("one real commit").to_vec();
+    let store = world.into_store();
+    let name = store.delivery_name().expect("one saved delivery name");
+    let first = store.delivery_answer(name).expect("first answer remains saved");
+    assert!(matches!(first, smith_domain::run::Delivery::Delivered(_)));
+    assert_eq!(store.delivery_answer(name), Some(first));
+    assert_eq!(store.delivery_answer(smith_domain::run::CallName { activation: name.activation + 1, ..name }), None);
+    let resumed = World::with_git_change_store(204, store);
+    assert_eq!(resumed.commit_message(), Some(commit.as_slice()), "replay did not make a second commit");
+}
+
+#[test]
 fn a_chat_with_no_workspace_waits_parks_and_resumes_on_the_next_invocation() {
     let mut first = World::new(21);
     first.line(b"Hello");

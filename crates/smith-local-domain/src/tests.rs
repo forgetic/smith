@@ -40,6 +40,8 @@ fn config() -> Config {
         budget: run::Budget { turns: 8, spend: 1, time: Duration::from_secs(60) },
         conventions: Some(run::Conventions { guide: Box::from(&b"GUIDE.md"[..]), checks: Box::from(&b"check"[..]) }),
         contract: Contract::Report(outcome::TextSpec { max: 256, fields: Box::new([]) }),
+        deliver: None,
+        title_field: Box::from(&b"title"[..]),
         waiting: Duration::from_secs(30),
         resume: true,
         accounts: Box::new([7]),

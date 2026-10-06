@@ -1,0 +1,193 @@
+//! One in-place delivery, in workspace order (domain/host.md, section 8;
+//! domain/run.md, sections 8.2–8.4). It keeps the child call's name, bounded
+//! message and receipts while IO decides git state. It never reads a tree or
+//! knows git syntax. The parent routes one terminal at a time and saves the
+//! final answer before returning it to the child.
+
+use alloc::boxed::Box;
+use skein_lib::{List, Time, Token};
+use smith_domain::run::{self, outcome};
+
+use crate::DeliveryRecord;
+
+/// Return the first durable answer for a repeated call name.
+pub(crate) fn cached(record: Option<&DeliveryRecord>, name: run::CallName) -> Option<run::Delivery> {
+    match record {
+        Some(record) => record.answer(name),
+        None => None,
+    }
+}
+
+/// Operation awaited from the caller, or the durable store.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Step {
+    Plain,
+    Status,
+    Markers,
+    Commit,
+}
+
+/// One child delivery call and the directories already made durable.
+#[derive(Debug)]
+pub(crate) struct InPlace {
+    pub(crate) name: run::CallName,
+    pub(crate) owner: Token,
+    pub(crate) deadline: Time,
+    pub(crate) next: u32,
+    pub(crate) receipts: List<run::Receipt>,
+    pub(crate) message: Box<[u8]>,
+    pub(crate) step: Step,
+}
+
+impl InPlace {
+    pub(crate) fn new(name: run::CallName, owner: Token, deadline: Time, message: Box<[u8]>) -> Self {
+        Self {
+            name,
+            owner,
+            deadline,
+            next: 0,
+            receipts: List::with_capacity(run::MAX_DIRECTORIES),
+            message,
+            step: Step::Status,
+        }
+    }
+
+    pub(crate) fn receipt(&mut self, directory: u32, text: Box<[u8]>) {
+        let receipt = run::Receipt::new(directory, text).expect("bounded host receipt");
+        self.receipts.push(receipt).expect("admitted directory count fits receipts");
+    }
+
+    pub(crate) fn result(self) -> run::Delivery {
+        let receipts = self.receipts.into_boxed();
+        if receipts.is_empty() {
+            run::Delivery::Nothing
+        } else {
+            run::Delivery::Delivered(run::Delivered::new(receipts).expect("ordered unique writable directories"))
+        }
+    }
+}
+
+/// Render the host's configured title first, then all other declared fields
+/// in their result order. The run already bounded each field and their total.
+#[must_use]
+pub fn commit_message(change: &outcome::Change, title_field: &[u8], rules: &[outcome::FieldRule]) -> Option<Box<[u8]>> {
+    let mut title = None;
+    let mut size = 0_usize;
+    for field in &change.fields {
+        if field.name.as_ref() == title_field {
+            title = Some(&field.value);
+        }
+        size = size.checked_add(field.value.len())?.checked_add(2)?;
+    }
+    let title = title?;
+    if title.is_empty() {
+        return None;
+    }
+    let cap = u32::try_from(size).ok()?;
+    let mut bytes = List::with_capacity(cap);
+    append(&mut bytes, title);
+    for rule in rules {
+        if rule.name.as_ref() == title_field {
+            continue;
+        }
+        for field in &change.fields {
+            if field.name == rule.name {
+                append(&mut bytes, b"\n\n");
+                append(&mut bytes, &field.value);
+            }
+        }
+    }
+    for field in &change.fields {
+        let mut required = false;
+        for rule in rules {
+            if field.name == rule.name {
+                required = true;
+            }
+        }
+        if field.name.as_ref() != title_field && !required {
+            append(&mut bytes, b"\n\n");
+            append(&mut bytes, &field.value);
+        }
+    }
+    Some(bytes.into_boxed())
+}
+
+fn append(out: &mut List<u8>, bytes: &[u8]) {
+    for byte in bytes {
+        out.push(*byte).expect("precomputed message bound");
+    }
+}
+
+/// Add an untold landed delivery to the next waking person message. The
+/// configured message bound keeps this usable even with many receipts.
+pub(crate) fn waking_text(record: Option<&DeliveryRecord>, line: Box<[u8]>, max: u32) -> Box<[u8]> {
+    let Some(record) = record else { return line };
+    if record.told {
+        return line;
+    }
+    let delivered = match &record.delivery {
+        run::Delivery::Delivered(delivered) => delivered,
+        run::Delivery::Nothing | run::Delivery::Refused(_) | run::Delivery::Failed(_) | run::Delivery::Stale => {
+            return line;
+        }
+    };
+    let prefix = b"Earlier delivery committed: ";
+    let cap = usize::try_from(max).expect("u32 fits usize");
+    let notice_cap = cap.saturating_sub(line.len().saturating_add(1));
+    if notice_cap < prefix.len() {
+        return line;
+    }
+    let mut bytes = List::with_capacity(max);
+    for byte in prefix {
+        if usize::try_from(bytes.len()).expect("bounded message") < notice_cap {
+            bytes.push(*byte).expect("bounded message");
+        }
+    }
+    for receipt in delivered.receipts() {
+        for byte in b"; ".iter().chain(receipt.text()) {
+            if usize::try_from(bytes.len()).expect("bounded message") < notice_cap {
+                let shown = if byte.is_ascii_graphic() || *byte == b' ' { *byte } else { b'?' };
+                bytes.push(shown).expect("bounded message");
+            }
+        }
+    }
+    for byte in b"\n".iter().chain(line.iter()) {
+        if usize::try_from(bytes.len()).expect("bounded message") < cap {
+            bytes.push(*byte).expect("bounded message");
+        }
+    }
+    bytes.into_boxed()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cached, commit_message};
+    use crate::DeliveryRecord;
+    use smith_domain::run::outcome::{Change, Field, FieldRule};
+    use smith_domain::run::{CallName, Delivery};
+
+    #[test]
+    fn the_configured_title_precedes_other_result_fields() {
+        let change = Change {
+            fields: Box::new([
+                Field { name: b"body".as_slice().into(), value: b"Second".as_slice().into() },
+                Field { name: b"title".as_slice().into(), value: b"First".as_slice().into() },
+                Field { name: b"context".as_slice().into(), value: b"Third".as_slice().into() },
+            ]),
+        };
+        let rules = [
+            FieldRule { name: b"title".as_slice().into(), max: 32 },
+            FieldRule { name: b"body".as_slice().into(), max: 32 },
+        ];
+        assert_eq!(commit_message(&change, b"title", &rules).as_deref(), Some(b"First\n\nSecond\n\nThird".as_slice()));
+        assert_eq!(commit_message(&change, b"missing", &rules), None);
+    }
+
+    #[test]
+    fn a_delivery_asked_again_under_its_name_gets_its_first_answer() {
+        let name = CallName { activation: 2, completion: 3, position: 1 };
+        let record = DeliveryRecord { name, delivery: Delivery::Nothing, after_turn: 2, told: false };
+        assert_eq!(cached(Some(&record), name), Some(Delivery::Nothing));
+        assert_eq!(cached(Some(&record), CallName { activation: 2, completion: 4, position: 1 }), None);
+    }
+}

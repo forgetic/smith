@@ -7,9 +7,10 @@ use core::mem;
 use skein_lib::{Env, List, Queue, ReplyTo, Time, Token};
 use smith_domain as agent;
 
-use crate::boundary::{AgentIo, ChatState, Event, ExitStatus, Request};
+use crate::boundary::{AgentIo, ChatState, DeliveryRecord, Event, ExitStatus, GitOp, GitResult, Request};
 use crate::chat::{Chat, Phase};
 use crate::credentials::Grants;
+use crate::delivery::{InPlace, Step, commit_message};
 use crate::person::Line;
 use crate::turns::Turns;
 use crate::{Config, Fact, Invalid, Limits, charter};
@@ -28,6 +29,11 @@ pub struct Domain {
     agent_out: Queue<agent::Request>,
     chat: Chat,
     transcript: Option<agent::Transcript>,
+    record: Option<DeliveryRecord>,
+    delivery: Option<InPlace>,
+    saving: Option<DeliveryRecord>,
+    delivery_owner: Option<Token>,
+    last_turn: u32,
     raw_lines: Queue<Box<[u8]>>,
     line: Option<Line>,
     grants: Grants,
@@ -53,6 +59,11 @@ impl Domain {
             agent_out: Queue::with_capacity(agent::max_out(&limits.agent)),
             chat: Chat::new(),
             transcript: None,
+            record: None,
+            delivery: None,
+            saving: None,
+            delivery_owner: None,
+            last_turn: 0,
             raw_lines: Queue::with_capacity(limits.lines),
             line: None,
             grants: Grants::new(limits.agent.accounts),
@@ -116,9 +127,12 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
         Event::Line { text } => receive_line(domain, env, text, out),
         Event::Interrupt => interrupt(domain, env, out),
         Event::Closed => closed(domain, out),
-        Event::Loaded { state, transcript } => loaded(domain, env, state, transcript, out),
+        Event::Loaded { state, transcript, delivery } => loaded(domain, env, state, transcript, delivery, out),
         Event::StateSaved => state_saved(domain, env, out),
         Event::TurnSaved { number } => turn_saved(domain, number, out),
+        Event::DeliverySaved { name } => delivery_saved(domain, env, name),
+        Event::Git { owner, result } => git_result(domain, env, owner, result, out),
+        Event::PlainStatus { owner, changed } => plain_status(domain, env, owner, changed, out),
         Event::StoreFailed { reason: _ } => store_failed(domain, env, out),
         Event::Credential { grant } => credential(domain, env, grant, out),
         Event::NoCredential { account: _, reason: _ } => no_credential(domain, env, out),
@@ -237,16 +251,22 @@ fn stop_names(domain: &mut Domain, out: &mut Queue<Request>) {
     out.push(Request::Exit { status: ExitStatus::Failed });
 }
 
+#[expect(clippy::manual_map, reason = "strict domain code uses an exhaustive match instead of a closure")]
 fn loaded(
     domain: &mut Domain,
     env: &Env<Limits>,
     state: Option<ChatState>,
     transcript: Option<agent::Transcript>,
+    delivery: Option<Box<DeliveryRecord>>,
     out: &mut Queue<Request>,
 ) {
     assert!(domain.chat.phase == Phase::Loading && domain.chat.load_requested, "Load has one terminal");
     domain.chat.state = state.unwrap_or(ChatState { activation: 0, next_message: 0, read: None });
     domain.transcript = transcript;
+    domain.record = match delivery {
+        Some(record) => Some(*record),
+        None => None,
+    };
     domain.chat.phase = Phase::Idle;
     domain.chat.load_requested = false;
     if domain.chat.closed {
@@ -319,6 +339,7 @@ fn maybe_start(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
     let grants = mem::replace(&mut domain.grants.values, List::with_capacity(env.limits.agent.accounts)).into_boxed();
     let history = if domain.config.resume { domain.transcript.take() } else { None };
     domain.wall_deadline = Some(env.now.saturating_add(domain.config.budget.time));
+    domain.last_turn = 0;
     agent::step(
         &mut domain.agent,
         &agent_env(env),
@@ -340,10 +361,11 @@ fn maybe_start(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
 fn send_line(domain: &mut Domain, env: &Env<Limits>) {
     let Some(run) = domain.run else { return };
     let Some(line) = domain.line.take() else { return };
+    let text = crate::delivery::waking_text(domain.record.as_ref(), line.text, env.limits.agent.run.message_bytes);
     agent::step(
         &mut domain.agent,
         &agent_env(env),
-        agent::Event::Message { run, name: line.name, text: line.text },
+        agent::Event::Message { run, name: line.name, text },
         &mut domain.agent_out,
     );
     observe(domain, Fact::Message { name: line.name });
@@ -355,6 +377,11 @@ fn turn_saved(domain: &mut Domain, number: u32, out: &mut Queue<Request>) {
     }
     let pending = domain.turns.unsaved.pop().expect("TurnSaved answers a pending SaveTurn");
     assert_eq!(number, pending, "turns become durable in order");
+    if let Some(record) = &mut domain.record
+        && number > record.after_turn
+    {
+        record.told = true;
+    }
     if domain.turns.unsaved.is_empty() {
         finish_answer(domain, out);
     }
@@ -394,6 +421,24 @@ fn store_failed(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>
     domain.wall_deadline = None;
     domain.turns.unsaved = Queue::with_capacity(env.limits.unsaved);
     out.push(Request::Show { text: Box::from(&b"The chat could not be saved"[..]) });
+    if let Some(record) = domain.saving.take() {
+        let owner = domain.delivery_owner.take().expect("delivery save retains its child owner");
+        match &record.delivery {
+            agent::run::Delivery::Delivered(_) => out.push(Request::Show {
+                text: Box::from(&b"A delivery committed, but its answer could not be saved"[..]),
+            }),
+            agent::run::Delivery::Nothing
+            | agent::run::Delivery::Refused(_)
+            | agent::run::Delivery::Failed(_)
+            | agent::run::Delivery::Stale => {}
+        }
+        agent::step(
+            &mut domain.agent,
+            &agent_env(env),
+            agent::Event::Delivered { owner, delivery: record.delivery },
+            &mut domain.agent_out,
+        );
+    }
     if let Some(run) = domain.run {
         agent::step(&mut domain.agent, &agent_env(env), agent::Event::Cancel { run }, &mut domain.agent_out);
         domain.chat.phase = Phase::Ending;
@@ -417,6 +462,7 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
                 assert!(domain.turns.unsaved.room() > 0, "store backpressure bounds unsaved turns");
                 let shown = crate::person::turn_text(&turn, env.limits.show_bytes);
                 domain.turns.unsaved.push(number);
+                domain.last_turn = number;
                 domain.chat.state.read = read;
                 observe(domain, Fact::Turn { number });
                 out.push(Request::SaveTurn { number, read, turn });
@@ -441,8 +487,11 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
             agent::Request::Exhausted { account: _, retry_after: _ } => {
                 out.push(Request::Show { text: Box::from(&b"A model account is exhausted"[..]) });
             }
-            agent::Request::HostCall { .. } | agent::Request::WithdrawHost { .. } | agent::Request::Deliver { .. } => {
-                unreachable!("local chat grants no host tools or delivery");
+            agent::Request::HostCall { .. } | agent::Request::WithdrawHost { .. } => {
+                unreachable!("local chat grants no host tools");
+            }
+            agent::Request::Deliver { name, owner, change, deadline, .. } => {
+                begin_delivery(domain, env, name, owner, change, deadline, out);
             }
             agent::Request::Cancel { owner } => {
                 if !held_completion(domain, owner) {
@@ -525,4 +574,252 @@ fn observe(domain: &mut Domain, fact: Fact) {
     if domain.facts.try_push(fact).is_err() {
         domain.facts_lost = domain.facts_lost.saturating_add(1);
     }
+}
+
+fn begin_delivery(
+    domain: &mut Domain,
+    env: &Env<Limits>,
+    name: agent::run::CallName,
+    owner: Token,
+    change: agent::run::outcome::Change,
+    deadline: Time,
+    out: &mut Queue<Request>,
+) {
+    assert!(domain.delivery.is_none() && domain.saving.is_none(), "one delivery in flight");
+    if let Some(delivery) = crate::delivery::cached(domain.record.as_ref(), name) {
+        agent::step(
+            &mut domain.agent,
+            &agent_env(env),
+            agent::Event::Delivered { owner, delivery },
+            &mut domain.agent_out,
+        );
+        return;
+    }
+    let rules = match &domain.config.contract {
+        crate::Contract::Change(spec) => &spec.fields,
+        crate::Contract::Report(_) => match &domain.config.deliver {
+            Some(spec) => &spec.fields,
+            None => unreachable!("a Report delivery has a separate grant"),
+        },
+    };
+    let Some(message) = commit_message(&change, &domain.config.title_field, rules) else {
+        save_delivery(
+            domain,
+            name,
+            owner,
+            agent::run::Delivery::Failed(agent::run::DeliveryFailure::new(0, agent::run::DeliveryReason::TooLarge)),
+            out,
+        );
+        return;
+    };
+    let in_place = InPlace::new(name, owner, deadline, message);
+    advance_delivery(domain, env, in_place, out);
+}
+
+fn advance_delivery(domain: &mut Domain, env: &Env<Limits>, mut in_place: InPlace, out: &mut Queue<Request>) {
+    let workspace = domain.config.workspace.as_ref().expect("admitted delivery has a workspace");
+    let start = usize::try_from(in_place.next).expect("bounded directory position");
+    for (index, directory) in workspace.directories.iter().enumerate().skip(start) {
+        if !directory.writable {
+            continue;
+        }
+        let position = u32::try_from(index).expect("admitted directory count fits u32");
+        if env.now >= in_place.deadline {
+            save_delivery(
+                domain,
+                in_place.name,
+                in_place.owner,
+                agent::run::Delivery::Failed(agent::run::DeliveryFailure::new(
+                    position,
+                    agent::run::DeliveryReason::TimedOut,
+                )),
+                out,
+            );
+            return;
+        }
+        in_place.next = position;
+        let request = if directory.git {
+            in_place.step = Step::Status;
+            Request::Git { owner: in_place.owner, directory: position, op: GitOp::Status, deadline: in_place.deadline }
+        } else {
+            in_place.step = Step::Plain;
+            Request::PlainStatus { owner: in_place.owner, directory: position, deadline: in_place.deadline }
+        };
+        domain.delivery = Some(in_place);
+        out.push(request);
+        return;
+    }
+    let name = in_place.name;
+    let owner = in_place.owner;
+    let result = in_place.result();
+    save_delivery(domain, name, owner, result, out);
+}
+
+fn plain_status(domain: &mut Domain, env: &Env<Limits>, owner: Token, changed: bool, out: &mut Queue<Request>) {
+    let mut in_place = domain.delivery.take().expect("plain status answers one delivery operation");
+    assert!(in_place.owner == owner && in_place.step == Step::Plain, "plain status matches the active request");
+    if changed {
+        in_place.receipt(in_place.next, Box::from(&b"files kept"[..]));
+    }
+    in_place.next = in_place.next.checked_add(1).expect("admitted directory position");
+    advance_delivery(domain, env, in_place, out);
+}
+
+fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitResult, out: &mut Queue<Request>) {
+    let mut in_place = domain.delivery.take().expect("git terminal answers one delivery operation");
+    assert_eq!(in_place.owner, owner, "git terminal matches active delivery");
+    let directory = in_place.next;
+    match in_place.step {
+        Step::Status => match result {
+            GitResult::Status { changed: false, merging: None } => {
+                in_place.next = directory.checked_add(1).expect("admitted directory position");
+                advance_delivery(domain, env, in_place, out);
+            }
+            GitResult::Status { changed: _, merging: Some(paths) } => {
+                let within_count =
+                    paths.len() <= usize::try_from(env.limits.agent.run.conflicts).expect("u32 fits usize");
+                let mut within_bytes = true;
+                for path in &paths {
+                    if path.len() > usize::try_from(env.limits.agent.run.conflict_path_bytes).expect("u32 fits usize") {
+                        within_bytes = false;
+                    }
+                }
+                if !within_count || !within_bytes {
+                    delivery_failure(
+                        domain,
+                        in_place.name,
+                        owner,
+                        directory,
+                        agent::run::DeliveryReason::TooLarge,
+                        out,
+                    );
+                    return;
+                }
+                in_place.step = Step::Markers;
+                out.push(Request::Git { owner, directory, op: GitOp::Markers { paths }, deadline: in_place.deadline });
+                domain.delivery = Some(in_place);
+            }
+            GitResult::Status { changed: true, merging: None } => commit_request(domain, in_place, out),
+            GitResult::Failed { reason, diagnostic } => {
+                delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
+            }
+            GitResult::Markers { .. } | GitResult::Committed { .. } => unreachable!("status awaits a status terminal"),
+        },
+        Step::Markers => match result {
+            GitResult::Markers { first: None } => commit_request(domain, in_place, out),
+            GitResult::Markers { first: Some(path) } => {
+                let Some(marker) = agent::run::Marker::new(directory, path) else {
+                    delivery_failure(
+                        domain,
+                        in_place.name,
+                        owner,
+                        directory,
+                        agent::run::DeliveryReason::TooLarge,
+                        out,
+                    );
+                    return;
+                };
+                let refusal =
+                    agent::run::DeliveryRefusal::new(Some(marker), Box::from(&b"conflict markers remain"[..]))
+                        .expect("bounded host explanation");
+                save_delivery(domain, in_place.name, owner, agent::run::Delivery::Refused(refusal), out);
+            }
+            GitResult::Failed { reason, diagnostic } => {
+                delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
+            }
+            GitResult::Status { .. } | GitResult::Committed { .. } => unreachable!("markers await a marker terminal"),
+        },
+        Step::Commit => match result {
+            GitResult::Committed { receipt } => {
+                if receipt.is_empty() || receipt.len() > agent::run::Receipt::CAPACITY {
+                    delivery_failure(
+                        domain,
+                        in_place.name,
+                        owner,
+                        directory,
+                        agent::run::DeliveryReason::TooLarge,
+                        out,
+                    );
+                    return;
+                }
+                in_place.receipt(directory, receipt);
+                in_place.next = directory.checked_add(1).expect("admitted directory position");
+                advance_delivery(domain, env, in_place, out);
+            }
+            GitResult::Failed { reason, diagnostic } => {
+                delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
+            }
+            GitResult::Status { .. } | GitResult::Markers { .. } => unreachable!("commit awaits a commit terminal"),
+        },
+        Step::Plain => unreachable!("git terminal cannot answer a plain status"),
+    }
+}
+
+fn commit_request(domain: &mut Domain, mut in_place: InPlace, out: &mut Queue<Request>) {
+    in_place.step = Step::Commit;
+    out.push(Request::Git {
+        owner: in_place.owner,
+        directory: in_place.next,
+        op: GitOp::Commit { message: in_place.message.clone() },
+        deadline: in_place.deadline,
+    });
+    domain.delivery = Some(in_place);
+}
+
+fn delivery_failure(
+    domain: &mut Domain,
+    name: agent::run::CallName,
+    owner: Token,
+    directory: u32,
+    reason: agent::run::DeliveryReason,
+    out: &mut Queue<Request>,
+) {
+    delivery_failed(domain, name, owner, directory, reason, &agent::run::Diagnostic::empty(), out);
+}
+
+fn delivery_failed(
+    domain: &mut Domain,
+    name: agent::run::CallName,
+    owner: Token,
+    directory: u32,
+    reason: agent::run::DeliveryReason,
+    diagnostic: &agent::run::Diagnostic,
+    out: &mut Queue<Request>,
+) {
+    save_delivery(
+        domain,
+        name,
+        owner,
+        agent::run::Delivery::Failed(agent::run::DeliveryFailure { directory, reason, diagnostic: *diagnostic }),
+        out,
+    );
+}
+
+fn save_delivery(
+    domain: &mut Domain,
+    name: agent::run::CallName,
+    owner: Token,
+    delivery: agent::run::Delivery,
+    out: &mut Queue<Request>,
+) {
+    let record = DeliveryRecord { name, delivery, after_turn: domain.last_turn, told: false };
+    assert!(domain.saving.is_none(), "one delivery store operation in flight");
+    domain.saving = Some(record.clone());
+    domain.delivery_owner = Some(owner);
+    domain.delivery = None;
+    out.push(Request::SaveDelivery { record: Box::new(record) });
+}
+
+fn delivery_saved(domain: &mut Domain, env: &Env<Limits>, name: agent::run::CallName) {
+    let record = domain.saving.take().expect("DeliverySaved answers one SaveDelivery");
+    assert_eq!(record.name, name, "delivery store terminal names the decision");
+    let owner = domain.delivery_owner.take().expect("saved delivery retains child owner");
+    domain.record = Some(record.clone());
+    observe(domain, Fact::DeliveryReturned { name });
+    agent::step(
+        &mut domain.agent,
+        &agent_env(env),
+        agent::Event::Delivered { owner, delivery: record.delivery },
+        &mut domain.agent_out,
+    );
 }

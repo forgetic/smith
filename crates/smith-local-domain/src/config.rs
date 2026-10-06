@@ -35,6 +35,10 @@ pub struct Config {
     pub conventions: Option<run::Conventions>,
     /// Result form; a report is the usual choice.
     pub contract: Contract,
+    /// Separately granted checked mid-run delivery, if configured.
+    pub deliver: Option<outcome::ChangeSpec>,
+    /// Required change field used as the first commit-message paragraph.
+    pub title_field: Box<[u8]>,
     /// Duration a waiting run stays live before parking.
     pub waiting: skein_lib::Duration,
     /// Whether a saved transcript is supplied on start.
@@ -60,6 +64,8 @@ pub enum Invalid {
     Endpoint,
     /// The agent cannot fit the chosen limits.
     Limits,
+    /// A configured delivery has no bounded title field.
+    Contract,
 }
 
 impl Config {
@@ -70,6 +76,27 @@ impl Config {
         }
         if self.instructions.len() > usize::try_from(limits.text_bytes).expect("u32 fits usize") {
             return Err(Invalid::Text);
+        }
+        if self.title_field.is_empty()
+            || self.title_field.len() > usize::try_from(limits.text_bytes).expect("u32 fits usize")
+        {
+            return Err(Invalid::Text);
+        }
+        if limits.line_bytes > limits.agent.run.message_bytes {
+            return Err(Invalid::Limits);
+        }
+        match &self.contract {
+            Contract::Change(spec) => {
+                if !has_title(spec, &self.title_field) {
+                    return Err(Invalid::Contract);
+                }
+            }
+            Contract::Report(_) => {}
+        }
+        if let Some(spec) = &self.deliver
+            && !has_title(spec, &self.title_field)
+        {
+            return Err(Invalid::Contract);
         }
         let mut brief_bytes = 0_u64;
         for section in &self.brief.sections {
@@ -128,6 +155,15 @@ impl Config {
     }
 }
 
+fn has_title(spec: &outcome::ChangeSpec, title: &[u8]) -> bool {
+    for field in &spec.fields {
+        if field.name.as_ref() == title && field.max > 0 {
+            return true;
+        }
+    }
+    false
+}
+
 /// Translate local choices into the agent's charter for one start.
 #[must_use]
 pub fn charter(config: &Config) -> charter::Charter {
@@ -164,7 +200,7 @@ pub fn charter(config: &Config) -> charter::Charter {
         conventions: config.conventions.clone(),
         grants: charter::Grants {
             wait: true,
-            deliver: None,
+            deliver: config.deliver.clone(),
             tools: charter::Tools { inspect: workspace.is_some(), modify: writable, shell: workspace.is_some() },
             agents: false,
             host_tools: Box::new([]),

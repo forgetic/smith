@@ -3,14 +3,19 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use skein_fake_checkout::{Checkout, Exit as FakeExit, Program};
+use skein_fake_checkout::git::Remote;
+use skein_fake_checkout::{Checkout, Exit as FakeExit, Program, git};
 use skein_fake_llm_domain as provider;
 use skein_lib::{Duration, Env, Queue, ReplyTo, Time, Token, Wall};
 use skein_world::domain::{Referee, Trace};
 use smith_agent_world::{self as agent_world, checkout_io, translate};
 use smith_domain::{self as agent, run, tools};
-use smith_local_domain::{self as local, AgentIo, ChatState, Contract, Event, ExitStatus, Request, StoreFailure};
+use smith_local_domain::{
+    self as local, AgentIo, ChatState, Contract, DeliveryRecord, Event, ExitStatus, GitOp, GitResult, Request,
+    StoreFailure,
+};
 
+use crate::git::History;
 use crate::referee::{Meeting, Seen};
 
 /// Typed fake transcript store, movable across independent invocations.
@@ -19,9 +24,24 @@ pub struct Store {
     state: Option<ChatState>,
     turns: Vec<agent::Turn>,
     history_override: Option<agent::Transcript>,
+    delivery: Option<DeliveryRecord>,
+    disk: Option<Checkout>,
+    history: Option<History>,
+    git_head: Option<u64>,
 }
 
 impl Store {
+    /// Replay the first durable terminal for the same delivery call name.
+    #[must_use]
+    pub fn delivery_answer(&self, name: run::CallName) -> Option<run::Delivery> {
+        self.delivery.as_ref()?.answer(name)
+    }
+
+    /// The last durable delivery call name.
+    #[must_use]
+    pub fn delivery_name(&self) -> Option<run::CallName> {
+        Some(self.delivery.as_ref()?.name)
+    }
     fn history(&self) -> Option<agent::Transcript> {
         if let Some(history) = &self.history_override {
             return Some(history.clone());
@@ -75,6 +95,8 @@ pub enum Cut {
     BeforeSaveTurn(u32),
     /// A numbered turn is durable and its terminal reached the domain.
     AfterTurnSaved(u32),
+    /// A commit and its delivery record are durable, but its child terminal is lost.
+    AfterSaveDelivery,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -83,6 +105,18 @@ enum Goal {
     Parked,
     Cut,
     Cancelled,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Scenario {
+    Chat,
+    Workspace,
+    PlainChange,
+    PlainNothing,
+    GitChange,
+    GitMarker,
+    SecondFails,
+    MidReport,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -114,6 +148,9 @@ pub struct World {
     provider_env: Env<provider::Config>,
     provider_out: Queue<provider::Request>,
     disk: Checkout,
+    disk_start: skein_fake_checkout::git::Tree,
+    history: Option<History>,
+    git_head: Option<u64>,
     pending: BTreeMap<Token, (tools::Grants, Box<[agent::llm::Served]>)>,
     cancelled: BTreeSet<Token>,
     events: VecDeque<Event>,
@@ -123,10 +160,14 @@ pub struct World {
     exit: Option<ExitStatus>,
     completions: u32,
     prompt_assistants: Vec<usize>,
+    prompt_texts: Vec<Vec<u8>>,
+    tool_results: Vec<Vec<u8>>,
     activation_turns: u32,
     cut: Option<Cut>,
     slow_store: bool,
     delayed_turns: VecDeque<u32>,
+    slow_git: bool,
+    held_git: VecDeque<(Token, GitResult)>,
     first_failure: FirstFailure,
     credential_requests: u32,
     referee: Referee<Meeting>,
@@ -146,7 +187,7 @@ impl World {
     /// Same chat with no observation capacity; domain behavior must agree.
     #[must_use]
     pub fn without_facts(seed: u64) -> World {
-        let mut world = Self::with_capacity(seed, Store::default(), true, 2, 0, false);
+        let mut world = Self::with_capacity(seed, Store::default(), true, 2, 0, Scenario::Chat);
         world.collect_facts = false;
         world
     }
@@ -154,7 +195,7 @@ impl World {
     /// A one-turn unsaved window for store-pressure stories.
     #[must_use]
     pub fn tight_unsaved(seed: u64) -> World {
-        Self::with_capacity(seed, Store::default(), true, 1, 64, false)
+        Self::with_capacity(seed, Store::default(), true, 1, 64, Scenario::Chat)
     }
 
     /// A fresh local domain over an existing durable fake store.
@@ -170,13 +211,81 @@ impl World {
     }
 
     fn with_resume(seed: u64, store: Store, resume: bool) -> World {
-        Self::with_capacity(seed, store, resume, 2, 64, false)
+        Self::with_capacity(seed, store, resume, 2, 64, Scenario::Chat)
     }
 
     /// A writable plain directory with a source file and contained test command.
     #[must_use]
     pub fn with_workspace(seed: u64) -> World {
-        Self::with_capacity(seed, Store::default(), true, 2, 64, true)
+        Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::Workspace)
+    }
+
+    /// A writable plain directory under a Change contract.
+    #[must_use]
+    pub fn with_plain_change(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::PlainChange)
+    }
+
+    /// A change declaration over an untouched plain directory.
+    #[must_use]
+    pub fn with_plain_nothing(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::PlainNothing)
+    }
+
+    /// A writable git checkout under a Change contract.
+    #[must_use]
+    pub fn with_git_change(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::GitChange)
+    }
+
+    /// A merge with one unresolved marker in its original conflict path.
+    #[must_use]
+    pub fn with_git_marker(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::GitMarker)
+    }
+
+    /// Two ordered git mounts with a commit fault in the second.
+    #[must_use]
+    pub fn with_second_commit_failure(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::SecondFails)
+    }
+
+    /// A Report run separately granted checked mid-run delivery.
+    #[must_use]
+    pub fn with_mid_report(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::MidReport)
+    }
+
+    /// Resume over the same transcript, checkout, graph and delivery record.
+    #[must_use]
+    pub fn with_git_change_store(seed: u64, store: Store) -> World {
+        Self::with_capacity(seed, store, true, 2, 64, Scenario::GitChange)
+    }
+
+    /// Provider prompts, including the next waking message.
+    #[must_use]
+    pub fn prompt_texts(&self) -> &[Vec<u8>] {
+        &self.prompt_texts
+    }
+
+    /// Rendered host tool results reaching provider prompts.
+    #[must_use]
+    pub fn tool_results(&self) -> &[Vec<u8>] {
+        &self.tool_results
+    }
+
+    /// The last durable delivery decision, if one was made.
+    #[must_use]
+    pub fn delivery(&self) -> Option<&run::Delivery> {
+        self.store.delivery.as_ref().map(|record| &record.delivery)
+    }
+
+    /// Message stored by the fake git graph for its latest local commit.
+    #[must_use]
+    pub fn commit_message(&self) -> Option<&[u8]> {
+        let history = self.history.as_ref()?;
+        let head = self.git_head?;
+        Some(history.commit_message(head))
     }
 
     /// The fake disk observed after the agent has settled its file operations.
@@ -185,9 +294,23 @@ impl World {
         &self.disk
     }
 
-    fn with_capacity(seed: u64, store: Store, resume: bool, unsaved: u32, facts: u32, workspace: bool) -> World {
-        let referee =
-            Referee::new(Meeting::after(store.activation(), store.state.map_or(0, |state| state.next_message)));
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one constructor keeps scenario fixtures and their typed configuration together"
+    )]
+    fn with_capacity(seed: u64, mut store: Store, resume: bool, unsaved: u32, facts: u32, scenario: Scenario) -> World {
+        let meeting = Meeting::after(store.activation(), store.state.map_or(0, |state| state.next_message));
+        let meeting = match scenario {
+            Scenario::Chat => meeting,
+            Scenario::SecondFails => meeting.writable(&[0, 1], &[1, 2]),
+            Scenario::Workspace
+            | Scenario::PlainChange
+            | Scenario::PlainNothing
+            | Scenario::GitChange
+            | Scenario::GitMarker
+            | Scenario::MidReport => meeting.writable(&[0], &[1]),
+        };
+        let referee = Referee::new(meeting);
         let limits = local::Limits {
             agent: agent_world::LIMITS,
             endpoints: Box::new([run::charter::Endpoint(0)]),
@@ -200,9 +323,39 @@ impl World {
             unsaved,
             facts,
         };
-        let mut disk = Checkout::new();
-        let workspace = if workspace {
-            disk.write(b"work/src/lib.rs", b"pub fn answer() -> u32 { 42 }\n");
+        let saved_disk = store.disk.take();
+        let restored = saved_disk.is_some();
+        let mut disk = saved_disk.unwrap_or_default();
+        let mut history = store.history.take();
+        let mut git_head = store.git_head.take();
+        let workspace = if scenario == Scenario::Chat {
+            None
+        } else {
+            if matches!(
+                scenario,
+                Scenario::GitChange | Scenario::GitMarker | Scenario::SecondFails | Scenario::MidReport
+            ) && !restored
+            {
+                let mut tree = BTreeMap::from([(b"src/lib.rs".to_vec(), b"pub fn answer() -> u32 { 42 }\n".to_vec())]);
+                if matches!(scenario, Scenario::GitChange | Scenario::SecondFails | Scenario::MidReport) {
+                    tree.insert(b".temper/pre-pr".to_vec(), b"#!checks\nsrc/lib.rs 43\n".to_vec());
+                }
+                let mut graph = History::new(tree);
+                git::clone_repository(&mut graph, &mut disk, b"repo", b"work").expect("fixture git clone");
+                git::check_out(&graph, &mut disk, b"work", 1).expect("fixture initial checkout");
+                if scenario == Scenario::GitMarker {
+                    disk.write(b"work/src/lib.rs", b"<<<<<<< ours\nleft\n=======\nright\n>>>>>>> theirs\n");
+                    disk.write(b"work/.git/MERGE_HEAD", &1_u64.to_le_bytes());
+                    disk.write(b"work/.git/temper-conflicts/0", b"src/lib.rs");
+                }
+                history = Some(graph);
+                git_head = Some(1);
+            } else if !restored {
+                disk.write(b"work/src/lib.rs", b"pub fn answer() -> u32 { 42 }\n");
+                if scenario != Scenario::PlainNothing {
+                    disk.write(b"work/.temper/pre-pr", b"#!checks\nsrc/lib.rs 43\n");
+                }
+            }
             disk.program(
                 b"cargo test",
                 Program {
@@ -212,21 +365,73 @@ impl World {
                     changes: Vec::new(),
                 },
             );
-            let root = disk.root(b"work");
-            Some(run::Workspace {
-                directories: Box::new([run::Directory {
-                    name: b"work".as_slice().into(),
-                    root: checkout_io::token(root),
-                    writable: true,
-                    git: false,
-                    conflicts: Box::new([]),
-                }]),
+            let root = if restored { 1 } else { disk.root(b"work") };
+            let first = run::Directory {
+                name: b"work".as_slice().into(),
+                root: checkout_io::token(root),
+                writable: true,
+                git: matches!(
+                    scenario,
+                    Scenario::GitChange | Scenario::GitMarker | Scenario::SecondFails | Scenario::MidReport
+                ),
+                conflicts: if scenario == Scenario::GitMarker {
+                    Box::new([b"src/lib.rs".as_slice().into()])
+                } else {
+                    Box::new([])
+                },
+            };
+            let directories = if scenario == Scenario::SecondFails {
+                if !restored {
+                    disk.write(b"work2/other.txt", b"changed");
+                }
+                let second_root = if restored { 2 } else { disk.root(b"work2") };
+                Box::new([
+                    first,
+                    run::Directory {
+                        name: b"work2".as_slice().into(),
+                        root: checkout_io::token(second_root),
+                        writable: true,
+                        git: true,
+                        conflicts: Box::new([]),
+                    },
+                ]) as Box<[run::Directory]>
+            } else {
+                Box::new([first]) as Box<[run::Directory]>
+            };
+            Some(run::Workspace { directories })
+        };
+        let change = matches!(
+            scenario,
+            Scenario::PlainChange
+                | Scenario::PlainNothing
+                | Scenario::GitChange
+                | Scenario::GitMarker
+                | Scenario::SecondFails
+        );
+        let instructions: &[u8] = if scenario == Scenario::MidReport {
+            b"@midreport Deliver then report."
+        } else if scenario == Scenario::PlainNothing {
+            b"@local-nothing Declare an unchanged result."
+        } else if scenario == Scenario::GitMarker {
+            b"@local-marker Resolve the merge."
+        } else if change {
+            b"@local-change Make a checked change."
+        } else if workspace.is_some() {
+            b"@local-workspace Assist the person."
+        } else {
+            b"@chat Assist the person."
+        };
+        let contract = if change {
+            Contract::Change(run::outcome::ChangeSpec {
+                checks_must_pass: true,
+                fields: Box::new([
+                    run::outcome::FieldRule { name: b"title".as_slice().into(), max: 256 },
+                    run::outcome::FieldRule { name: b"body".as_slice().into(), max: 1024 },
+                ]),
             })
         } else {
-            None
+            Contract::Report(run::outcome::TextSpec { max: 2048, fields: Box::new([]) })
         };
-        let instructions: &[u8] =
-            if workspace.is_some() { b"@local-workspace Assist the person." } else { b"@chat Assist the person." };
         let config = local::Config {
             chat: b"main".as_slice().into(),
             instructions: instructions.into(),
@@ -241,13 +446,27 @@ impl World {
             }]),
             budget: agent_world::BUDGET,
             conventions: None,
-            contract: Contract::Report(run::outcome::TextSpec { max: 2048, fields: Box::new([]) }),
+            contract,
+            deliver: if scenario == Scenario::MidReport {
+                Some(run::outcome::ChangeSpec {
+                    checks_must_pass: true,
+                    fields: Box::new([run::outcome::FieldRule { name: b"ticket".as_slice().into(), max: 128 }]),
+                })
+            } else {
+                None
+            },
+            title_field: if scenario == Scenario::MidReport {
+                b"ticket".as_slice().into()
+            } else {
+                b"title".as_slice().into()
+            },
             waiting: Duration::from_secs(30),
             resume,
             accounts: Box::new([0]),
             workspace,
         };
         let provider_config = smith_session_world::Settings::calm(seed).provider;
+        let disk_start = disk.tree(b"work");
         let provider = agent_world::scripted_provider(&provider_config, seed ^ 0x25);
         let out = Queue::with_capacity(local::max_out(&limits));
         let domain = local::Domain::new(config, &limits, seed ^ 0x17).expect("world config fits local limits");
@@ -259,6 +478,9 @@ impl World {
             provider_env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits: provider_config },
             provider_out: Queue::with_capacity(provider::MAX_OUT),
             disk,
+            disk_start,
+            history,
+            git_head,
             pending: BTreeMap::new(),
             cancelled: BTreeSet::new(),
             events: VecDeque::new(),
@@ -268,10 +490,14 @@ impl World {
             exit: None,
             completions: 0,
             prompt_assistants: Vec::new(),
+            prompt_texts: Vec::new(),
+            tool_results: Vec::new(),
             activation_turns: 0,
             cut: None,
             slow_store: false,
             delayed_turns: VecDeque::new(),
+            slow_git: false,
+            held_git: VecDeque::new(),
             first_failure: FirstFailure::None,
             credential_requests: 0,
             referee,
@@ -284,7 +510,10 @@ impl World {
 
     /// Take the fake store after ending or dropping this invocation.
     #[must_use]
-    pub fn into_store(self) -> Store {
+    pub fn into_store(mut self) -> Store {
+        self.store.disk = Some(self.disk);
+        self.store.history = self.history;
+        self.store.git_head = self.git_head;
         self.store
     }
 
@@ -301,6 +530,18 @@ impl World {
     /// Hold store turn acknowledgements until released by the story.
     pub fn slow_store(&mut self) {
         self.slow_store = true;
+    }
+
+    /// Delay typed git terminals until the story releases them.
+    pub fn slow_git(&mut self) {
+        self.slow_git = true;
+    }
+
+    /// Release one git terminal already computed by the fake checkout.
+    pub fn release_git(&mut self) -> bool {
+        let Some((owner, result)) = self.held_git.pop_front() else { return false };
+        self.events.push_back(Event::Git { owner, result });
+        true
     }
 
     /// Fail the next store request of the selected kind.
@@ -435,6 +676,10 @@ impl World {
                         self.observe(Seen::TurnSaved { number: *number });
                         Some(*number)
                     }
+                    Event::DeliverySaved { name } => {
+                        self.observe(Seen::DeliverySaved { name: *name });
+                        None
+                    }
                     Event::Agent(
                         AgentIo::Completed { owner, .. } | AgentIo::Failed { owner, .. } | AgentIo::Cancelled { owner },
                     ) => {
@@ -446,6 +691,8 @@ impl World {
                     | Event::Closed
                     | Event::Loaded { .. }
                     | Event::StateSaved
+                    | Event::Git { .. }
+                    | Event::PlainStatus { .. }
                     | Event::StoreFailed { .. }
                     | Event::Credential { .. }
                     | Event::NoCredential { .. }
@@ -502,7 +749,9 @@ impl World {
                 return true;
             }
             if !self.domain.is_ready() && self.events.is_empty() && self.out.is_empty() {
-                if self.slow_store && !self.delayed_turns.is_empty() && self.pending.is_empty() {
+                if (self.slow_store && !self.delayed_turns.is_empty() && self.pending.is_empty())
+                    || (self.slow_git && !self.held_git.is_empty())
+                {
                     return false;
                 }
                 let next = [self.domain.next_deadline(), self.provider.next_deadline()].into_iter().flatten().min();
@@ -514,6 +763,7 @@ impl World {
         false
     }
 
+    #[expect(clippy::too_many_lines, reason = "the test adapter settles each local request beside its terminal")]
     fn request(&mut self, request: Request) {
         match request {
             Request::Show { text } => {
@@ -533,7 +783,11 @@ impl World {
                     self.store_fault = None;
                     self.events.push_back(Event::StoreFailed { reason: StoreFailure::Read });
                 } else {
-                    self.events.push_back(Event::Loaded { state: self.store.state, transcript: self.store.history() });
+                    self.events.push_back(Event::Loaded {
+                        state: self.store.state,
+                        transcript: self.store.history(),
+                        delivery: self.store.delivery.clone().map(Box::new),
+                    });
                 }
             }
             Request::SaveState { state, fresh } => {
@@ -572,6 +826,11 @@ impl World {
                 let state = self.store.state.as_mut().expect("activation state saved before any turn");
                 state.read = read;
                 self.store.turns.push(turn);
+                if let Some(record) = &mut self.store.delivery
+                    && number > record.after_turn
+                {
+                    record.told = true;
+                }
                 if self.slow_store {
                     self.delayed_turns.push_back(number);
                 } else {
@@ -587,8 +846,106 @@ impl World {
                     },
                 });
             }
+            Request::SaveDelivery { record } => {
+                let name = record.name;
+                self.observe(Seen::DeliveryRecorded { name });
+                self.store.delivery = Some(*record);
+                self.events.push_back(Event::DeliverySaved { name });
+                if self.cut == Some(Cut::AfterSaveDelivery) {
+                    self.reached.insert(Goal::Cut);
+                }
+            }
+            Request::PlainStatus { owner, directory: _, deadline } => {
+                assert!(self.env.now <= deadline, "plain status observes its deadline");
+                let changed = self.disk.tree(b"work") != self.disk_start;
+                self.events.push_back(Event::PlainStatus { owner, changed });
+            }
+            Request::Git { owner, directory, op, deadline } => {
+                let result = if self.env.now > deadline {
+                    GitResult::Failed {
+                        reason: run::DeliveryReason::TimedOut,
+                        diagnostic: Box::new(run::Diagnostic::empty()),
+                    }
+                } else if directory == 1 {
+                    match op {
+                        GitOp::Status => GitResult::Status { changed: true, merging: None },
+                        GitOp::Commit { .. } => GitResult::Failed {
+                            reason: run::DeliveryReason::Broken,
+                            diagnostic: Box::new(run::Diagnostic::new(b"simulated git commit failure", 0)),
+                        },
+                        GitOp::Markers { .. } => unreachable!("second directory has no merge"),
+                    }
+                } else {
+                    assert_eq!(directory, 0, "fixture has at most two git directories");
+                    self.git_operation(op)
+                };
+                if matches!(result, GitResult::Committed { .. }) {
+                    let mut tree = self.disk.tree(b"work");
+                    tree.retain(|path, _| !skein_fake_checkout::in_git(path));
+                    self.observe(Seen::Committed { directory, tree });
+                }
+                if self.slow_git {
+                    self.held_git.push_back((owner, result));
+                } else {
+                    self.events.push_back(Event::Git { owner, result });
+                }
+            }
             Request::Agent(request) => self.agent_request(request),
             Request::Exit { status } => self.exit = Some(status),
+        }
+    }
+
+    fn git_operation(&mut self, op: GitOp) -> GitResult {
+        let head = self.git_head.expect("git operation has a checkout head");
+        let history = self.history.as_mut().expect("git operation has a graph");
+        match op {
+            GitOp::Status => {
+                let mut tree = self.disk.tree(b"work");
+                tree.retain(|path, _| !skein_fake_checkout::in_git(path));
+                let merging = if self.disk.exists(b"work/.git/MERGE_HEAD") {
+                    let mut paths = Vec::new();
+                    for path in self.disk.tree(b"work/.git/temper-conflicts").into_values() {
+                        paths.push(path.into_boxed_slice());
+                    }
+                    Some(paths.into_boxed_slice())
+                } else {
+                    None
+                };
+                GitResult::Status { changed: tree != history.tree(head), merging }
+            }
+            GitOp::Markers { paths } => {
+                let mut first = None;
+                for path in paths {
+                    let at = [b"work/".as_slice(), path.as_ref()].concat();
+                    if self.disk.content(&at).is_some_and(|text| text.windows(7).any(|part| part == b"<<<<<<<")) {
+                        first = Some(path);
+                        break;
+                    }
+                }
+                GitResult::Markers { first }
+            }
+            GitOp::Commit { message } => {
+                let committed = if let Some(raw) = self.disk.content(b"work/.git/MERGE_HEAD") {
+                    let merging = u64::from_le_bytes(raw.try_into().expect("fixture merge head is u64"));
+                    git::commit_merging(history, &mut self.disk, b"work", head, merging, &message).ok().map(Some)
+                } else {
+                    git::commit(history, &mut self.disk, b"work", head, &message).ok()
+                };
+                match committed {
+                    Some(Some(commit)) => {
+                        self.git_head = Some(commit);
+                        GitResult::Committed { receipt: format!("commit {commit}").into_bytes().into() }
+                    }
+                    Some(None) => GitResult::Failed {
+                        reason: run::DeliveryReason::Broken,
+                        diagnostic: Box::new(run::Diagnostic::empty()),
+                    },
+                    None => GitResult::Failed {
+                        reason: run::DeliveryReason::Missing,
+                        diagnostic: Box::new(run::Diagnostic::empty()),
+                    },
+                }
+            }
         }
     }
 
@@ -603,6 +960,7 @@ impl World {
                 local::Fact::Turn { number } => Some(Seen::Turn { number }),
                 local::Fact::Answered { activation } => Some(Seen::Answered { activation }),
                 local::Fact::Shown { activation } => Some(Seen::Shown { activation }),
+                local::Fact::DeliveryReturned { name } => Some(Seen::DeliveryReturned { name }),
             };
             if let Some(seen) = seen {
                 self.observe(seen);
@@ -626,6 +984,24 @@ impl World {
                 self.completions += 1;
                 self.prompt_assistants
                     .push(prompt.messages.iter().filter(|message| message.role == agent::llm::Role::Assistant).count());
+                let mut user_text = Vec::new();
+                for message in &prompt.messages {
+                    if message.role == agent::llm::Role::User {
+                        for block in &message.content {
+                            match block {
+                                agent::llm::Block::Text { text, .. } => user_text.extend_from_slice(text),
+                                agent::llm::Block::ToolResult {
+                                    result: agent::llm::Returned::Text { text, .. },
+                                    ..
+                                } => {
+                                    self.tool_results.push(text.to_vec());
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                self.prompt_texts.push(user_text);
                 let grants = prompt.tools;
                 let served = prompt.served.clone();
                 if matches!(self.first_failure, FirstFailure::Exhaust) {
@@ -662,6 +1038,13 @@ impl World {
                 self.events.push_back(Event::Agent(AgentIo::Cancelled { owner }));
             }
             agent::Request::Io { owner, op, deadline: _ } => {
+                let store_root = match &op {
+                    tools::Op::Store { at, .. } => Some(at.root.raw()),
+                    tools::Op::Load { .. }
+                    | tools::Op::Scan { .. }
+                    | tools::Op::Spawn { .. }
+                    | tools::Op::Search { .. } => None,
+                };
                 let done = match op {
                     tools::Op::Spawn { cwd, command, env, roots, head, tail } => {
                         match checkout_io::spawn(&self.disk, &cwd, &command, &env, &roots, (head, tail)) {
@@ -679,6 +1062,9 @@ impl World {
                     }
                     op => checkout_io::perform(&mut self.disk, op),
                 };
+                if matches!(done, tools::Done::Stored { .. }) {
+                    self.observe(Seen::Wrote { root: store_root.expect("stored operation names a root") });
+                }
                 self.events.push_back(Event::Agent(AgentIo::Done { owner, done }));
             }
             agent::Request::CancelIo { owner } => {
@@ -701,6 +1087,14 @@ impl World {
                     .disk
                     .load(program.root.raw(), b"src/lib.rs", 4096)
                     .is_ok_and(|(text, _)| text.windows(2).any(|part| part == b"43"));
+                if passed {
+                    let directory =
+                        u32::try_from(program.root.raw().checked_sub(1).expect("fixture roots start at one"))
+                            .expect("few fixture roots");
+                    let mut tree = self.disk.tree(self.disk.root_path(program.root.raw()));
+                    tree.retain(|path, _| !skein_fake_checkout::in_git(path));
+                    self.observe(Seen::Checked { directory, tree });
+                }
                 let output = if passed { &b"ok: src/lib.rs\n"[..] } else { &b"FAILED: src/lib.rs\n"[..] };
                 let keep = usize::try_from(tail).expect("small check output").min(output.len());
                 let ran = run::Ran {

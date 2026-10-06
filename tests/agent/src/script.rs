@@ -150,6 +150,9 @@ pub fn all() -> Box<[Script]> {
         script(b"@review", review()),
         script(b"@report", reporting()),
         script(b"@local-workspace", local_workspace()),
+        script(b"@local-change", local_change()),
+        script(b"@local-nothing", local_nothing()),
+        script(b"@local-marker", local_marker()),
         script(b"@failure", failing()),
         script(b"@delegate", delegating()),
         script(b"@spend", spending()),
@@ -251,6 +254,18 @@ fn local_workspace() -> Vec<Turn> {
         calls(vec![call("shell", r#"{"command":"cargo test"}"#)]),
         calls(vec![call("finish", r#"{"report":"The answer is 43."}"#)]),
     ]
+}
+
+fn local_change() -> Vec<Turn> {
+    vec![calls(vec![read("src/lib.rs")]), calls(vec![edit("42", "43")]), calls(vec![change("The answer is 43 now.")])]
+}
+
+fn local_nothing() -> Vec<Turn> {
+    vec![calls(vec![change("No file was edited.")]), says("I saw the host's answer.")]
+}
+
+fn local_marker() -> Vec<Turn> {
+    vec![calls(vec![change("Resolve the merge.")]), says("The marker is still present.")]
 }
 
 fn failing() -> Vec<Turn> {

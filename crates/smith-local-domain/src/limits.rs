@@ -60,6 +60,9 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let child_out = Queue::<agent::Request>::worst_case(agent::max_out(&limits.agent))?
         .checked_add(u64::from(agent::max_out(&limits.agent)).checked_mul(record.max(limits.agent.run.run_bytes))?)?;
     let held = Queue::<AgentIo>::worst_case(1)?.checked_add(limits.agent.session.completion_bytes)?;
+    let delivery = skein_lib::List::<run::Receipt>::worst_case(run::MAX_DIRECTORIES)?
+        .checked_add(run::Delivered::worst_case().checked_mul(4)?)?
+        .checked_add(limits.agent.run.outcome_bytes.checked_mul(2)?)?;
     agent
         .checked_add(configuration)?
         .checked_add(lines)?
@@ -67,5 +70,6 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(out)?
         .checked_add(child_out)?
         .checked_add(held)?
+        .checked_add(delivery)?
         .checked_add(Queue::<Fact>::worst_case(limits.facts)?)
 }

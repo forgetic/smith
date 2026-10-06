@@ -31,6 +31,7 @@ mod boundary;
 mod chat;
 mod config;
 mod credentials;
+mod delivery;
 mod domain;
 mod facts;
 mod limits;
@@ -40,7 +41,9 @@ mod turns;
 #[cfg(test)]
 mod tests;
 
-pub use boundary::{AgentIo, ChatState, CredentialFailure, Event, ExitStatus, Request, StoreFailure};
+pub use boundary::{
+    AgentIo, ChatState, CredentialFailure, DeliveryRecord, Event, ExitStatus, GitOp, GitResult, Request, StoreFailure,
+};
 pub use config::{Config, Contract, Invalid, charter};
 pub use domain::{Domain, fire, max_out, resume, step};
 pub use facts::Fact;

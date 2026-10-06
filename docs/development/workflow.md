@@ -244,3 +244,11 @@ local-world tests passed in 0.087 seconds, and the 64-seed fuzzy sweep passed
 in 0.033 seconds. Store failures at load, metadata save and turn save are
 covered. The world remains within its one-second focused and five-second
 fuzzy shares; workspace timeouts are unchanged.
+
+The local workspace and delivery stories were measured serially on
+2026-10-06 with `measure -j 1`: 34 focused local-world tests passed in
+0.288 seconds. The eight delivery stories cover git commits, plain files,
+no changes, markers, a later directory failure, repeated names, a crash
+after recording a commit, and cancellation during delivery. The world's
+64-seed fuzzy sweep remains its one fuzzy test. The one-second focused and
+five-second fuzzy world shares and workspace budgets are unchanged.

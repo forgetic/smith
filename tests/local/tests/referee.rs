@@ -2,19 +2,62 @@
 
 use skein_lib::{Time, Token};
 use skein_world::domain::{Referee, Verdict};
+use smith_domain::run::CallName;
 use smith_local_world::referee::{Meeting, Seen};
 
 fn observe(referee: &mut Referee<Meeting>, seen: Seen) {
     referee.observe(Time::ZERO, seen, &mut Vec::new());
 }
 
-fn broken(mut history: Vec<Seen>, reason: &str) {
-    let mut referee = Referee::new(Meeting::default());
+fn broken(history: Vec<Seen>, reason: &str) {
+    broken_with(Meeting::default(), history, reason);
+}
+
+fn broken_with(meeting: Meeting, mut history: Vec<Seen>, reason: &str) {
+    let mut referee = Referee::new(meeting);
     for seen in history.drain(..) {
         observe(&mut referee, seen);
     }
     let Verdict::Failed(failure) = referee.verdict() else { panic!("bad history must fail") };
     assert_eq!(failure.why, reason);
+}
+
+#[test]
+fn a_delivery_returned_before_its_record_is_durable_is_rejected() {
+    let name = CallName { activation: 1, completion: 1, position: 0 };
+    broken(
+        vec![Seen::DeliveryRecorded { name }, Seen::DeliveryReturned { name }],
+        "delivery is recorded before the child hears it",
+    );
+}
+
+#[test]
+fn two_decisions_for_one_delivery_name_are_rejected() {
+    let name = CallName { activation: 1, completion: 1, position: 0 };
+    broken(
+        vec![Seen::DeliveryRecorded { name }, Seen::DeliveryRecorded { name }],
+        "one durable decision per delivery name",
+    );
+}
+
+#[test]
+fn a_commit_of_a_tree_changed_after_checks_is_rejected() {
+    let checked = std::collections::BTreeMap::from([(b"answer".to_vec(), b"43".to_vec())]);
+    let changed = std::collections::BTreeMap::from([(b"answer".to_vec(), b"44".to_vec())]);
+    broken_with(
+        Meeting::default().writable(&[0], &[1]),
+        vec![Seen::Checked { directory: 0, tree: checked }, Seen::Committed { directory: 0, tree: changed }],
+        "delivery commits exactly the checked tree",
+    );
+}
+
+#[test]
+fn a_write_outside_the_writable_roots_is_rejected() {
+    broken_with(
+        Meeting::default().writable(&[0], &[1]),
+        vec![Seen::Wrote { root: 2 }],
+        "agent writes only writable roots",
+    );
 }
 
 #[test]

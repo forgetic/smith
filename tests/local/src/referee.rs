@@ -3,8 +3,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use skein_fake_checkout::git::Tree;
 use skein_lib::Token;
 use skein_world::domain::{Expectations, Judge};
+use smith_domain::run::CallName;
 
 /// A boundary observation made by the scripted person, store or provider.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +29,18 @@ pub enum Seen {
     Complete { owner: Token },
     /// One provider terminal was delivered to the host.
     Completed { owner: Token },
+    /// One delivery answer reached the typed store.
+    DeliveryRecorded { name: CallName },
+    /// The store confirmed the record is durable.
+    DeliverySaved { name: CallName },
+    /// The local domain then returned that answer to the child.
+    DeliveryReturned { name: CallName },
+    /// A writable directory's check passed with this working tree.
+    Checked { directory: u32, tree: Tree },
+    /// The host committed this working tree in the named directory.
+    Committed { directory: u32, tree: Tree },
+    /// The agent successfully stored a file beneath this root.
+    Wrote { root: u64 },
 }
 
 /// Scenario policy populated only from observations, never domain state.
@@ -45,6 +59,11 @@ pub struct Meeting {
     completions: BTreeSet<Token>,
     answered: BTreeMap<u64, u32>,
     shown: BTreeSet<u64>,
+    recorded: BTreeSet<(u64, u32, u32)>,
+    saved_deliveries: BTreeSet<(u64, u32, u32)>,
+    checked: BTreeMap<u32, Tree>,
+    writable: BTreeSet<u32>,
+    writable_roots: BTreeSet<u64>,
 }
 
 impl Meeting {
@@ -52,6 +71,14 @@ impl Meeting {
     #[must_use]
     pub fn after(activation: u64, message: u64) -> Self {
         Self { last_activation: activation, last_message: message, ..Self::default() }
+    }
+
+    /// Supply the fixture's writable mount ordinals and IO roots.
+    #[must_use]
+    pub fn writable(mut self, directories: &[u32], roots: &[u64]) -> Self {
+        self.writable.extend(directories);
+        self.writable_roots.extend(roots);
+        self
     }
 }
 
@@ -125,6 +152,35 @@ impl Expectations for Meeting {
             Seen::Completed { owner } => {
                 judge.check(self.completions.remove(&owner), "one terminal per completion request");
             }
+            Seen::DeliveryRecorded { name } => {
+                judge.check(self.recorded.insert(call_key(name)), "one durable decision per delivery name");
+            }
+            Seen::DeliverySaved { name } => {
+                judge.check(self.recorded.contains(&call_key(name)), "a delivery save has a decision");
+                judge.check(self.saved_deliveries.insert(call_key(name)), "one store terminal per delivery record");
+            }
+            Seen::DeliveryReturned { name } => {
+                judge.check(
+                    self.saved_deliveries.contains(&call_key(name)),
+                    "delivery is recorded before the child hears it",
+                );
+            }
+            Seen::Checked { directory, tree } => {
+                self.checked.insert(directory, tree);
+            }
+            Seen::Committed { directory, tree } => {
+                judge.check(self.writable.contains(&directory), "delivery writes only writable directories");
+                if let Some(checked) = self.checked.get(&directory) {
+                    judge.check(&tree == checked, "delivery commits exactly the checked tree");
+                }
+            }
+            Seen::Wrote { root } => {
+                judge.check(self.writable_roots.contains(&root), "agent writes only writable roots");
+            }
         }
     }
+}
+
+fn call_key(name: CallName) -> (u64, u32, u32) {
+    (name.activation, name.completion, name.position)
 }
