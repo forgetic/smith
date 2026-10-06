@@ -75,8 +75,13 @@ fn setup() -> (Agent, Host) {
     start.logical_run = Token::new(1);
     start.transcript = None;
     start.answered = Box::new([]);
-    start.directories =
-        Box::new([host::Directory { name: b"work".as_slice().into(), writable: true, conflicts: Box::new([]) }]);
+    start.workspace = Some(Token::new(1));
+    start.directories = Box::new([host::Directory {
+        name: b"work".as_slice().into(),
+        writable: true,
+        git: true,
+        conflicts: Box::new([]),
+    }]);
     host.spawn(start);
     host.spawned();
     host.sent();

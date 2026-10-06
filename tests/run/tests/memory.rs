@@ -6,12 +6,13 @@ use std::mem::size_of;
 
 use skein_lib::{Duration, Env, Queue, ReplyTo, Time, Token, Wall};
 use skein_world::domain::heap::{self, Meter};
-use smith_domain_run::charter::{Checkout, Endpoint, Families, Grants, HostTool, Llm, Repository, Tools};
+use smith_domain_run::charter::{Endpoint, Families, Grants, HostTool, Llm, Tools};
 use smith_domain_run::outcome::{Change, ChangeSpec, Declared, Field, FieldRule, ItemRule, OutcomeSpec, VerdictRule};
 use smith_domain_run::{
     Answer, Ask, Budget, Charter, Domain, End, Event, Exit, Invalid, Limits, MAX_OUT, Ran, Read, Refusal, Request,
     Spend, Stop, worst_case,
 };
+use smith_domain_run::{Directory, Workspace};
 
 #[global_allocator]
 static HEAP: heap::Counting = heap::Counting;
@@ -37,7 +38,10 @@ const LIMITS: Limits = Limits {
     runs: 1,
     conversations: 2,
     run_bytes: 1024,
-    repositories: 1,
+    directories: 1,
+    directory_name_bytes: 64,
+    conflicts: 1,
+    conflict_path_bytes: 64,
     host_tools: 1,
     host_input_bytes: 65_536,
     host_reply_bytes: 65_536,
@@ -66,19 +70,34 @@ const LIMITS: Limits = Limits {
 };
 
 /// A charter that holds exactly `held` bytes, as the run counts them: one of
-/// every part held in a box, at its fixed size plus a byte of payload each,
-/// and a brief of the rest.
+/// every charter part held in a box and a workspace attaining every receiving
+/// directory/name/conflict/path cap; the brief occupies the aggregate remainder.
+fn workspace() -> Workspace {
+    Workspace {
+        directories: Box::new([Directory {
+            name: bytes(u64::from(LIMITS.directory_name_bytes)),
+            root: Token::new(1),
+            writable: true,
+            git: true,
+            conflicts: Box::new([bytes(u64::from(LIMITS.conflict_path_bytes))]),
+        }]),
+    }
+}
+
 fn charter(held: u64) -> Charter {
-    let parts =
-        (size(size_of::<Repository>()) + 1) + (size(size_of::<HostTool>()) + 14) + 1 + (size(size_of::<Llm>()) + 1);
+    let parts = (size(size_of::<Directory>())
+        + u64::from(LIMITS.directory_name_bytes)
+        + size(size_of::<Box<[u8]>>())
+        + u64::from(LIMITS.conflict_path_bytes))
+        + (size(size_of::<HostTool>()) + 14)
+        + 1
+        + (size(size_of::<Llm>()) + 1);
     let rule = size(size_of::<VerdictRule>()) + 1 + size(size_of::<ItemRule>()) + 1 + size(size_of::<FieldRule>()) + 1;
     let change_rules = 2 * size(size_of::<FieldRule>()) + 5 + 4;
     let convention_paths = size(b"AGENTS.md".len() + b".temper/pre-pr".len());
     Charter {
         brief: bytes(held - parts - rule - change_rules - convention_paths),
-        checkout: Checkout {
-            repositories: Box::new([Repository { name: bytes(1), root: Token::new(1), writable: true }]),
-        },
+
         grants: Grants {
             deliver: None,
             tools: Tools { inspect: true, modify: true, shell: true },
@@ -229,6 +248,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
     for run in 0..limits.runs {
         let worker = Token::new(u64::from(run));
         let start = Event::Start {
+            workspace: Some(workspace()),
             reply_to: ReplyTo::new(worker),
             worker,
             charter: {
@@ -311,6 +331,7 @@ fn refuse_oversized_charter(limits: Limits, env: &Env<Limits>, out: &mut Queue<R
     let mut domain = Domain::new(&Limits { runs: 1, conversations: 2, ..limits });
     let worker = Token::new(0);
     let start = Event::Start {
+        workspace: Some(workspace()),
         reply_to: ReplyTo::new(worker),
         worker,
         charter: charter(limits.run_bytes + 1),
@@ -437,7 +458,14 @@ fn delivery_memory_step(
 
 #[test]
 fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
-    let limits = Limits { repositories: smith_domain_run::MAX_DIRECTORIES, run_bytes: 65_536, ..LIMITS };
+    let limits = Limits {
+        directories: smith_domain_run::MAX_DIRECTORIES,
+        directory_name_bytes: 256,
+        conflicts: 64,
+        conflict_path_bytes: 4096,
+        run_bytes: 65_536,
+        ..LIMITS
+    };
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
     let mut out = Queue::with_capacity(MAX_OUT);
     let meter = Meter::new();
@@ -449,7 +477,13 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
         &env,
         &mut out,
         &meter,
-        Event::Start { reply_to: ReplyTo::new(worker), worker, charter, transcript: None },
+        Event::Start {
+            workspace: Some(full_delivery_workspace()),
+            reply_to: ReplyTo::new(worker),
+            worker,
+            charter,
+            transcript: None,
+        },
     );
     let run = owner.expect("preparation read");
     let mut owner = run;
@@ -514,20 +548,26 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
 
 /// Complete caller-owned charter at the aggregate cap, with all directories
 /// writable and every exact receiving receipt slot exercised by the real path.
-fn full_delivery_charter(limits: Limits) -> Charter {
-    let repositories: Box<[Repository]> = (0..smith_domain_run::MAX_DIRECTORIES)
-        .map(|directory| Repository {
-            name: Box::new([u8::try_from(directory + 1).expect("64 distinct names")]),
+fn full_delivery_workspace() -> Workspace {
+    let directories: Box<[Directory]> = (0..smith_domain_run::MAX_DIRECTORIES)
+        .map(|directory| Directory {
+            name: Box::new([u8::try_from(directory + 64).expect("64 distinct names")]),
             root: Token::new(u64::from(directory)),
             writable: true,
+            git: true,
+            conflicts: Box::new([]),
         })
         .collect();
-    let parts = u64::from(smith_domain_run::MAX_DIRECTORIES) * (size(size_of::<Repository>()) + 1)
+    Workspace { directories }
+}
+
+fn full_delivery_charter(limits: Limits) -> Charter {
+    let parts = u64::from(smith_domain_run::MAX_DIRECTORIES) * (size(size_of::<Directory>()) + 1)
         + 1
         + size(b"AGENTS.md".len() + b".temper/pre-pr".len());
     Charter {
         brief: bytes(limits.run_bytes - parts),
-        checkout: Checkout { repositories },
+
         grants: Grants {
             deliver: Some(ChangeSpec { fields: Box::new([]) }),
             tools: Tools { inspect: true, modify: true, shell: true },
@@ -611,10 +651,20 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
     let meter = Meter::new();
     let mut domain = Domain::new(&limits);
     let mut charter = charter(limits.run_bytes);
-    charter.checkout.repositories[0].writable = false;
-    // Move the brief budget into opaque schema storage, retaining exact aggregate charge.
+    let mut mounted = Some(workspace());
+    mounted.as_mut().expect("explicit host fixture workspace").directories[0].writable = false;
+    // Read-only host-tool work has a feasible verdict contract. Move the exact
+    // retired Change field cells/names and brief into the schema, preserving the
+    // aggregate maximum and this fixture's original read-only workspace control.
+    let retired = charter.outcome.change.take().expect("default Change fixture fields");
+    let mut retired_bytes = 0_u64;
+    for field in &retired.fields {
+        retired_bytes += size(size_of::<FieldRule>()) + size(field.name.len());
+    }
+    drop(retired);
     let tool = &mut charter.grants.host_tools[0];
-    tool.schema = bytes(u64::try_from(tool.schema.len() + charter.brief.len()).expect("bounded declaration"));
+    tool.schema =
+        bytes(u64::try_from(tool.schema.len() + charter.brief.len()).expect("bounded declaration") + retired_bytes);
     charter.brief = Box::new([]);
     let (run, _) = host_memory_take(
         &mut domain,
@@ -622,6 +672,7 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
         &mut out,
         &meter,
         Some(Event::Start {
+            workspace: mounted,
             reply_to: ReplyTo::new(Token::new(88)),
             worker: Token::new(91),
             charter,

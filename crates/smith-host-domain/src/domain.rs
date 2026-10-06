@@ -492,11 +492,28 @@ fn valid_start(start: &Start, limits: &Limits) -> Option<Invalid> {
     if start.directories.len() > usize::try_from(limits.directories).expect("u32 fits usize") {
         return Some(Invalid::Directories);
     }
-    for (at, directory) in start.directories.iter().enumerate() {
-        if directory.name.is_empty()
-            || !within(&directory.name, u64::from(limits.name_bytes))
+    match start.workspace {
+        Some(_) if start.directories.is_empty() => return Some(Invalid::Directories),
+        None if !start.directories.is_empty() => return Some(Invalid::Directories),
+        Some(_) | None => {}
+    }
+    if limits.path_bytes > 4096 {
+        return Some(Invalid::Directories);
+    }
+    for directory in &start.directories {
+        if !within(&directory.name, u64::from(limits.name_bytes))
             || directory.conflicts.len() > usize::try_from(limits.conflicts).expect("u32 fits usize")
         {
+            return Some(Invalid::Directories);
+        }
+        for path in &directory.conflicts {
+            if !within(path, u64::from(limits.path_bytes)) {
+                return Some(Invalid::Directories);
+            }
+        }
+    }
+    for (at, directory) in start.directories.iter().enumerate() {
+        if !safe_name(&directory.name) || (!directory.git && !directory.conflicts.is_empty()) {
             return Some(Invalid::Directories);
         }
         for earlier in start.directories.get(..at).expect("enumerated directory") {
@@ -504,9 +521,14 @@ fn valid_start(start: &Start, limits: &Limits) -> Option<Invalid> {
                 return Some(Invalid::Directories);
             }
         }
-        for path in &directory.conflicts {
-            if !relative(path, limits.path_bytes) || !directory.writable {
+        for (position, path) in directory.conflicts.iter().enumerate() {
+            if !relative(path, limits.path_bytes) {
                 return Some(Invalid::Directories);
+            }
+            for earlier in directory.conflicts.get(..position).expect("enumerated conflict") {
+                if earlier == path {
+                    return Some(Invalid::Directories);
+                }
             }
         }
     }
@@ -524,6 +546,18 @@ fn valid_start(start: &Start, limits: &Limits) -> Option<Invalid> {
         }
     }
     None
+}
+
+fn safe_name(name: &[u8]) -> bool {
+    if name.is_empty() || name == b"." || name == b".." {
+        return false;
+    }
+    for byte in name {
+        if *byte == 0 || *byte == b'/' {
+            return false;
+        }
+    }
+    true
 }
 
 fn within(bytes: &[u8], limit: u64) -> bool {

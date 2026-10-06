@@ -8,12 +8,12 @@
 
 use crate::boundary::{Exit, Place, Ran, Request, Returned};
 use crate::call::{self, Call, Withdrawal};
-use crate::charter::Repository;
 use crate::conventions;
 use crate::delivery::{CallName, Delivered, Delivery, DeliveryFailure, DeliveryReason};
 use crate::limits::Limits;
 use crate::outcome::Change;
 use crate::run::Run;
+use crate::workspace::{self, Directory};
 use core::mem;
 use skein_lib::bytes::copy_of;
 use skein_lib::{Env, Id, Queue, Time, Token};
@@ -144,7 +144,7 @@ fn malformed(owner: Token, out: &mut Queue<Request>) -> Settled {
 
 fn writable(run: &Run, directory: u32) -> bool {
     let position = usize::try_from(directory).expect("bounded directory ordinal fits");
-    match run.charter.checkout.repositories.get(position) {
+    match workspace::directories(run.workspace.as_ref()).get(position) {
         Some(repository) => repository.writable,
         None => false,
     }
@@ -194,15 +194,13 @@ fn back(owner: Token, result: Returned, settled: Settled, out: &mut Queue<Reques
     settled
 }
 
-fn repository(run: &Run, check: u32) -> &Repository {
+fn repository(run: &Run, check: u32) -> &Directory {
     let index = run.found.checks.get(check).expect("only discovered checks run");
     repository_at(run, *index)
 }
 
-fn repository_at(run: &Run, index: u32) -> &Repository {
-    run.charter
-        .checkout
-        .repositories
+fn repository_at(run: &Run, index: u32) -> &Directory {
+    workspace::directories(run.workspace.as_ref())
         .get(usize::try_from(index).expect("bounded mount"))
         .expect("checks belong to admitted mounts")
 }

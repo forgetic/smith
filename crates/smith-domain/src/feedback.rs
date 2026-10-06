@@ -102,7 +102,7 @@ pub fn feedback_worst_case(limits: &run::Limits) -> Option<u64> {
     let fields = limits.run_bytes.max(limits.outcome_bytes).checked_mul(4)?;
     let problems = fields.checked_add(256)?.checked_mul(u64::from(Problems::LISTED))?.checked_add(128)?;
     let checks = limits.run_bytes.checked_add(u64::from(limits.check_tail))?.checked_mul(4)?.checked_add(256)?;
-    let count = u64::from(limits.repositories.min(run::MAX_DIRECTORIES));
+    let count = u64::from(limits.directories.min(run::MAX_DIRECTORIES));
     let receipts = u64::try_from(run::Receipt::CAPACITY)
         .ok()?
         .checked_mul(4)?

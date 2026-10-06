@@ -24,7 +24,7 @@
 //! Generic result contracts implement domain/run.md, section 7 in 05s4.
 //! Generic delivery implements domain/run.md, section 8; opaque host tools and
 //! bounded settled recovery implement section 5.2. Host-selected conventions
-//! implement sections 3.1, 3.3 and 8.1. The optional workspace, titled brief and
+//! implement sections 3.1, 3.3 and 8.1. The typed optional workspace implements section 3.2; titled brief and
 //! split token budget remain for subsequent increments (domain/run.md, section 14).
 
 //!
@@ -63,6 +63,7 @@ mod prompt;
 mod run;
 #[cfg(test)]
 mod tests;
+mod workspace;
 
 pub use boundary::{
     Answer, Ask, AskRefusal, CompletionEvidence, CompletionFailure, End, Event, Exit, Failure, Fault, Invalid,
@@ -72,6 +73,7 @@ pub use budget::{Budget, Exhausted, Spend};
 pub use charter::{Charter, Conventions};
 pub use domain::{Domain, MAX_OUT, fire, step};
 pub use limits::{Limits, worst_case};
+pub use workspace::{Directory, Workspace};
 
 pub use delivery::{
     CallName, Delivered, Delivery, DeliveryFailure, DeliveryReason, DeliveryRefusal, DeliveryStatus, Diagnostic,

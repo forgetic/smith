@@ -43,15 +43,27 @@ pub struct Limits {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub conversations: u32,
-    /// Bytes a run holds: its charter, each part held in a box counted at its
-    /// fixed size plus its payload.
+    /// Bytes a run holds beyond inline slab fields: its charter and separate
+    /// workspace, including every Directory cell, name, conflict Box cell and path.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub run_bytes: u64,
-    /// Repositories a checkout may list.
+    /// Directories a present workspace may list; empty present workspaces refuse.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub repositories: u32,
+    pub directories: u32,
+
+    /// Maximum opaque safe mount component bytes, checked before pairwise admission.
+    /// Contract: domain/run.md, sections 3.2 and 14; domain/tools.md, section 2.
+    pub directory_name_bytes: u32,
+
+    /// Maximum initial conflict paths per git directory, checked before comparisons.
+    /// Contract: domain/run.md, sections 3.2, 8.3 and 14.
+    pub conflicts: u32,
+
+    /// Maximum relative conflict path bytes, at most `Marker::CAPACITY` (4096).
+    /// Contract: domain/run.md, sections 3.2, 8.3 and 14.
+    pub conflict_path_bytes: u32,
     /// Host tool declarations a charter may grant.
     ///
     /// Contract: domain/run.md, sections 3, 5.2, 13 and 14.
@@ -156,6 +168,9 @@ pub struct Limits {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
+    if limits.conflict_path_bytes > u32::try_from(crate::Marker::CAPACITY).ok()? {
+        return None;
+    }
     let runs = Slab::<Run>::worst_case(limits.runs)?;
     let conversations = Slab::<Conversation>::worst_case(limits.conversations)?;
     // A deadline per run, and two per call.
@@ -164,9 +179,9 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     // Each run holds its charter, including both convention path payloads, up
     // to its byte limit (inline path wrappers are in Slab<Run>), and what it found in
     // its checkout: a guide and a mark for checks per repository.
-    let guides = List::<Guide>::worst_case(limits.repositories)?
-        .checked_add(u64::from(limits.repositories).checked_mul(u64::from(limits.guide_bytes))?)?;
-    let checks = List::<u32>::worst_case(limits.repositories)?;
+    let guides = List::<Guide>::worst_case(limits.directories)?
+        .checked_add(u64::from(limits.directories).checked_mul(u64::from(limits.guide_bytes))?)?;
+    let checks = List::<u32>::worst_case(limits.directories)?;
     // A winding run holds the outcome it accepted.
     let run = limits
         .run_bytes

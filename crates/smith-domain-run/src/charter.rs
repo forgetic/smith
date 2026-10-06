@@ -8,7 +8,7 @@
 use alloc::boxed::Box;
 use core::mem::size_of;
 
-use skein_lib::{Duration, Token};
+use skein_lib::Duration;
 
 use crate::boundary::Invalid;
 use crate::budget::Budget;
@@ -38,11 +38,6 @@ pub struct Charter {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub brief: Box<[u8]>,
-    /// Prepared repository roots and effective write authority supplied by the host.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub checkout: Checkout,
-
     /// Host-supplied relative guide/check paths, admitted before effects. None
     /// selects AGENTS.md and .smith/check. Both owning paths count in `run_bytes`;
     /// workspace authority and lower IO root confinement still apply.
@@ -71,37 +66,6 @@ pub struct Charter {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub models: Box<[Llm]>,
-}
-
-/// The repositories prepared for the run, and which of them it may write: the
-/// effective write authority, decided by the engine and enforced by the tools.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Checkout {
-    /// Repository mounts in host order, bounded by the receiving limits.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub repositories: Box<[Repository]>,
-}
-
-/// Host-prepared repository mount with an opaque IO root and explicit write authority.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Repository {
-    /// The name the LLM and the tools know it by.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub name: Box<[u8]>,
-    /// io's name for its root directory, where the worker put it.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub root: Token,
-    /// Whether this mount permits modification; protected git paths remain unwritable.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub writable: bool,
 }
 
 /// What the LLM may do besides talking. Data, never derived from a role.
@@ -228,8 +192,8 @@ pub struct Endpoint(
 /// pairs.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
-    let Charter { brief: _, checkout, grants, outcome, budget, llm, models, resume: _, waiting, conventions } = charter;
+pub(crate) fn check(charter: &Charter, workspace: Option<&crate::Workspace>, limits: &Limits) -> Result<(), Invalid> {
+    let Charter { brief: _, grants, outcome, budget, llm, models, resume: _, waiting, conventions } = charter;
     if !budget.is_workable()
         || !budget.within(&limits.budget)
         || *waiting == Duration::ZERO
@@ -250,13 +214,19 @@ pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
     {
         return Err(Invalid::Conventions);
     }
-    match cost(charter) {
+    crate::workspace::admit(workspace, limits)?;
+    let owned = match cost(charter) {
+        Some(bytes) => match crate::workspace::cost(workspace) {
+            Some(workspace_bytes) => bytes.checked_add(workspace_bytes),
+            None => None,
+        },
+        None => None,
+    };
+    match owned {
         Some(bytes) if bytes <= limits.run_bytes => {}
         Some(_) | None => return Err(Invalid::TooLarge),
     }
-    if count(checkout.repositories.len()) > limits.repositories || repeated_repository(&checkout.repositories) {
-        return Err(Invalid::Checkout);
-    }
+    crate::workspace::check(workspace, limits)?;
     if count(grants.host_tools.len()) > limits.host_tools
         || repeated_host_tool(&grants.host_tools)
         || !valid_host_tools(&grants.host_tools, limits)
@@ -272,11 +242,28 @@ pub(crate) fn check(charter: &Charter, limits: &Limits) -> Result<(), Invalid> {
         return Err(Invalid::Grants);
     }
     if (outcome.change.is_some() || grants.deliver.is_some())
-        && (count(checkout.repositories.len()) > crate::MAX_DIRECTORIES || limits.delivery_timeout == Duration::ZERO)
+        && (count(crate::workspace::directories(workspace).len()) > crate::MAX_DIRECTORIES
+            || limits.delivery_timeout == Duration::ZERO)
     {
-        return Err(Invalid::Checkout);
+        return Err(Invalid::Workspace);
+    }
+    let writable = has_writable(workspace);
+    if outcome.change.is_some() && !writable {
+        return Err(Invalid::Outcome);
+    }
+    if grants.deliver.is_some() && !writable {
+        return Err(Invalid::Grants);
     }
     Ok(())
+}
+
+fn has_writable(workspace: Option<&crate::Workspace>) -> bool {
+    for directory in crate::workspace::directories(workspace) {
+        if directory.writable {
+            return true;
+        }
+    }
+    false
 }
 
 /// The bytes a charter holds beyond its fixed size: each part held in a box
@@ -292,10 +279,6 @@ pub(crate) fn cost(charter: &Charter) -> Option<u64> {
     let llm = u64::try_from(size_of::<Llm>()).ok()?;
     for Llm { account: _, endpoint: _, model, max_tokens: _, dialect: _ } in &charter.models {
         cost = cost.checked_add(llm)?.checked_add(len(model)?)?;
-    }
-    let repository = u64::try_from(size_of::<Repository>()).ok()?;
-    for Repository { name, root: _, writable: _ } in &charter.checkout.repositories {
-        cost = cost.checked_add(repository)?.checked_add(len(name)?)?;
     }
     let host_tool = u64::try_from(size_of::<HostTool>()).ok()?;
     for tool in &charter.grants.host_tools {
@@ -322,17 +305,6 @@ fn repeated_model(models: &[Llm]) -> bool {
     for (index, llm) in models.iter().enumerate() {
         for other in models.get(index.saturating_add(1)..).unwrap_or_default() {
             if other.model == llm.model {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn repeated_repository(repositories: &[Repository]) -> bool {
-    for (index, repository) in repositories.iter().enumerate() {
-        for other in repositories.get(index.saturating_add(1)..).unwrap_or_default() {
-            if other.name == repository.name {
                 return true;
             }
         }

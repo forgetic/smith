@@ -4,7 +4,9 @@ Provisional, 2026-10-05. What a smith session does to its workspace, as
 a domain layer: read, list, search, write, edit and shell. It is the
 child domain `smith-domain-tools`, under the session (session.md). A run
 with no workspace has none of these tools; its LLM acts through its
-host's tools and MCP servers. What is still open is listed in section 8.
+host's tools and MCP servers. In the typed run boundary, absent workspace
+suppresses inspect, modify and shell families; host and run tools remain under
+their own grants. What is still open is listed in section 8.
 
 ## 1. In one page
 
@@ -32,7 +34,9 @@ host's tools and MCP servers. What is still open is listed in section 8.
   opens.
 - **A merge in progress** is a repository like any other, whose
   conflicted files hold their markers until the LLM resolves them
-  (run.md, 8.3).
+  (run.md, 8.3). A read-only git directory may describe its initial conflicts,
+  but its metadata grants no permission to resolve them. Plain directories
+  carry no git conflict list.
 
 ## 3. The tools
 

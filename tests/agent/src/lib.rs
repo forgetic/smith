@@ -46,4 +46,4 @@ pub use limits::{BUDGET, LIMITS, TIGHT};
 
 pub use script::{JOBS, Job};
 
-pub use world::{DeliverySubmission, HostReply, HostSchedule, Settings, World, delivered};
+pub use world::{Boundary, DeliverySubmission, HostReply, HostSchedule, Settings, World, delivered};

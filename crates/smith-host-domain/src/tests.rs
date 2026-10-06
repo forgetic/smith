@@ -106,3 +106,94 @@ fn a_spawn_beyond_the_slots_is_refused_as_busy_without_displacing_the_active_own
     domain.reclaim();
     assert_eq!(domain.agents(), 0);
 }
+
+fn mount(name: &[u8], writable: bool, git: bool, conflicts: &[&[u8]]) -> crate::Directory {
+    let mut paths = skein_lib::List::with_capacity(u32::try_from(conflicts.len()).unwrap());
+    for path in conflicts {
+        paths.push(Box::from(*path)).expect("fixture conflict count");
+    }
+    crate::Directory { name: Box::from(name), writable, git, conflicts: paths.into_boxed() }
+}
+
+fn admit_start(start: Start, limits: crate::Limits) -> Request {
+    let mut domain = Domain::new(&limits);
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut out = Queue::with_capacity(crate::max_out(&limits));
+    crate::step(&mut domain, &env, Event::Spawn { client: Token::new(91), start }, &mut out);
+    out.pop().expect("one actual spawn or invalid terminal")
+}
+
+#[test]
+fn host_mount_metadata_admission_agrees_with_optional_workspace_and_git_kind() {
+    let receiving = crate::Limits { directories: 2, conflicts: 2, path_bytes: 4096, ..limits() };
+    let selected = Start {
+        workspace: Some(Token::new(7)),
+        directories: Box::new([mount(b"plain", true, false, &[]), mount(b"git", false, true, &[b"src/conflict.rs"])]),
+        ..start()
+    };
+    match admit_start(selected, receiving) {
+        Request::Spawn { .. } => {}
+        Request::Started { .. }
+        | Request::Admitted { .. }
+        | Request::Called { .. }
+        | Request::Withdrawn { .. }
+        | Request::Turn { .. }
+        | Request::Waiting { .. }
+        | Request::Rejected { .. }
+        | Request::Exhausted { .. }
+        | Request::Told { .. }
+        | Request::Answered { .. }
+        | Request::Faulted { .. }
+        | Request::Bounced { .. }
+        | Request::Gone { .. }
+        | Request::Send { .. }
+        | Request::Read { .. }
+        | Request::Signal { .. }
+        | Request::Wait { .. }
+        | Request::Reap { .. } => panic!("readonly git conflict evidence is valid"),
+    }
+    let cases = [
+        Start { workspace: None, directories: Box::new([mount(b"git", false, true, &[])]), ..start() },
+        Start { workspace: Some(Token::new(7)), directories: Box::new([]), ..start() },
+        Start { workspace: Some(Token::new(7)), directories: Box::new([mount(b"a/b", true, true, &[])]), ..start() },
+        Start {
+            workspace: Some(Token::new(7)),
+            directories: Box::new([mount(b"plain", true, false, &[b"src/conflict"])]),
+            ..start()
+        },
+        Start {
+            workspace: Some(Token::new(7)),
+            directories: Box::new([mount(b"git", false, true, &[b"src/conflict", b"src/conflict"])]),
+            ..start()
+        },
+        Start {
+            workspace: Some(Token::new(7)),
+            directories: Box::new([mount(b"git", false, true, &[b"../conflict"])]),
+            ..start()
+        },
+    ];
+    for rejected in cases {
+        match admit_start(rejected, receiving) {
+            Request::Gone { end, .. } => assert_eq!(end, End::Invalid(crate::Invalid::Directories)),
+            Request::Spawn { .. }
+            | Request::Started { .. }
+            | Request::Admitted { .. }
+            | Request::Called { .. }
+            | Request::Withdrawn { .. }
+            | Request::Turn { .. }
+            | Request::Waiting { .. }
+            | Request::Rejected { .. }
+            | Request::Exhausted { .. }
+            | Request::Told { .. }
+            | Request::Answered { .. }
+            | Request::Faulted { .. }
+            | Request::Bounced { .. }
+            | Request::Send { .. }
+            | Request::Read { .. }
+            | Request::Signal { .. }
+            | Request::Wait { .. }
+            | Request::Reap { .. } => panic!("metadata refuses before lower spawn"),
+        }
+    }
+    assert!(crate::worst_case(&crate::Limits { path_bytes: 4097, ..receiving }).is_none());
+}

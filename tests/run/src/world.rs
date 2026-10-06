@@ -185,7 +185,10 @@ const fn calm_run_limits() -> run::Limits {
         runs: 4,
         conversations: 16,
         run_bytes: 1 << 16,
-        repositories: 4,
+        directories: 4,
+        directory_name_bytes: 256,
+        conflicts: 64,
+        conflict_path_bytes: 4096,
         host_tools: 4,
         host_input_bytes: 65_536,
         host_reply_bytes: 65_536,
@@ -296,6 +299,7 @@ enum Delivery {
         reply_to: ReplyTo,
         worker: Token,
         charter: run::Charter,
+        workspace: Option<run::Workspace>,
     },
     /// The host's cancel reaches the agent.
     ///
@@ -1177,9 +1181,9 @@ impl World {
     /// io finds it.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    fn checkout(&mut self, repositories: &[run::charter::Repository]) {
+    fn checkout(&mut self, directories: &[run::Directory]) {
         let settings = self.settings.checkout;
-        for &run::charter::Repository { root, .. } in repositories {
+        for &run::Directory { root, .. } in directories {
             if self.rng.chance(settings.guides) {
                 let len = usize::try_from(self.rng.between(1, u64::from(settings.guide_max))).expect("small");
                 // Text with characters of more than one byte, so a cut may
@@ -1210,11 +1214,11 @@ impl World {
     fn host_out(&mut self, out: Vec<run::Event>) {
         for event in out {
             match event {
-                run::Event::Start { reply_to, worker, charter, .. } => {
+                run::Event::Start { reply_to, worker, charter, workspace, .. } => {
                     let start = Start { budget: charter.budget, checks: BTreeSet::new(), answer: None };
                     assert!(self.starts.insert(worker, start).is_none(), "jobs have distinct names");
                     self.stats.starts += 1;
-                    self.send(Lane::Agent, Delivery::Start { reply_to, worker, charter });
+                    self.send(Lane::Agent, Delivery::Start { reply_to, worker, charter, workspace });
                 }
                 event @ run::Event::Message { .. } => self.send(Lane::Agent, Delivery::Host(event)),
                 run::Event::Cancel { run } => {
@@ -1250,18 +1254,18 @@ impl World {
     fn deliver(&mut self) {
         while let Some(delivery) = self.wire.next(self.now) {
             match delivery {
-                Delivery::Start { reply_to, worker, charter } => {
-                    self.checkout(&charter.checkout.repositories);
+                Delivery::Start { reply_to, worker, charter, workspace } => {
+                    self.checkout(workspace.as_ref().map_or(&[][..], |workspace| &workspace.directories));
                     let wants = charter.outcome.change.is_some() || charter.grants.deliver.is_some();
                     let mut checks = BTreeSet::new();
-                    for repository in &charter.checkout.repositories {
+                    for repository in workspace.as_ref().map_or(&[][..], |workspace| workspace.directories.as_ref()) {
                         let executable = (repository.root, b".temper/pre-pr".to_vec());
                         if wants && repository.writable && self.executables.contains(&executable) {
                             checks.insert(repository.root);
                         }
                     }
                     self.starts.get_mut(&worker).expect("a start is tracked").checks = checks;
-                    self.run_stage.push(run::Event::Start { reply_to, worker, charter, transcript: None });
+                    self.run_stage.push(run::Event::Start { reply_to, worker, charter, workspace, transcript: None });
                 }
                 Delivery::Cancel { run } => self.run_stage.push(run::Event::Cancel { run }),
                 Delivery::Host(event) => self.hand(event),

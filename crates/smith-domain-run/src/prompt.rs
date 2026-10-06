@@ -15,10 +15,11 @@ use alloc::boxed::Box;
 use skein_lib::Writer;
 
 use crate::boundary::Stop;
-use crate::charter::{Charter, Families, Llm, Repository, Tools};
+use crate::charter::{Charter, Families, Llm, Tools};
 use crate::conventions;
 use crate::outcome::{FieldRule, OutcomeSpec, TextSpec, VerdictRule};
 use crate::prepare::{Found, Guide};
+use crate::workspace::{self, Directory, Workspace};
 
 /// The first user message of a main conversation.
 ///
@@ -29,23 +30,29 @@ pub(crate) const BEGIN: &[u8] = b"Begin the work your brief describes.";
 /// its checkout.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-pub(crate) fn system(charter: &Charter, found: &Found) -> Box<[u8]> {
-    let families = Families::of(&charter.grants);
+pub(crate) fn system(charter: &Charter, mounted: Option<&Workspace>, found: &Found) -> Box<[u8]> {
+    let families = workspace::families(mounted, Families::of(&charter.grants));
     let mut measured = Text::measuring();
-    render_system(&mut measured, charter, found, &charter.brief, families, true);
+    render_system(&mut measured, charter, mounted, found, &charter.brief, families, true);
     let mut text = measured.writing();
-    render_system(&mut text, charter, found, &charter.brief, families, true);
+    render_system(&mut text, charter, mounted, found, &charter.brief, families, true);
     text.finish()
 }
 
 /// The system text of a sub-agent asked for with `brief` and `families`.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-pub(crate) fn child(charter: &Charter, found: &Found, brief: &[u8], families: Families) -> Box<[u8]> {
+pub(crate) fn child(
+    charter: &Charter,
+    mounted: Option<&Workspace>,
+    found: &Found,
+    brief: &[u8],
+    families: Families,
+) -> Box<[u8]> {
     let mut measured = Text::measuring();
-    render_system(&mut measured, charter, found, brief, families, false);
+    render_system(&mut measured, charter, mounted, found, brief, families, false);
     let mut text = measured.writing();
-    render_system(&mut text, charter, found, brief, families, false);
+    render_system(&mut text, charter, mounted, found, brief, families, false);
     text.finish()
 }
 
@@ -64,12 +71,21 @@ pub(crate) fn nudge(stop: Stop, nudge: u32, nudges: u32) -> Box<[u8]> {
 /// The system text of main, or of a sub-agent: on `brief`, with `families`.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-fn render_system(text: &mut Text, charter: &Charter, found: &Found, brief: &[u8], families: Families, main: bool) {
+fn render_system(
+    text: &mut Text,
+    charter: &Charter,
+    mounted: Option<&Workspace>,
+    found: &Found,
+    brief: &[u8],
+    families: Families,
+    main: bool,
+) {
     if !brief.is_empty() {
         text.put(brief);
         end_paragraph(text, brief);
     }
-    let repositories = &charter.checkout.repositories;
+    let repositories = workspace::directories(mounted);
+    let families = workspace::families(mounted, families);
     for guide in &found.guides {
         render_guide(text, repositories, guide, conventions::guide(charter));
     }
@@ -131,7 +147,7 @@ fn end_paragraph(text: &mut Text, came: &[u8]) {
     text.put(b"\n");
 }
 
-fn render_guide(text: &mut Text, repositories: &[Repository], guide: &Guide, guide_path: &[u8]) {
+fn render_guide(text: &mut Text, repositories: &[Directory], guide: &Guide, guide_path: &[u8]) {
     text.put(b"## ");
     text.put(guide_path);
     text.put(b" in `");
@@ -163,16 +179,25 @@ fn render_tools(text: &mut Text, tools: Tools) {
     }
 }
 
-fn render_checkout(text: &mut Text, repositories: &[Repository], checks: &[u32], check_path: &[u8]) {
+fn render_checkout(text: &mut Text, repositories: &[Directory], checks: &[u32], check_path: &[u8]) {
     text.put(b"## Checkout\n\n");
     if repositories.is_empty() {
         text.put(b"There is no checkout.\n");
     }
     let mut index: u32 = 0;
-    for Repository { name, root: _, writable } in repositories {
+    for Directory { name, root: _, writable, git, conflicts } in repositories {
         text.put(b"- `");
         text.put(name);
         text.put(if *writable { b"`, which you may change" } else { b"`, which you may only read" });
+        text.put(if *git { b", a git working tree" } else { b", a plain directory" });
+        if !conflicts.is_empty() {
+            text.put(b", with initial merge conflicts: ");
+            for path in conflicts {
+                text.put(b"`");
+                text.put(path);
+                text.put(b"` ");
+            }
+        }
         if checks.contains(&index) {
             text.put(b", with checks (`");
             text.put(check_path);
@@ -234,7 +259,7 @@ fn render_fields(text: &mut Text, fields: &[FieldRule]) {
     }
 }
 
-fn name(repositories: &[Repository], index: u32) -> &Repository {
+fn name(repositories: &[Directory], index: u32) -> &Directory {
     let index = usize::try_from(index).expect("a u32 fits in a usize");
     repositories.get(index).expect("a guide is of a repository of the checkout")
 }
@@ -338,10 +363,10 @@ impl Text {
 mod tests {
     use super::{Text, child, nudge, system};
     use crate::boundary::Stop;
-    use crate::charter::{Charter, Checkout, Families, Grants, Tools};
+    use crate::charter::{Charter, Families, Grants, Tools};
     use crate::outcome::{ChangeSpec, FieldRule, ItemRule, ItemSpec, OutcomeSpec, TextSpec, VerdictRule};
     use crate::prepare::{Found, Guide};
-    use crate::tests::{bytes, charter};
+    use crate::tests::{bytes, charter, workspace};
     use alloc::boxed::Box;
 
     #[expect(clippy::disallowed_methods, reason = "a test reads the exact fixture text it checks")]
@@ -386,7 +411,7 @@ mod tests {
             },
             ..charter()
         };
-        let rendered = system(&charter, &found());
+        let rendered = system(&charter, Some(&workspace()), &found());
         let rendered = text(&rendered);
         let brief = rendered.find("Review the change.").expect("brief");
         let guide = rendered.find("## AGENTS.md").expect("guide");
@@ -414,7 +439,6 @@ mod tests {
     #[test]
     fn absent_workspace_and_empty_field_rules_are_said_plainly() {
         let charter = Charter {
-            checkout: Checkout { repositories: Box::new([]) },
             grants: Grants {
                 deliver: None,
                 tools: Tools { inspect: false, modify: false, shell: false },
@@ -428,7 +452,7 @@ mod tests {
             },
             ..charter()
         };
-        let rendered = system(&charter, &Found::with_capacity(0));
+        let rendered = system(&charter, None, &Found::with_capacity(0));
         let rendered = text(&rendered);
         assert!(rendered.contains("There is no checkout."));
         assert!(rendered.contains("Report: text from 0 through 16 bytes, with these host-required fields:\n(none)"));
@@ -448,7 +472,7 @@ You can read, list and search the files in the checkout.
 
 ## Checkout
 
-- `temper`, which you may only read
+- `temper`, which you may only read, a git working tree
 
 ## Sub-agents
 
@@ -462,7 +486,10 @@ When you are done, end your turn with your answer: your last message goes, as it
 you, and you are done.
 ";
         let found = Found::with_capacity(1);
-        assert_eq!(text(&child(&charter, &found, b"Find where tabs are parsed.", families)), text(expected));
+        assert_eq!(
+            text(&child(&charter, Some(&workspace()), &found, b"Find where tabs are parsed.", families)),
+            text(expected)
+        );
     }
 
     #[test]

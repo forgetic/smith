@@ -81,7 +81,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     if !fits
         || run_limits.conversations > session_limits.sessions
         || run_limits.max_tokens > session_limits.max_tokens
-        || run_limits.repositories > session_limits.tools.repos
+        || run_limits.directories > session_limits.tools.repos
+        || run_limits.directory_name_bytes > session_limits.tools.path_bytes
     {
         return None;
     }
@@ -120,8 +121,28 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let convention_paths = run_limits
         .run_bytes
         .min(u64::try_from(run::Conventions::PATH_CAPACITY).ok()?.checked_mul(2)?)
-        .checked_mul(u64::from(run_limits.repositories))?;
-    let payload = payload.checked_add(convention_paths)?;
+        .checked_mul(u64::from(run_limits.directories))?;
+    // Kind/conflict labels and quoted delimiters are additional to the owning
+    // workspace copy. Each guide and mount renders its name once; each conflict
+    // payload renders once. The retained workspace already owns Box wrappers.
+    let directories = u64::from(run_limits.directories);
+    let conflicts = directories.checked_mul(u64::from(run_limits.conflicts))?;
+    let names = directories.checked_mul(u64::from(run_limits.directory_name_bytes))?.min(run_limits.run_bytes);
+    let paths = conflicts.checked_mul(u64::from(run_limits.conflict_path_bytes))?.min(run_limits.run_bytes);
+    let workspace_render = directories
+        .checked_mul(52)?
+        .checked_add(conflicts.checked_mul(3)?)?
+        .checked_add(paths)?
+        .checked_add(names.checked_mul(2)?)?;
+    // Moving directory names into tools authority overlaps its receiving Repo
+    // cells and one allocated Name mount per directory with the source array;
+    // cwd additionally clones the first Name and its payload.
+    let authority_cells = skein_lib::List::<smith_domain_tools::Repo>::worst_case(run_limits.directories)?
+        .checked_add(
+            directories.checked_add(1)?.checked_mul(u64::try_from(size_of::<smith_domain_tools::Name>()).ok()?)?,
+        )?
+        .checked_add(u64::from(run_limits.directory_name_bytes).min(run_limits.run_bytes))?;
+    let payload = payload.checked_add(convention_paths)?.checked_add(workspace_render)?.checked_add(authority_cells)?;
     let run_out = Queue::<run::Request>::worst_case(run_out(limits))?
         .checked_add(u64::from(run_out(limits)).checked_mul(payload)?)?;
     // Every copied turn/prompt in the child queue and every separate handoff

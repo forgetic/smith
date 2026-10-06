@@ -18,9 +18,10 @@ use skein_lib::bytes::copy_of;
 use skein_lib::{List, Time, Token};
 
 use crate::boundary::{Place, Read, Request};
-use crate::charter::{Charter, Repository, count};
+use crate::charter::{Charter, count};
 use crate::conventions;
 use crate::limits::Limits;
+use crate::workspace::{self, Directory, Workspace};
 
 /// One thing a run looks for: in the repository at `repository` in its
 /// checkout, its guide or its checks.
@@ -83,8 +84,8 @@ impl Found {
 /// nothing left to look for.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-pub(crate) fn next(charter: &Charter, after: Option<Step>) -> Option<Step> {
-    let repositories = count(charter.checkout.repositories.len());
+pub(crate) fn next(charter: &Charter, mounted: Option<&Workspace>, after: Option<Step>) -> Option<Step> {
+    let repositories = count(workspace::directories(mounted).len());
     let candidate = match after {
         None => Step { repository: 0, look: Look::Guide },
         Some(Step { repository, look: Look::Guide }) => Step { repository, look: Look::Checks },
@@ -94,7 +95,7 @@ pub(crate) fn next(charter: &Charter, after: Option<Step>) -> Option<Step> {
     };
     let step = match candidate.look {
         Look::Guide => candidate,
-        Look::Checks if wants_checks(charter, candidate.repository) => candidate,
+        Look::Checks if wants_checks(charter, mounted, candidate.repository) => candidate,
         Look::Checks => Step { repository: candidate.repository.saturating_add(1), look: Look::Guide },
     };
     (step.repository < repositories).then_some(step)
@@ -103,8 +104,15 @@ pub(crate) fn next(charter: &Charter, after: Option<Step>) -> Option<Step> {
 /// The request that takes `step`, for the run `owner`.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-pub(crate) fn request(charter: &Charter, step: Step, owner: Token, now: Time, limits: &Limits) -> Request {
-    let root = repository(charter, step.repository).root;
+pub(crate) fn request(
+    charter: &Charter,
+    mounted: Option<&Workspace>,
+    step: Step,
+    owner: Token,
+    now: Time,
+    limits: &Limits,
+) -> Request {
+    let root = repository(mounted, step.repository).root;
     let deadline = now.saturating_add(limits.io_timeout);
     match step.look {
         Look::Guide => {
@@ -146,11 +154,11 @@ pub(crate) fn checks(found: &mut Found, step: Step, executable: bool) {
 /// writable, and a change must pass its checks.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-fn wants_checks(charter: &Charter, index: u32) -> bool {
-    (charter.outcome.change.is_some() || charter.grants.deliver.is_some()) && repository(charter, index).writable
+fn wants_checks(charter: &Charter, mounted: Option<&Workspace>, index: u32) -> bool {
+    (charter.outcome.change.is_some() || charter.grants.deliver.is_some()) && repository(mounted, index).writable
 }
 
-fn repository(charter: &Charter, index: u32) -> &Repository {
+fn repository(mounted: Option<&Workspace>, index: u32) -> &Directory {
     let index = usize::try_from(index).expect("a u32 fits in a usize");
-    charter.checkout.repositories.get(index).expect("steps are within the checkout")
+    workspace::directories(mounted).get(index).expect("steps are within the checkout")
 }

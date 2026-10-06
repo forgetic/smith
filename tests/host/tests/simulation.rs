@@ -155,6 +155,7 @@ fn admission_refusals_preserve_separate_process_rights() {
                 request.directories = Box::new([smith_host_domain::Directory {
                     name: Box::from(&b"a"[..]),
                     writable: false,
+                    git: false,
                     conflicts: Box::new([Box::from(&b"file"[..])]),
                 }]);
                 Invalid::Directories

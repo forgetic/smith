@@ -16,7 +16,8 @@ pub struct Limits {
     pub directories: u32,
     /// Conflict paths per mount (domain/host.md, sections 2–7).
     pub conflicts: u32,
-    /// Relative conflict path bytes (domain/host.md, sections 2–7).
+    /// Relative conflict path bytes, at most 4096; larger configurations are
+    /// refused by admission and `worst_case` (domain/host.md, section 4.1).
     pub path_bytes: u32,
     /// Mount and generic tool label bytes (domain/host.md, sections 2–7).
     pub name_bytes: u32,
@@ -75,6 +76,9 @@ pub struct Limits {
 /// invalid/unrepresentable limits (domain/host.md, sections 3, 4 and 6).
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
+    if limits.path_bytes > 4096 {
+        return None;
+    }
     if limits.turns == 0
         || limits.turn_bytes == 0
         || limits.unacknowledged_bytes < limits.turn_bytes

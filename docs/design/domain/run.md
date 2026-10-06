@@ -113,6 +113,32 @@ What comes with the charter:
 - **Credential grants** for the endpoints that need them (host.md,
   section 7).
 
+The typed start owns `workspace: Option<Workspace>` separately from the
+charter. `None` is the canonical absence; `Some` contains at least one
+`Directory`. Each directory supplies its name, root token, write permission,
+git kind and initial relative conflict paths. Names and root tokens are unique
+within the workspace. A name is a nonempty single path component, excluding
+NUL, `.` and `..`; conflict paths use the existing relative marker spelling,
+with no empty, `.` or `..` components or NUL. Both kinds of text are host-attested
+UTF-8. Plain directories have no conflicts. A read-only git directory may carry
+conflict metadata; that information grants no write or delivery authority.
+
+Receiving limits bound directory count, each name, conflicts per directory and
+each conflict path, with paths at most the existing 4,096-byte marker capacity.
+The checked aggregate `run_bytes` counts charter and workspace ownership:
+directory cells, names, conflict-path Box cells and payloads. Counts and owned
+bytes are admitted before pairwise duplicate checks and before discovery,
+provider or tool effects. A malformed workspace refuses as `Invalid::Workspace`.
+A Change contract or a delivery grant without any writable directory is refused
+as an impossible outcome or grant before effects; delivery-capable workspaces
+also fit the existing 64-directory receipt vocabulary.
+
+Without a workspace, inspect, modify and shell families are unavailable even if
+the charter names them. Host tools, finish, wait and permitted sub-agents keep
+their own contracts. No guide read, check probe, file operation, check or delivery
+is introduced merely to start or resume a workspace-free run. The host supplies
+the workspace again on resume; transcript history does not retain it.
+
 Messages may follow at once, before the run has read its start.
 
 ### 3.3 The prompt
@@ -123,7 +149,9 @@ those are what it enforces: the workspace, if any, and what it may
 write, the tools, each directory's guide, the checks, how to finish
 (the contract, as the LLM must meet it) and how waiting works. The
 domain decides what each says and in which order; the protocol layer
-renders it.
+renders it. Workspace metadata distinguishes plain directories from git working
+trees and names the actual initial conflict paths. Those paths describe files;
+they are not executable instructions or authority grants.
 
 A guide is read from each workspace directory at the path the
 conventions name,
@@ -274,6 +302,14 @@ Within a run, sub-agents: cheap, sharing its workspace and budget, ended
 with the call that asked for them. Work that should outlive the run, run
 elsewhere or have its own authority is the host's, which may offer a
 host tool for it, as temper's `delegate` does.
+
+Each main/child opening owns its optional workspace copy until authority
+translation moves its names into the tools' existing mount vocabulary. Prompt
+rendering retains git/conflict information; tools need only roots and write
+permissions. The root prices these copies and rendered metadata alongside
+queued opening and translation ownership. Children see the same directories
+and initial conflict paths, with the charter's narrowed tool families; no
+workspace is fabricated for a child of a workspace-free run.
 
 ### 5.4 Concrete application feedback
 
@@ -500,7 +536,7 @@ claim a conflicted file. Failure carries the generic reason and its sealed
 
 Successful receipts are constructor-sealed: one to 64 distinct directory
 ordinals, each with one to 512 opaque bytes. A delivery-capable charter admits
-at most 64 mounted directories, also within the receiving repository limit,
+at most 64 mounted directories, also within the receiving directory limit,
 so every changed mount is representable. A Report-only charter without the
 separate delivery grant does not acquire this cap. The run revalidates every
 receipt or marker ordinal against its admitted writable mounts; malformed
@@ -549,6 +585,12 @@ conflict, and the run tells the LLM. The LLM edits them and runs the
 checks; it has no git writes (tools.md, section 5). Delivered, the host
 commits the tree as the merge, and refuses while a file the merge left
 in conflict still holds a marker, naming it.
+
+The initial conflict list is host-supplied metadata for a git working tree,
+including an informative list on a read-only directory. Checks and deliveries
+act only on writable directories. The host's actual merge state decides whether
+markers remain and whether a merge commit can land; the run does not infer a
+successful merge from its initial list or an emitted delivery request.
 
 ### 8.4 Delivering mid-run
 
@@ -658,6 +700,14 @@ turns in order; nothing written outside the writable directories; budgets exceed
 open session; every call answered once; every host call asked under one
 name.
 
+The Workspace increment exercises a workspace-free native host call, wait,
+park and genuine transcript restore in both wire configurations; mixed
+git/plain mounts and independent child authority; and an actual shared-git
+initial merge whose marker refusal precedes resolution, checks and a
+two-parent commit. Receiving and component ownership controls remain in
+the run, host and native root worlds; the increment ledger records their
+exact source and full-suite evidence.
+
 ## 14. From temper
 
 - **The run, as temper built it, stays:** charters judged at the
@@ -681,8 +731,7 @@ name.
 The first 05s4 RESULTS and DELIVERY increments implement generic final forms,
 separately granted main delivery, all discovered writable checks, sealed actual
 host terminals and stable transcript-derived naming. The copied token-split
-budget and charter workspace/unstructured brief remain until subsequent
-increments. The CONVENTIONS increment replaces fixed discovery/check paths
+budget and unstructured brief remain until subsequent increments. The CONVENTIONS increment replaces fixed discovery/check paths
 with the bounded host-supplied pair described in section 3.1; Temper-style
 callers explicitly select `.temper/pre-pr`. The HOST TOOLS increment replaces closed forge
 and outlet grants with bounded declarations and opaque durable relays, settled
@@ -692,11 +741,15 @@ activation counts and exact selected-history/post-transcript restoration. It
 also repairs session receiving ownership before provider and tool effects
 (domain/session.md, section 3.1), preserving maximum actual late terminals.
 Provider-neutral canonical feedback lives in the root; shared Client/peer and
-replay codecs belong to Skein. Optional workspace, titled brief, conflict files
-in Start, scalar run pricing, live channel/transcript codecs and the executable
-remain later increments. Source and validation status are recorded in
+replay codecs belong to Skein. The WORKSPACE increment separates optional workspace
+from the charter, carries git kind and initial conflict paths into main/child
+openings, and admits its aggregate ownership before effects (section 3.2).
+Its source and world evidence are tracked separately; titled brief, scalar run
+pricing, live channel/transcript codecs and the executable remain later
+increments. Source and validation status are recorded in
 `docs/development/migration-05s4-messages.md` and
-`docs/development/migration-05s4-conventions.md`; a source draft alone is not a
+`docs/development/migration-05s4-conventions.md`, and
+`docs/development/migration-05s4-workspace.md`; a source draft alone is not a
 gate claim.
 
 ## 15. Open questions

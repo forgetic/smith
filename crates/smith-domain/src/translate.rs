@@ -5,10 +5,9 @@
 
 use alloc::boxed::Box;
 
-use skein_lib::bytes::copy_of;
 use skein_lib::{List, Token};
-use smith_domain_run::charter::{Checkout, Families, Repository, Tools};
-use smith_domain_run::{self as run, Ask, Opening, Spend};
+use smith_domain_run::charter::{Families, Tools};
+use smith_domain_run::{self as run, Ask, Directory, Opening, Spend, Workspace};
 use smith_domain_session::{self as session, Budget, Dimension, Spec, Yield, llm};
 use smith_domain_tools::{Authority, Effect, Grants, Name, Repo};
 
@@ -72,7 +71,7 @@ pub(crate) fn spec(opening: Opening) -> Option<(Spec, Offered)> {
         system,
         prompt,
         tools,
-        checkout,
+        workspace,
         budget,
         finish,
         deliver,
@@ -80,7 +79,7 @@ pub(crate) fn spec(opening: Opening) -> Option<(Spec, Offered)> {
         wait,
         transcript: _,
     } = opening;
-    let authority = authority(&checkout, tools)?;
+    let authority = authority(workspace, tools)?;
     let offered = Offered { host_tools: host_tools.clone(), finish, deliver, agents: families.agents, wait };
     let capacity = u32::try_from(host_tools.len()).ok()?.checked_add(4)?;
     let mut delegated = List::with_capacity(capacity);
@@ -126,12 +125,16 @@ pub(crate) fn spec(opening: Opening) -> Option<(Spec, Offered)> {
 /// an empty environment: a charter carries none yet.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-fn authority(checkout: &Checkout, tools: Tools) -> Option<Authority> {
-    let count = u32::try_from(checkout.repositories.len()).ok()?;
+fn authority(workspace: Option<Workspace>, tools: Tools) -> Option<Authority> {
+    let mounted = match workspace {
+        Some(workspace) => workspace.directories,
+        None => Box::default(),
+    };
+    let count = u32::try_from(mounted.len()).ok()?;
     let mut repos = List::with_capacity(count);
-    for Repository { name, root, writable } in &checkout.repositories {
-        let name = Name::new(copy_of(name))?;
-        let repo = Repo { mount: Box::new([name]), root: *root, writable: *writable };
+    for Directory { name, root, writable, git: _, conflicts: _ } in mounted {
+        let name = Name::new(name)?;
+        let repo = Repo { mount: Box::new([name]), root, writable };
         repos.push(repo).expect("room for every repository");
     }
     let repos = repos.into_boxed();

@@ -45,9 +45,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use skein_lib::{Duration, ReplyTo, Rng, Time, Token};
-use smith_domain_run::charter::{Checkout, Endpoint, Grants, HostTool, Llm, Repository, Tools};
+use smith_domain_run::charter::{Endpoint, Grants, HostTool, Llm, Tools};
 use smith_domain_run::outcome::{ChangeSpec, FieldRule, OutcomeSpec, TextSpec, VerdictRule};
 use smith_domain_run::{Budget, Charter, Delivery, Event};
+use smith_domain_run::{Directory, Workspace};
 
 use skein_world::domain::Span;
 
@@ -122,13 +123,13 @@ pub struct Script {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub max_tokens: u32,
-    /// Chance per mille that a charter's first repository is writable.
+    /// Chance per mille that the first directory is writable.
     /// Result permissions are drawn separately; when none is selected,
-    /// the fixture permits a change.
+    /// the fixture permits a change if writable, otherwise a report.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub writable: u32,
-    /// Chance per mille that the generated outcome or charter permits a change.
+    /// Chance per mille of permitting a change when the first directory is writable.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub changes: u32,
@@ -395,17 +396,24 @@ impl Host {
         let state = self.state(job);
         match state {
             State::Waiting => {
-                let charter = self.charter();
-                self.jobs.get_mut(&job).expect("waiting job").writable = charter
-                    .checkout
-                    .repositories
+                let (charter, workspace) = self.charter();
+                self.jobs.get_mut(&job).expect("waiting job").writable = workspace
+                    .as_ref()
+                    .expect("scripted host has mounts")
+                    .directories
                     .iter()
                     .enumerate()
                     .filter_map(|(position, mount)| {
                         mount.writable.then_some(u32::try_from(position).expect("bounded mounts"))
                     })
                     .collect();
-                out.push(Event::Start { reply_to: ReplyTo::new(job), worker: job, charter, transcript: None });
+                out.push(Event::Start {
+                    reply_to: ReplyTo::new(job),
+                    worker: job,
+                    charter,
+                    workspace,
+                    transcript: None,
+                });
                 self.set(job, State::Starting);
             }
             State::Running { run } => {
@@ -487,22 +495,36 @@ impl Host {
     /// - Reading is always granted; writing, the shell, forge reads and a
     ///   "comment" host tool each at random; sub-agents with the configured
     ///   chance, with two more models listed for them.
-    /// - Result permissions include change, the closed verdicts "approve"
-    ///   and "request-changes", report and declared failure, at the configured
+    /// - Result permissions include change only with a writable directory,
+    ///   the closed verdicts "approve" and "request-changes", report and
+    ///   declared failure, at the configured
     ///   chances. Change requires title/body fields; review items require
     ///   path/body; report requires source and failure requires cause. These
-    ///   names and meanings are owned by this host fixture.
+    ///   names and meanings are owned by this host fixture. A readonly job with
+    ///   no other result family receives a report contract.
     /// - The budget's turns, tokens and time are drawn from their ranges.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    fn charter(&mut self) -> Charter {
+    fn charter(&mut self) -> (Charter, Option<Workspace>) {
         let script = self.script;
         let len = self.rng.between(u64::from(script.brief_min), u64::from(script.brief_max));
         let brief = TEXT.iter().copied().cycle().take(usize::try_from(len).expect("a u32 fits")).collect();
         let writable = self.rng.chance(script.writable);
-        let mut repositories = vec![Repository { name: Box::from(&b"temper"[..]), root: self.name(), writable }];
+        let mut repositories = vec![Directory {
+            name: Box::from(&b"temper"[..]),
+            root: self.name(),
+            writable,
+            git: true,
+            conflicts: Box::new([]),
+        }];
         if self.rng.chance(500) {
-            repositories.push(Repository { name: Box::from(&b"docs"[..]), root: self.name(), writable: false });
+            repositories.push(Directory {
+                name: Box::from(&b"docs"[..]),
+                root: self.name(),
+                writable: false,
+                git: true,
+                conflicts: Box::new([]),
+            });
         }
         let tools = Tools { inspect: true, modify: self.rng.chance(500), shell: self.rng.chance(500) };
         let _retired_forge_draw = self.rng.chance(500);
@@ -518,9 +540,11 @@ impl Host {
             Vec::new()
         };
         let verdicts = if self.rng.chance(script.verdicts) { verdicts() } else { Vec::new() };
-        let report = script.reports > 0 && self.rng.chance(script.reports);
+        let requested_report = script.reports > 0 && self.rng.chance(script.reports);
         let failure = script.failures > 0 && self.rng.chance(script.failures);
-        let change = self.rng.chance(script.changes) || (verdicts.is_empty() && !report && !failure);
+        let change =
+            (self.rng.chance(script.changes) || (verdicts.is_empty() && !requested_report && !failure)) && writable;
+        let report = requested_report || (!change && verdicts.is_empty() && !failure);
         let tokens = |rng: &mut Rng| rng.between(script.tokens_min, script.tokens_max);
         let budget = Budget {
             turns: u32::try_from(self.rng.between(u64::from(script.turns_min), u64::from(script.turns_max)))
@@ -539,9 +563,10 @@ impl Host {
             max_tokens: script.max_tokens,
             dialect: 1,
         };
-        Charter {
+        let workspace = Some(Workspace { directories: repositories.into_boxed_slice() });
+        let charter = Charter {
             brief,
-            checkout: Checkout { repositories: repositories.into() },
+
             grants: Grants { deliver: None, tools, agents, host_tools: host_tools.into() },
             outcome: OutcomeSpec {
                 change: change.then_some(ChangeSpec {
@@ -571,7 +596,8 @@ impl Host {
             }),
             resume: false,
             waiting: skein_lib::Duration::from_secs(30),
-        }
+        };
+        (charter, workspace)
     }
 }
 

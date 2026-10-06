@@ -311,6 +311,32 @@ impl Backend {
     }
 }
 
+/// Actual lower requests observed without inspecting domain state.
+/// Contract: domain/run.md, sections 3.2 and 14; testing-strategy.md, section 7.
+#[derive(Clone, Debug)]
+pub enum Boundary {
+    /// Actual guide discovery. Contract: domain/run.md, section 3.3.
+    Read {
+        /// Accepted lower place. Contract: domain/run.md, section 3.3.
+        at: run::Place,
+    },
+    /// Actual writable check discovery. Contract: domain/run.md, section 8.1.
+    Probe {
+        /// Accepted lower place. Contract: domain/run.md, section 8.1.
+        at: run::Place,
+    },
+    /// Actual checked snapshot. Contract: domain/run.md, section 8.1.
+    Check {
+        /// Accepted lower program. Contract: domain/run.md, section 8.1.
+        program: run::Place,
+    },
+    /// Actual session filesystem/program operation. Contract: domain/tools.md, section 2.
+    Io {
+        /// Existing tools boundary. Contract: domain/tools.md, section 2.
+        op: tools::Op,
+    },
+}
+
 /// The real agent on a typed scripted host or actual wire backend. [`World::run`]
 /// drives every boundary to settlement, then checks its ledgers, referee and facts.
 /// The selected backend owns only its corresponding provider state and queues.
@@ -330,7 +356,8 @@ pub struct World {
     schedule: Schedule<Delivery>,
     flights: Ledger<(Family, Token), Flight>,
     disk: Checkout,
-    root: u64,
+    root: Option<u64>,
+    boundaries: Vec<(Time, Boundary)>,
     admitted: Option<Token>,
     answer: Option<run::Answer>,
     answered: Option<Time>,
@@ -378,14 +405,38 @@ impl World {
     fn with_backend(settings: &Settings, transcript: Option<agent::Transcript>, backend: Backend) -> World {
         let mut disk = Checkout::new();
         let root = fixture::seed(&mut disk);
+        let workspace = Some(run::Workspace {
+            directories: Box::new([run::Directory {
+                name: b"work".as_slice().into(),
+                root: Token::new(root),
+                writable: settings.writable,
+                git: true,
+                conflicts: Box::new([]),
+            }]),
+        });
+        Self::with_selected_backend(settings, transcript, workspace, disk, backend)
+    }
+
+    fn with_selected_backend(
+        settings: &Settings,
+        transcript: Option<agent::Transcript>,
+        workspace: Option<run::Workspace>,
+        disk: Checkout,
+        backend: Backend,
+    ) -> World {
+        let root = workspace
+            .as_ref()
+            .and_then(|workspace| workspace.directories.first())
+            .map(|directory| directory.root.raw());
         let max_out = agent::max_out(&settings.limits);
         let mut stage = Stage::new(settings.limits, max_out, max_out + 3);
-        let charter = charter(settings, root);
+        let charter = charter(settings);
         let observed_contract = charter.outcome.clone();
         stage.push(Event::Start {
             reply_to: ReplyTo::new(Token::new(1)),
             worker: Token::new(1),
             charter,
+            workspace,
             grants: Box::new([Grant {
                 name: GrantName { account: 0, generation: 1 },
                 valid: Duration::from_secs(7200),
@@ -426,6 +477,7 @@ impl World {
             flights: Ledger::new("agent request"),
             disk,
             root,
+            boundaries: Vec::new(),
             admitted: None,
             answer: None,
             answered: None,
@@ -475,6 +527,86 @@ impl World {
         scripts: Box<[provider::api::Script]>,
     ) -> World {
         Self::with_backend(&settings, transcript, Backend::Wire(wire::Composition::new(configuration, limits, scripts)))
+    }
+
+    /// Caller-selected workspace/disk and actual typed scripts; no default roots
+    /// are seeded. All accepted metadata and lower terminals use the existing world.
+    /// Contract: domain/run.md, sections 3.2, 8.3 and 14; testing-strategy.md, section 2.3.
+    #[must_use]
+    pub fn with_workspace_scripts(
+        settings: Settings,
+        transcript: Option<agent::Transcript>,
+        workspace: Option<run::Workspace>,
+        disk: Checkout,
+        scripts: Box<[provider::api::Script]>,
+    ) -> World {
+        let mut backend = Backend::typed(&settings);
+        match &mut backend {
+            Backend::Typed { provider, .. } => {
+                *provider = provider::Domain::configured(
+                    &settings.provider,
+                    settings.seed ^ 0x25,
+                    scripts,
+                    smith_session_world::provider::menu(),
+                )
+                .expect("caller scripts obey provider admission");
+            }
+            Backend::Wire(_) => unreachable!("typed constructor"),
+        }
+        Self::with_selected_backend(&settings, transcript, workspace, disk, backend)
+    }
+
+    /// Caller-selected mounts and actual Client/byte-peer scripts, using the same
+    /// receiving and settling paths as `with_wire`; no unused fixture root is seeded.
+    /// Contract: domain/run.md, sections 3.2 and 14; domain/client.md, sections 1 and 5.
+    #[must_use]
+    pub fn with_workspace_wire(
+        settings: Settings,
+        transcript: Option<agent::Transcript>,
+        workspace: Option<run::Workspace>,
+        disk: Checkout,
+        configuration: wire::Configuration,
+        limits: WireLimits,
+        scripts: Box<[provider::api::Script]>,
+    ) -> World {
+        Self::with_selected_backend(
+            &settings,
+            transcript,
+            workspace,
+            disk,
+            Backend::Wire(wire::Composition::new(configuration, limits, scripts)),
+        )
+    }
+
+    /// Route subsequent genuine checked submissions to the outside parent.
+    /// Contract: domain/run.md, sections 8.2 and 10.
+    pub fn enable_parent_deliveries(&mut self) {
+        self.parent_deliveries = true;
+    }
+
+    /// Actual fake filesystem state, with no domain-private authority inspection.
+    /// Contract: domain/run.md, section 14; testing-strategy.md, section 4.3.
+    #[must_use]
+    pub fn disk(&self) -> &Checkout {
+        &self.disk
+    }
+
+    /// A real parent submission grants access to its current exclusive snapshot.
+    /// The actual host terminal remains owed and is supplied by `return_delivery`.
+    /// Contract: domain/run.md, sections 8.2 and 10; testing-strategy.md, section 4.3.
+    pub fn delivery_checkout(&mut self, owner: Token) -> &mut Checkout {
+        assert!(
+            self.parent_deliveries && self.snapshots.contains_key(&owner),
+            "only an actual pending parent submission exposes its checkout"
+        );
+        &mut self.disk
+    }
+
+    /// Actual lower boundary observations, in emission order at injected time.
+    /// Contract: domain/run.md, sections 3.2 and 14; testing-strategy.md, section 7.
+    #[must_use]
+    pub fn boundaries(&self) -> &[(Time, Boundary)] {
+        &self.boundaries
     }
 
     /// Set the externally injected wall clock before the next iteration.
@@ -823,6 +955,7 @@ impl World {
                 Backend::Typed { .. } => self.cancel(Family::Completion, owner, Event::Cancelled { owner }),
             },
             Request::Io { owner, op, deadline } => {
+                self.boundaries.push((self.now, Boundary::Io { op: op.clone() }));
                 self.flights
                     .open((Family::Io, owner), Flight { key: None, cancelled: false, completion_message: None });
                 let delivery = match op {
@@ -864,6 +997,7 @@ impl World {
                 self.cancel(Family::Io, owner, Event::Done { owner, done: tools::Done::Cancelled });
             }
             Request::Read { owner, at, max, deadline } => {
+                self.boundaries.push((self.now, Boundary::Read { at: at.clone() }));
                 let complete = self.now.saturating_add(self.settings.network.draw(&mut self.rng));
                 let read = if complete > deadline {
                     run::Read::Failed
@@ -881,6 +1015,7 @@ impl World {
                     .open((Family::Read, owner), Flight { key: Some(key), cancelled: false, completion_message: None });
             }
             Request::Probe { owner, at, deadline } => {
+                self.boundaries.push((self.now, Boundary::Probe { at: at.clone() }));
                 let complete = self.now.saturating_add(self.settings.network.draw(&mut self.rng));
                 let executable = complete <= deadline
                     && self
@@ -897,6 +1032,7 @@ impl World {
                 );
             }
             Request::Check { owner, program, deadline, tail } => {
+                self.boundaries.push((self.now, Boundary::Check { program: program.clone() }));
                 self.observe(Seen::Checking { owner, tree: self.code() });
                 assert_eq!(&*program.path, fixture::CHECKS, "the host explicitly selected its Temper fixture checks");
                 let (passed, output) = fixture::check(&self.disk, program.root.raw());
@@ -954,7 +1090,7 @@ impl World {
                 } else if self.settings.job == Job::MarkerReport
                     && self
                         .disk
-                        .load(self.root, b"conflict.txt", u64::MAX)
+                        .load(self.root.expect("marker scenario has a workspace"), b"conflict.txt", u64::MAX)
                         .is_ok_and(|(bytes, _)| bytes.windows(7).any(|part| part == b"<<<<<<<"))
                 {
                     run::Delivery::Refused(
@@ -1224,8 +1360,12 @@ impl World {
     }
 
     fn settled(&self) {
+        let continuation = match self.answer() {
+            run::Answer::Accepted { .. } | run::Answer::Parked { .. } => true,
+            run::Answer::Delivered { .. } | run::Answer::Failed { .. } | run::Answer::Refused(_) => false,
+        };
         self.host_history
-            .finish(matches!(self.answer(), run::Answer::Accepted { .. }))
+            .finish(continuation)
             .expect("normal continuation owes exact host feedback; shutdown settles actual relays");
         assert!(self.host_pending.is_empty());
         self.flights.assert_settled();
@@ -1351,7 +1491,8 @@ impl World {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn code(&self) -> Vec<u8> {
-        self.disk.load(self.root, fixture::CODE, u64::MAX).expect("fixture code exists").0
+        self.root
+            .map_or_else(Vec::new, |root| self.disk.load(root, fixture::CODE, u64::MAX).expect("fixture code exists").0)
     }
 
     /// Bytes retained by a successful host push; empty when nothing landed.
@@ -1446,8 +1587,9 @@ impl World {
     }
 }
 
-fn charter(settings: &Settings, root: u64) -> run::Charter {
-    use run::charter::{Checkout as Roots, Endpoint, Grants, Llm, Repository, Tools};
+fn charter(settings: &Settings) -> run::Charter {
+    use run::charter::{Endpoint, Grants, Llm, Tools};
+
     use run::outcome::{ChangeSpec, FieldRule, ItemRule, ItemSpec, OutcomeSpec, TextSpec, VerdictRule};
     let change = matches!(settings.job, Job::Coding | Job::Delegating | Job::Wandering | Job::MidChange);
     let review = settings.job == Job::Review;
@@ -1471,13 +1613,7 @@ fn charter(settings: &Settings, root: u64) -> run::Charter {
         Llm { account: 0, endpoint: Endpoint(0), model: b"fake-1".as_slice().into(), max_tokens: 4096, dialect: 1 };
     run::Charter {
         brief: script::cue(settings.job).unwrap_or(b"Look into the code.").into(),
-        checkout: Roots {
-            repositories: Box::new([Repository {
-                name: b"work".as_slice().into(),
-                root: Token::new(root),
-                writable: settings.writable,
-            }]),
-        },
+
         grants: Grants {
             deliver: if matches!(settings.job, Job::MidReport | Job::MidChange | Job::MarkerReport) {
                 Some(ChangeSpec { fields: Box::new([FieldRule { name: b"ticket".as_slice().into(), max: 128 }]) })

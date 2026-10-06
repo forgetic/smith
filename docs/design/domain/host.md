@@ -142,7 +142,7 @@ policy.
 
 The extraction is V2 only. `Start` carries opaque charter, optional transcript,
 opaque calls answered after that transcript, optional workspace token, mount
-names/writability/relative conflict paths and credential grant names. The kit
+names/writability/git kind/relative conflict paths and credential grant names. The kit
 never reads charter or transcript contents. `Spawned` emits `Started`, moves
 `Start` into the first lower `Send`, requests `Wait` and `Reap`, and demands
 `Read`. The parent learns its agent token in `Started`; payload notices before
@@ -150,6 +150,14 @@ that are refused. Messages may queue immediately afterwards while the lower
 adapter still owns the first Send, before the agent has read it. Start and queued
 payloads are exclusive in the kit; the caller must count its IO-owned Start
 alongside the queue.
+
+The mount descriptors carry git kind even though the kit does not execute git.
+Plain directories cannot carry conflict paths; a git directory may carry them
+whether writable or read-only. That information never changes write authority.
+The optional prepared workspace and its mount descriptors agree on presence;
+mount names are unique safe single components and conflict paths are unique,
+relative and bounded. The parent owns the actual merge and delivery policy,
+while the kit preserves admitted metadata unchanged through its Start Send.
 
 The parent inputs are `Spawn`, `Message`, `Answer`, `Acknowledge`, `Grant` and
 `Stop`. The lower terminals are `Spawned`/`Unspawned`, `Sent`/`Unsent`,

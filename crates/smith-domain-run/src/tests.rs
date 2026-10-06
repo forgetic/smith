@@ -4,7 +4,7 @@ use alloc::boxed::Box;
 
 use skein_lib::{Duration, Env, List, Queue, ReplyTo, Time, Token, Wall};
 
-use crate::charter::{Checkout, Endpoint, Grants, HostTool, Llm, Repository, Tools};
+use crate::charter::{Endpoint, Grants, HostTool, Llm, Tools};
 use crate::facts::{Answered, Asked, Fact, Return};
 use crate::outcome::{
     Change, ChangeSpec, Declared, Field, FieldRule, Item, OutcomeSpec, Problem, Problems, Verdict, VerdictRule,
@@ -15,6 +15,7 @@ use crate::{
     Limits, MAX_OUT, Opening, Place, Policy, Ran, Read, Refusal, Request, Returned, Spend, Stop, fire, step,
     worst_case,
 };
+use crate::{Directory, Workspace};
 
 const BUDGET: Budget = Budget {
     turns: 10,
@@ -31,7 +32,10 @@ pub(crate) const LIMITS: Limits = Limits {
     runs: 2,
     conversations: 4,
     run_bytes: 4096,
-    repositories: 2,
+    directories: 2,
+    directory_name_bytes: 256,
+    conflicts: 64,
+    conflict_path_bytes: 4096,
     host_tools: 2,
     host_input_bytes: 65_536,
     host_reply_bytes: 65_536,
@@ -106,8 +110,21 @@ impl Harness {
 
     /// Starts a run of `charter` for call `call`: what it emitted.
     fn start(&mut self, call: u64, charter: Charter) -> Box<[Request]> {
+        let mounted = if charter.outcome.change.is_some() {
+            Some(coding_workspace())
+        } else if charter.grants.deliver.is_some() {
+            let mut mounted = Some(workspace());
+            mounted.as_mut().unwrap().directories[0].writable = true;
+            mounted
+        } else {
+            Some(workspace())
+        };
+        self.start_workspace(call, charter, mounted)
+    }
+
+    fn start_workspace(&mut self, call: u64, charter: Charter, workspace: Option<Workspace>) -> Box<[Request]> {
         let reply_to = ReplyTo::new(Token::new(call));
-        self.step(Event::Start { reply_to, worker: Token::new(call), charter, transcript: None })
+        self.step(Event::Start { reply_to, worker: Token::new(call), charter, workspace, transcript: None })
     }
 
     /// Starts a run of the test charter for call `call`, which is admitted:
@@ -177,12 +194,22 @@ pub(crate) fn rule(name: &[u8], min: u32, max: u32) -> VerdictRule {
     }
 }
 
+pub(crate) fn workspace() -> Workspace {
+    Workspace {
+        directories: Box::new([Directory {
+            name: bytes(b"temper"),
+            root: Token::new(900),
+            writable: false,
+            git: true,
+            conflicts: Box::new([]),
+        }]),
+    }
+}
+
 pub(crate) fn charter() -> Charter {
     Charter {
         brief: bytes(b"Review the change."),
-        checkout: Checkout {
-            repositories: Box::new([Repository { name: bytes(b"temper"), root: Token::new(900), writable: false }]),
-        },
+
         grants: Grants {
             deliver: None,
             tools: Tools { inspect: true, modify: false, shell: true },
@@ -256,10 +283,10 @@ fn an_admitted_run_reads_its_checkout_then_opens_main_with_the_whole_budget() {
         host_tools: charter().grants.host_tools,
         deliver: false,
         llm: charter().llm,
-        system: super::prompt::system(&charter(), &found),
+        system: super::prompt::system(&charter(), Some(&workspace()), &found),
         prompt: bytes(super::prompt::BEGIN),
         tools: charter().grants.tools,
-        checkout: charter().checkout,
+        workspace: Some(workspace()),
         budget: BUDGET,
         finish: true,
         families: crate::charter::Families { tools: charter().grants.tools, agents: false },
@@ -273,10 +300,22 @@ fn an_admitted_run_reads_its_checkout_then_opens_main_with_the_whole_budget() {
 #[test]
 fn a_run_looks_for_checks_in_writable_repositories_when_a_change_must_pass_them() {
     let mut h = Harness::new(LIMITS);
-    let checkout = Checkout {
-        repositories: Box::new([
-            Repository { name: bytes(b"temper"), root: Token::new(900), writable: true },
-            Repository { name: bytes(b"docs"), root: Token::new(901), writable: false },
+    let checkout = Workspace {
+        directories: Box::new([
+            Directory {
+                name: bytes(b"temper"),
+                root: Token::new(900),
+                writable: true,
+                git: true,
+                conflicts: Box::new([]),
+            },
+            Directory {
+                name: bytes(b"docs"),
+                root: Token::new(901),
+                writable: false,
+                git: true,
+                conflicts: Box::new([]),
+            },
         ]),
     };
     let outcome = OutcomeSpec {
@@ -290,7 +329,7 @@ fn a_run_looks_for_checks_in_writable_repositories_when_a_change_must_pass_them(
         report: None,
         failure: None,
     };
-    let emitted = h.start(1, Charter { checkout, outcome, ..charter() });
+    let emitted = h.start_workspace(1, Charter { outcome, ..charter() }, Some(checkout));
     let [Request::Admitted { run, .. }, Request::Read { at, .. }] = &*emitted else {
         panic!("expected a read, got {emitted:?}");
     };
@@ -312,14 +351,14 @@ fn a_run_looks_for_checks_in_writable_repositories_when_a_change_must_pass_them(
         panic!("expected main to open, got {emitted:?}");
     };
     let system = &opening.system;
-    let marked = b"- `temper`, which you may change, with checks (`.temper/pre-pr`)\n";
+    let marked = b"- `temper`, which you may change, a git working tree, with checks (`.temper/pre-pr`)\n";
     assert!(skein_lib::bytes::find(system, marked).is_some(), "the checkout says which has checks");
 }
 
 #[test]
 fn a_run_with_nothing_to_look_for_opens_main_at_once() {
     let mut h = Harness::new(LIMITS);
-    let emitted = h.start(1, Charter { checkout: Checkout { repositories: Box::new([]) }, ..charter() });
+    let emitted = h.start_workspace(1, charter(), None);
     let [Request::Admitted { .. }, Request::Open { .. }] = &*emitted else {
         panic!("expected an admitted run and main, got {emitted:?}");
     };
@@ -343,8 +382,8 @@ fn starts_beyond_the_run_or_conversation_slots_are_refused_as_busy() {
 
 #[test]
 fn charters_beyond_the_limits_are_refused_as_invalid() {
-    let three = Box::new([repository(b"a"), repository(b"b"), repository(b"c")]);
-    let twins = Box::new([repository(b"a"), repository(b"a")]);
+    let three: Box<[Directory]> = Box::new([repository(b"a"), repository(b"b"), repository(b"c")]);
+    let twins: Box<[Directory]> = Box::new([repository(b"a"), repository(b"a")]);
     let host_tools = Box::new([
         HostTool {
             name: bytes(b"reply"),
@@ -363,6 +402,13 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
     ]);
     let llm = Llm { account: 0, endpoint: Endpoint(2), model: bytes(b"model-b"), max_tokens: 512, dialect: 1 };
     let models = Box::new([llm.clone(), Llm { endpoint: Endpoint(3), ..llm }]);
+    for directories in [three, twins] {
+        let mut harness = Harness::new(LIMITS);
+        assert_eq!(
+            answered(harness.start_workspace(9, charter(), Some(Workspace { directories }))),
+            (9, Answer::Refused(Refusal::Invalid(Invalid::Workspace)))
+        );
+    }
     let cases = [
         (Charter { budget: Budget { turns: 101, ..BUDGET }, ..charter() }, Invalid::Budget),
         (Charter { budget: Budget { time: Duration::from_secs(3601), ..BUDGET }, ..charter() }, Invalid::Budget),
@@ -372,8 +418,6 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
         (Charter { llm: Llm { max_tokens: 4097, ..charter().llm }, ..charter() }, Invalid::Llm),
         (Charter { models, ..charter() }, Invalid::Llm),
         (Charter { brief: Box::from([b'x'; 4096].as_slice()), ..charter() }, Invalid::TooLarge),
-        (Charter { checkout: Checkout { repositories: three }, ..charter() }, Invalid::Checkout),
-        (Charter { checkout: Checkout { repositories: twins }, ..charter() }, Invalid::Checkout),
         (Charter { grants: Grants { host_tools, ..charter().grants }, ..charter() }, Invalid::Grants),
         (Charter { outcome: spec(Box::new([])), ..charter() }, Invalid::Outcome),
         (Charter { outcome: spec(Box::new([rule(b"a", 0, 0), rule(b"a", 1, 1)])), ..charter() }, Invalid::Outcome),
@@ -421,8 +465,8 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
     assert_eq!(h.domain.runs(), 1);
 }
 
-fn repository(name: &[u8]) -> Repository {
-    Repository { name: bytes(name), root: Token::new(1), writable: true }
+fn repository(name: &[u8]) -> Directory {
+    Directory { name: bytes(name), root: Token::new(1), writable: true, git: true, conflicts: Box::new([]) }
 }
 
 fn spec(verdicts: Box<[VerdictRule]>) -> OutcomeSpec {
@@ -615,15 +659,29 @@ fn change() -> Change {
 
 /// The test charter, finishing with a change whose checks must pass, in two
 /// writable repositories.
-fn coding() -> Charter {
-    let checkout = Checkout {
-        repositories: Box::new([
-            Repository { name: bytes(b"temper"), root: Token::new(900), writable: true },
-            Repository { name: bytes(b"docs"), root: Token::new(901), writable: true },
+fn coding_workspace() -> Workspace {
+    Workspace {
+        directories: Box::new([
+            Directory {
+                name: bytes(b"temper"),
+                root: Token::new(900),
+                writable: true,
+                git: true,
+                conflicts: Box::new([]),
+            },
+            Directory {
+                name: bytes(b"docs"),
+                root: Token::new(901),
+                writable: true,
+                git: true,
+                conflicts: Box::new([]),
+            },
         ]),
-    };
+    }
+}
+
+fn coding() -> Charter {
     Charter {
-        checkout,
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
                 fields: Box::new([
@@ -801,7 +859,7 @@ fn a_guide_that_is_not_text_is_not_there() {
     let run = h.prepare(1);
     let emitted = h.step(Event::Read { owner: run, read: Read::NotText });
     let [Request::Open { opening, .. }] = &*emitted else { panic!("expected main to open, got {emitted:?}") };
-    assert_eq!(opening.system, super::prompt::system(&charter(), &Found::with_capacity(1)));
+    assert_eq!(opening.system, super::prompt::system(&charter(), Some(&workspace()), &Found::with_capacity(1)));
 }
 
 #[test]
@@ -1626,7 +1684,6 @@ fn delivered() -> Delivery {
 
 fn mid_report() -> Charter {
     let mut charter = text_charter(false);
-    charter.checkout.repositories[0].writable = true;
     charter.grants.deliver = Some(ChangeSpec { fields: Box::new([]) });
     charter
 }
@@ -1805,7 +1862,7 @@ fn impossible_delivery_grant_and_zero_host_deadline_refuse_before_preparation() 
     assert_eq!(answered(harness.start(1, charter)), (1, Answer::Refused(Refusal::Invalid(Invalid::Grants))));
     assert_eq!((harness.domain.runs(), harness.domain.conversations()), (0, 0));
     let mut harness = Harness::new(Limits { delivery_timeout: Duration::ZERO, ..LIMITS });
-    assert_eq!(answered(harness.start(2, mid_report())), (2, Answer::Refused(Refusal::Invalid(Invalid::Checkout))));
+    assert_eq!(answered(harness.start(2, mid_report())), (2, Answer::Refused(Refusal::Invalid(Invalid::Workspace))));
     assert_eq!((harness.domain.runs(), harness.domain.conversations()), (0, 0));
 }
 
@@ -2006,7 +2063,7 @@ fn host_unknown_is_conveyed_after_actual_withdrawn_terminal_when_shutdown_disall
 #[test]
 fn host_declarations_are_admitted_as_bounded_unique_contracts_before_io() {
     let baseline = charter();
-    assert_eq!(crate::charter::check(&baseline, &LIMITS), Ok(()));
+    assert_eq!(crate::charter::check(&baseline, Some(&workspace()), &LIMITS), Ok(()));
     for invalid in 0_u32..5 {
         let mut declared = charter();
         match invalid {
@@ -2207,8 +2264,10 @@ fn convention_path_payloads_fill_the_exact_charter_cap_and_cancel_discovery_sett
         guide: Box::new([b'g'; crate::Conventions::PATH_CAPACITY]),
         checks: Box::new([b'c'; crate::Conventions::PATH_CAPACITY]),
     });
-    let exact = crate::charter::cost(&selected).expect("bounded maximum paths");
-    let baseline = crate::charter::cost(&Charter { conventions: None, ..charter() }).unwrap();
+    let exact = crate::charter::cost(&selected).expect("bounded maximum paths")
+        + crate::workspace::cost(Some(&workspace())).unwrap();
+    let baseline = crate::charter::cost(&Charter { conventions: None, ..charter() }).unwrap()
+        + crate::workspace::cost(Some(&workspace())).unwrap();
     // The legacy fixture contributes explicit path payloads; remove them from
     // this independent cap comparison rather than reducing any fixture maximum.
     assert_eq!(exact, baseline + u64::try_from(crate::Conventions::PATH_CAPACITY * 2).unwrap());
@@ -2244,4 +2303,189 @@ fn convention_path_payloads_fill_the_exact_charter_cap_and_cancel_discovery_sett
     };
     assert_eq!(answered(harness.start(78, oversized)), (78, Answer::Refused(Refusal::Invalid(Invalid::TooLarge))));
     assert_eq!((harness.domain.runs(), harness.domain.conversations(), harness.domain.calls()), (0, 0, 0));
+}
+
+/// Independent host workspace fixtures exercise admission before any IO.
+fn workspace_directory(name: &[u8], root: u64, writable: bool, git: bool, conflicts: &[&[u8]]) -> Directory {
+    let mut paths = List::with_capacity(u32::try_from(conflicts.len()).unwrap());
+    for path in conflicts {
+        paths.push(bytes(path)).expect("bounded fixture conflict count");
+    }
+    Directory { name: bytes(name), root: Token::new(root), writable, git, conflicts: paths.into_boxed() }
+}
+
+fn mixed_workspace() -> Workspace {
+    Workspace {
+        directories: Box::new([
+            workspace_directory(b"work", 41, true, false, &[]),
+            workspace_directory(b"reference", 42, false, true, &[b"src/merge.rs"]),
+        ]),
+    }
+}
+
+#[test]
+fn accepted_mixed_workspace_drives_discovery_opening_and_child_metadata() {
+    let mut harness = Harness::new(LIMITS);
+    let mounted = mixed_workspace();
+    let mut policy = charter();
+    policy.grants.deliver = Some(ChangeSpec { fields: Box::new([]) });
+    let emitted = harness.start_workspace(51, policy, Some(mounted.clone()));
+    let [Request::Admitted { run, .. }, Request::Read { at, .. }] = emitted.as_ref() else {
+        panic!("mixed workspace starts discovery: {emitted:?}");
+    };
+    let run = *run;
+    assert_eq!(at.root, Token::new(41));
+    let emitted = harness.step(Event::Read { owner: run, read: Read::Missing });
+    let [Request::Probe { at, .. }] = emitted.as_ref() else { panic!("writable plain directory probes checks") };
+    assert_eq!(at.root, Token::new(41));
+    let emitted = harness.step(Event::Probed { owner: run, executable: false });
+    let [Request::Read { at, .. }] = emitted.as_ref() else { panic!("read-only git guide") };
+    assert_eq!(at.root, Token::new(42));
+    let emitted = harness.step(Event::Read { owner: run, read: Read::Missing });
+    let [Request::Open { opening, .. }] = emitted.as_ref() else { panic!("read-only git has no check probe") };
+    assert_eq!(opening.workspace, Some(mounted.clone()));
+    for fragment in [b"a plain directory".as_slice(), b"a git working tree", b"initial merge conflicts: `src/merge.rs`"]
+    {
+        assert!(skein_lib::bytes::find(&opening.system, fragment).is_some());
+    }
+    let child =
+        super::prompt::child(&charter(), Some(&mounted), &Found::with_capacity(0), b"Inspect", opening.families);
+    assert!(skein_lib::bytes::find(&child, b"initial merge conflicts: `src/merge.rs`").is_some());
+    assert!(skein_lib::bytes::find(&child, b"`reference`, which you may only read").is_some());
+}
+
+#[test]
+fn absent_workspace_suppresses_workspace_families_and_preserves_main_services() {
+    let mut harness = Harness::new(LIMITS);
+    let mut policy = charter();
+    policy.grants.tools = Tools { inspect: true, modify: true, shell: true };
+    policy.grants.agents = true;
+    policy.grants.host_tools = Box::new([HostTool {
+        name: bytes(b"host_action"),
+        description: bytes(b"Host action"),
+        schema: bytes(b"{}"),
+        effect: crate::HostEffect::Write,
+        timeout: Duration::from_secs(5),
+    }]);
+    let emitted = harness.start_workspace(52, policy, None);
+    let [Request::Admitted { .. }, Request::Open { opening, .. }] = emitted.as_ref() else {
+        panic!("workspace-free start has no discovery effects: {emitted:?}");
+    };
+    assert_eq!(opening.workspace, None);
+    assert_eq!(opening.tools, Tools { inspect: false, modify: false, shell: false });
+    assert_eq!(opening.families.tools, opening.tools);
+    assert!(opening.families.agents && opening.finish && opening.wait);
+    assert!(!opening.deliver);
+    assert_eq!(opening.host_tools.len(), 1);
+    assert_eq!(opening.host_tools[0].name.as_ref(), b"host_action");
+    assert!(skein_lib::bytes::find(&opening.system, b"There is no checkout.").is_some());
+}
+
+fn refuse_workspace(mounted: Option<Workspace>, limits: Limits, expected: Invalid) {
+    let mut harness = Harness::new(limits);
+    assert_eq!(
+        answered(harness.start_workspace(53, charter(), mounted)),
+        (53, Answer::Refused(Refusal::Invalid(expected)))
+    );
+    assert_eq!(harness.domain.runs(), 0, "invalid metadata is refused before retained state or effects");
+}
+
+#[test]
+fn workspace_names_roots_and_presence_are_admitted_independently() {
+    refuse_workspace(Some(Workspace { directories: Box::new([]) }), LIMITS, Invalid::Workspace);
+    for name in [b"".as_slice(), b".", b"..", b"bad/name", b"bad\0name"] {
+        refuse_workspace(
+            Some(Workspace { directories: Box::new([workspace_directory(name, 1, false, false, &[])]) }),
+            LIMITS,
+            Invalid::Workspace,
+        );
+    }
+    for directories in [
+        Box::new([workspace_directory(b"one", 1, false, false, &[]), workspace_directory(b"one", 2, true, true, &[])]),
+        Box::new([workspace_directory(b"one", 1, false, false, &[]), workspace_directory(b"two", 1, true, true, &[])]),
+    ] {
+        refuse_workspace(Some(Workspace { directories }), LIMITS, Invalid::Workspace);
+    }
+    refuse_workspace(Some(mixed_workspace()), Limits { directories: 1, ..LIMITS }, Invalid::Workspace);
+    refuse_workspace(
+        Some(Workspace { directories: Box::new([workspace_directory(b"name", 1, false, false, &[])]) }),
+        Limits { directory_name_bytes: 3, ..LIMITS },
+        Invalid::Workspace,
+    );
+}
+
+#[test]
+fn initial_conflicts_require_git_unique_relative_paths_and_independent_caps() {
+    for path in [b"".as_slice(), b"/root", b"a//b", b"a/./b", b"a/../b", b"a/", b"a\0b"] {
+        refuse_workspace(
+            Some(Workspace { directories: Box::new([workspace_directory(b"git", 1, false, true, &[path])]) }),
+            LIMITS,
+            Invalid::Workspace,
+        );
+    }
+    for (directory, limits) in [
+        (workspace_directory(b"plain", 1, true, false, &[b"a"]), LIMITS),
+        (workspace_directory(b"git", 1, false, true, &[b"a", b"a"]), LIMITS),
+        (workspace_directory(b"git", 1, false, true, &[b"a", b"b"]), Limits { conflicts: 1, ..LIMITS }),
+        (workspace_directory(b"git", 1, false, true, &[b"abcd"]), Limits { conflict_path_bytes: 3, ..LIMITS }),
+    ] {
+        refuse_workspace(Some(Workspace { directories: Box::new([directory]) }), limits, Invalid::Workspace);
+    }
+    let limits = Limits { run_bytes: 65_536, ..LIMITS };
+    let path = Box::new([b'p'; crate::Marker::CAPACITY]);
+    let mounted =
+        Workspace { directories: Box::new([workspace_directory(b"git", 1, false, true, &[path.as_slice()])]) };
+    assert_eq!(crate::charter::check(&charter(), Some(&mounted), &limits), Ok(()));
+    let over = Box::new([b'p'; crate::Marker::CAPACITY + 1]);
+    refuse_workspace(
+        Some(Workspace { directories: Box::new([workspace_directory(b"git", 1, false, true, &[over.as_slice()])]) }),
+        limits,
+        Invalid::Workspace,
+    );
+    let invalid_limits = Limits { conflict_path_bytes: 4097, ..limits };
+    assert_eq!(worst_case(&invalid_limits), None);
+    refuse_workspace(None, invalid_limits, Invalid::Workspace);
+}
+
+#[test]
+fn exact_workspace_limits_and_aggregate_price_include_every_nested_owner() {
+    let limits = Limits { directories: 2, directory_name_bytes: 9, conflicts: 1, conflict_path_bytes: 12, ..LIMITS };
+    let mounted = mixed_workspace();
+    let directory_cells = 2 * u64::try_from(size_of::<Directory>()).unwrap();
+    let conflict_cell = u64::try_from(size_of::<Box<[u8]>>()).unwrap();
+    let owned = directory_cells + 4 + 9 + conflict_cell + 12;
+    assert_eq!(crate::workspace::cost(Some(&mounted)), Some(owned));
+    assert_eq!(crate::workspace::cost(None), Some(0));
+    let policy = charter();
+    let exact = crate::charter::cost(&policy).unwrap() + owned;
+    let exact_limits = Limits { run_bytes: exact, ..limits };
+    assert_eq!(crate::charter::check(&policy, Some(&mounted), &exact_limits), Ok(()));
+    refuse_workspace(Some(mounted.clone()), Limits { run_bytes: exact - 1, ..limits }, Invalid::TooLarge);
+    // Aggregate ownership refuses before quadratic semantic duplicate scans.
+    let mut duplicate = mounted;
+    duplicate.directories[1].root = duplicate.directories[0].root;
+    refuse_workspace(Some(duplicate), Limits { run_bytes: exact - 1, ..limits }, Invalid::TooLarge);
+    assert!(worst_case(&exact_limits).is_some());
+}
+
+#[test]
+fn contracts_requiring_writes_without_writable_directories_refuse_before_effects() {
+    for mounted in [None, Some(workspace())] {
+        let mut harness = Harness::new(LIMITS);
+        let change = Charter {
+            outcome: OutcomeSpec { change: Some(ChangeSpec { fields: Box::new([]) }), ..charter().outcome },
+            ..charter()
+        };
+        assert_eq!(
+            answered(harness.start_workspace(54, change, mounted.clone())),
+            (54, Answer::Refused(Refusal::Invalid(Invalid::Outcome)))
+        );
+        let mut deliver = charter();
+        deliver.grants.deliver = Some(ChangeSpec { fields: Box::new([]) });
+        assert_eq!(
+            answered(harness.start_workspace(55, deliver, mounted)),
+            (55, Answer::Refused(Refusal::Invalid(Invalid::Grants)))
+        );
+        assert_eq!(harness.domain.runs(), 0);
+    }
 }

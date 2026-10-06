@@ -29,11 +29,17 @@ pub struct Start {
 /// Parent mount descriptor forwarded without filesystem or delivery policy (domain/host.md, sections 2–7).
 #[derive(PartialEq, Eq, Debug)]
 pub struct Directory {
-    /// Unique nonempty opaque mount name bounded by `Limits::name_bytes` (domain/host.md, sections 2–7).
+    /// Unique safe single component bounded by `Limits::name_bytes`; the host
+    /// attests text encoding, and bytes move unchanged (domain/host.md, section 4.1).
     pub name: Box<[u8]>,
     /// Parent write authority for the mount (domain/host.md, sections 2–7).
     pub writable: bool,
-    /// At most `Limits::conflicts` bounded relative paths per writable mount (domain/host.md, sections 2–7).
+    /// Parent declares a git working tree; plain directories have no conflicts
+    /// (domain/host.md, section 4.1).
+    pub git: bool,
+    /// At most `Limits::conflicts` unique bounded relative paths per git mount.
+    /// Read-only git conflicts are informative and grant no writes. The host
+    /// attests text encoding (domain/host.md, section 4.1).
     pub conflicts: Box<[Box<[u8]>]>,
 }
 

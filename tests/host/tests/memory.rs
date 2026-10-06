@@ -16,7 +16,7 @@ fn bytes(length: u64) -> Box<[u8]> {
 fn maximum_start(limits: Limits) -> Start {
     Start {
         logical_run: Token::new(7),
-        workspace: Some(Token::new(8)),
+        workspace: (limits.directories > 0).then_some(Token::new(8)),
         charter: bytes(limits.charter_bytes),
         transcript: Some(bytes(limits.transcript_bytes)),
         answered: bytes(limits.answered_bytes),
@@ -28,7 +28,15 @@ fn maximum_start(limits: Limits) -> Start {
                 ]
                 .into_boxed_slice(),
                 writable: true,
-                conflicts: (0..limits.conflicts).map(|_| bytes(u64::from(limits.path_bytes))).collect(),
+                git: true,
+                conflicts: (0..limits.conflicts)
+                    .map(|index| {
+                        let mut path = bytes(u64::from(limits.path_bytes));
+                        *path.last_mut().expect("positive exact path cap") =
+                            b'a' + u8::try_from(index).expect("finite conflict count");
+                        path
+                    })
+                    .collect(),
             })
             .collect(),
         grants: (0..limits.accounts)

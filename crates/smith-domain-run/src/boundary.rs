@@ -42,7 +42,7 @@ use crate::delivery::{CallName, Delivered, Delivery, DeliveryFailure, DeliveryRe
 use skein_lib::{ReplyTo, Time, Token};
 
 use crate::budget::{Budget, Exhausted, Spend};
-use crate::charter::{Charter, Checkout, Families, Llm, Tools};
+use crate::charter::{Charter, Families, Llm, Tools};
 use crate::outcome::{Change, Declared, Problems};
 
 /// parent -> run
@@ -80,6 +80,9 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         charter: Charter,
+        /// Optional immutable host mounts and initial conflicts, admitted before effects.
+        /// Contract: domain/run.md, sections 3.2, 8.3 and 14.
+        workspace: Option<crate::Workspace>,
         /// Root-owned restore binding, consumed by main once; never decoded here.
         /// Contract: domain/run.md, sections 3 and 13.
         transcript: Option<Token>,
@@ -954,10 +957,11 @@ pub struct Opening {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub tools: Tools,
-    /// The checkout they act on, and which of it may be written.
+    /// Immutable accepted mounts, git kinds and initial conflicts, copied to the
+    /// receiving root; None supplies no workspace tool authority.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub checkout: Checkout,
+    pub workspace: Option<crate::Workspace>,
     /// Its share of the run's budget: what the run has left when it opens, and
     /// the time to the run's deadline. The conversation keeps to it.
     ///
@@ -1268,11 +1272,13 @@ pub enum Invalid {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     TooLarge,
-    /// The checkout lists more repositories than a run may hold, or one name
-    /// twice.
+    /// Present workspace is empty, exceeds directory/name/conflict/path caps,
+    /// repeats a name/root/path, uses unsafe names or relative paths, or supplies
+    /// conflicts for a plain directory. Delivery-capable starts also bound directory
+    /// ordinals and require a positive receiving delivery timeout.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Checkout,
+    Workspace,
     /// The host declarations exceed count/storage bounds, repeat/reserve a name,
     /// have empty opaque fields or a zero deadline, or the receiving retry limits are invalid.
     ///

@@ -75,7 +75,7 @@ fn observation_limits(limits: &adapter::Limits) -> ObservationLimits {
         events: skein_llm::client::MAX_OUT.above,
         event_bytes: 32768,
         queries: 1,
-        query_bytes: 32768,
+        query_bytes: u64::from(limits.client.dialect.request_bytes),
         pending: 0,
         request_bytes: limits
             .client
@@ -97,7 +97,10 @@ fn bounds(messages: u32) -> Limits {
             run_conversations: 1,
             calls: 1,
             run_bytes: 4096,
-            repositories: 1,
+            directories: 1,
+            directory_name_bytes: 64,
+            conflicts: 64,
+            conflict_path_bytes: 4096,
             host_tools: 0,
             host_input_bytes: 64,
             host_reply_bytes: 64,
@@ -148,16 +151,22 @@ fn bounds(messages: u32) -> Limits {
     }
 }
 
+fn workspace() -> run::Workspace {
+    run::Workspace {
+        directories: Box::new([run::Directory {
+            name: b"work".as_slice().into(),
+            root: Token::new(7),
+            writable: false,
+            git: true,
+            conflicts: Box::new([]),
+        }]),
+    }
+}
+
 fn charter(restoring: bool) -> run::Charter {
     run::Charter {
         brief: b"@root-memory".as_slice().into(),
-        checkout: run::charter::Checkout {
-            repositories: Box::new([run::charter::Repository {
-                name: b"work".as_slice().into(),
-                root: Token::new(7),
-                writable: false,
-            }]),
-        },
+
         grants: run::charter::Grants {
             deliver: None,
             tools: run::charter::Tools { inspect: false, modify: false, shell: false },
@@ -187,6 +196,21 @@ fn charter(restoring: bool) -> run::Charter {
 
 /// Independent owning boxes of this fixed public caller Start fixture. Charter
 /// and Conventions wrappers are inline in Counted, not heap allocations.
+fn workspace_bytes(workspace: Option<&run::Workspace>) -> u64 {
+    workspace.map_or(0, |workspace| {
+        sum([
+            cells::<run::Directory>(workspace.directories.len()),
+            sum(workspace.directories.iter().map(|directory| {
+                sum([
+                    len(&directory.name),
+                    cells::<Box<[u8]>>(directory.conflicts.len()),
+                    sum(directory.conflicts.iter().map(|path| len(path))),
+                ])
+            })),
+        ])
+    })
+}
+
 fn charter_bytes(charter: &run::Charter) -> u64 {
     assert!(charter.grants.host_tools.is_empty() && charter.models.is_empty());
     assert!(charter.outcome.verdicts.is_empty());
@@ -195,8 +219,6 @@ fn charter_bytes(charter: &run::Charter) -> u64 {
     sum([
         len(&charter.brief),
         len(&charter.llm.model),
-        cells::<run::charter::Repository>(charter.checkout.repositories.len()),
-        sum(charter.checkout.repositories.iter().map(|repository| len(&repository.name))),
         charter.conventions.as_ref().map_or(0, |conventions| sum([len(&conventions.guide), len(&conventions.checks)])),
     ])
 }
@@ -304,20 +326,21 @@ fn actual(
     complete: Complete,
     configuration: &Configuration,
     cycles: u32,
+    native: &Env<adapter::Limits>,
     meter: &Meter,
     bound: u64,
     old: &mut Option<Retained>,
-    clocks: (Time, Wall),
 ) -> (Event, Retained, bool) {
-    let (now, wall) = clocks;
+    let now = native.now;
+    let wall = native.wall;
+    let limits = &native.limits;
     let owner = complete.owner;
     let messages = complete.prompt.messages.len();
     let incoming = prompt_bytes(&complete.prompt);
     let large = complete.prompt.messages.iter().flat_map(|message| &message.content).any(|block| {
         matches!(block, llm::Block::Text { text, .. } if text.len() == LARGE && text.iter().all(|byte| *byte == b'x'))
     });
-    let limits = wire_limits();
-    let observations = observation_limits(&limits);
+    let observations = observation_limits(limits);
     let retained_bound = sum([
         skein_llm::client::worst_case(&limits.client).expect("one retained actual Client independent bound"),
         extra_worst_case(&limits.client, &observations, &configuration.endpoint, &configuration.credential)
@@ -326,7 +349,7 @@ fn actual(
     ]);
     let before = meter.held();
     meter.start();
-    let mut wire = Wire::prepare(owner, complete.prompt, complete.receiving, configuration, &limits, scripts(cycles))
+    let mut wire = Wire::prepare(owner, complete.prompt, complete.receiving, configuration, limits, scripts(cycles))
         .expect("actual root receiving contract admits the Client");
     wire.peer.observe(observations);
     wire.observed.reserve_exact(4);
@@ -677,6 +700,8 @@ struct Counted {
     queue_bytes: u64,
     configuration_bytes: u64,
     caller_charter: Option<run::Charter>,
+    caller_workspace: Option<run::Workspace>,
+    native_limits: adapter::Limits,
     records: Vec<session::record::Turn>,
     prefix: Option<root::Transcript>,
     saved: Option<root::Transcript>,
@@ -713,6 +738,8 @@ impl Counted {
             queue_bytes,
             configuration_bytes: 0,
             caller_charter: None,
+            caller_workspace: None,
+            native_limits: wire_limits(),
             records: Vec::new(),
             prefix: None,
             saved: None,
@@ -770,6 +797,7 @@ impl Counted {
         self.queue_bytes
             + self.configuration_bytes
             + self.caller_charter.as_ref().map_or(0, charter_bytes)
+            + workspace_bytes(self.caller_workspace.as_ref())
             + records
             + self.prefix.as_ref().map_or(0, transcript_bytes)
             + self.saved.as_ref().map_or(0, transcript_bytes)
@@ -905,6 +933,7 @@ impl Counted {
 
     fn start(&mut self, history: Option<root::Transcript>, restoring: bool) {
         self.step(Event::Start {
+            workspace: Some(workspace()),
             reply_to: ReplyTo::new(PARENT),
             worker: WORKER,
             charter: charter(restoring),
@@ -976,7 +1005,7 @@ impl Counted {
     fn native(&mut self, complete: Complete, configuration: &Configuration, cycles: u32) -> Event {
         let incoming = prompt_bytes(&complete.prompt);
         let schema_constructor = self.schema_constructor(&complete.prompt);
-        let limits = wire_limits();
+        let limits = self.native_limits;
         let observations = observation_limits(&limits);
         let bound = sum([
             root::worst_case(&self.env.limits).expect("live root's independent bound"),
@@ -992,15 +1021,9 @@ impl Counted {
         let terminal_cap = complete.receiving.max_completion_bytes;
         let old_held = self.retained.as_ref().map_or(0, |retained| retained.held);
         let before = self.meter.held();
-        let (event, retained, overlapping) = actual(
-            complete,
-            configuration,
-            cycles,
-            &self.meter,
-            bound,
-            &mut self.retained,
-            (self.env.now, self.env.wall),
-        );
+        let native = Env { now: self.env.now, wall: self.env.wall, limits };
+        let (event, retained, overlapping) =
+            actual(complete, configuration, cycles, &native, &self.meter, bound, &mut self.retained);
         if overlapping {
             self.overlaps += 1;
             if self.prefix.is_some()
@@ -1302,6 +1325,7 @@ fn reclaim_every_owner(mut counted: Counted, tight: &Limits, configuration: Conf
     drop(counted.saved.take());
     drop(counted.initial.take());
     drop(counted.caller_charter.take());
+    drop(counted.caller_workspace.take());
     drop(counted.held_prompt.take());
     drop(counted.prompt_copy.take());
     drop(counted.turn_copy.take());
@@ -1330,12 +1354,62 @@ fn restored_root_arrays_payload_rewrites_and_turn_copies_stay_within_the_attaine
     }
 }
 
+fn maximum_workspace(limits: &run::Limits) -> run::Workspace {
+    let mounted = run::Workspace {
+        directories: Box::new([
+            run::Directory {
+                name: vec![b'w'; 64].into_boxed_slice(),
+                root: Token::new(7),
+                writable: true,
+                git: true,
+                conflicts: (0..limits.conflicts)
+                    .map(|index| {
+                        if index == 0 {
+                            vec![
+                                b'p';
+                                usize::try_from(limits.conflict_path_bytes).expect("bounded initial conflict path cap")
+                            ]
+                            .into_boxed_slice()
+                        } else {
+                            format!("p{index:02}").into_bytes().into_boxed_slice()
+                        }
+                    })
+                    .collect(),
+            },
+            run::Directory {
+                name: vec![b'r'; 64].into_boxed_slice(),
+                root: Token::new(8),
+                writable: false,
+                git: true,
+                conflicts: (0..limits.conflicts)
+                    .map(|index| format!("q{index:02}").into_bytes().into_boxed_slice())
+                    .collect(),
+            },
+        ]),
+    };
+    assert_eq!(mounted.directories.len(), usize::try_from(limits.directories).expect("bounded directory count"));
+    for directory in &mounted.directories {
+        assert_eq!(directory.name.len(), usize::try_from(limits.directory_name_bytes).expect("bounded mount name cap"));
+        assert_eq!(
+            directory.conflicts.len(),
+            usize::try_from(limits.conflicts).expect("bounded initial conflict count")
+        );
+        assert!(directory.conflicts.iter().all(|path| path.len()
+            <= usize::try_from(limits.conflict_path_bytes).expect("bounded initial conflict path cap")));
+    }
+    assert_eq!(
+        mounted.directories[0].conflicts[0].len(),
+        usize::try_from(limits.conflict_path_bytes).expect("bounded initial conflict path cap")
+    );
+    mounted
+}
+
 #[test]
 fn maximum_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapping_clients() {
     let path_bytes = run::Conventions::PATH_CAPACITY;
     let mut receiving = bounds(16);
     receiving.run.run_bytes = 16_384;
-    receiving.run.repositories = 2;
+    receiving.run.directories = 2;
     receiving.session.tools.repos = 2;
     // The receiving root must retain every rendered actual run result. Select
     // the public checked feedback bound exactly, rather than widening the
@@ -1344,6 +1418,13 @@ fn maximum_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapp
         .expect("maximum path charter has a finite exact receiving feedback bound")
         .max(receiving.session.delegated_result_bytes);
     let mut counted = Counted::new(&receiving);
+    // This combined fixture's actual system contains both maximum convention
+    // labels plus full nested workspace metadata. Select explicit native input
+    // string cap for that new prompt: 32,768 rather than the default 16,384.
+    // HTTP request-head and dialect request/document caps stay 32,768, matching
+    // the shared peer's fixed HTTP body/intake bounds. Original history/count/
+    // completion/refusal tests keep wire_limits() unchanged; root caps stay fixed.
+    counted.native_limits.client.dialect.string_bytes = 32_768;
     let configuration = counted.configuration();
     let make_path = |byte| {
         let mut path = vec![byte; path_bytes];
@@ -1354,12 +1435,7 @@ fn maximum_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapp
     };
     let caller = run::Charter {
         conventions: Some(run::Conventions { guide: make_path(b'g'), checks: make_path(b'c') }),
-        checkout: run::charter::Checkout {
-            repositories: Box::new([
-                run::charter::Repository { name: b"work".as_slice().into(), root: Token::new(7), writable: true },
-                run::charter::Repository { name: b"reference".as_slice().into(), root: Token::new(8), writable: false },
-            ]),
-        },
+
         outcome: run::outcome::OutcomeSpec {
             change: Some(run::outcome::ChangeSpec { fields: Box::new([]) }),
             ..charter(false).outcome
@@ -1370,13 +1446,16 @@ fn maximum_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapp
     let both_paths = path_bytes.checked_mul(2).expect("two bounded convention paths fit a fixture size");
     assert!(caller_bytes >= u64::try_from(both_paths).expect("bounded maximum convention payload fits u64"));
     let selected = caller.conventions.clone();
-    let checkout = caller.checkout.clone();
+    let mounted = Some(maximum_workspace(&receiving.run));
+    assert!(caller_bytes + workspace_bytes(mounted.as_ref()) <= receiving.run.run_bytes);
+    counted.caller_workspace = mounted.clone();
     let outcome = caller.outcome.clone();
     counted.caller_charter = Some(caller);
     counted.step(Event::Start {
         reply_to: ReplyTo::new(PARENT),
         worker: WORKER,
-        charter: run::Charter { conventions: selected, checkout, outcome, ..charter(false) },
+        charter: run::Charter { conventions: selected, outcome, ..charter(false) },
+        workspace: mounted,
         transcript: None,
         grants: Box::new([Grant { name: GrantName { account: 0, generation: 1 }, valid: Duration::from_secs(3600) }]),
     });
@@ -1395,6 +1474,8 @@ fn maximum_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapp
         read: run::Read::Text { text: b"Maximum readonly guide".as_slice().into(), whole: true },
     });
     let first = counted.complete.as_ref().expect("actual first root Complete");
+    assert!(first.prompt.system.len() > 16_384, "combined metadata exceeds the original native string cap");
+    assert!(first.prompt.system.len() <= 32_768, "explicit native string cap fits the actual combined prompt");
     let selected = counted
         .caller_charter
         .as_ref()

@@ -6,9 +6,10 @@
 use alloc::boxed::Box;
 
 use skein_lib::{Duration, Env, List, Queue, ReplyTo, Time, Token, Wall};
-use smith_domain_run::charter::{Checkout, Endpoint, Families, Grants, Llm, Repository, Tools};
+use smith_domain_run::charter::{Endpoint, Families, Grants, Llm, Tools};
 use smith_domain_run::outcome::{Change, ChangeSpec, Declared, OutcomeSpec, Verdict, VerdictRule};
 use smith_domain_run::{self as run, Ask, Charter};
+use smith_domain_run::{Directory, Workspace};
 use smith_domain_session as session;
 
 use crate::limits;
@@ -42,7 +43,10 @@ const LIMITS: Limits = Limits {
         runs: 2,
         conversations: 4,
         run_bytes: 4096,
-        repositories: 2,
+        directories: 2,
+        directory_name_bytes: 64,
+        conflicts: 64,
+        conflict_path_bytes: 4096,
         host_tools: 2,
         host_input_bytes: 65_536,
         host_reply_bytes: 65_536,
@@ -294,6 +298,7 @@ impl Harness {
     /// the run's token, and main's first call to its LLM.
     fn admit(&mut self, call: u64, charter: Charter) -> (Token, Token, Prompt) {
         let emitted = self.step(Event::Start {
+            workspace: Some(workspace()),
             grants: Box::new([crate::Grant {
                 name: crate::GrantName { account: 0, generation: 0 },
                 valid: Duration::from_secs(100_000),
@@ -339,12 +344,22 @@ fn bytes(text: &[u8]) -> Box<[u8]> {
     Box::from(text)
 }
 
+fn workspace() -> Workspace {
+    Workspace {
+        directories: Box::new([Directory {
+            name: bytes(b"temper"),
+            root: Token::new(900),
+            writable: true,
+            git: true,
+            conflicts: Box::new([]),
+        }]),
+    }
+}
+
 fn charter() -> Charter {
     Charter {
         brief: bytes(b"Review the change."),
-        checkout: Checkout {
-            repositories: Box::new([Repository { name: bytes(b"temper"), root: Token::new(900), writable: true }]),
-        },
+
         grants: Grants { deliver: None, tools: TOOLS, agents: true, host_tools: Box::new([]) },
         outcome: OutcomeSpec { change: None, verdicts: Box::new([rule(b"approve")]), report: None, failure: None },
         budget: BUDGET,
@@ -518,6 +533,7 @@ fn no_grant_fails_locally_and_exhaustion_reports_the_account() {
     let mut ungranted = charter();
     ungranted.llm.account = 9;
     let emitted = h.step(Event::Start {
+        workspace: Some(workspace()),
         reply_to: ReplyTo::new(Token::new(7)),
         worker: Token::new(7),
         charter: ungranted,
@@ -630,10 +646,16 @@ fn matches_text(content: &[Block]) -> bool {
 }
 
 #[test]
-fn a_checkout_the_tools_cannot_lay_out_refuses_main_as_invalid() {
+fn an_unsafe_workspace_mount_refuses_start_before_discovery() {
     let mut h = Harness::new();
-    let checkout = Checkout {
-        repositories: Box::new([Repository { name: bytes(b"ai/temper"), root: Token::new(900), writable: true }]),
+    let checkout = Workspace {
+        directories: Box::new([Directory {
+            name: bytes(b"ai/temper"),
+            root: Token::new(900),
+            writable: true,
+            git: true,
+            conflicts: Box::new([]),
+        }]),
     };
     let emitted = h.step(Event::Start {
         grants: Box::new([crate::Grant {
@@ -642,17 +664,16 @@ fn a_checkout_the_tools_cannot_lay_out_refuses_main_as_invalid() {
         }]),
         reply_to: ReplyTo::new(Token::new(7)),
         worker: Token::new(7),
-        charter: Charter { checkout, ..charter() },
+        charter: charter(),
+        workspace: Some(checkout),
         transcript: None,
     });
-    let [Request::Admitted { run, .. }, Request::Read { .. }] = &*emitted else {
-        panic!("expected an admitted run, got {emitted:?}");
+    let requests = Box::<[Request; 1]>::try_from(emitted).expect("one refusal terminal, no admission or discovery");
+    let [Request::Answer { to, answer }] = *requests else {
+        panic!("unsafe mount refuses before admission or discovery");
     };
-    let emitted = h.step(Event::Read { owner: *run, read: run::Read::Missing });
-    let [Request::Answer { to: _, answer }] = &*emitted else {
-        panic!("expected the run's answer, got {emitted:?}");
-    };
-    assert_eq!(answer, &run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Conversation)));
+    assert_eq!(to.into_token(), Token::new(7));
+    assert_eq!(answer, run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Workspace)));
     assert_eq!(h.domain.peers(), 0);
 }
 
@@ -676,6 +697,7 @@ fn an_opening_larger_than_a_session_holds_refuses_main_as_invalid() {
     let mut h = Harness::with(&limits);
     let brief = filler(10_240);
     let emitted = h.step(Event::Start {
+        workspace: Some(workspace()),
         grants: Box::new([crate::Grant {
             name: crate::GrantName { account: 0, generation: 0 },
             valid: Duration::from_secs(100_000),
@@ -1141,6 +1163,27 @@ fn declared_host_reads_run_together_write_waits_and_mismatched_effect_never_rela
     };
 }
 
+fn convention_workspace() -> Workspace {
+    Workspace {
+        directories: Box::new([
+            Directory {
+                name: bytes(b"work"),
+                root: Token::new(900),
+                writable: true,
+                git: true,
+                conflicts: Box::new([]),
+            },
+            Directory {
+                name: bytes(b"reference"),
+                root: Token::new(901),
+                writable: false,
+                git: true,
+                conflicts: Box::new([]),
+            },
+        ]),
+    }
+}
+
 /// Actual composed root entrance; decoy paths belong to the fake filesystem,
 /// not to Smith's selection. Read-only mounts supply guides but no check probe.
 fn convention_main(harness: &mut Harness, selected: Option<run::Conventions>) -> (Token, Token, Prompt) {
@@ -1150,14 +1193,10 @@ fn convention_main(harness: &mut Harness, selected: Option<run::Conventions>) ->
     };
     let guide_path = bytes(guide_path);
     let check_path = bytes(check_path);
+    let mounted = Some(convention_workspace());
     let charter = Charter {
         conventions: selected,
-        checkout: Checkout {
-            repositories: Box::new([
-                Repository { name: bytes(b"work"), root: Token::new(900), writable: true },
-                Repository { name: bytes(b"reference"), root: Token::new(901), writable: false },
-            ]),
-        },
+
         outcome: OutcomeSpec {
             change: Some(ChangeSpec { fields: Box::new([]) }),
             verdicts: Box::new([]),
@@ -1170,6 +1209,7 @@ fn convention_main(harness: &mut Harness, selected: Option<run::Conventions>) ->
         reply_to: ReplyTo::new(Token::new(77)),
         worker: Token::new(77),
         charter,
+        workspace: mounted,
         transcript: None,
         grants: Box::new([crate::Grant {
             name: crate::GrantName { account: 0, generation: 1 },
@@ -1351,6 +1391,7 @@ fn invalid_conventions_are_refused_at_original_root_start_before_any_effect() {
                 run::Conventions { guide: bytes(b"docs/GUIDE"), checks: bytes(path) }
             };
             let emitted = harness.step(Event::Start {
+                workspace: Some(workspace()),
                 reply_to: ReplyTo::new(Token::new(77)),
                 worker: Token::new(77),
                 charter: Charter { conventions: Some(conventions), ..charter() },
@@ -1423,16 +1464,25 @@ fn maximum_custom_guide_headings_obey_the_actual_session_receiving_limit_after_d
         let emitted = harness.step(Event::Start {
             reply_to: ReplyTo::new(Token::new(7)),
             worker: Token::new(7),
-            charter: Charter {
-                conventions: selected,
-                checkout: Checkout {
-                    repositories: Box::new([
-                        Repository { name: bytes(b"work"), root: Token::new(900), writable: false },
-                        Repository { name: bytes(b"reference"), root: Token::new(901), writable: false },
-                    ]),
-                },
-                ..charter()
-            },
+            workspace: Some(Workspace {
+                directories: Box::new([
+                    Directory {
+                        name: bytes(b"work"),
+                        root: Token::new(900),
+                        writable: false,
+                        git: true,
+                        conflicts: Box::new([]),
+                    },
+                    Directory {
+                        name: bytes(b"reference"),
+                        root: Token::new(901),
+                        writable: false,
+                        git: true,
+                        conflicts: Box::new([]),
+                    },
+                ]),
+            }),
+            charter: Charter { conventions: selected, ..charter() },
             transcript: None,
             grants: Box::new([crate::Grant {
                 name: crate::GrantName { account: 0, generation: 1 },

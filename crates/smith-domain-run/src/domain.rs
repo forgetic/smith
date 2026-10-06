@@ -133,8 +133,8 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
 fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     match event {
         Event::HostReturned { relay, reply } => run::host_returned(domain, env, relay, reply, out),
-        Event::Start { reply_to, worker, charter, transcript } => {
-            run::start(domain, env, reply_to, worker, charter, transcript, out);
+        Event::Start { reply_to, worker, charter, workspace, transcript } => {
+            run::start(domain, env, run::Start { reply_to, worker, charter, workspace, transcript }, out);
         }
         Event::Message { run, name, text } => run::message(domain, env, run, name, text, out),
         Event::Turn { conversation, record, sequence } => run::turn(domain, conversation, record, sequence, out),

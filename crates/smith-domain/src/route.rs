@@ -36,7 +36,7 @@ pub(crate) const fn session_env(env: &Env<Limits>) -> Env<session::Limits> {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
     let event = match event {
-        Event::Start { reply_to, worker, charter, grants, transcript } => {
+        Event::Start { reply_to, worker, charter, workspace, grants, transcript } => {
             if !takes_grants(domain, &grants, env.limits.accounts) {
                 domain.notices.push(Request::Answer {
                     to: reply_to,
@@ -47,7 +47,7 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
             for grant in grants {
                 granted(domain, env, grant);
             }
-            return start(domain, env, reply_to, worker, charter, transcript);
+            return start(domain, env, reply_to, worker, charter, workspace, transcript);
         }
         Event::Grant { grant } => return granted(domain, env, grant),
         Event::Message { run, name, text } => run::Event::Message { run, name, text },
@@ -141,6 +141,7 @@ fn start(
     reply_to: ReplyTo,
     worker: Token,
     charter: run::Charter,
+    workspace: Option<run::Workspace>,
     transcript: Option<session::record::Transcript>,
 ) {
     if domain.starts.is_full() {
@@ -151,7 +152,10 @@ fn start(
         Some(bytes) => bytes <= env.limits.session.delegated_result_bytes && env.limits.session.spend > 0,
         None => false,
     };
-    if !compatible {
+    if !compatible
+        || env.limits.run.directories > env.limits.session.tools.repos
+        || env.limits.run.directory_name_bytes > env.limits.session.tools.path_bytes
+    {
         domain.notices.push(Request::Answer {
             to: reply_to,
             answer: run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Conversation)),
@@ -172,7 +176,13 @@ fn start(
     run_step(
         domain,
         env,
-        run::Event::Start { reply_to: ReplyTo::new(id.token()), worker, charter, transcript: Some(id.token()) },
+        run::Event::Start {
+            reply_to: ReplyTo::new(id.token()),
+            worker,
+            charter,
+            workspace,
+            transcript: Some(id.token()),
+        },
     );
 }
 

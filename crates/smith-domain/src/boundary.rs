@@ -107,6 +107,9 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         charter: run::Charter,
+        /// Optional immutable host mounts and initial conflicts, moved to run admission.
+        /// Contract: domain/run.md, sections 3.2, 8.3 and 14.
+        workspace: Option<run::Workspace>,
         /// Typed V2 history including committed post-transcript actual results.
         /// False charter.resume ignores it; semantic refusal never starts fresh.
         /// Receiving record/count caps are checked before root retention.

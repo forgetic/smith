@@ -36,6 +36,7 @@ use crate::prompt;
 #[derive(Debug)]
 pub(crate) struct Run {
     pub(crate) charter: Charter,
+    pub(crate) workspace: Option<crate::Workspace>,
     /// What it found in its checkout as it prepared.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -203,19 +204,33 @@ pub(crate) enum Alarm {
 // Entry points, one per event or alarm: look the conversation or run up, take
 // its state out, run the cell's handler, follow the run's new state.
 
-pub(crate) fn start(
-    domain: &mut Domain,
-    env: &Env<Limits>,
-    reply_to: ReplyTo,
-    worker: Token,
-    charter: Charter,
-    transcript: Option<Token>,
-    out: &mut Queue<Request>,
-) {
+/// Owned Start fields moved directly from the boundary event into admission.
+/// This transient bundle retains no additional copy or separate allocation.
+/// Contract: domain/run.md, sections 3.2, 10 and 14.
+#[derive(Debug)]
+pub(crate) struct Start {
+    /// Affine right to the run's one final answer (domain/run.md, section 10).
+    pub(crate) reply_to: ReplyTo,
+
+    /// Host-selected worker identity (domain/run.md, sections 3.2 and 10).
+    pub(crate) worker: Token,
+
+    /// Immutable requested contract and budget (domain/run.md, sections 3.1 and 14).
+    pub(crate) charter: Charter,
+
+    /// Optional host-owned mount metadata (domain/run.md, sections 3.2 and 14).
+    pub(crate) workspace: Option<crate::Workspace>,
+
+    /// Optional opaque history handle (domain/run.md, sections 11 and 14).
+    pub(crate) transcript: Option<Token>,
+}
+
+pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &mut Queue<Request>) {
+    let Start { reply_to, worker, charter, workspace, transcript } = start;
     let Domain { runs, conversations, calls: _, alarms, facts } = domain;
     // A charter that can never fit is invalid, room or not: busy invites a
     // retry.
-    if let Err(invalid) = charter::check(&charter, &env.limits) {
+    if let Err(invalid) = charter::check(&charter, workspace.as_ref(), &env.limits) {
         out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(invalid)) });
         return;
     }
@@ -224,11 +239,12 @@ pub(crate) fn start(
         return;
     }
     let deadline = env.now.saturating_add(charter.budget.time);
-    let found = Found::with_capacity(count(charter.checkout.repositories.len()));
+    let found = Found::with_capacity(count(crate::workspace::directories(workspace.as_ref()).len()));
     // A run is stored before its main conversation, which names it, and starts
     // once main has a name too: main's slot is the run's from its admission.
     let run = Run {
         charter,
+        workspace,
         found,
         worker,
         spent: Spend::ZERO,
@@ -247,13 +263,14 @@ pub(crate) fn start(
     };
     let id = runs.insert(run).expect("checked for room above");
     facts.about(id.token());
-    let families = Families::of(&runs.get(id).expect("inserted above").charter.grants);
+    let admitted = runs.get(id).expect("inserted above");
+    let families = crate::workspace::families(admitted.workspace.as_ref(), Families::of(&admitted.charter.grants));
     let conversation =
         Conversation { run: id, asker: None, families, depth: 0, spent: Spend::ZERO, calls: 0, phase: Phase::Pending };
     let main = conversations.insert(conversation).expect("checked for room above");
     out.push(Request::Admitted { worker, run: id.token() });
     let run = runs.get_mut(id).expect("inserted above");
-    run.state = match prepare::next(&run.charter, None) {
+    run.state = match prepare::next(&run.charter, run.workspace.as_ref(), None) {
         Some(step) => look(run, id, reply_to, main, step, env, out),
         None => open(run, conversations, reply_to, main, env.now, out),
     };
@@ -952,7 +969,7 @@ fn look(
     env: &Env<Limits>,
     out: &mut Queue<Request>,
 ) -> State {
-    out.push(prepare::request(&run.charter, step, id.token(), env.now, &env.limits));
+    out.push(prepare::request(&run.charter, run.workspace.as_ref(), step, id.token(), env.now, &env.limits));
     State::Preparing { reply_to, main, step }
 }
 
@@ -970,7 +987,7 @@ fn prepared(
     env: &Env<Limits>,
     out: &mut Queue<Request>,
 ) -> State {
-    match prepare::next(&run.charter, Some(step)) {
+    match prepare::next(&run.charter, run.workspace.as_ref(), Some(step)) {
         Some(next) => look(run, id, reply_to, main, next, env, out),
         None => open(run, conversations, reply_to, main, env.now, out),
     }
@@ -995,7 +1012,8 @@ fn open(
             unreachable!("main is opened once, when its run has prepared")
         }
     };
-    let mut opening = opening(&run.charter, &run.found, run.spent, run.deadline.saturating_since(now));
+    let mut opening =
+        opening(&run.charter, run.workspace.as_ref(), &run.found, run.spent, run.deadline.saturating_since(now));
     opening.transcript = run.transcript.take();
     out.push(Request::Open { conversation: main.token(), opening });
     State::Working { reply_to, main }
@@ -1240,10 +1258,10 @@ fn sub_agent(
         wait: false,
         host_tools: Box::new([]),
         deliver: false,
-        system: prompt::child(&run.charter, &run.found, &wanted.brief, plan.families),
+        system: prompt::child(&run.charter, run.workspace.as_ref(), &run.found, &wanted.brief, plan.families),
         prompt: copy_of(prompt::BEGIN),
         tools: plan.families.tools,
-        checkout: run.charter.checkout.clone(),
+        workspace: run.workspace.clone(),
         budget: plan.budget,
         finish: false,
         families: plan.families,
@@ -1367,20 +1385,26 @@ fn answer(reply_to: ReplyTo, answer: Answer, out: &mut Queue<Request>) -> State 
 /// emission).
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-fn opening(charter: &Charter, found: &Found, spent: Spend, left: Duration) -> Opening {
+fn opening(
+    charter: &Charter,
+    workspace: Option<&crate::Workspace>,
+    found: &Found,
+    spent: Spend,
+    left: Duration,
+) -> Opening {
     Opening {
         transcript: None,
         wait: true,
         host_tools: charter.grants.host_tools.clone(),
         deliver: charter.grants.deliver.is_some(),
         llm: charter.llm.clone(),
-        system: prompt::system(charter, found),
+        system: prompt::system(charter, workspace, found),
         prompt: copy_of(prompt::BEGIN),
-        tools: charter.grants.tools,
-        checkout: charter.checkout.clone(),
+        tools: crate::workspace::families(workspace, Families::of(&charter.grants)).tools,
+        workspace: workspace.cloned(),
         budget: charter.budget.remainder(spent, left),
         finish: true,
-        families: Families::of(&charter.grants),
+        families: crate::workspace::families(workspace, Families::of(&charter.grants)),
     }
 }
 

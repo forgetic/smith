@@ -9,12 +9,13 @@ use skein_lib::{Duration, Env, Queue, ReplyTo, Rng, Time, Token, Wall};
 use skein_world::domain::heap::{self, Meter};
 use smith_agent_world::TIGHT;
 use smith_domain::llm::{Completion, Decoded, Failure, Problem, Prompt, Said, Served, Stop, Usage};
-use smith_domain::run::charter::{Checkout, Endpoint, Families, Grants, Llm, Repository, Tools};
+use smith_domain::run::charter::{Endpoint, Families, Grants, Llm, Tools};
 use smith_domain::run::outcome::{
     Change, ChangeSpec, Declared, DeclaredFailure, Field, Item, OutcomeSpec, Report, TextSpec,
 };
 use smith_domain::run::outcome::{Verdict, VerdictRule};
 use smith_domain::run::{self, Ask, Charter};
+use smith_domain::run::{Directory, Workspace};
 use smith_domain::tools::{Call, Done, Entry, Exit, Fault, Hit, Kind, Name, Op, Part, Path, Version};
 use smith_domain::{Domain, Event, Limits, Request, fire, max_out, resume, step, worst_case};
 
@@ -86,8 +87,18 @@ const LIMITS: Limits = Limits {
 
 /// A charter of `brief` bytes of brief that grants everything, and wants a
 /// change that passes its checks, a verdict, report or declared failure.
+fn workspace() -> Workspace {
+    let repository = Directory {
+        name: (*b"temper").into(),
+        root: Token::new(1),
+        writable: true,
+        git: true,
+        conflicts: Box::new([]),
+    };
+    Workspace { directories: Box::new([repository]) }
+}
+
 fn charter(brief: u64) -> Charter {
-    let repository = Repository { name: (*b"temper").into(), root: Token::new(1), writable: true };
     let all = Tools { inspect: true, modify: true, shell: true };
     let rule = VerdictRule {
         name: (*b"request-changes").into(),
@@ -115,7 +126,7 @@ fn charter(brief: u64) -> Charter {
     };
     Charter {
         brief: bytes(brief),
-        checkout: Checkout { repositories: Box::new([repository]) },
+
         grants: Grants { deliver: None, tools: all, agents: true, host_tools: Box::new([]) },
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
@@ -348,6 +359,7 @@ impl Driver {
             // Most charters as large as a run may hold, some a byte larger.
             let brief = limits.run.run_bytes - 900 + self.rng.below(901);
             return Some(Event::Start {
+                workspace: Some(workspace()),
                 grants: Box::new([smith_domain::Grant {
                     name: smith_domain::GrantName { account: 0, generation: 0 },
                     valid: Duration::from_secs(100_000),
