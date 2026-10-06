@@ -46,18 +46,20 @@ Both original consumer lockfiles select 2c725c2 at this merged checkpoint. Tempe
 call and item IDs in distinct bounded fields. The temporary consumer evidence
 below continues Smith's adapter work; final replacement acceptance remains open.
 
-## Implementation and evidence still open
+## Copy removal
 
-- Audit the copied codec tests and fixtures against Skein; move missing
-  captures with provenance and preserve bounded unknown replay fields.
-- Preserve actual shared terminal and reuse rights in the real consumer;
-  gate any further shared repair before advancing consumer revisions.
-- Gate the real Smith consumer and its worlds before removing copied provider,
-  OAuth and generic peer crates. Record exact source and suite evidence here.
+The 2026-10-06 cleanup removed Smith's copied provider, OAuth and generic
+fake LLM packages after comparing their tests and every recorded provider
+exchange with Skein. The fake issuer remains recoverable from Smith
+`d218817` for Skein's OAuth work. Temper continues to own the OAuth codec
+tests until that shared client exists. The test mapping and gate evidence
+are in the cleanup commit; the serial measurements are in workflow.md,
+section 4.
 
 The original design correction, 51fdd24, changed Markdown only. The shared
-increments above are merged; final consumer acceptance and copied-crate
-removal remain open. Their earlier evidence updates changed Markdown only.
+increments above and the real Smith consumer were merged later. The
+temporary checkout notes below record intermediate evidence, not current
+ownership.
 
 
 ## Reviewed temporary consumer checkpoints

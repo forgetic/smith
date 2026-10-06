@@ -194,36 +194,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "smith-fake-llm-domain"
-version = "0.0.0"
-dependencies = [
- "skein-lib",
-]
-
-[[package]]
-name = "smith-fake-llm-protocol"
-version = "0.0.0"
-dependencies = [
- "skein-http",
- "skein-io",
- "skein-json",
- "skein-lib",
- "smith-fake-llm-domain",
- "smith-llm-anthropic",
- "smith-llm-openai",
- "smith-oauth",
-]
-
-[[package]]
-name = "smith-fake-llm-tests"
-version = "0.0.0"
-dependencies = [
- "skein-lib",
- "skein-world",
- "smith-fake-llm-domain",
-]
-
-[[package]]
 name = "smith-host-domain"
 version = "0.0.0"
 dependencies = [
@@ -237,30 +207,6 @@ dependencies = [
  "skein-lib",
  "skein-world",
  "smith-host-domain",
-]
-
-[[package]]
-name = "smith-llm-anthropic"
-version = "0.0.0"
-dependencies = [
- "skein-json",
- "skein-lib",
-]
-
-[[package]]
-name = "smith-llm-openai"
-version = "0.0.0"
-dependencies = [
- "skein-json",
- "skein-lib",
-]
-
-[[package]]
-name = "smith-oauth"
-version = "0.0.0"
-dependencies = [
- "skein-json",
- "skein-lib",
 ]
 
 [[package]]

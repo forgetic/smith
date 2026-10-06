@@ -209,3 +209,13 @@ new protocol LLM world contributes 28 focused tests in 2.051 seconds and
 no fuzzy tests. It owns the moved wire fixture and tests; the agent world
 uses only the typed fake LLM, including three domain feature controls.
 Both suite budgets are unchanged.
+
+The shared fake LLM cleanup was measured serially on 2026-10-06 with the
+section 2 `measure` commands. Before removal, 583 focused tests passed in
+8.786 seconds and eleven fuzzy tests passed in 8.458 seconds. After removal,
+538 focused tests passed in 8.862 seconds and eleven fuzzy tests passed in
+8.557 seconds, with no skips. The 45 removed tests took 0.201 seconds in
+the before run; suite wall times varied upward by 0.076 and 0.099 seconds.
+Skein owns the provider and fake LLM tests and recorded exchanges; Temper
+retains the OAuth codec tests until the shared OAuth client is built.
+The workspace budgets are unchanged.
