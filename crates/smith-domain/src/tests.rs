@@ -30,6 +30,7 @@ const CEILING: session::Budget = session::Budget {
 
 const LIMITS: Limits = Limits {
     accounts: 4,
+    endpoints: 3,
     decoded_call_bytes: 4096,
     skew: Duration::ZERO,
     run: run::Limits {
@@ -194,7 +195,7 @@ impl Harness {
 
     fn with(limits: &Limits) -> Harness {
         Harness {
-            domain: Domain::new(limits, 1),
+            domain: Domain::new(limits, crate::Config { endpoints: Box::new([Endpoint(1), Endpoint(2)]) }, 1),
             env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits: *limits },
             out: Queue::with_capacity(max_out(limits)),
             turns: List::with_capacity(CEILING.turns),
@@ -389,6 +390,48 @@ fn root_refuses_invalid_grants_before_admission() {
     });
     let [Request::Answer { answer, .. }] = &*emitted else { panic!("expected admission refusal: {emitted:?}") };
     assert_eq!(answer, &run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Grants)));
+}
+
+#[test]
+fn root_refuses_unconfigured_main_and_sub_agent_endpoints_before_admission() {
+    for (main, child) in [(Endpoint(3), Endpoint(2)), (Endpoint(1), Endpoint(3))] {
+        let mut h = Harness::new();
+        let mut requested = charter();
+        requested.llm.endpoint = main;
+        requested.models = Box::new([Llm { endpoint: child, model: bytes(b"model-b"), ..requested.llm.clone() }]);
+        let emitted = h.step(Event::Start {
+            workspace: None,
+            grants: Box::new([]),
+            reply_to: ReplyTo::new(Token::new(7)),
+            host_run: Token::new(7),
+            activation: 1,
+            charter: requested,
+            transcript: None,
+        });
+        assert_eq!(
+            &*emitted,
+            &[Request::Answer {
+                to: ReplyTo::new(Token::new(7)),
+                answer: run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Endpoint)),
+            }]
+        );
+        assert_eq!(h.domain.peers(), 0);
+    }
+    let mut h = Harness::new();
+    let mut requested = charter();
+    requested.models = Box::new([Llm { endpoint: Endpoint(2), model: bytes(b"model-b"), ..requested.llm.clone() }]);
+    let emitted = h.step(Event::Start {
+        workspace: None,
+        grants: Box::new([]),
+        reply_to: ReplyTo::new(Token::new(7)),
+        host_run: Token::new(7),
+        activation: 1,
+        charter: requested,
+        transcript: None,
+    });
+    let [Request::Admitted { .. }] = &*emitted else {
+        panic!("configured endpoints admit the start: {emitted:?}");
+    };
 }
 
 #[test]

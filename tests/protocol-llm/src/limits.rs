@@ -26,6 +26,7 @@ const CEILING: session::Budget = session::Budget {
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 pub const LIMITS: Limits = Limits {
     accounts: 4,
+    endpoints: 3,
     decoded_call_bytes: 4096,
     skew: Duration::ZERO,
     run: run::Limits {
@@ -112,6 +113,7 @@ pub const LIMITS: Limits = Limits {
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
 pub const TIGHT: Limits = Limits {
     accounts: LIMITS.accounts,
+    endpoints: LIMITS.endpoints,
     decoded_call_bytes: LIMITS.decoded_call_bytes,
     skew: LIMITS.skew,
     run: run::Limits {

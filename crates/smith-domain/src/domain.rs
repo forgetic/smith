@@ -39,6 +39,7 @@ use smith_domain_run as run;
 use smith_domain_session::{self as session};
 
 use crate::boundary::{Event, GrantName, Request};
+use crate::config::Config;
 use crate::facts::Fact;
 use crate::limits::{self, Limits};
 use crate::peer::Peer;
@@ -57,6 +58,7 @@ pub const fn max_out(limits: &Limits) -> u32 {
 /// conversation between them, and room for what they emit within a step.
 #[derive(Debug)]
 pub struct Domain {
+    pub(crate) config: Config,
     pub(crate) run: run::Domain,
     pub(crate) session: session::Domain,
     /// The conversations the run opened, until their sessions end.
@@ -194,13 +196,15 @@ impl Domain {
     /// drawing randomness from `seed`: each child domain's seed is drawn from
     /// it.
     #[must_use]
-    pub fn new(limits: &Limits, seed: u64) -> Domain {
+    pub fn new(limits: &Limits, config: Config, seed: u64) -> Domain {
+        assert!(config.valid(limits), "configured endpoints fit the limits and are unique");
         let mut rng = Rng::new(seed);
         let peers = limits.run.conversations;
         let flights = limits::flights(limits).expect("worst_case accepted the limits");
         let handoffs = limits::handoffs(limits).expect("worst_case accepted the limits");
         let facts = limits::facts(limits).expect("worst_case accepted the limits");
         Domain {
+            config,
             run: run::Domain::new(&limits.run),
             session: session::Domain::new(&limits.session, rng.next_u64()),
             peers: Slab::with_capacity(peers),

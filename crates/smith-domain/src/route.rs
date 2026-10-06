@@ -36,6 +36,13 @@ pub(crate) const fn session_env(env: &Env<Limits>) -> Env<session::Limits> {
 pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
     let event = match event {
         Event::Start { reply_to, host_run, activation, charter, workspace, grants, transcript } => {
+            if !endpoints_known(domain, &charter) {
+                domain.notices.push(Request::Answer {
+                    to: reply_to,
+                    answer: run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Endpoint)),
+                });
+                return;
+            }
             if !takes_grants(domain, &grants, env.limits.accounts) {
                 domain.notices.push(Request::Answer {
                     to: reply_to,
@@ -125,6 +132,18 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
         }
     };
     run_step(domain, env, event);
+}
+
+fn endpoints_known(domain: &Domain, charter: &run::Charter) -> bool {
+    if !domain.config.contains(charter.llm.endpoint) {
+        return false;
+    }
+    for model in &charter.models {
+        if !domain.config.contains(model.endpoint) {
+            return false;
+        }
+    }
+    true
 }
 
 /// Delivers a hand-off from the run that waited on the ready list.

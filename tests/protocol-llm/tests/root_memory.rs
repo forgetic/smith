@@ -90,6 +90,7 @@ fn observation_limits(limits: &adapter::Limits) -> ObservationLimits {
 fn bounds(messages: u32) -> Limits {
     Limits {
         accounts: 1,
+        endpoints: 1,
         decoded_call_bytes: 16_384,
         run: run::Limits {
             runs: 1,
@@ -737,7 +738,7 @@ impl Counted {
         let meter = Meter::new();
         meter.start();
         let out = Queue::with_capacity(root::max_out(limits));
-        let domain = Domain::new(limits, 41);
+        let domain = Domain::new(limits, root::Config { endpoints: Box::new([run::charter::Endpoint(0)]) }, 41);
         let measured = meter.end();
         let queue_bytes = Queue::<Request>::worst_case(root::max_out(limits)).expect("output container fits");
         meter.check(measured, root::worst_case(limits).expect("compatible root limits") + queue_bytes, limits);
@@ -1078,7 +1079,7 @@ impl Counted {
         self.calls = 0;
         self.records.clear();
         self.meter.start();
-        self.domain = Some(Domain::new(limits, 42));
+        self.domain = Some(Domain::new(limits, root::Config { endpoints: Box::new([run::charter::Endpoint(0)]) }, 42));
         let measured = self.meter.end();
         self.drain(measured);
     }

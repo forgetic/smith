@@ -19,6 +19,8 @@ use crate::peer::{self, Peer};
 pub struct Limits {
     /// Maximum configured credential accounts retained by the root.
     pub accounts: u32,
+    /// Maximum endpoint names in the agent configuration.
+    pub endpoints: u32,
 
     /// Aggregate decoded application-call bytes admitted from one completion.
     /// The adapter includes these owning call fields in its translated completion
@@ -56,7 +58,8 @@ pub struct Limits {
 /// pre-effect session credit until received and recorded through close.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
-    let Limits { run: run_limits, session: session_limits, accounts: _, skew: _, decoded_call_bytes: _ } = limits;
+    let Limits { run: run_limits, session: session_limits, accounts: _, endpoints: _, skew: _, decoded_call_bytes: _ } =
+        limits;
     let budget = run_limits.budget;
     let ceiling = session_limits.budget;
     let fits = budget.turns <= ceiling.turns && budget.spend <= session_limits.spend && budget.time <= ceiling.time;
@@ -154,6 +157,9 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let content = Queue::<crate::Content>::worst_case(limits.session.facts)?
         .checked_add(u64::from(limits.session.facts).checked_add(1)?.checked_mul(limits.session.session_bytes)?)?;
     children
+        .checked_add(
+            u64::from(limits.endpoints).checked_mul(u64::try_from(size_of::<run::charter::Endpoint>()).ok()?)?,
+        )?
         .checked_add(held)?
         .checked_add(found)?
         .checked_add(flights)?

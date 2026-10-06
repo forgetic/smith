@@ -27,6 +27,7 @@
 extern crate alloc;
 
 mod boundary;
+mod config;
 mod domain;
 mod facts;
 
@@ -42,6 +43,7 @@ mod translate;
 mod translation_tests;
 
 pub use boundary::{Event, Grant, GrantName, Request};
+pub use config::Config;
 pub use domain::{Domain, fire, max_out, resume, step};
 pub use facts::{Content, Fact};
 

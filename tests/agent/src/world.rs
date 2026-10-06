@@ -501,7 +501,11 @@ impl World {
             settings: *settings,
             now: Time::ZERO,
             rng: Rng::new(settings.seed ^ 0x0b),
-            agent: agent::Domain::new(&settings.limits, settings.seed ^ 0x17),
+            agent: agent::Domain::new(
+                &settings.limits,
+                agent::Config { endpoints: Box::new([run::charter::Endpoint(0)]) },
+                settings.seed ^ 0x17,
+            ),
             stage,
             backend,
             parent_deliveries: false,

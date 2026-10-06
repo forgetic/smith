@@ -42,6 +42,7 @@ fn index(rng: &mut Rng, len: usize) -> usize {
 /// few bytes each.
 const LIMITS: Limits = Limits {
     accounts: 4,
+    endpoints: 3,
     decoded_call_bytes: 4096,
     skew: Duration::ZERO,
     run: run::Limits {
@@ -700,7 +701,7 @@ fn churn(limits: &Limits, seed: u64, rounds: u32) -> [u32; 18] {
         seen: [0; 18],
     };
     let meter = Meter::new();
-    let mut domain = Domain::new(&limits, seed);
+    let mut domain = Domain::new(&limits, smith_domain::Config { endpoints: Box::new([Endpoint(0)]) }, seed);
     let mut measure = |domain: &mut Domain, env: &Env<Limits>, driver: &mut Driver, call: Point| {
         meter.start();
         match call {
@@ -747,6 +748,7 @@ enum Point {
 fn a_domain_driven_at_random_stays_within_its_worst_case_at_every_entry_point() {
     let wider = Limits {
         accounts: LIMITS.accounts,
+        endpoints: LIMITS.endpoints,
         decoded_call_bytes: LIMITS.decoded_call_bytes,
         skew: LIMITS.skew,
         run: run::Limits { runs: 3, conversations: 8, run_conversations: 4, calls: 8, ..LIMITS.run },
