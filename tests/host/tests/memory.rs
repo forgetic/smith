@@ -224,17 +224,7 @@ fn maximum_v2_starts_and_full_queued_replies_fit_every_slot() {
             measured.up(
                 owner,
                 Up::Answer {
-                    answer: Answer {
-                        turns: limits.turns,
-                        completions: u32::MAX,
-                        input: u64::MAX,
-                        output: u64::MAX,
-                        cache_read: u64::MAX,
-                        cache_write: u64::MAX,
-                        spent: u64::from(limits.turns),
-
-                        result: RunResult::Parked,
-                    },
+                    answer: Answer { turns: limits.turns, spent: u64::from(limits.turns), result: RunResult::Parked },
                 },
             );
             measured.cleanup(owner, 0, false);
@@ -271,22 +261,7 @@ fn maximum_start_io_ownership_coexists_with_full_pre_read_message_queue() {
     // dropping the caller's Start is a real send terminal ownership boundary.
     measured.held_start = None;
     measured.up(owner, Up::Admitted);
-    measured.up(
-        owner,
-        Up::Answer {
-            answer: Answer {
-                turns: 0,
-                completions: 0,
-                input: 0,
-                output: 0,
-                cache_read: 0,
-                cache_write: 0,
-                spent: 0,
-
-                result: RunResult::Parked,
-            },
-        },
-    );
+    measured.up(owner, Up::Answer { answer: Answer { turns: 0, spent: 0, result: RunResult::Parked } });
     measured.cleanup(owner, 0, true);
 }
 

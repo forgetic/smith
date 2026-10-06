@@ -182,11 +182,6 @@ fn final_answer(agent: &Agent) -> host::Answer {
     }), "the concrete Turn keeps paired opaque receipt feedback");
     host::Answer {
         turns: *turns,
-        completions: spent.turns,
-        input: spent.input,
-        output: spent.output,
-        cache_read: spent.cache_read,
-        cache_write: spent.cache_write,
         spent: spent.units,
         result: RunResult::Failed { failure: host::RunFailure::Cancelled },
     }

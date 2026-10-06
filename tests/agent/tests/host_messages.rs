@@ -143,27 +143,13 @@ fn real_host_turn_ack_and_send_rights_survive_root_parking_and_exit_tree_empty_e
 /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
 fn assert_accounting(answer: &host::Answer, turns: u32, spent: run::Spend) {
     assert_eq!(answer.turns, turns, "only actual main Turns count as transmitted turns");
-    assert_eq!(answer.completions, spent.turns, "global main and child completions move once");
-    assert_eq!(answer.input, spent.input);
-    assert_eq!(answer.output, spent.output);
-    assert_eq!(answer.cache_read, spent.cache_read);
-    assert_eq!(answer.cache_write, spent.cache_write);
     assert_eq!(answer.spent, spent.units);
 }
 
 /// Translate the actual root final `Spend` without session usage or `Turn` metadata.
 /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
 fn final_accounting(turns: u32, spent: run::Spend, result: RunResult) -> host::Answer {
-    host::Answer {
-        turns,
-        completions: spent.turns,
-        input: spent.input,
-        output: spent.output,
-        cache_read: spent.cache_read,
-        cache_write: spent.cache_write,
-        spent: spent.units,
-        result,
-    }
+    host::Answer { turns, spent: spent.units, result }
 }
 
 #[test]

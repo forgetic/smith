@@ -1035,20 +1035,12 @@ fn valid_answer(agent: &Agent, answer: &crate::Answer, limits: &Limits) -> bool 
             }
         }
     }
-    if answer.turns != agent.number || answer.completions < answer.turns || !valid_spend(agent, answer.spent) {
+    if answer.turns != agent.number || !valid_spend(agent, answer.spent) {
         return false;
     }
     match &answer.result {
         RunResult::Refused { detail } => {
-            !agent.admitted
-                && answer.turns == 0
-                && answer.completions == 0
-                && answer.input == 0
-                && answer.output == 0
-                && answer.cache_read == 0
-                && answer.cache_write == 0
-                && answer.spent == 0
-                && within(detail, limits.outcome_bytes)
+            !agent.admitted && answer.turns == 0 && answer.spent == 0 && within(detail, limits.outcome_bytes)
         }
         RunResult::Accepted { outcome } => agent.admitted && within(outcome, limits.outcome_bytes),
         RunResult::Parked | RunResult::Failed { .. } => agent.admitted,

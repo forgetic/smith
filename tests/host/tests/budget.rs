@@ -14,18 +14,7 @@ fn recorded(number: u32, spent: u64) -> Up {
 }
 
 fn ended(turns: u32, spent: u64) -> Up {
-    Up::Answer {
-        answer: Answer {
-            turns,
-            completions: turns,
-            input: 0,
-            output: 0,
-            cache_read: 0,
-            cache_write: 0,
-            spent,
-            result: RunResult::Failed { failure: RunFailure::PriceOverflow },
-        },
-    }
+    Up::Answer { answer: Answer { turns, spent, result: RunResult::Failed { failure: RunFailure::PriceOverflow } } }
 }
 
 #[test]

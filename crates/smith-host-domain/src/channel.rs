@@ -435,36 +435,6 @@ pub struct Answer {
     /// Exactly the observed numbered turn count (domain/host.md, sections 2–7).
     pub turns: u32,
 
-    /// Agent's final global actual completion count across main and every child,
-    /// copied from the root's `Spend` without recounting transmitted `Turn`s.
-    /// At least `turns`. Zero for `Refused`.
-    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
-    pub completions: u32,
-
-    /// Agent's final global fresh-input tokens, copied from root `Spend`.
-    /// Exact;
-    /// never repriced by the host. Zero for `Refused`.
-    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
-    pub input: u64,
-
-    /// Agent's final global output tokens, copied from root `Spend`.
-    /// Exact;
-    /// never reconstructed from the last `Turn`. Zero for `Refused`.
-    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
-    pub output: u64,
-
-    /// Agent's final global cache-read tokens, copied from root `Spend`.
-    /// Exact;
-    /// independent of host-unit pricing. Zero for `Refused`.
-    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
-    pub cache_read: u64,
-
-    /// Agent's final global cache-write tokens, copied from root `Spend`.
-    /// Exact;
-    /// Charged before a typed overflow. Zero for `Refused`.
-    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
-    pub cache_write: u64,
-
     /// Final global host-unit spend, at least the previous Turn's spend;
     /// refused starts have zero.
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
