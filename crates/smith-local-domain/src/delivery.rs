@@ -18,6 +18,25 @@ pub(crate) fn cached(record: Option<&DeliveryRecord>, name: run::CallName) -> Op
     }
 }
 
+/// A same-activation turn carries the answer after its call. Across starts,
+/// only a read fence through the latest saved person line proves the waking
+/// notice was read; turn numbers begin again at one.
+pub(crate) fn told(
+    record: &DeliveryRecord,
+    activation: u64,
+    number: u32,
+    read: Option<Token>,
+    latest_message: u64,
+) -> bool {
+    if record.name.activation == activation {
+        return number > record.after_turn;
+    }
+    match read {
+        Some(read) => read.raw() >= latest_message,
+        None => false,
+    }
+}
+
 /// Operation awaited from the caller, or the durable store.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Step {
@@ -250,7 +269,7 @@ fn append_notice(out: &mut List<u8>, text: &[u8], cap: usize) {
 
 #[cfg(test)]
 mod tests {
-    use super::{cached, commit_message, waking_text};
+    use super::{cached, commit_message, told, waking_text};
     use crate::DeliveryRecord;
     use smith_domain::run::outcome::{Change, Field, FieldRule};
     use smith_domain::run::{CallName, Delivery};
@@ -304,5 +323,24 @@ mod tests {
             waking_text(Some(&record), Box::from(&b"Continue"[..]), 1024).as_ref(),
             b"Earlier delivery interrupted; committed: none\nContinue"
         );
+    }
+
+    #[test]
+    fn a_later_activation_only_tells_a_delivery_when_it_reads_the_waking_line() {
+        let name = CallName { activation: 2, completion: 3, position: 1 };
+        let receipt = smith_domain::run::Receipt::new(0, Box::from(&b"commit 2"[..])).expect("bounded receipt");
+        let record = DeliveryRecord {
+            name,
+            state: crate::DeliveryState::Answer(Delivery::Delivered(
+                smith_domain::run::Delivered::new(Box::new([receipt.clone()])).expect("one receipt"),
+            )),
+            landed: Box::new([receipt]),
+            after_turn: 2,
+            told: false,
+        };
+        assert!(told(&record, 2, 3, None, 7));
+        assert!(!told(&record, 3, 3, None, 8));
+        assert!(!told(&record, 3, 4, Some(skein_lib::Token::new(7)), 8));
+        assert!(told(&record, 3, 1, Some(skein_lib::Token::new(8)), 8));
     }
 }

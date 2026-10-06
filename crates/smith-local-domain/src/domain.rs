@@ -422,7 +422,13 @@ fn turn_saved(domain: &mut Domain, number: u32, out: &mut Queue<Request>) {
     let pending = domain.turns.unsaved.pop().expect("TurnSaved answers a pending SaveTurn");
     assert_eq!(number, pending, "turns become durable in order");
     if let Some(record) = &mut domain.record
-        && number > record.after_turn
+        && crate::delivery::told(
+            record,
+            domain.chat.state.activation,
+            number,
+            domain.chat.state.read,
+            domain.chat.state.next_message,
+        )
     {
         record.told = true;
     }

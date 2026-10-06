@@ -43,6 +43,7 @@ impl Store {
     pub fn delivery_name(&self) -> Option<run::CallName> {
         Some(self.delivery.as_ref()?.name)
     }
+
     fn history(&self) -> Option<agent::Transcript> {
         if let Some(history) = &self.history_override {
             return Some(history.clone());
@@ -916,7 +917,9 @@ impl World {
                 state.read = read;
                 self.store.turns.push(turn);
                 if let Some(record) = &mut self.store.delivery
-                    && number > record.after_turn
+                    && ((record.name.activation == state.activation && number > record.after_turn)
+                        || (record.name.activation != state.activation
+                            && read.is_some_and(|read| read.raw() >= state.next_message)))
                 {
                     record.told = true;
                 }
