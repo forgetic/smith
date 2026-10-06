@@ -35,7 +35,7 @@ pub enum Event {
         agent: Token,
         /// Agent callback identity; separate from durable operation name (domain/host.md, sections 2–7).
         call: Token,
-        /// Exactly one matching actual parent terminal; never abandons delivery (domain/host.md, sections 2–7).
+        /// Exactly one matching parent terminal; never abandons delivery (domain/host.md, sections 2–7).
         reply: Reply,
     },
     /// Parent committed exactly this forwarded turn (domain/host.md, sections 2–7).
@@ -136,7 +136,7 @@ pub enum Request {
         /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
     },
-    /// One parent operation; exact actual Answer required (domain/host.md, sections 2–7).
+    /// One parent operation; exact Answer required (domain/host.md, sections 2–7).
     Called {
         /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
@@ -151,7 +151,7 @@ pub enum Request {
         /// Generic tool/effect or delivery fields (domain/host.md, sections 2–7).
         ask: Ask,
     },
-    /// Agent/process withdrew call once; actual parent terminal still required (domain/host.md, sections 2–7).
+    /// Agent/process withdrew call once; parent terminal still required (domain/host.md, sections 2–7).
     Withdrawn {
         /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
@@ -169,7 +169,7 @@ pub enum Request {
     Waiting {
         /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Last actual sent message read (domain/host.md, sections 2–7).
+        /// Last sent message read (domain/host.md, sections 2–7).
         read: Option<Token>,
     },
     /// Known-account credential rejection notice (domain/host.md, sections 2–7).

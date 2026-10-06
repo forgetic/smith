@@ -27,7 +27,7 @@ fn random_worlds_settle_and_reach_every_ending() {
             } else {
                 world.up(Up::Admitted);
                 // Stable names, generic effects and actual late terminals all
-                // cross the real host boundary; tree exit cannot erase them.
+                // cross the host boundary; tree exit cannot erase them.
                 if seed.is_multiple_of(3) && ![2, 3, 4, 7, 8, 10].contains(&fate) {
                     world.up(Up::Call {
                         call: Token::new(20),
@@ -74,7 +74,7 @@ fn random_worlds_settle_and_reach_every_ending() {
                     0 | 1 => unreachable!("handled pre-admission"),
                     _ => unreachable!("bounded fate"),
                 }
-                settle_actual_parent_call(&mut world, seed, fate);
+                settle_parent_call(&mut world, seed, fate);
             }
             world.cleanup();
         }
@@ -94,7 +94,7 @@ fn assert_ending(world: &World, fate: u64, seed: u64) {
         0 => assert_eq!(world.seen.gone, Some(smith_host_domain::End::Unspawned)),
         1 | 2 | 3 | 4 | 8 | 10 => {
             assert_eq!(world.seen.fault, None, "positive fate {fate}, seed {seed}");
-            let result = &world.seen.answer.as_ref().expect("real agent last word").result;
+            let result = &world.seen.answer.as_ref().expect("agent last word").result;
             match result {
                 RunResult::Refused { .. } => assert_eq!(fate, 1),
                 RunResult::Accepted { .. } => assert_eq!(fate, 2),
@@ -116,7 +116,7 @@ fn assert_ending(world: &World, fate: u64, seed: u64) {
     }
 }
 
-fn settle_actual_parent_call(world: &mut World, seed: u64, fate: u64) {
+fn settle_parent_call(world: &mut World, seed: u64, fate: u64) {
     world.cleanup();
     assert_eq!(world.seen.gone, None, "actual parent call terminal survives all tree cleanup");
     let reply = if seed.is_multiple_of(3) && ![2, 3, 4, 7, 8, 10].contains(&fate) {

@@ -194,7 +194,7 @@ pub fn max_out(limits: &Limits) -> u32 {
     limits.calls.saturating_add(8)
 }
 
-/// Consume one parent notice or actual lower terminal with injected clocks.
+/// Consume one parent notice or lower terminal with injected clocks.
 /// Caller reserves `max_out` free slots and returns every operation terminal,
 /// even after cancellation/EOF (domain/host.md, sections 2–7).
 #[expect(clippy::too_many_lines, reason = "one exhaustive typed boundary keeps terminal ownership visible")]

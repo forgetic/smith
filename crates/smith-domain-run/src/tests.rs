@@ -77,8 +77,7 @@ impl Harness {
 
     /// Steps `event`, returning what it emitted, oldest first.
     fn step(&mut self, event: Event) -> Box<[Request]> {
-        // Legacy controls supply own units alongside raw usage; the actual
-        // run receives the two independent session notices in protocol order.
+        // Legacy controls supply own units alongside raw usage; the         // run receives the two independent session notices in protocol order.
         if let Event::Used { conversation, spend } = &event {
             let previous = self.prices.get(conversation).copied().unwrap_or(0);
             let own_spent = previous.checked_add(spend.units).expect("fixture own units");
@@ -1138,7 +1137,7 @@ fn a_push_that_lands_while_a_cancel_closes_main_wins_over_it() {
         h.step(Event::Withdraw { conversation, call: Token::new(7) }).is_empty(),
         "submitted delivery is never abandoned"
     );
-    // The actual host terminal reports a landing while run cancellation settles.
+    // The host terminal reports a landing while run cancellation settles.
     assert_eq!(
         &*h.step(Event::Delivered { owner, delivery: delivered() }),
         &[returned(7, Returned::Delivered(receipts()))]
@@ -1147,7 +1146,7 @@ fn a_push_that_lands_while_a_cancel_closes_main_wins_over_it() {
     let accepted = Answer::Accepted { outcome: Declared::Change(change()), spent: Spend::ZERO, turns: 0 };
     assert_eq!(answered(emitted), (1, accepted));
 
-    // Or the actual host operation times out while run cancellation settles.
+    // Or the host operation times out while run cancellation settles.
     // Cancellation does not abandon that submitted operation or invent its result.
     let (run, conversation) = h.coding(2, 101);
     let owner = h.land(conversation, 8);
@@ -1703,7 +1702,7 @@ fn reports_and_declared_failures_settle_once_without_checks_or_push() {
         assert!(h.step(Event::Cancel { run: Token::new(999) }).is_empty());
         assert!(
             h.step(Event::Priced { conversation, own_spent: 5, subtree_spent: 5 }).is_empty(),
-            "a genuine own price notice charges the terminal's usage independently"
+            "an own price notice charges the terminal's usage independently"
         );
         let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: spend(5) });
         assert_eq!(
@@ -1942,7 +1941,7 @@ fn time_and_spend_shutdown_keep_an_already_submitted_mid_landing() {
                 &[returned(50, Returned::Delivered(receipts())), Request::Close { peer: Token::new(100) },]
             );
         }
-        // Closing the real session waits for the host terminal; its one End
+        // Closing the session waits for the host terminal; its one End
         // then reports the spend it already used, without another delivery.
         let answer = answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: expected_spend })).1;
         assert_eq!(answer, Answer::Failed { failure: expected, spent: expected_spend, turns: 0 });
@@ -2057,7 +2056,7 @@ fn host_submission(emitted: &[Request]) -> crate::RelayName {
 }
 
 #[test]
-fn host_busy_and_lost_recover_only_after_actual_terminal_with_same_name_and_bytes() {
+fn host_relay_retries_keep_the_call_name_and_input() {
     let mut h = Harness::new(LIMITS);
     let (_, conversation) = h.running(71, 99);
     let deadline = h.env.now.saturating_add(Duration::from_secs(30));
@@ -2160,7 +2159,7 @@ fn host_withdrawal_and_timeout_retain_relay_until_terminal_answer_wins() {
 }
 
 #[test]
-fn host_unknown_is_conveyed_after_actual_withdrawn_terminal_when_shutdown_disallows_recovery() {
+fn host_unknown_is_conveyed_after_withdrawn_terminal_when_shutdown_disallows_recovery() {
     let mut h = Harness::new(LIMITS);
     let (_, conversation) = h.running(71, 99);
     let deadline = h.env.now.saturating_add(Duration::from_secs(30));
@@ -2227,7 +2226,7 @@ fn undeclared_host_and_effect_mismatch_are_refused_before_relay() {
 }
 
 #[test]
-fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
+fn opaque_fifo_wakes_waiting_and_read_advances_only_on_main_turn() {
     let mut h = Harness::new(LIMITS);
     let (run, conversation) = h.running(1, 9);
     let call = Token::new(20);
@@ -2722,7 +2721,7 @@ fn instructions_and_ordered_section_cells_titles_and_text_attain_the_exact_aggre
     let emitted = harness.start(92, selected);
     match emitted.as_ref() {
         [Request::Admitted { .. }, Request::Read { .. }] => {}
-        _ => panic!("exact count/byte cap admits before real discovery: {emitted:?}"),
+        _ => panic!("exact count/byte cap admits before discovery: {emitted:?}"),
     }
 }
 

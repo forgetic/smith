@@ -693,7 +693,7 @@ fn a_write_replaces_a_file_at_the_version_its_llm_read() {
 }
 
 #[test]
-fn a_write_that_conflicts_with_the_real_file_is_refused() {
+fn a_write_that_conflicts_with_the_current_file_is_refused() {
     let mut h = Harness::new(LIMITS);
     let kit = h.open(1, authority(ALL));
     // Creating over a file the LLM never read, even one removed before io

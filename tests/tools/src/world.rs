@@ -17,7 +17,7 @@ pub struct Settings {
     ///
     /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub seed: u64,
-    /// Immutable checkout-tool limits for the real component under test.
+    /// Immutable checkout-tool limits for the component under test.
     ///
     /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub tools: tools::Limits,

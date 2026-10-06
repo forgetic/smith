@@ -1,6 +1,6 @@
 //! Ordered host sections through actual main/child sessions and native restore.
 //! Expected system bodies are handwritten outside literals; concrete history,
-//! child results, usage and lower settlement come from the real composed routes.
+//! child results, usage and lower settlement come from the composed routes.
 //! Contract: domain/run.md, sections 3.1, 3.3, 5.3, 6 and 13;
 //! testing-strategy.md, sections 2.3, 6 and 7.
 
@@ -284,7 +284,7 @@ fn ordered_sections_and_instructions_reach_main_but_child_receives_only_its_own_
     assert_eq!(
         loads.iter().filter(|(root, path)| *root == roots[0] && *path == b"data.txt").count(),
         3,
-        "main's read and edit reload, then child's real read"
+        "main's read and edit reload, then child's read"
     );
     assert_eq!(loads.iter().filter(|(root, path)| *root == roots[1] && *path == b"data.txt").count(), 1);
     assert_eq!(world.turns().len(), 5);
@@ -306,7 +306,7 @@ fn ordered_sections_and_instructions_reach_main_but_child_receives_only_its_own_
             | llm::Block::ToolCall { .. }
             | llm::Block::ToolResult { .. } => None,
         })
-        .expect("genuine persisted raw child-task call");
+        .expect("persisted raw child-task call");
     assert_eq!(
         delegated
             .messages
@@ -469,7 +469,7 @@ fn recorded_wait(turn: &smith_domain::Turn, resumed: bool) {
                 None
             }
         })
-        .expect("genuine actual historical Wait call");
+        .expect("actual historical Wait call");
     assert_eq!(
         turn.messages
             .iter()
@@ -510,7 +510,7 @@ fn structured_brief_native_wait_park_and_genuine_transcript_restore_in_both_wire
         };
         settings.limits.session.completion_bytes =
             adapter::completion_worst_case(&bounds.client, settings.limits.decoded_call_bytes)
-                .expect("real Client receiving reservation before original Start");
+                .expect("Client receiving reservation before original Start");
         settings.limits.session.completion_blocks = bounds.client.dialect.parts;
         let (disk, mounted) = workspace();
         let roots = mounted.directories.iter().map(|directory| directory.root).collect::<Vec<_>>();

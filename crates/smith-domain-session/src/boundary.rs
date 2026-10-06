@@ -116,7 +116,7 @@ pub enum Event {
     /// The root closed the run before publishing this requested completion.
     /// Only the current Calling owner releases its reservation and settles
     /// Closed after the kit closes. Stale, duplicate and already-closing
-    /// events are inert; an actual provider terminal remains owed once started.
+    /// events are inert; a provider terminal remains owed once started.
     /// No cancellation, retry, usage or Turn is invented.
     /// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
     UnsentClosed {
@@ -131,7 +131,7 @@ pub enum Event {
         /// Typed reason why the pending operation produced no successful value.
         failure: Failure,
 
-        /// Exact content-free transport evidence carried by the actual terminal.
+        /// Exact content-free transport evidence carried by the terminal.
         /// Contract: domain/session.md, sections 4, 5 and 12.
         evidence: crate::llm::Evidence,
 
@@ -230,18 +230,17 @@ pub enum Request {
 
         /// Maximum owned translated completion bytes, including block cells,
         /// replay envelopes and decoded calls. The adapter verifies its configured
-        /// bound before preparing the provider request; actual terminals obey it.
+        /// bound before preparing the provider request; terminals obey it.
         /// Contract: domain/session.md, sections 3, 5 and 12.
         max_completion_bytes: u64,
 
         /// Maximum translated completion blocks, reserved with result skeletons
-        /// before this request. One actual terminal remains owed after Cancel.
+        /// before this request. One terminal remains owed after Cancel.
         /// Contract: domain/session.md, sections 3, 5 and 12.
         max_completion_blocks: u32,
 
         /// Maximum exact shared-client failure diagnostic bytes. The adapter
-        /// verifies compatibility before prepare; policy consumes the actual
-        /// terminal and drops detail without retaining text in facts/history.
+        /// verifies compatibility before prepare; policy consumes the         /// terminal and drops detail without retaining text in facts/history.
         /// Contract: domain/session.md, sections 4, 5 and 12.
         max_failure_bytes: u32,
     },
@@ -394,7 +393,7 @@ pub enum End {
         /// Typed reason why the pending operation produced no successful value.
         failure: Failure,
 
-        /// Exact content-free transport evidence carried by the actual terminal.
+        /// Exact content-free transport evidence carried by the terminal.
         /// Contract: domain/session.md, sections 4, 5 and 12.
         evidence: crate::llm::Evidence,
     },

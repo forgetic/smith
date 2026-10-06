@@ -91,7 +91,7 @@ pub enum Fact {
         /// Terminal process classification; only a zero exit code passes checks.
         exit: Exit,
     },
-    /// An actual host delivery ended with its content-free classification.
+    /// An host delivery ended with its content-free classification.
     Delivered {
         /// Admitted run token, retained and echoed within this child's boundary.
         run: Token,
@@ -147,7 +147,7 @@ pub enum Return {
     ChecksFailed,
     /// The host found its delivery context stale.
     Stale,
-    /// The actual host delivery failed and returned bounded feedback.
+    /// The host delivery failed and returned bounded feedback.
     DeliveryFailed,
     /// The caller cancelled and the terminal settled.
     Cancelled,

@@ -2,7 +2,7 @@
 //! sections 3, 5.2 and 12). State retains one immutable operation name, tool,
 //! effect and protocol-attested input through bounded retries. It never knows
 //! schemas' meaning, host policy, provider IDs or delivery state. A withdrawal
-//! requests relay settlement; only an actual terminal releases that relay.
+//! requests relay settlement; only a terminal releases that relay.
 
 use crate::delivery::CallName;
 use alloc::boxed::Box;
@@ -120,7 +120,7 @@ impl HostAnswer {
         Some(Self { text, error })
     }
 
-    /// Move the sealed actual text and host error bit to concrete transcript
+    /// Move the sealed text and host error bit to concrete transcript
     /// feedback without copying or interpreting either value.
     /// Contract: domain/run.md, sections 5.2 and 14.
     #[must_use]
@@ -151,7 +151,7 @@ pub struct RelayName {
     /// Contract: domain/run.md, section 5.2.
     pub owner: Token,
 
-    /// One-based bounded attempt number, incremented only after actual settlement.
+    /// One-based bounded attempt number, incremented only after settlement.
     /// Contract: domain/run.md, section 5.2.
     pub attempt: u32,
 }
@@ -168,7 +168,7 @@ pub enum Unanswered {
     Withdrawn,
 }
 
-/// Exactly one actual host terminal per relay. Before Busy the host made no
+/// Exactly one host terminal per relay. Before Busy the host made no
 /// decision; after Unanswered the relay and its effects have settled. A decided
 /// durable name always replays its first answer, even after a lost response.
 /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
@@ -186,7 +186,7 @@ pub enum HostReply {
     /// Contract: domain/run.md, section 5.2.
     Busy,
 
-    /// The actual relay terminal carries no learnable outcome yet.
+    /// The relay terminal carries no learnable outcome yet.
     /// Contract: domain/run.md, section 5.2.
     Unanswered(
         /// Actual settled relay status, preserving possible committed effects.

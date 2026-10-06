@@ -27,7 +27,7 @@ pub struct Feedback {
 }
 
 /// Pure feedback construction failed before allocation. A root must reserve a
-/// compatible cap before admitting an effect whose actual result uses this helper.
+/// compatible cap before admitting an effect whose result uses this helper.
 /// Contract: domain/run.md, sections 7, 8 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum FeedbackRefusal {
@@ -40,7 +40,7 @@ pub enum FeedbackRefusal {
 /// Consume a semantic terminal into complete canonical feedback. This is a pure
 /// mechanical application translation, never a new request, retry or effect.
 /// The caller prices simultaneous semantic and rendered ownership. `TooLarge`
-/// precedes allocation; actual admitted results require a compatible receiving cap.
+/// precedes allocation; admitted results require a compatible receiving cap.
 /// Contract: domain/run.md, sections 7, 8, 10 and 14.
 ///
 /// # Errors

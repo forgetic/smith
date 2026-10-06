@@ -1,4 +1,4 @@
-//! Scalar activation bills through real root/run/session/tools and actual Clients.
+//! Scalar activation bills through root/run/session/tools and actual Clients.
 //! The outside oracle prices the actual peer/SDK callbacks with its own literal
 //! model table, and sums each callback once. Child-inclusive Turn bills and
 //! historical bills never supply that global expected total.
@@ -98,7 +98,7 @@ fn spent(answer: &run::Answer) -> run::Spend {
 
 fn conservation(world: &World, rates: &[Rate]) -> run::Spend {
     let expected = total(world.completions(), rates);
-    assert_eq!(spent(world.answer()), expected, "one own-completion charge per genuine outside callback");
+    assert_eq!(spent(world.answer()), expected, "one own-completion charge per outside callback");
     assert_eq!(world.prompts().len(), world.completions().len());
     assert_eq!(world.turn_metadata().last().expect("actual main Turn").2, expected);
     assert!(expected.input > 0 && expected.output > 0);
@@ -260,7 +260,7 @@ fn native_settled(world: &World) {
     for (binding, actual) in world.wire_bindings().iter().zip(world.completions()) {
         assert_eq!(binding.owner, actual.owner);
         assert_eq!(binding.started.0, actual.started);
-        assert_eq!(binding.accepted_usage, Some(usage(actual)), "genuine SDK counters before adapter translation");
+        assert_eq!(binding.accepted_usage, Some(usage(actual)), "SDK counters before adapter translation");
         assert_eq!(
             binding.observed.iter().map(|(_, _, event)| *event).collect::<Vec<_>>(),
             [Observed::Completed(binding.owner), Observed::Reusable, Observed::Close, Observed::Closed],
@@ -306,7 +306,7 @@ fn turn_usage(actual: skein_llm::Usage) -> llm::Usage {
 }
 
 #[test]
-fn three_priced_models_and_seven_actual_nested_completions_conserve_global_own_charges() {
+fn three_priced_models_and_seven_nested_completions_conserve_global_own_charges() {
     let scripts = Box::new([
         script(
             b"@budget-main",
@@ -342,7 +342,7 @@ fn three_priced_models_and_seven_actual_nested_completions_conserve_global_own_c
     let mut inclusive = child_bill;
     for (index, actual) in main.iter().enumerate() {
         inclusive += charge(usage(actual), NESTED_RATES[0]);
-        assert_eq!(world.turns()[index].spent, inclusive, "main includes the genuine child's whole subtree bill once");
+        assert_eq!(world.turns()[index].spent, inclusive, "main includes the child's whole subtree bill once");
         assert_eq!(world.turns()[index].usage, turn_usage(usage(actual)));
     }
     assert_eq!(inclusive, expected.units);
@@ -372,7 +372,7 @@ fn three_priced_models_and_seven_actual_nested_completions_conserve_global_own_c
 }
 
 #[test]
-fn an_actual_crossing_edit_settles_and_same_turn_finish_can_win_the_scalar_fence() {
+fn an_crossing_edit_settles_and_same_turn_finish_can_win_the_scalar_fence() {
     for finish in [false, true] {
         let mut settings = settings(702, true, false);
         settings.budget.spend = 4;
@@ -397,7 +397,7 @@ fn an_actual_crossing_edit_settles_and_same_turn_finish_can_win_the_scalar_fence
                 Boundary::Read { .. } | Boundary::Probe { .. } | Boundary::Check { .. } | Boundary::Io { .. } => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(stores, [b"after\n".as_slice()], "crossing completion's real write settled once");
+        assert_eq!(stores, [b"after\n".as_slice()], "crossing completion's write settled once");
         assert_eq!(world.turns().len(), 2);
         assert_eq!(world.turns()[1].spent, 10);
         assert!(world.turns()[1].messages.iter().flat_map(|message| &message.content).any(|block| matches!(
@@ -485,18 +485,18 @@ fn parallel_story(index: usize, read_then_denied: bool) {
         "both calls started before either winner could fence a new call"
     );
     if !read_then_denied {
-        assert_eq!(costly_at, cheap_at, "both genuine Client terminals won at the same injected clock");
+        assert_eq!(costly_at, cheap_at, "both Client terminals won at the same injected clock");
     }
     assert!(world.completions().iter().all(|actual| actual.started <= costly_at));
     if read_then_denied {
-        root_denied_after_actual_tool(&world, &settings);
+        root_denied_after_tool(&world, &settings);
     }
 }
 
 /// A live cheap child finishes its actual read after the sibling's price
 /// crosses the global cap. Its own allowance remains positive, so the extra
-/// requested completion is stopped by the real root before Client preparation.
-fn root_denied_after_actual_tool(world: &World, settings: &Settings) {
+/// requested completion is stopped by the root before Client preparation.
+fn root_denied_after_tool(world: &World, settings: &Settings) {
     use smith_domain::{Fact, session};
 
     let main = model_calls(world, b"fake-1");
@@ -519,7 +519,7 @@ fn root_denied_after_actual_tool(world: &World, settings: &Settings) {
             Boundary::Read { .. } | Boundary::Probe { .. } | Boundary::Check { .. } | Boundary::Io { .. } => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(loads.len(), 1, "already-started crossing completion runs its real checkout read");
+    assert_eq!(loads.len(), 1, "already-started crossing completion runs its checkout read");
     assert!(loads[0] >= costly[0].terminal.expect("actual costly winner").0);
     let costly_callback = format!("agent <- Completed {{ owner: {:?},", costly[0].owner);
     let crossing = world
@@ -532,7 +532,7 @@ fn root_denied_after_actual_tool(world: &World, settings: &Settings) {
         .iter()
         .position(|line| line.contains("agent <- Done {"))
         .expect("actual owned read terminal entered root");
-    assert!(crossing < settled, "the real read settles after root accepted the costly crossing completion");
+    assert!(crossing < settled, "the read settles after root accepted the costly crossing completion");
     let requested = world
         .facts()
         .iter()
@@ -541,7 +541,7 @@ fn root_denied_after_actual_tool(world: &World, settings: &Settings) {
             Fact::Session { .. } | Fact::Run { .. } => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(requested.len(), 4, "real Session declared one more completion after its read settled");
+    assert_eq!(requested.len(), 4, "Session declared one more completion after its read settled");
     let denied = requested
         .iter()
         .copied()
@@ -632,7 +632,7 @@ fn exact_history(query: &Query, expected: &[Message]) -> bool {
 }
 
 fn positive_history_controls(query: &Query, expected: &[Message]) {
-    assert!(exact_history(query, expected), "whole genuine saved history and fresh activation wake");
+    assert!(exact_history(query, expected), "whole saved history and fresh activation wake");
     let mut changed = query.clone();
     changed.messages[2].parts = Box::new([]);
     assert!(!exact_history(&changed, expected), "dropping the actual child's result breaks the positive oracle");

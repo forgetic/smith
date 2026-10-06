@@ -31,26 +31,26 @@ pub struct Limits {
     /// it is collecting, each block counted at its fixed size plus its payload.
     pub session_bytes: u64,
 
-    /// Maximum owned content of one actual provider completion, including
+    /// Maximum owned content of one provider completion, including
     /// block cells, replay envelopes and decoded owned-call fields. The session
     /// reserves this and every possible unstarted result before asking the provider.
     /// Contract: domain/session.md, sections 3, 5 and 12.
     pub completion_bytes: u64,
 
-    /// Maximum blocks in an actual completion; result-slot storage is
+    /// Maximum blocks in a completion; result-slot storage is
     /// reserved independently before the provider request. The adapter's full
     /// translated completion bound must obey both receiving caps.
     /// Contract: domain/session.md, sections 3, 5 and 12.
     pub completion_blocks: u32,
 
-    /// Maximum exact actual failure diagnostic bytes. Provider receiving credit
+    /// Maximum exact failure diagnostic bytes. Provider receiving credit
     /// covers this terminal before work; policy drops detail after consumption.
     /// Contract: domain/session.md, sections 4, 5 and 12.
     pub failure_bytes: u32,
 
     /// Maximum concrete opener-result payload per admitted delegated call.
     /// A whole batch reserves its possible results before any effect; each
-    /// actual terminal owns its reservation through close and turn emission.
+    /// terminal owns its reservation through close and turn emission.
     /// Contract: domain/session.md, sections 3, 5 and 12.
     pub delegated_result_bytes: u64,
 
@@ -89,7 +89,7 @@ pub struct Limits {
 /// Logical room secured before each provider request: maximum completion,
 /// copied result IDs/details and independent Block/Slot skeleton wrappers.
 /// This does not allocate memory or lower the transcript payload ceiling; it
-/// prevents a provider effect whose actual in-cap terminal cannot be retained.
+/// prevents a provider effect whose in-cap terminal cannot be retained.
 /// It also covers the full bounded failure terminal; diagnostic policy consumes
 /// and drops that transient detail. Returns None on zero completion caps or
 /// checked arithmetic overflow.

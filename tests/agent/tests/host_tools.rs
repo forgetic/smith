@@ -13,7 +13,7 @@ fn story(schedule: HostSchedule, seed: u64) -> World {
     let mut world = World::new(Settings { job: Job::HostTools, host: schedule, ..Settings::calm(seed) });
     world.run(20_000);
     assert!(matches!(world.answer(), run::Answer::Accepted { outcome: run::outcome::Declared::Report(_), .. }));
-    assert!(!world.host_submissions().is_empty(), "real provider calls the offered opaque host declaration");
+    assert!(!world.host_submissions().is_empty(), "provider calls the offered opaque host declaration");
     assert!(world.checked().is_empty() && world.pushes().is_empty());
     world
 }
@@ -34,7 +34,7 @@ fn host_busy_lost_then_replayed_answer_preserves_opaque_input_name_scope_and_exa
         assert!(submission.deadline <= submission.at.saturating_add(Duration::from_millis(300)));
     }
     assert_eq!(first.input.bytes(), br#" {"opaque":{"policy":"outside","numbers":[1,2]},"unchanged":"\u0041"} "#);
-    assert!(world.prompts().iter().flat_map(|query| &query.messages).flat_map(|message| &message.parts).any(|part| matches!(part, skein_fake_llm_domain::api::Part::ToolOutput { output, is_error: false, .. } if output.as_ref() == b"opaque host answer: first decision")), "actual exact host text is continuation feedback");
+    assert!(world.prompts().iter().flat_map(|query| &query.messages).flat_map(|message| &message.parts).any(|part| matches!(part, skein_fake_llm_domain::api::Part::ToolOutput { output, is_error: false, .. } if output.as_ref() == b"opaque host answer: first decision")), "exact host text is continuation feedback");
     assert_replays(812, 816, |seed| {
         let world = story(HostSchedule::Replay, seed);
         (world.trace().to_vec(), format!("{:?} {:?}", world.host_submissions(), world.answer()))
@@ -49,7 +49,7 @@ fn exhausted_lost_then_busy_keeps_unknown_and_continues_to_report() {
 }
 
 #[test]
-fn declared_timeout_requests_withdrawal_then_actual_terminal_allows_same_name_recovery() {
+fn declared_timeout_requests_withdrawal_then_terminal_allows_same_name_recovery() {
     let world = story(HostSchedule::Withdraw, 814);
     assert_eq!(world.host_submissions().len(), 2);
     assert!(world.trace().iter().any(|line| line.contains("WithdrawHost")));
@@ -57,7 +57,7 @@ fn declared_timeout_requests_withdrawal_then_actual_terminal_allows_same_name_re
 }
 
 #[test]
-fn actual_answer_after_withdrawal_is_retained_without_another_relay() {
+fn answer_after_withdrawal_is_retained_without_another_relay() {
     let world = story(HostSchedule::LateAnswer, 815);
     assert_eq!(world.host_submissions().len(), 1);
     assert!(world.trace().iter().any(|line| line.contains("WithdrawHost")));
@@ -191,7 +191,7 @@ fn outside_known_and_unknown_feedback_cannot_be_omitted_or_rewritten_but_shutdow
 }
 
 #[test]
-fn real_composed_cancellation_while_host_relay_is_live_retains_recorded_answer_and_stops_recovery() {
+fn composed_cancellation_while_host_relay_is_live_retains_recorded_answer_and_stops_recovery() {
     let seed = 818;
     let baseline = story(HostSchedule::LateAnswer, seed);
     let first = &baseline.host_submissions()[0];
@@ -219,7 +219,7 @@ fn real_composed_cancellation_while_host_relay_is_live_retains_recorded_answer_a
 }
 
 #[test]
-fn outside_shutdown_control_requires_actual_stop_and_original_terminal() {
+fn outside_shutdown_control_requires_stop_and_original_terminal() {
     let mut history = positive_prefix();
     history.shutdown(Time::ZERO.saturating_add(Duration::from_millis(2500)));
     assert_eq!(history.finish(false), Err("shutdown abandoned actual relay terminal"));
@@ -350,7 +350,7 @@ fn corrupt_origin(prompt: &mut llm::Prompt, field: u32) {
 }
 
 #[test]
-fn outside_host_feedback_uses_actual_origin_when_older_invalid_call_reuses_id() {
+fn outside_host_feedback_uses_origin_when_older_invalid_call_reuses_id() {
     let mut positive = origin_history(2, 0);
     positive.prompt(&origin_prompt()).expect("older same-ID Invalid feedback is not the corrected host receipt");
     positive.finish(true).expect("complete positive local pair");

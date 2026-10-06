@@ -24,7 +24,7 @@ pub struct Conventions {
 
     /// Relative executable path probed and run only in writable mounts when
     /// a Change or separately granted delivery requires checks. No executable
-    /// means no checks; an actual failing check returns bounded feedback.
+    /// means no checks; a failing check returns bounded feedback.
     /// Contract: domain/run.md, sections 8.1, 10, 12 and 14.
     pub checks: Box<[u8]>,
 }

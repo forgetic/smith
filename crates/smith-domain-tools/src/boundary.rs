@@ -227,7 +227,7 @@ pub enum Op {
         max: u32,
 
         /// Maximum owned listing bytes: entry array cells plus every name's bytes.
-        /// The actual terminal obeys this cap even when it wins cancellation.
+        /// The terminal obeys this cap even when it wins cancellation.
         /// An unfit first entry returns an empty prefix; `Scanned.more` counts
         /// all omitted entries, including those excluded by the byte cap.
         /// Contract: domain/tools.md, sections 4, 5 and 9; domain/session.md, section 3.

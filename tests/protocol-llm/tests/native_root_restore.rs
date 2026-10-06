@@ -272,7 +272,7 @@ fn history(world: &World) -> Transcript {
     }
 }
 
-// The parent retains an actual prefix and its genuine concrete result separately;
+// The parent retains an actual prefix and its concrete result separately;
 // no completion, application classification, feedback or usage is manufactured.
 fn post_tail(world: &World) -> Transcript {
     let mut saved = history(world);
@@ -431,7 +431,7 @@ fn header_refusals(first: &World, fixture: &Fixture, index: usize) {
 }
 
 #[test]
-fn actual_native_root_parks_then_restores_whole_opaque_prefix_and_real_post_tail() {
+fn native_root_parks_then_restores_whole_opaque_prefix_and_real_post_tail() {
     for (index, fixture) in fixtures().into_iter().enumerate() {
         let bounds = bounds();
         let settings = settings(919, false, &bounds);

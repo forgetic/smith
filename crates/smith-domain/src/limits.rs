@@ -53,7 +53,7 @@ pub struct Limits {
 /// session's Block/payload cap. Rewritten root prompt Block/Message envelopes,
 /// semantic-result plus escaped text construction, failure diagnostic transit
 /// and separately retained observations are counted before caller ownership
-/// transfer. V2 has no persistent answer-ticket map; valid actual results own
+/// transfer. V2 has no persistent answer-ticket map; valid results own
 /// pre-effect session credit until received and recorded through close.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {

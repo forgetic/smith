@@ -258,7 +258,7 @@ fn maximum_start_io_ownership_coexists_with_full_pre_read_message_queue() {
     assert!(measured.held_start.is_some(), "actual IO still owns the maximum first Send");
     assert!(measured.meter.held() >= caller + u64::from(limits.messages) * limits.message_bytes);
     // The domain max and caller ownership sum are checked at every step;
-    // dropping the caller's Start is a real send terminal ownership boundary.
+    // dropping the caller's Start is a send terminal ownership boundary.
     measured.held_start = None;
     measured.up(owner, Up::Admitted);
     measured.up(owner, Up::Answer { answer: Answer { turns: 0, spent: 0, result: RunResult::Parked } });
@@ -292,7 +292,7 @@ fn delivery_replies_and_shutdown_rights_stay_priced() {
         );
         measured.step(Event::Sent { owner }, false);
     }
-    // Keep a real parent delivery right through both tree signals and EOF;
+    // Keep a parent delivery right through both tree signals and EOF;
     // disconnect's bounded withdrawal snapshot is measured too.
     measured.up(
         owner,

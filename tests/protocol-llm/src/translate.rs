@@ -2,7 +2,7 @@
 //! (domain/session.md, section 12; domain/run.md, section 14). This test-only
 //! adapter recognizes the scripts' finite arguments. It owns no production
 //! provider schema adapter; migration 05s5 supplies those. Opaque host inputs
-//! use the real skein JSON tokenizer to attest complete object syntax. Tool results keep
+//! use the skein JSON tokenizer to attest complete object syntax. Tool results keep
 //! call IDs and diagnostic bytes, allowing the provider to check transcript
 //! pairing and the tests to inspect feedback on subsequent requests.
 
@@ -285,7 +285,7 @@ pub(crate) fn failure(error: provider::Error) -> agent::Failure {
     }
 }
 
-/// This protocol face uses the real JSON tokenizer for syntax and object shape;
+/// This protocol face uses the JSON tokenizer for syntax and object shape;
 /// the domain receives exactly the original bytes, without field extraction.
 fn object(document: &[u8]) -> Option<()> {
     use skein_json::{Token, tokenizer as json};

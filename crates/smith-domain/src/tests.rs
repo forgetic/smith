@@ -903,8 +903,8 @@ fn assert_no_provider_completion(emitted: &[Request]) {
 }
 
 #[test]
-fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_actual_bytes() {
-    // Find the exact receiving edge from actual admission/dispatch outputs.
+fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_bytes() {
+    // Find the exact receiving edge from admission/dispatch outputs.
     // C bounds provider content; D bounds each complete canonical child result.
     // A one-byte tighter transcript must refuse the entire adjacent read batch.
     let mut lower = LIMITS.session.delegated_result_bytes.checked_mul(2).expect("two result caps");
@@ -939,7 +939,7 @@ fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_actual_
     assert!(children(&refused).is_none(), "all result credit precedes the first child effect");
     let refused_turn = tight_world.turns.last().expect("actual assistant and unstarted result tail survive");
     assert_eq!(
-        refused_turn.messages.last().expect("real results").content.as_ref(),
+        refused_turn.messages.last().expect("results").content.as_ref(),
         &[
             session::llm::Block::ToolResult { id: bytes(b"a1"), result: session::llm::Returned::NotRun },
             session::llm::Block::ToolResult { id: bytes(b"a2"), result: session::llm::Returned::NotRun },
@@ -954,7 +954,7 @@ fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_actual_
     assert!(world.says(second, &answer).is_empty());
     assert!(world.next().is_empty(), "actual child endings queue both owning results");
     assert_eq!(world.domain.flights(), 2);
-    assert_eq!(world.domain.run().runs(), 1, "only main remains after both real child terminals");
+    assert_eq!(world.domain.run().runs(), 1, "only main remains after both child terminals");
     assert!(world.step(Event::Cancel { run }).is_empty());
     // Cancel emission cannot replace either result which already won its terminal.
     let emitted = world.next();
@@ -1285,7 +1285,7 @@ fn convention_main(harness: &mut Harness, selected: Option<run::Conventions>) ->
 }
 
 #[test]
-fn caller_conventions_select_actual_default_custom_and_explicit_legacy_check_delivery_paths() {
+fn caller_conventions_select_default_custom_and_explicit_legacy_check_delivery_paths() {
     for (selected, expected_path) in [
         (None, b".smith/check".as_slice()),
         (
@@ -1337,7 +1337,7 @@ fn caller_conventions_select_actual_default_custom_and_explicit_legacy_check_del
 }
 
 #[test]
-fn custom_check_cancellation_waits_for_the_actual_abort_terminal() {
+fn custom_check_cancellation_waits_for_the_abort_terminal() {
     let mut harness = Harness::new();
     let (run, main, _) = convention_main(
         &mut harness,
@@ -1416,7 +1416,7 @@ fn invalid_conventions_are_refused_at_original_root_start_before_any_effect() {
     }
 }
 
-/// Settle the positive default-path companion using its actual provider terminal.
+/// Settle the positive default-path companion using its provider terminal.
 fn settle_default_convention_control(harness: &mut Harness, run: Token, main: Token, receiving: &Limits) {
     let mut cancelled = List::with_capacity(max_out(receiving));
     for request in harness.step(Event::Cancel { run }) {
@@ -1444,7 +1444,7 @@ fn settle_default_convention_control(harness: &mut Harness, run: Token, main: To
 }
 
 #[test]
-fn maximum_custom_guide_headings_obey_the_actual_session_receiving_limit_after_discovery() {
+fn maximum_custom_guide_headings_obey_the_session_receiving_limit_after_discovery() {
     for maximum_paths in [false, true] {
         let run = run::Limits { run_bytes: 16_384, ..LIMITS.run };
         let receiving = Limits {
@@ -1558,10 +1558,10 @@ fn scalar_charter() -> Charter {
 }
 
 #[test]
-fn scalar_crossing_yields_a_genuine_turn_and_ends_without_consulting_credentials() {
+fn scalar_crossing_yields_a_turn_and_ends_without_consulting_credentials() {
     let mut harness = Harness::with(&scalar_limits());
     let (_, main, _) = harness.admit(1, scalar_charter());
-    // Exact-cap completion owns its real Turn. Closing needs no credential
+    // Exact-cap completion owns its Turn. Closing needs no credential
     // lookup or subsequent provider request.
     assert!(harness.domain.grants.remove(&0).is_some());
     let usage = Usage { input_tokens: 100, ..Usage::ZERO };
@@ -1593,7 +1593,7 @@ fn a_priced_crossing_finish_settles_without_publishing_another_completion() {
     };
     assert_eq!((spent.units, spent.turns, *turns), (130, 1, 1));
     assert_eq!(harness.turns.len(), 1);
-    assert_eq!(harness.turns.iter().next().expect("genuine final record").spent, 130);
+    assert_eq!(harness.turns.iter().next().expect("final record").spent, 130);
 }
 
 #[test]

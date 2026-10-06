@@ -167,7 +167,7 @@ struct Conversation {
     transcript: List<Message>,
     /// Bytes held, counted against `Limits::session_bytes`.
     bytes: u64,
-    /// Logical space owed to actual provider and tool terminals.
+    /// Logical space owed to provider and tool terminals.
     reserved: u64,
     provider_credit: Option<u64>,
     /// What the session may spend, and what it has: completions received, and
@@ -543,15 +543,15 @@ pub(crate) fn budget_denied(
 
 /// The enclosing run closed before publishing this requested completion.
 /// Only its current Calling reservation settles Closed; no provider lease,
-/// cancel or completion evidence is fabricated. Closing actual calls still
-/// require their actual terminal.
+/// cancel or completion evidence is fabricated. Closing calls still
+/// require their terminal.
 /// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
 pub(crate) fn unsent_closed(domain: &mut Domain, env: &Env<Limits>, owner: Token, out: &mut Queue<Request>) {
     unsent_finished(domain, env, owner, End::Closed, out);
 }
 
 /// Settles a current reserved but unpublished provider request. Other states
-/// retain their actual terminal obligations and all stale identities are inert.
+/// retain their terminal obligations and all stale identities are inert.
 /// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
 fn unsent_finished(domain: &mut Domain, env: &Env<Limits>, owner: Token, end: End, out: &mut Queue<Request>) {
     let Some(id) = addressed(&domain.sessions, owner) else {
@@ -1909,7 +1909,7 @@ fn spec_cost(model: &[u8], system: &[u8], delegated: &[Descriptor], content: &[B
 /// the message, a block for each call's result, the copied ID it echoes and
 /// the answers to invalid calls, which are known already. Admission secured this whole
 /// skeleton before provider work and separately reserves each batch's payloads
-/// before effects. The actual terminal transfers its credit into held bytes.
+/// before effects. The terminal transfers its credit into held bytes.
 /// Slot containers and their transient coexistence with assembled Block arrays
 /// are independently priced by `worst_case`; no Slot/Block size inequality is assumed.
 fn held(content: &[Block], calls: u32) -> Option<u64> {
@@ -2365,7 +2365,7 @@ pub(crate) struct Bill {
 }
 
 /// An addressed delegated terminal charges its inclusive bill once before
-/// settling its actual result. Retired, stale, wrong-owner and duplicate bills
+/// settling its result. Retired, stale, wrong-owner and duplicate bills
 /// change neither price prefix; the own prefix never includes a child bill.
 /// Contract: domain/session.md, sections 5 and 6; domain/run.md, section 9.
 pub(crate) fn delegate_ended(
@@ -2601,7 +2601,7 @@ fn recorded_shape(message: &Message, limits: &Limits) -> Result<(), crate::recor
     }
 }
 
-/// Fault injection for the unit test of the integer naming fence. A real
+/// Fault injection for the unit test of the integer naming fence. A
 /// bounded transcript cannot hold this many turns; this tests the fence before
 /// delegated or owned effects, while retaining the received provider usage.
 /// Contract: domain/session.md, sections 3 and 5; testing-strategy.md, section 2.2.

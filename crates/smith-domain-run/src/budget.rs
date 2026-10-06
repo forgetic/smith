@@ -1,4 +1,4 @@
-//! Scalar host-unit ceilings and exact actual accounting (domain/run.md,
+//! Scalar host-unit ceilings and exact accounting (domain/run.md,
 //! sections 9, 10 and 14). Sessions price usage; the run never reprices it.
 
 use skein_lib::Duration;
@@ -8,11 +8,11 @@ use skein_lib::Duration;
 /// sections 3, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Budget {
-    /// Maximum actual completions; already admitted work may cross once.
+    /// Maximum completions; already admitted work may cross once.
     /// Contract: domain/run.md, sections 9, 10 and 14.
     pub turns: u32,
 
-    /// Host-unit ceiling; sessions alone price actual usage against it.
+    /// Host-unit ceiling; sessions alone price usage against it.
     /// Contract: domain/run.md, sections 9, 10 and 14.
     pub spend: u64,
 
@@ -111,7 +111,7 @@ pub enum ReceivingLimit {
 }
 
 impl Spend {
-    /// Empty actual activation accounting. Contract: domain/run.md, section 9.
+    /// Empty activation accounting. Contract: domain/run.md, section 9.
     pub const ZERO: Spend = Spend { turns: 0, input: 0, output: 0, cache_read: 0, cache_write: 0, units: 0 };
 
     /// Add only a fully representable increment. No part of a failed addition

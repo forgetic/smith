@@ -56,7 +56,7 @@ fn host_boundary(world: &World, expected_arguments: &[u8]) {
             .system
             .windows(b"The answer is in src/lib.rs; the checks want it to be 43.\n".len())
             .any(|bytes| bytes == b"The answer is in src/lib.rs; the checks want it to be 43.\n"),
-        "the real discovered guide reaches the first actual system text: {first:?}"
+        "the discovered guide reaches the first actual system text: {first:?}"
     );
     let read =
         world.trace().iter().position(|line| line.contains("agent -> Read {")).expect("actual discovery Read request");
@@ -155,7 +155,7 @@ fn root_story(configuration: Configuration) {
 }
 
 #[test]
-fn actual_root_wire_host_feedback_and_reused_owner_close_survive_parent_cancel() {
+fn root_wire_host_feedback_and_reused_owner_close_survive_parent_cancel() {
     for configuration in wire::configurations() {
         root_story(configuration);
     }

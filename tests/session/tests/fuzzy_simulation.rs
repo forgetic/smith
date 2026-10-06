@@ -100,7 +100,7 @@ fn random_worlds_settle_with_every_session_ended() {
         }
     }
     assert_eq!(ends, EXPECTED_ENDS.into_iter().map(String::from).collect());
-    assert!(concrete_turns > 0, "real accepted provider completions emitted concrete checked Turns");
+    assert!(concrete_turns > 0, "accepted provider completions emitted concrete checked Turns");
     println!(
         "canonical scheduled hits: concrete_turns={concrete_turns}, stale={stale}, invalid={invalid}, not_run={not_run}, parallel={parallel}, most_runs={most_runs}, op_timeouts={op_timeouts}, delegated={served:?}, races={races:?}, ends={ends:?}, stops={stops:?}"
     );

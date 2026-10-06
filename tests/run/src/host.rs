@@ -2,7 +2,7 @@
 //!
 //! It speaks the run's vocabulary for the host, as the top level will route
 //! it to and from the protocol layer, and plays the host beyond it, with
-//! some liberties a real host does not take:
+//! some liberties a host does not take:
 //!
 //! - It has jobs to run, and starts a run for each at a time drawn from the
 //!   first `window`, on a charter drawn from the script. It checks out the

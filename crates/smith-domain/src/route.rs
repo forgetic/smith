@@ -339,8 +339,7 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
 }
 
 /// Transfer one live ask into a pending terminal right, retaining its complete
-/// historical origin. The session's expiry bounds the call; only its actual
-/// terminal releases this flight. Contract: domain/run.md, sections 5 and 10.
+/// historical origin. The session's expiry bounds the call; only its /// terminal releases this flight. Contract: domain/run.md, sections 5 and 10.
 fn delegated(
     domain: &mut Domain,
     owner: Token,
@@ -443,7 +442,7 @@ fn complete(domain: &mut Domain, env: &Env<Limits>, pending: PendingCompletion, 
     let id = *domain.sessions.get(&owner).expect("a session asks for completions once it has opened");
     let conversation = domain.peers.get(id).expect("a peer lives as its session").conversation;
     // Admission precedes grant lookup, prompt cloning, lease retention
-    // and every actual Client effect. This completion is still unsent.
+    // and every Client effect. This completion is still unsent.
     match run::completion_permit(&domain.run, conversation) {
         run::CompletionPermit::Allowed => {}
         run::CompletionPermit::Denied(exhausted) => {

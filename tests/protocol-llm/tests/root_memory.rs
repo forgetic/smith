@@ -1,9 +1,9 @@
 //! Attained V2 root ownership at public Start, Complete and concrete Turn seams.
-//! Records come from actual shared Client terminals, including the real Wait
+//! Records come from actual shared Client terminals, including the Wait
 //! result; fixture ownership is counted independently from production pricing.
 //! Root entrances and caller-copy transients are measured separately. One whole
 //! actual Client/adapter/peer lifecycle is measured while root and caller
-//! histories remain live, including two real physical Clients across one logical
+//! histories remain live, including two physical Clients across one logical
 //! callback: the won closing Client and its replacement with one active context.
 //! Passive simulator, referee and composition bookkeeping are outside this
 //! component ownership contract (skein-world/src/heap.rs).
@@ -319,7 +319,7 @@ fn retire(retained: Retained, meter: &Meter, bound: u64, now: Time, wall: Wall) 
             break;
         }
     }
-    assert!(closed_quiet, "genuine Closed drains remaining bounded peer work");
+    assert!(closed_quiet, "Closed drains remaining bounded peer work");
     assert_eq!(wire.peer.machine.waiting(), skein_llm::client::Waiting::Nothing);
     assert_eq!(wire.peer.service.calls(), 0, "retired native provider routes reclaimed before drop");
     assert_eq!(wire.observed, [Observed::Completed(owner), Observed::Reusable, Observed::Close, Observed::Closed]);
@@ -374,7 +374,7 @@ fn actual(
         assert_eq!(
             previous.wire.observed,
             [Observed::Completed(owner), Observed::Reusable, Observed::Close],
-            "old Completed/Reusable/Close precedes new Start and old genuine Closed"
+            "old Completed/Reusable/Close precedes new Start and old Closed"
         );
         assert_eq!(previous.wire.peer.machine.waiting(), skein_llm::client::Waiting::Closing);
         assert!(wire.observed.is_empty(), "new Start has no terminal while the old won Client still closes");
@@ -403,7 +403,7 @@ fn actual(
         let mut handed = 0;
         for event in returned {
             handed = terminal_bytes(&event);
-            assert!(terminal.replace(event).is_none(), "one genuine native terminal");
+            assert!(terminal.replace(event).is_none(), "one native terminal");
         }
         let after = native_peak(meter, bound);
         held = attributed(held, before, after, 0, handed);
@@ -699,7 +699,7 @@ fn assert_rewritten(history: &root::Transcript, prompt: &llm::Prompt) {
     }
     let waking = prompt.messages.last().expect("actual waking User");
     assert_eq!(waking.role, llm::Role::User);
-    let [llm::Block::Text { text, replay: None }] = waking.content.as_ref() else { panic!("real waking text") };
+    let [llm::Block::Text { text, replay: None }] = waking.content.as_ref() else { panic!("waking text") };
     assert_eq!(text.as_ref(), b"Begin the work your brief describes.");
 }
 
@@ -955,7 +955,7 @@ impl Counted {
             }]),
         });
         assert!(self.admitted.is_some() && self.read.is_some());
-        assert_eq!(self.calls, 0, "selected Start ownership survives real outstanding discovery");
+        assert_eq!(self.calls, 0, "selected Start ownership survives outstanding discovery");
         assert!(self.complete.is_none());
     }
 
@@ -1130,7 +1130,7 @@ fn assert_generated(history: &root::Transcript, messages: u32) {
                     }
                     session::llm::Block::Refusal { .. }
                     | session::llm::Block::Opaque { .. }
-                    | session::llm::Block::ToolResult { .. } => panic!("real supported fixture records"),
+                    | session::llm::Block::ToolResult { .. } => panic!("supported fixture records"),
                 }
             }
         }
@@ -1228,16 +1228,16 @@ fn restore_overlap(counted: &mut Counted, configuration: &Configuration, message
     assert_rewritten(counted.prefix.as_ref().expect("maximum generated prefix"), &complete.prompt);
     counted.held_prompt = Some(copy_prompt(&complete.prompt));
     counted.prompt_copy = counted.held_prompt.as_ref().map(copy_prompt);
-    // The same whole native script adds the real next Wait/text pair. The old
+    // The same whole native script adds the next Wait/text pair. The old
     // Wait terminal's closing Client remains live when its text Client starts.
     counted.cycle(configuration, cycles + 1);
-    assert_eq!(counted.calls, 2, "two genuine actual Clients share the restored logical callback");
-    assert_eq!(counted.records.len(), 2, "both real restored terminals produced concrete Turns");
+    assert_eq!(counted.calls, 2, "two actual Clients share the restored logical callback");
+    assert_eq!(counted.records.len(), 2, "both restored terminals produced concrete Turns");
     assert_eq!(counted.records[0].sequence, 2 * cycles + 1);
     assert_eq!(counted.records[1].sequence, 2 * cycles + 2);
     assert!(
         counted.restored_overlap,
-        "full generated histories, both restored Prompt copies and a real Turn copy coexist with native overlap"
+        "full generated histories, both restored Prompt copies and a Turn copy coexist with native overlap"
     );
     assert!(counted.waiting, "actual restored Wait/text pair reaches Waiting after both native terminals");
     let run = counted.admitted.expect("actual overlapping restore activation");
@@ -1469,7 +1469,7 @@ fn maximum_convention_charter() -> run::Charter {
 }
 
 #[test]
-fn maximum_brief_and_convention_paths_coexist_with_caller_start_actual_prompt_and_overlapping_clients() {
+fn a_restored_run_keeps_full_brief_and_custom_paths_with_two_clients() {
     let path_bytes = run::Conventions::PATH_CAPACITY;
     let mut receiving = bounds(16);
     receiving.run.run_bytes = 16_384;
@@ -1563,10 +1563,7 @@ fn maximum_brief_and_convention_paths_coexist_with_caller_start_actual_prompt_an
     );
     assert!(counted.probe.is_none(), "the readonly mount adds no second check probe");
     counted.cycle(&configuration, 1);
-    assert!(
-        counted.waiting && counted.overlaps > 0,
-        "actual Wait/text terminals settle with two real Clients overlapping"
-    );
+    assert!(counted.waiting && counted.overlaps > 0, "actual Wait/text terminals settle with two Clients overlapping");
     assert!(counted.caller_charter.is_some(), "caller owns both maximum paths throughout actual native handoffs");
     let run = counted.admitted.expect("maximum-path activation was actually admitted");
     counted.waiting = false;

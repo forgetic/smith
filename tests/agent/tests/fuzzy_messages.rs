@@ -1,4 +1,4 @@
-//! Bounded real message interleavings and replay on the existing root world.
+//! Bounded message interleavings and replay on the existing root world.
 //! Fixture choices inject inputs; actual boundaries alone classify the endings,
 //! read fences and cancellation chronology. The existing message
 //! referee checks complete positive histories unchanged; no generic scheduler,
@@ -24,7 +24,7 @@ const CLASSES: [&str; 16] = [
     "read zero",
     "descending99→7",
     "read advances",
-    "input during real call",
+    "input during call",
     "input after actual Waiting",
     "Completed after actual Cancel",
     "actual Cancelled completion",
@@ -117,7 +117,7 @@ fn cancellation_anchor(seed: u64, fixture: Fixture, late: bool) -> Option<Durati
     let mut baseline = world(seed, Fixture::Idle, None, late);
     baseline.run(2000);
     let earliest = if late { inputs(seed, true).last().expect("actual wake fixture input").0 } else { Time::ZERO };
-    // Anchor the real text request after Wait has settled. The unchanged oracle
+    // Anchor the text request after Wait has settled. The unchanged oracle
     // requires actual Wait feedback; it must not be fed an invented waiting
     // result for a late ToolUse that legitimately remained unstarted on Cancel.
     let (started, returned) = baseline
@@ -264,7 +264,7 @@ fn run(seed: u64, fixture: Fixture) -> (Vec<String>, Outcome) {
 }
 
 #[test]
-fn bounded_message_schedules_replay_with_every_required_actual_class() {
+fn bounded_message_schedules_replay_with_every_required_class() {
     let mut observed = [0_u64; 16];
     for seed in SEEDS {
         for fixture in [Fixture::Idle, Fixture::Wall, Fixture::WakeCancel, Fixture::EarlyCancel] {

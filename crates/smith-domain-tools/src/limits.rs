@@ -58,7 +58,7 @@ pub struct Limits {
 
     /// Maximum listing ownership: each entry's fixed size plus its name bytes.
     /// The lower scan returns a name-order prefix within this and `list_entries`,
-    /// preserving the count of omitted entries. This also bounds actual late results.
+    /// preserving the count of omitted entries. This also bounds late results.
     /// Contract: domain/tools.md, sections 4, 5 and 9; domain/session.md, section 3.
     pub list_bytes: u64,
 
@@ -143,7 +143,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     kits.checked_add(jobs)?.checked_add(facts)?.checked_add(scratch)
 }
 
-/// Maximum dynamic ownership of this call's actual outcome, excluding its
+/// Maximum dynamic ownership of this call's outcome, excluding its
 /// enclosing result block and copied provider ID, which the session reserves
 /// separately. The parent uses this before dispatch, including for a terminal
 /// that wins cancellation; `None` means a configured bound overflowed.

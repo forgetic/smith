@@ -2,7 +2,7 @@
 //! Synthetic handwritten HTTP/SSE fixtures are independent of the peer encoder.
 //! Restored no-effect history is a caller/adapter handoff, not a root restore
 //! or combined memory proof. The separate malformed-call story drives original
-//! root discovery, real byte peers, one corrected host effect and cancellation.
+//! root discovery, byte peers, one corrected host effect and cancellation.
 //! Contract: scratch/client.md, sections 1–7; domain/run.md, sections 5.2,
 //! 10, 13 and 14; testing-strategy.md, sections 2.3, 2.4, 4.1 and 6.
 
@@ -274,7 +274,7 @@ fn native_corruptions(peer: &RawWorld, expected: &[u8], markers: &[&[u8]]) {
 }
 
 #[test]
-fn actual_codex_reasoning_refusal_and_message_identity_continue_exactly() {
+fn codex_reasoning_refusal_and_message_identity_continue_exactly() {
     let configuration = wire::configurations().into_iter().next().expect("literal Codex fixture");
     let source = response(200, "Content-Type: text/event-stream\r\n", &events(CODEX_RESPONSE), true);
     let (context, mut peer) = adopt(&configuration, Token::new(0), Box::new([user(b"Start.")]), source);
@@ -303,7 +303,7 @@ fn actual_codex_reasoning_refusal_and_message_identity_continue_exactly() {
 }
 
 #[test]
-fn actual_anthropic_all_usage_signed_and_redacted_replay_continue_exactly() {
+fn anthropic_all_usage_signed_and_redacted_replay_continue_exactly() {
     let configuration = wire::configurations().into_iter().nth(1).expect("literal Anthropic fixture");
     let source = response(200, "Content-Type: text/event-stream\r\n", ANTHROPIC_RESPONSE, true);
     let (context, mut peer) = adopt(&configuration, Token::new(99), Box::new([user(b"Start.")]), source.clone());
@@ -475,7 +475,7 @@ fn retired(world: &World) {
 }
 
 #[test]
-fn actual_root_malformed_call_has_no_effect_and_corrected_call_runs_once() {
+fn root_malformed_call_has_no_effect_and_corrected_call_runs_once() {
     let configuration = wire::configurations().into_iter().next().expect("raw-string Codex fixture");
     let mut bounds = limits();
     bounds.client.http.request = 16384;
@@ -572,7 +572,7 @@ fn observe_failure(
 }
 
 #[test]
-fn actual_response_unknown_and_unsent_failures_preserve_full_evidence() {
+fn response_unknown_and_unsent_failures_preserve_full_evidence() {
     let configuration = wire::configurations().into_iter().next().expect("literal failure fixture");
     let source = response(
         429,

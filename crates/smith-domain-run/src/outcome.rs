@@ -4,7 +4,7 @@
 //! no checkout or host effect. The run admits a satisfiable bounded contract,
 //! bounds a declaration with `owned_bytes`, then calls `judge` for shape.
 //! `Report`, verdict and declared failure finish without delivery; a change
-//! follows exclusive writable checks and the actual generic host terminal.
+//! follows exclusive writable checks and the generic host terminal.
 
 use alloc::boxed::Box;
 use core::mem::size_of;

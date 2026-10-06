@@ -42,7 +42,7 @@ fn text_seen(world: &World, expected: &[u8]) -> bool {
 }
 
 #[test]
-fn actual_wait_result_settles_before_waiting_then_opaque_fifo_names_cross_only_real_turns() {
+fn wait_result_settles_before_waiting_then_opaque_fifo_names_cross_only_turns() {
     let mut world = World::new(waiting(900));
     world.message_at(Time::from_nanos(500_000_000), Token::new(0), b"person: first".as_slice().into());
     world.message_at(Time::from_nanos(501_000_000), Token::new(99), b"person: second".as_slice().into());
@@ -63,7 +63,7 @@ fn actual_wait_result_settles_before_waiting_then_opaque_fifo_names_cross_only_r
             result: session::llm::Returned::Text { text, error: false, replay: None }, ..
         } if text.as_ref() == b"waiting")
         });
-    assert!(result, "real wait terminal is saved as exact canonical feedback");
+    assert!(result, "wait terminal is saved as exact canonical feedback");
     assert_eq!(world.judged().1, 1);
 }
 
@@ -91,7 +91,7 @@ fn bounded_message_keeps_the_zero_name_and_wall_time_runs_while_waiting() {
 }
 
 #[test]
-fn actual_parked_transcript_resumes_without_recharging_history_or_reusing_activation_numbers() {
+fn parked_transcript_resumes_without_recharging_history_or_reusing_activation_numbers() {
     let mut first = World::new(waiting(902));
     first.run(2000);
     let saved = history(&first);
@@ -113,7 +113,7 @@ fn actual_parked_transcript_resumes_without_recharging_history_or_reusing_activa
 }
 
 #[test]
-fn real_host_result_committed_after_last_transcript_restores_before_wake_without_repeating_effect() {
+fn host_result_committed_after_last_transcript_restores_before_wake_without_repeating_effect() {
     let mut first = World::new(Settings { job: Job::HostTools, ..Settings::calm(905) });
     first.run(2000);
     let mut turn = first.turns()[0].clone();
@@ -137,7 +137,7 @@ fn real_host_result_committed_after_last_transcript_restores_before_wake_without
         next.answer(),
         run::Answer::Accepted { outcome: run::outcome::Declared::Report(_), turns: 1, .. }
     ));
-    assert!(next.host_submissions().is_empty(), "restored real answer prevents duplicate host effect");
+    assert!(next.host_submissions().is_empty(), "restored answer prevents duplicate host effect");
     assert!(next.prompts()[0].messages.iter().any(|message| {
         message.parts.iter().any(|part| {
             matches!(part,
@@ -210,7 +210,7 @@ fn every_transient_history_refusal_is_exact_and_starts_no_provider_or_tool_effec
 }
 
 #[test]
-fn maximum_actual_opaque_delivery_receipt_survives_continue_saved_turn_and_resumed_prompt_exactly() {
+fn maximum_opaque_delivery_receipt_survives_continue_saved_turn_and_resumed_prompt_exactly() {
     let mut world = World::new(Settings {
         job: Job::MidReport,
         push: smith_agent_world::HostReply::OpaqueDelivered,
@@ -229,7 +229,7 @@ fn maximum_actual_opaque_delivery_receipt_survives_continue_saved_turn_and_resum
             run::Delivery::Nothing | run::Delivery::Refused(_) | run::Delivery::Failed(_) | run::Delivery::Stale =>
                 false,
         }),
-        "the host produced a real maximum successful receipt"
+        "the host produced a maximum successful receipt"
     );
     assert!(world.prompts().iter().flat_map(|query| &query.messages).flat_map(|message| &message.parts).any(|part| {
         matches!(part, Part::ToolOutput { output, is_error: false, .. } if output.as_ref() == expected)

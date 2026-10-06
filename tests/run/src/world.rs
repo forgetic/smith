@@ -22,7 +22,7 @@ pub struct Settings {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub seed: u64,
-    /// Immutable run limits for the real component under test.
+    /// Immutable run limits for the component under test.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub run: run::Limits,
@@ -1472,7 +1472,7 @@ impl World {
                     let Some(Out::Event(run::Event::Used { conversation: used, spend: usage })) = items.next() else {
                         panic!("checked adjacent raw usage from the same actual callback")
                     };
-                    assert_eq!(conversation, used, "one genuine completion callback owns both notices");
+                    assert_eq!(conversation, used, "one completion callback owns both notices");
                     self.send(Lane::Run, Delivery::CompletionUsage { conversation, own_spent, subtree_spent, usage });
                 }
                 Out::Permit { peer, conversation } => {

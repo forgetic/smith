@@ -256,7 +256,7 @@ fn yielded_historical_calls_resume_with_concrete_not_run_results() {
 }
 
 #[test]
-fn closing_a_resting_batch_keeps_its_real_result_and_marks_only_unstarted_calls() {
+fn closing_a_resting_batch_keeps_its_result_and_marks_only_unstarted_calls() {
     use smith_domain_tools::{Call, Part, Path};
     let mut world = World::new(30, 256);
     world.open(opening(None, 100));
@@ -313,7 +313,7 @@ fn cumulative_child_spend_overflow_is_a_typed_failure() {
 }
 
 #[test]
-fn owned_io_cancellation_keeps_actual_terminal_results_in_the_turn() {
+fn owned_io_cancellation_keeps_terminal_results_in_the_turn() {
     use smith_domain_tools::{Authority, Call, Done, Grants, Name, Op, Outcome, Part, Path, Repo, Version};
     for wins in [false, true] {
         let mut world = World::new(32, 256);
@@ -440,7 +440,7 @@ fn fill_initial(spec: &mut record::Opening, total: u64) {
 }
 
 #[test]
-fn cap_filled_provider_credit_preserves_actual_replay_completion_that_wins_cancel() {
+fn cap_filled_provider_credit_preserves_replay_completion_that_wins_cancel() {
     let mut world = World::new(101, 0);
     world.env.limits.session_bytes = 16_384;
     world.env.limits.completion_bytes = 2048;
@@ -520,7 +520,7 @@ fn one_byte_or_one_message_less_refuses_before_provider_and_tools() {
 }
 
 #[test]
-fn full_history_batch_credit_keeps_maximum_actual_late_results_or_prevents_every_effect() {
+fn full_history_batch_credit_keeps_maximum_late_results_or_prevents_every_effect() {
     use smith_domain_tools::Effect;
     for short in [false, true] {
         let mut world = World::new(103, 0);
@@ -626,7 +626,7 @@ fn exact_failure_classes_and_transport_evidence_survive_policy_without_diagnosti
 }
 
 #[test]
-fn fullest_history_keeps_maximum_actual_owned_read_list_search_and_shell_after_cancel() {
+fn fullest_history_keeps_maximum_owned_read_list_search_and_shell_after_cancel() {
     use smith_domain_tools::{self as tools, Authority, Call, Grants, Name, Repo};
     for kind in 0..4 {
         for short in [false, true] {
@@ -698,7 +698,7 @@ fn fullest_history_keeps_maximum_actual_owned_read_list_search_and_shell_after_c
     }
 }
 
-/// Exact maximum real lower terminal and independently expected semantic result.
+/// Exact maximum lower terminal and independently expected semantic result.
 fn maximum_owned_result(
     kind: u64,
 ) -> (smith_domain_tools::Call, smith_domain_tools::Done, smith_domain_tools::Outcome) {

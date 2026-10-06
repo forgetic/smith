@@ -1,4 +1,4 @@
-//! Scalar activation bills through real root/run/session/tools and actual Clients.
+//! Scalar activation bills through root/run/session/tools and actual Clients.
 //! The outside oracle prices the actual peer/SDK callbacks with its own literal
 //! model table, and sums each callback once. Child-inclusive Turn bills and
 //! historical bills never supply that global expected total.
@@ -78,7 +78,7 @@ fn spent(answer: &run::Answer) -> run::Spend {
 
 fn conservation(world: &World, rates: &[Rate]) -> run::Spend {
     let expected = total(world.completions(), rates);
-    assert_eq!(spent(world.answer()), expected, "one own-completion charge per genuine outside callback");
+    assert_eq!(spent(world.answer()), expected, "one own-completion charge per outside callback");
     assert_eq!(world.prompts().len(), world.completions().len());
     assert_eq!(world.turn_metadata().last().expect("actual main Turn").2, expected);
     assert!(expected.input > 0 && expected.output > 0);
@@ -233,7 +233,7 @@ fn turn_usage(actual: llm::Usage) -> llm::Usage {
 }
 
 #[test]
-fn three_priced_models_and_seven_actual_nested_completions_conserve_global_own_charges() {
+fn three_priced_models_and_seven_nested_completions_conserve_global_own_charges() {
     let scripts = Box::new([
         script(
             b"@budget-main",
@@ -269,7 +269,7 @@ fn three_priced_models_and_seven_actual_nested_completions_conserve_global_own_c
     let mut inclusive = child_bill;
     for (index, actual) in main.iter().enumerate() {
         inclusive += charge(usage(actual), NESTED_RATES[0]);
-        assert_eq!(world.turns()[index].spent, inclusive, "main includes the genuine child's whole subtree bill once");
+        assert_eq!(world.turns()[index].spent, inclusive, "main includes the child's whole subtree bill once");
         assert_eq!(world.turns()[index].usage, turn_usage(usage(actual)));
     }
     assert_eq!(inclusive, expected.units);

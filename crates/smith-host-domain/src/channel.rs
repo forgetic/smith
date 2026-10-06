@@ -53,7 +53,7 @@ pub struct Grant {
     pub account: u32,
     /// Positive increasing credential generation; rejected notices echo it (domain/host.md, sections 2–7).
     pub generation: u64,
-    /// Relative lifetime; protocol resolves the actual secret (domain/host.md, sections 2–7).
+    /// Relative lifetime; protocol resolves the secret (domain/host.md, sections 2–7).
     pub valid: Duration,
 }
 
@@ -113,7 +113,7 @@ pub enum Ask {
     },
 }
 
-/// Parent terminal forwarded through Send; delivery keeps its actual evidence (domain/host.md, sections 2–7).
+/// Parent terminal forwarded through Send; delivery keeps its evidence (domain/host.md, sections 2–7).
 #[derive(PartialEq, Eq, Debug)]
 #[expect(
     clippy::large_enum_variant,
@@ -127,7 +127,7 @@ pub enum Reply {
         /// Owned text result bounded by `Limits::answer_bytes` (domain/host.md, sections 2–7).
         body: Box<[u8]>,
     },
-    /// One full actual delivered/nothing/refused/failed/stale terminal (domain/host.md, sections 2–7).
+    /// One full delivered/nothing/refused/failed/stale terminal (domain/host.md, sections 2–7).
     Delivery(
         /// Sealed typed boundary value; no hidden policy (domain/host.md, section 2).
         Delivery,
@@ -155,7 +155,7 @@ pub enum CompletionFailure {
     /// Contract: domain/host.md, sections 2, 5 and 10.
     Protocol,
 
-    /// Unsolicited actual lower cancellation.
+    /// Unsolicited lower cancellation.
     /// Contract: domain/host.md, sections 2, 5 and 10.
     Cancelled,
 
@@ -167,7 +167,7 @@ pub enum CompletionFailure {
     /// Contract: domain/host.md, sections 2, 5 and 10.
     Unavailable,
 
-    /// The actual completion deadline elapsed.
+    /// The completion deadline elapsed.
     /// Contract: domain/host.md, sections 2, 5 and 10.
     TimedOut,
 
@@ -213,7 +213,7 @@ pub enum CompletionEvidence {
     /// Contract: domain/host.md, sections 2, 5 and 10.
     Unknown,
 
-    /// An actual peer response, including a refusal, was received.
+    /// A peer response, including a refusal, was received.
     /// Contract: domain/host.md, sections 2, 5 and 10.
     Response,
 }
@@ -221,7 +221,7 @@ pub enum CompletionEvidence {
 /// What kept an LLM from going on.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ModelFault {
-    /// Full neutral actual failure and evidence after session retry policy.
+    /// Full neutral failure and evidence after session retry policy.
     /// This is distinct from local model stopping rules and requested run Cancel.
     /// Contract: domain/host.md, sections 2, 5 and 10.
     Completion {
@@ -229,7 +229,7 @@ pub enum ModelFault {
         /// Contract: domain/host.md, sections 2, 5 and 10.
         failure: CompletionFailure,
 
-        /// Exact actual transport evidence, including across interrupted Delivery.
+        /// Exact transport evidence, including across interrupted Delivery.
         /// Contract: domain/host.md, sections 2, 5 and 10.
         evidence: CompletionEvidence,
     },
@@ -406,7 +406,7 @@ pub struct Answer {
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.
     pub spent: u64,
 
-    /// Opaque accepted result or typed refusal/parking/failure/actual delivery evidence (domain/host.md, sections 2–7).
+    /// Opaque accepted result or typed refusal/parking/failure/delivery evidence (domain/host.md, sections 2–7).
     pub result: RunResult,
 }
 
@@ -415,7 +415,7 @@ pub struct Answer {
 pub enum Up {
     /// Independent run admission after process Started, exactly once (domain/host.md, sections 2–7).
     Admitted,
-    /// Generic named host operation; parent owes actual terminal (domain/host.md, sections 2–7).
+    /// Generic named host operation; parent owes terminal (domain/host.md, sections 2–7).
     Call {
         /// Agent callback identity; separate from durable operation name (domain/host.md, sections 2–7).
         call: Token,
@@ -494,11 +494,11 @@ pub enum Down {
         /// Opaque text bounded by `Limits::message_bytes` (domain/host.md, sections 2–7).
         body: Box<[u8]>,
     },
-    /// One actual response to agent callback (domain/host.md, sections 2–7).
+    /// One response to agent callback (domain/host.md, sections 2–7).
     Answer {
         /// Agent callback identity; separate from durable operation name (domain/host.md, sections 2–7).
         call: Token,
-        /// Exactly one matching actual parent terminal; never abandons delivery (domain/host.md, sections 2–7).
+        /// Exactly one matching parent terminal; never abandons delivery (domain/host.md, sections 2–7).
         reply: Reply,
     },
     /// Exact parent commitment of one forwarded turn (domain/host.md, sections 2–7).
@@ -511,6 +511,6 @@ pub enum Down {
         /// Names only; generation increases (domain/host.md, sections 2–7).
         grant: Grant,
     },
-    /// First polite stop, once; actual operations retain terminal rights (domain/host.md, sections 2–7).
+    /// First polite stop, once; operations retain terminal rights (domain/host.md, sections 2–7).
     Cancel,
 }

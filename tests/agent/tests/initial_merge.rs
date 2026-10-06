@@ -231,7 +231,7 @@ fn contains(bytes: &[u8], part: &[u8]) -> bool {
     bytes.windows(part.len()).any(|bytes| bytes == part)
 }
 
-fn actual_conflict_read(turn: &smith_domain::Turn) -> bool {
+fn conflict_read(turn: &smith_domain::Turn) -> bool {
     let calls = turn
         .messages
         .iter()
@@ -264,7 +264,7 @@ fn actual_conflict_read(turn: &smith_domain::Turn) -> bool {
 
 fn assert_conflict_read(world: &World, root: Token) {
     let turn = world.turns().iter().find(|turn| turn.sequence == 3).expect("actual main read completion");
-    assert!(actual_conflict_read(turn), "actual main call/result pair contains all five unresolved lines: {turn:?}");
+    assert!(conflict_read(turn), "actual main call/result pair contains all five unresolved lines: {turn:?}");
     for field in 0..3 {
         let mut corrupted = turn.clone();
         for block in corrupted.messages.iter_mut().flat_map(|message| &mut message.content) {
@@ -288,7 +288,7 @@ fn assert_conflict_read(world: &World, root: Token) {
                 *input = br#"{"path":"invented-file"}"#.as_slice().into();
             }
         }
-        assert!(!actual_conflict_read(&corrupted), "content/result identity/call path corruption {field}");
+        assert!(!conflict_read(&corrupted), "content/result identity/call path corruption {field}");
     }
     let reads = world
         .boundaries()
@@ -315,7 +315,7 @@ fn assert_conflict_read(world: &World, root: Token) {
 }
 
 #[test]
-fn genuine_initial_merge_refusal_resolution_checks_and_two_parent_commit() {
+fn initial_merge_refusal_resolution_checks_and_two_parent_commit() {
     let Fixture { mut world, mut store, readonly_git, readonly_plain, actual_conflicts, roots } = setup();
     let first = submitted(&mut world, 1);
     assert_eq!(world.checked(), [true, true]);

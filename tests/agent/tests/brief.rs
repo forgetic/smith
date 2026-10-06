@@ -1,6 +1,6 @@
 //! Ordered host sections through actual main/child sessions and native restore.
 //! Expected system bodies are handwritten outside literals; concrete history,
-//! child results, usage and lower settlement come from the real composed routes.
+//! child results, usage and lower settlement come from the composed routes.
 //! Contract: domain/run.md, sections 3.1, 3.3, 5.3, 6 and 13;
 //! testing-strategy.md, sections 2.3, 6 and 7.
 
@@ -273,7 +273,7 @@ fn ordered_sections_and_instructions_reach_main_but_child_receives_only_its_own_
     assert_eq!(
         loads.iter().filter(|(root, path)| *root == roots[0] && *path == b"data.txt").count(),
         3,
-        "main's read and edit reload, then child's real read"
+        "main's read and edit reload, then child's read"
     );
     assert_eq!(loads.iter().filter(|(root, path)| *root == roots[1] && *path == b"data.txt").count(), 1);
     assert_eq!(world.turns().len(), 5);
@@ -295,7 +295,7 @@ fn ordered_sections_and_instructions_reach_main_but_child_receives_only_its_own_
             | llm::Block::ToolCall { .. }
             | llm::Block::ToolResult { .. } => None,
         })
-        .expect("genuine persisted raw child-task call");
+        .expect("persisted raw child-task call");
     assert_eq!(
         delegated
             .messages

@@ -112,7 +112,7 @@ pub struct Settings {
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub seed: u64,
-    /// Immutable session limits for the real component under test.
+    /// Immutable session limits for the component under test.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub agent: agent::Limits,
@@ -412,27 +412,27 @@ pub struct Stats {
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Told {
-    /// Count of opened facts drained from the real component.
+    /// Count of opened facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub opened: u32,
-    /// Count of completions started facts drained from the real component.
+    /// Count of completions started facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completions_started: u32,
-    /// Count of completions answered facts drained from the real component.
+    /// Count of completions answered facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completions_answered: u32,
-    /// Count of completions failed facts drained from the real component.
+    /// Count of completions failed facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completions_failed: u32,
-    /// Count of completions cancelled facts drained from the real component.
+    /// Count of completions cancelled facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completions_cancelled: u32,
-    /// Count of completions retried facts drained from the real component.
+    /// Count of completions retried facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub completions_retried: u32,
@@ -441,39 +441,39 @@ pub struct Told {
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub kits_opened: u32,
-    /// Count of kits closed facts drained from the real component.
+    /// Count of kits closed facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub kits_closed: u32,
-    /// Count of tools started facts drained from the real component.
+    /// Count of tools started facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub tools_started: u32,
-    /// Count of tools answered facts drained from the real component.
+    /// Count of tools answered facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub tools_answered: u32,
-    /// Count of yielded facts drained from the real component.
+    /// Count of yielded facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub yielded: u32,
-    /// Count of used facts drained from the real component.
+    /// Count of used facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub used: u32,
-    /// Count of ended facts drained from the real component.
+    /// Count of ended facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub ended: u32,
-    /// Count of delegates started facts drained from the real component.
+    /// Count of delegates started facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub delegates_started: u32,
-    /// Count of delegates answered facts drained from the real component.
+    /// Count of delegates answered facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub delegates_answered: u32,
-    /// Count of delegates cancelled facts drained from the real component.
+    /// Count of delegates cancelled facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub delegates_cancelled: u32,
@@ -481,7 +481,7 @@ pub struct Told {
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub calls: u32,
-    /// Count of invalid calls facts drained from the real component.
+    /// Count of invalid calls facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub invalid_calls: u32,
@@ -1258,10 +1258,7 @@ impl World {
                                 "actual late Closing winners settle calls without effects"
                             );
                         } else {
-                            assert!(
-                                result.is_none(),
-                                "a yielded call retains its unanswered tail until a real Continue"
-                            );
+                            assert!(result.is_none(), "a yielded call retains its unanswered tail until a Continue");
                         }
                         continue;
                     }
@@ -1674,7 +1671,7 @@ impl World {
                     self.stats.provider_calls += 1;
                 }
                 Delivery::Answer { call, result } => {
-                    // The fake refuses a transcript a real provider would:
+                    // The fake refuses a transcript a provider would:
                     // a call without its result, a result without its call.
                     assert!(result != Err(provider::api::Error::InvalidRequest), "the agent sends well-formed queries");
                     if let Some(Call { owner, opener, served, .. }) = self.end_call(call) {
@@ -2043,8 +2040,8 @@ fn assert_resumed_tail(session: &Session, index: usize, preceding: &[agent::llm:
     if index > 0 && session.accepted_stop[index - 1] != agent::llm::Stop::ToolUse && !session.accepted_late[index - 1] {
         for block in &session.accepted_content[index - 1] {
             if let Block::ToolCall { id, .. } = block {
-                let result = recorded_result(preceding, id)
-                    .expect("continuing a yielded call supplies its genuine next-Turn result");
+                let result =
+                    recorded_result(preceding, id).expect("continuing a yielded call supplies its next-Turn result");
                 assert_eq!(*result, Returned::NotRun, "yielded calls did not execute and precede the waking assistant");
             }
         }

@@ -54,7 +54,7 @@ pub enum Fact {
         /// Typed reason why the pending operation produced no successful value.
         failure: Failure,
 
-        /// Content-free actual lower transport evidence; diagnostic text is not retained.
+        /// Content-free lower transport evidence; diagnostic text is not retained.
         /// Contract: domain/session.md, sections 4, 5 and 12.
         evidence: crate::llm::Evidence,
     },

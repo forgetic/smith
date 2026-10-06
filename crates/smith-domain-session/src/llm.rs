@@ -1,7 +1,7 @@
 //! The provider-neutral vocabulary of a conversation with an LLM.
 //!
 //! The domain speaks this to the provider-neutral shared Client. Smith's
-//! protocol translates this vocabulary and actual terminals; Skein owns wire
+//! protocol translates this vocabulary and terminals; Skein owns wire
 //! formats and failure classification. Smith owns the application schemas of
 //! the tools a prompt offers, decodes the JSON the LLM writes as a tool's input
 //! into a typed call, or into the [`Problem`] that keeps it from being one, and
@@ -277,7 +277,7 @@ impl Usage {
     pub const ZERO: Usage = Usage { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
 }
 
-/// What the actual transport terminal proves about a provider operation.
+/// What the transport terminal proves about a provider operation.
 /// It is supplied by the shared client, never inferred from failure wording.
 /// Contract: domain/session.md, sections 4, 5 and 12.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -290,7 +290,7 @@ pub enum Evidence {
     /// Contract: domain/session.md, sections 4, 5 and 12.
     Unknown,
 
-    /// The actual peer response was received, including a refused response.
+    /// The peer response was received, including a refused response.
     /// Contract: domain/session.md, sections 4, 5 and 12.
     Response,
 }
@@ -300,7 +300,7 @@ pub enum Evidence {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Failure {
     /// The shared client's bounded receiving allowance was exceeded.
-    /// This actual terminal is nonretryable; it is distinct from provider rejection.
+    /// This terminal is nonretryable; it is distinct from provider rejection.
     /// Contract: domain/session.md, sections 4, 5 and 12.
     Limit,
 
@@ -308,7 +308,7 @@ pub enum Failure {
     /// Contract: domain/session.md, sections 4, 5 and 12.
     Protocol,
 
-    /// An unsolicited actual lower cancellation, not acknowledgement of a
+    /// An unsolicited lower cancellation, not acknowledgement of a
     /// requested Cancel. This failure is nonretryable and keeps transport evidence.
     /// Contract: domain/session.md, sections 4, 5 and 12.
     Cancelled,

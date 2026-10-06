@@ -41,12 +41,11 @@ fn judge(observations: &[(Time, Seen)]) -> Verdict {
 }
 
 #[test]
-fn actual_chat_positive_and_omitted_reordered_or_corrupted_turns() {
+fn chat_positive_and_omitted_reordered_or_corrupted_turns() {
     let good = observed();
     for corruption in 0..5 {
         let mut bad = good.clone();
-        let turn =
-            bad.iter().position(|(_, seen)| matches!(seen, Seen::Turn { number: 3, .. })).expect("real third output");
+        let turn = bad.iter().position(|(_, seen)| matches!(seen, Seen::Turn { number: 3, .. })).expect("third output");
         if corruption == 0 {
             bad.remove(turn);
         } else {
@@ -76,7 +75,7 @@ fn actual_chat_positive_and_omitted_reordered_or_corrupted_turns() {
                 _ => unreachable!("five precise changes"),
             }
         }
-        assert!(matches!(judge(&bad), Verdict::Failed(_)), "turn corruption {corruption} rejected after real positive");
+        assert!(matches!(judge(&bad), Verdict::Failed(_)), "turn corruption {corruption} rejected after positive");
     }
 }
 

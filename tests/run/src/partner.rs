@@ -150,7 +150,7 @@ pub struct Script {
     reason = "fixed diagnostic tails keep boundary records bounded without allocation"
 )]
 pub enum Out {
-    /// Simulated session requests the real pure run admission gate before
+    /// Simulated session requests the pure run admission gate before
     /// starting a completion. Contract: domain/run.md, sections 9 and 14.
     Permit {
         /// Concrete conversation. Contract: domain/run.md, section 14.
@@ -426,7 +426,7 @@ impl Partner {
         Spend { units: input, turns: 1, input, output, cache_read: cache, cache_write: cache }
     }
 
-    /// Delivers a new typed opening to the scripted peer or real session and retains its pending terminal obligations.
+    /// Delivers a new typed opening to the scripted peer or session and retains its pending terminal obligations.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     pub fn open(&mut self, now: Time, conversation: Token, opening: &Opening, out: &mut Vec<Out>) {
@@ -799,7 +799,7 @@ impl Partner {
         permit: smith_domain_run::CompletionPermit,
         out: &mut Vec<Out>,
     ) {
-        // A real prior Close owns its delayed settlement; an old queued
+        // A prior Close owns its delayed settlement; an old queued
         // permission cannot revive it or invent a second terminal.
         let Some(talk) = self.talks.get(&peer) else {
             return;

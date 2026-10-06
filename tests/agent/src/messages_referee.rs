@@ -10,7 +10,7 @@ use skein_lib::{Duration, Time, Token};
 use skein_world::domain::{Expectations, Judge};
 use smith_domain::{Turn, llm, session};
 
-/// A real external observation copied by the world for replay and mutation.
+/// A external observation copied by the world for replay and mutation.
 /// Contract: domain/run.md, sections 6 and 13; testing-strategy.md, section 7.
 #[derive(Clone, Debug)]
 pub enum Seen {
@@ -234,7 +234,7 @@ impl Expectations for Meeting {
                         && self.offered.is_none()
                         && self.wait_result
                         && read == self.read,
-                    "Waiting follows settled wait, real turns and an empty inbox",
+                    "Waiting follows settled wait, turns and an empty inbox",
                 );
                 self.waiting = Some(judge.now());
                 judge.rearm("idle park", self.idle.saturating_add(Duration::from_secs(1)));

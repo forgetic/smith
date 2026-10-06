@@ -493,7 +493,7 @@ fn delivery_memory_step(
             | Request::Abort { .. }) => panic!("unexpected delivery fixture output {unexpected:?}"),
         }
     }
-    meter.check(measured, worst_case(&env.limits).expect("bounded limits"), &"full real delivery path");
+    meter.check(measured, worst_case(&env.limits).expect("bounded limits"), &"full delivery path");
     (token, answered)
 }
 
@@ -586,7 +586,7 @@ fn full_receipt_delivery_settles_before_a_cancelled_answer() {
 }
 
 /// Complete caller-owned charter at the aggregate cap, with all directories
-/// writable and every exact receiving receipt slot exercised by the real path.
+/// writable and every exact receiving receipt slot exercised by the path.
 fn full_delivery_workspace() -> Workspace {
     let directories: Box<[Directory]> = (0..smith_domain_run::MAX_DIRECTORIES)
         .map(|directory| Directory {
@@ -729,7 +729,7 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
             transcript: None,
         }),
     );
-    let run = run.expect("real admitted run reads");
+    let run = run.expect("admitted run reads");
     let (conversation, _) = host_memory_take(
         &mut domain,
         &env,

@@ -5,7 +5,7 @@
 //! `step` and `fire` consume typed events and injected clocks; the parent reserves
 //! `max_out` output slots and settles every issued operation, including during shutdown.
 //! Exact agent message refusals settle issued names even while draining; pending
-//! Send names protect reuse, and only actual Waiting establishes a watchdog claim.
+//! Send names protect reuse, and only Waiting establishes a watchdog claim.
 //! Turns move to the parent, with exact commitment ACK metadata retained here.
 //! Actual deliveries survive EOF and tree cleanup; `Gone` is the separate process
 //! containment terminal, after every outstanding right. Reclaim at the iteration boundary

@@ -1,5 +1,5 @@
 //! Tickets: the values a session names but cannot hold, kept for it by its
-//! opener's side, as the root domain keeps them for a real session: the
+//! opener's side, as the root domain keeps them for a session: the
 //! tools the opener serves, the calls the LLM made to them. Concrete answers move directly
 //! into the session. A session's tickets are freed when it ends, and resolving one
 //! after that is a bug the world catches.

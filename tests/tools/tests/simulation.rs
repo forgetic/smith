@@ -204,7 +204,7 @@ fn listing_credit_counts_tiny_entry_wrappers_and_does_not_skip_a_long_first_name
 }
 
 #[test]
-fn an_actual_listing_that_wins_cancel_keeps_its_bounded_prefix_and_omitted_count() {
+fn an_listing_that_wins_cancel_keeps_its_bounded_prefix_and_omitted_count() {
     let cell = u64::try_from(core::mem::size_of::<Entry>()).expect("entry size");
     let calm = Settings::calm(703);
     let settings = Settings {

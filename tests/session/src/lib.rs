@@ -7,7 +7,7 @@
 //! around the two domains: the sessions' opener, which nudges a session that
 //! yields a few times and then closes it, or closes it at a moment of its own;
 //! both protocol layers, both io layers and the network. The sessions own the
-//! real tools, whose file operations and commands the world runs as io would
+//! tools, whose file operations and commands the world runs as io would
 //! on a fake checkout ([`skein_fake_checkout`]), seeded with a repository for
 //! each session ([`fixture`]). It is the only code that knows both
 //! vocabularies, as a protocol crate is the only one that sees both io's and

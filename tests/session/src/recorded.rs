@@ -250,7 +250,7 @@ impl World {
         }
     }
 
-    /// Delivers a new typed opening to the scripted peer or real session and retains its pending terminal obligations.
+    /// Delivers a new typed opening to the scripted peer or session and retains its pending terminal obligations.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub fn open(&mut self, opening: record::Opening) {

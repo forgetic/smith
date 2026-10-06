@@ -84,7 +84,7 @@ impl HostReply {
     }
 }
 
-/// Immutable deterministic scenario inputs for the real composed agent on a
+/// Immutable deterministic scenario inputs for the composed agent on a
 /// scripted typed host; terminal choices are sealed only at actual submission.
 /// Contract: domain/run.md, sections 8 and 13; testing-strategy.md, section 7.
 #[derive(Clone, Copy, Debug)]
@@ -350,7 +350,7 @@ pub enum CompletionTerminal {
     /// All four exact accepted provider counters.
     /// Contract: domain/run.md, section 9; scratch/client.md, section 4.
     Completed(
-        /// SDK usage shape copied at the genuine terminal.
+        /// SDK usage shape copied at the terminal.
         /// Contract: scratch/client.md, section 4.
         llm::Usage,
     ),
@@ -362,7 +362,7 @@ pub enum CompletionTerminal {
     Cancelled,
 }
 
-/// The real agent on a typed scripted host or actual wire backend. [`World::run`]
+/// The agent on a typed scripted host or actual wire backend. [`World::run`]
 /// drives every boundary to settlement, then checks its ledgers, referee and facts.
 /// The selected backend owns only its corresponding provider state and queues.
 ///
@@ -411,7 +411,7 @@ pub struct World {
 }
 
 impl World {
-    /// Creates one host request and a fresh real agent tree. Fixed queue slack
+    /// Creates one host request and a fresh agent tree. Fixed queue slack
     /// exercises output pressure; finite trace and delivery caps fail fast.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
@@ -567,7 +567,7 @@ impl World {
 
     /// Caller supplies the complete typed Charter before the original Start;
     /// sections and instructions are never derived from the job settings. The
-    /// real admission path decides refusal, or one terminal Answer after settling.
+    /// admission path decides refusal, or one terminal Answer after settling.
     /// Existing receiving bounds, typed backend exclusivity and history apply.
     /// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14.
     #[must_use]
@@ -594,7 +594,7 @@ impl World {
         Self::with_selected_backend(&settings, transcript, workspace, disk, backend, Some(charter))
     }
 
-    /// Route subsequent genuine checked submissions to the outside parent.
+    /// Route subsequent checked submissions to the outside parent.
     /// Contract: domain/run.md, sections 8.2 and 10.
     pub fn enable_parent_deliveries(&mut self) {
         self.parent_deliveries = true;
@@ -607,7 +607,7 @@ impl World {
         &self.disk
     }
 
-    /// A real parent submission grants access to its current exclusive snapshot.
+    /// A parent submission grants access to its current exclusive snapshot.
     /// The actual host terminal remains owed and is supplied by `return_delivery`.
     /// Contract: domain/run.md, sections 8.2 and 10; testing-strategy.md, section 4.3.
     pub fn delivery_checkout(&mut self, owner: Token) -> &mut Checkout {
@@ -683,7 +683,7 @@ impl World {
         Ok(())
     }
 
-    /// Queue a real parent cancellation for the admitted original run. Its
+    /// Queue a parent cancellation for the admitted original run. Its
     /// Start reply and all actual lower terminals remain owed through close.
     /// Contract: domain/run.md, sections 10 and 13; scratch/client.md, section 5.
     pub fn cancel_run(&mut self) {
@@ -717,7 +717,7 @@ impl World {
         );
     }
 
-    /// Advance up to this many real loop rounds, allowing another real domain
+    /// Advance up to this many loop rounds, allowing another domain
     /// to translate the emitted boundary records before the next round. Returns
     /// true only after the original root/provider/IO ledgers actually settle.
     /// An opt-in parent delivery awaiting its external terminal keeps the current
@@ -1299,7 +1299,7 @@ impl World {
         }
     }
 
-    /// Observe the original owner's real terminal before forwarding its event.
+    /// Observe the original owner's terminal before forwarding its event.
     /// Native usage comes directly from the matching SDK binding; typed usage
     /// is the exact callback value. No event or completion body is cloned.
     /// Contract: scratch/client.md, section 4; domain/run.md, sections 9 and 13.
@@ -1756,7 +1756,7 @@ fn copy_answer(answer: &run::Answer) -> run::Answer {
 }
 
 impl World {
-    /// Bounded actual start/terminal chronology from real Complete and callbacks.
+    /// Bounded actual start/terminal chronology from Complete and callbacks.
     /// Native exact SDK usage is also retained on each physical wire Binding.
     /// Contract: domain/run.md, sections 9 and 14; scratch/client.md, section 4.
     #[must_use]

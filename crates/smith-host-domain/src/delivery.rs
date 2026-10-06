@@ -245,7 +245,7 @@ impl DeliveryRefusal {
     }
 }
 
-/// Content-free classification of an actual host terminal, for bounded facts.
+/// Content-free classification of a host terminal, for bounded facts.
 /// It carries no receipt, path, diagnostic or host policy text.
 /// Contract: domain/run.md, sections 8.2 and 12.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -341,7 +341,7 @@ pub enum DeliveryReason {
     /// Target refused the operation. Contract: domain/run.md, section 8.2.
     RefusedByTarget,
 
-    /// Host deadline ended the actual operation. Contract: domain/run.md, section 8.2.
+    /// Host deadline ended the operation. Contract: domain/run.md, section 8.2.
     TimedOut,
 
     /// Operation or malformed host terminal is broken. Contract: domain/run.md, section 8.2.
@@ -390,7 +390,7 @@ impl DeliveryFailure {
     }
 }
 
-/// Exactly one actual host terminal for an already submitted delivery. Sealed
+/// Exactly one host terminal for an already submitted delivery. Sealed
 /// owned values cap it before domain admission; mounted-directory validity is
 /// still checked by the run. A stale callback is inert, never another delivery.
 ///
@@ -424,7 +424,7 @@ pub enum Delivery {
 }
 
 impl Delivery {
-    /// Project the actual terminal to content-free observation; this neither
+    /// Project the terminal to content-free observation; this neither
     /// validates mounted authority nor decides lifecycle behavior.
     /// Contract: domain/run.md, sections 8.2 and 12.
     #[must_use]

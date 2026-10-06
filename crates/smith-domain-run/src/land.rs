@@ -4,7 +4,7 @@
 //! provider ids, callback identity or host delivery policy. Main's write batch
 //! waits throughout checks and submission; children have already returned.
 //! Before submission withdrawal aborts checks. Afterwards no cancellation is
-//! emitted: the actual bounded host terminal settles even during shutdown.
+//! emitted: the bounded host terminal settles even during shutdown.
 
 use crate::boundary::{Exit, Place, Ran, Request, Returned};
 use crate::call::{self, Call, Withdrawal};
@@ -161,7 +161,7 @@ pub(crate) fn withdraw(landing: &mut Landing, id: Id<Call>, why: Withdrawal, out
             out.push(Request::Abort { owner: id.token() });
             Stage::Aborting { why }
         }
-        // Submission owes its actual terminal. Caller-only withdrawal or expiry
+        // Submission owes its terminal. Caller-only withdrawal or expiry
         // grants no authority to decide the run's independent shutdown outcome.
         Stage::Delivering => Stage::Delivering,
         Stage::Aborting { why: first } => {

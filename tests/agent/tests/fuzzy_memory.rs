@@ -490,7 +490,7 @@ impl Driver {
         Some(Event::Cancel { run })
     }
 
-    /// A real bounded terminal, independently pricing provider and decoded
+    /// A bounded terminal, independently pricing provider and decoded
     /// ownership; history capacity cannot enlarge the advertised receiving cap.
     fn completion(&mut self, limits: &Limits, finish: bool, agents: bool, receiving: Receiving) -> Completion {
         let completion_cell_bytes = completion_cell();

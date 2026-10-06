@@ -127,7 +127,7 @@ fn pressure_limits(original: Limits, route: Route, messages: u32) -> (Limits, u6
     (limits, spec_cost, output, field)
 }
 
-/// Observe real co-emitted boundary records without replacing an outstanding
+/// Observe co-emitted boundary records without replacing an outstanding
 /// provider/IO request, then drop receiver-owned payload copies before metering.
 fn observe_fill(
     out: &mut Queue<Request>,
@@ -301,7 +301,7 @@ fn fill(original: Limits, route: Route, full_service: bool) {
 }
 
 /// Supplement every original allocation route by filling the entire service
-/// byte cap, with real provider/continue handoffs and independent message room.
+/// byte cap, with provider/continue handoffs and independent message room.
 fn fill_service_tail(
     step: &mut impl FnMut(Event) -> Option<Asked>,
     limits: &Limits,
@@ -1075,7 +1075,7 @@ fn maximum_admissible_backoff_preserves_the_exact_next_provider_credit() {
 }
 
 #[test]
-fn the_original_maximum_parallel_width_has_real_live_result_rights() {
+fn the_original_maximum_parallel_width_has_live_result_rights() {
     let width = MAX_PARALLEL;
     let call = size(size_of::<Block>()) + 3 + size(size_of::<Part>()) + 1;
     let mut limits = Limits {
@@ -1165,7 +1165,7 @@ fn the_original_four_message_cap_refuses_the_next_provider_before_work() {
                     bound,
                     Event::Completed { owner, completion: read_completion(1) },
                 );
-                let op = seen.io[0].expect("original full generated read admits its real IO right");
+                let op = seen.io[0].expect("original full generated read admits its IO right");
                 measured_step(
                     &mut domain,
                     &env,

@@ -7,8 +7,8 @@
 //!   [`Event::Start`] is a call, answered by exactly one [`Request::Answer`].
 //!   An admitted run is named by [`Request::Admitted`] first, so that a
 //!   [`Event::Cancel`] can name it. A run's host call, [`Request::Deliver`], is
-//!   ended by exactly one actual [`Event::Delivered`]. After submission the
-//!   host operation is never abandoned; its deadline bounds the real terminal.
+//!   ended by exactly one [`Event::Delivered`]. After submission the
+//!   host operation is never abandoned; its deadline bounds the host terminal.
 //!   Duplicate or stale callback owners are inert (domain/run.md, sections 8 and 10).
 //! - io's, for what the run itself does in its checkout, which the parent
 //!   routes to and from the protocol layer. A [`Request::Read`] is ended by
@@ -27,7 +27,7 @@
 //!   conversation's own token for it, `call`. It carries its deadline, and
 //!   the run runs the race: past it, the run stops work before submission and
 //!   returns it as timed out once that settles. A submitted delivery always
-//!   owes its actual host terminal, including after withdrawal or expiry;
+//!   owes its host terminal, including after withdrawal or expiry;
 //!   caller-only expiry does not decide the run's shutdown (domain/run.md, 8.2 and 10).
 //!
 //! A request's `owner` is the run's token for what asked: the run itself for
@@ -53,7 +53,7 @@ pub enum Event {
     HostReturned {
         /// Live attempt identity, distinct from durable `CallName`. Contract: domain/run.md, section 5.2.
         relay: crate::RelayName,
-        /// Bounded actual answer or settled retry classification. Contract: domain/run.md, section 5.2.
+        /// Bounded answer or settled retry classification. Contract: domain/run.md, section 5.2.
         reply: crate::HostReply,
     },
     /// From the host, a call: start a run on `charter`, and answer once it
@@ -146,7 +146,7 @@ pub enum Event {
         subtree_spent: u64,
     },
 
-    /// The Session completed a turn with exact actual raw counters in `spend`.
+    /// The Session completed a turn with exact raw counters in `spend`.
     /// Units are supplied separately by Priced; this event cannot reprice them.
     Used {
         /// Run-issued opaque conversation name, echoed on every conversation event.
@@ -162,7 +162,7 @@ pub enum Event {
         conversation: Token,
         /// Terminal classification after everything started beneath this entity has settled.
         end: End,
-        /// Session's exact cumulative raw usage after all actual terminals settled.
+        /// Session's exact cumulative raw usage after all terminals settled.
         /// Units remain supplied separately by `Priced`.
         spend: Spend,
     },
@@ -184,7 +184,7 @@ pub enum Event {
     /// A call the conversation's LLM made of the run, which the run answers
     /// with one `Return`. `deadline` is the conversation's own expiry: past
     /// it, pre-submission checks abort and return `TimedOut` once settled.
-    /// After submission the actual host terminal remains owed through caller
+    /// After submission the host terminal remains owed through caller
     /// expiry or withdrawal, including while the conversation closes. A caller-only
     /// stop does not decide the run's independent shutdown outcome.
     Delegated {
@@ -243,7 +243,7 @@ pub enum Request {
         /// Stable parent logical run scope. Contract: domain/run.md, section 6.
         host_run: Token,
 
-        /// Latest message consumed by an actual told turn. Contract: domain/run.md, section 6.
+        /// Latest message consumed by a told turn. Contract: domain/run.md, section 6.
         read: Option<Token>,
     },
 
@@ -267,7 +267,7 @@ pub enum Request {
     },
 
     /// Relay an admitted main host-tool call without interpreting its bytes. Each
-    /// actual attempt gets exactly one terminal; a durable name is decided once.
+    /// attempt gets exactly one terminal; a durable name is decided once.
     /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     HostCall {
         /// Host logical run identity, preserved across restart. Contract: domain/host.md, section 2.
@@ -284,11 +284,11 @@ pub enum Request {
         /// Complete immutable protocol-attested JSON object, including whitespace.
         /// Contract: domain/run.md, sections 5.2 and 12.
         input: crate::HostInput,
-        /// This relay's bounded deadline; a timeout requests withdrawal and waits for the actual terminal.
+        /// This relay's bounded deadline; a timeout requests withdrawal and waits for the terminal.
         /// Contract: domain/run.md, section 5.2.
         deadline: Time,
     },
-    /// Request settlement of a host relay, retaining its actual terminal right.
+    /// Request settlement of a host relay, retaining its terminal right.
     /// This is transport withdrawal, never cancellation of submitted Delivery.
     /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     WithdrawHost {
@@ -385,7 +385,7 @@ pub enum Request {
     },
     /// To the host, deliver the exact checked writable-directory state under
     /// the logical run named `host_run`. The host interprets the unchanged
-    /// generic fields and returns its real bounded terminal. Final Change
+    /// generic fields and returns its bounded host terminal. Final Change
     /// and separately granted main delivery share the same exclusive checks;
     /// the terminal remains owed through shutdown.
     ///
@@ -395,7 +395,7 @@ pub enum Request {
         /// Callback `owner` is separate; retries of this operation reuse this name.
         /// Contract: domain/run.md, section 8.2; domain/host.md, section 2.
         name: CallName,
-        /// Bounded actual host-operation deadline; the host supplies exactly one
+        /// Bounded host-operation deadline; the host supplies exactly one
         /// terminal even during shutdown. The run never abandons submission.
         /// Contract: domain/run.md, sections 8.2 and 10.
         deadline: Time,
@@ -444,7 +444,7 @@ pub enum Ask {
     /// Main-only, separately granted mid-run delivery. Fields use that grant's
     /// required-name caps; every extra value counts toward `Limits::outcome_bytes`.
     /// It takes the same exclusive checked snapshot as finishing Change, then
-    /// returns the actual terminal and continues unless shutdown was pending.
+    /// returns the terminal and continues unless shutdown was pending.
     /// Contract: domain/run.md, sections 7.1, 8.1 and 8.4.
     Deliver {
         /// Opaque host-named metadata, passed unchanged after checked aggregate
@@ -503,7 +503,7 @@ pub enum Returned {
     /// call ends with its admitted Change. Receipt constructors cap each copy.
     /// Contract: domain/run.md, sections 8.2 and 8.4.
     Delivered(
-        /// Constructor-bounded actual host receipts, at most 64 unique writable mounts.
+        /// Constructor-bounded host receipts, at most 64 unique writable mounts.
         /// Contract: domain/run.md, sections 8.2 and 8.4.
         Delivered,
     ),
@@ -535,7 +535,7 @@ pub enum Returned {
     /// Delivery cannot land later because the host context moved, and
     /// the run ends.
     Stale,
-    /// The actual host operation failed. Its fixed generic reason and sealed
+    /// The host operation failed. Its fixed generic reason and sealed
     /// 512-byte diagnostic/drop count return as feedback; no landing is claimed.
     ///
     /// Contract: domain/run.md, sections 8.2 and 10.
@@ -547,7 +547,7 @@ pub enum Returned {
     /// otherwise.
     Cancelled,
     /// Before submission, the call's deadline passed and its sub-agent or
-    /// checks settled. A submitted delivery instead owes its real host terminal.
+    /// checks settled. A submitted delivery instead owes its settled host terminal.
     ///
     /// Contract: domain/run.md, sections 8.2 and 10.
     TimedOut,
@@ -769,7 +769,7 @@ pub enum CompletionFailure {
     /// Contract: domain/run.md, sections 2, 5 and 10.
     Protocol,
 
-    /// Unsolicited actual lower cancellation.
+    /// Unsolicited lower cancellation.
     /// Contract: domain/run.md, sections 2, 5 and 10.
     Cancelled,
 
@@ -781,7 +781,7 @@ pub enum CompletionFailure {
     /// Contract: domain/run.md, sections 2, 5 and 10.
     Unavailable,
 
-    /// The actual completion deadline elapsed.
+    /// The completion deadline elapsed.
     /// Contract: domain/run.md, sections 2, 5 and 10.
     TimedOut,
 
@@ -827,7 +827,7 @@ pub enum CompletionEvidence {
     /// Contract: domain/run.md, sections 2, 5 and 10.
     Unknown,
 
-    /// An actual peer response, including a refusal, was received.
+    /// A peer response, including a refusal, was received.
     /// Contract: domain/run.md, sections 2, 5 and 10.
     Response,
 }
@@ -835,7 +835,7 @@ pub enum CompletionEvidence {
 /// What kept an LLM from going on.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Fault {
-    /// Full neutral actual failure and evidence after session retry policy.
+    /// Full neutral failure and evidence after session retry policy.
     /// This is distinct from local model stopping rules and requested run Cancel.
     /// Contract: domain/run.md, sections 2, 5 and 10.
     Completion {
@@ -843,7 +843,7 @@ pub enum Fault {
         /// Contract: domain/run.md, sections 2, 5 and 10.
         failure: CompletionFailure,
 
-        /// Exact actual transport evidence, including across interrupted Delivery.
+        /// Exact transport evidence, including across interrupted Delivery.
         /// Contract: domain/run.md, sections 2, 5 and 10.
         evidence: CompletionEvidence,
     },
@@ -867,12 +867,12 @@ pub enum Fault {
 /// The answer to a `Start`.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum Answer {
-    /// Settled main wait reached its idle threshold; all real rights have closed.
+    /// Settled main wait reached its idle threshold; all terminal rights have closed.
     /// Contract: domain/run.md, sections 6, 10 and 13.
     Parked {
         /// Actual cumulative run token usage. Contract: domain/run.md, section 9.
         spent: Spend,
-        /// Number of actual main turns emitted in this activation.
+        /// Number of main turns emitted in this activation.
         /// Contract: domain/run.md, section 13.
         turns: u32,
     },

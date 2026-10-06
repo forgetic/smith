@@ -1,4 +1,4 @@
-//! Application translation over one actual shared Client and real scripted byte peer.
+//! Application translation over one actual shared Client and scripted byte peer.
 //! These are boundary controls; the root composition uses the same wire helper.
 //! Incoming streamed argument bytes are checked exactly at the root. Continued
 //! native embedded objects use handwritten outside wire expectations: whitespace
@@ -96,7 +96,7 @@ fn run_wire(prompt: llm::Prompt, configuration: &Configuration, owner: u64) -> (
     (wire, terminal)
 }
 
-fn actual_feedback(
+fn feedback(
     query: &skein_fake_llm_domain::api::Query,
     expected_id: &[u8],
     expected_arguments: &[u8],
@@ -190,14 +190,14 @@ fn conveys(configuration: &Configuration, error: bool) {
         if error { [configuration.error_prefix.as_ref(), FEEDBACK].concat() } else { FEEDBACK.to_vec() };
     let expected_error = error && configuration.error_flag;
     assert!(
-        actual_feedback(query, id, &configuration.continuation_arguments, &expected_text, expected_error),
+        feedback(query, id, &configuration.continuation_arguments, &expected_text, expected_error),
         "positive actual whole input and exact paired feedback: provider={:?}, error={error}, expected_id={id:?}, expected_text={expected_text:?}, expected_error={expected_error}, actual_query={query:?}",
         configuration.endpoint.provider
     );
     let mut missing = query.clone();
     missing.messages.last_mut().expect("actual user message").parts = Box::new([]);
     assert!(
-        !actual_feedback(&missing, id, &configuration.continuation_arguments, &expected_text, expected_error),
+        !feedback(&missing, id, &configuration.continuation_arguments, &expected_text, expected_error),
         "missing concrete host feedback cannot satisfy outside evidence"
     );
     let mut changed = query.clone();
@@ -207,7 +207,7 @@ fn conveys(configuration: &Configuration, error: bool) {
     };
     *output = b"rewritten host receipt".as_slice().into();
     assert!(
-        !actual_feedback(&changed, id, &configuration.continuation_arguments, &expected_text, expected_error),
+        !feedback(&changed, id, &configuration.continuation_arguments, &expected_text, expected_error),
         "rewritten feedback cannot satisfy outside evidence"
     );
     corrupted_arguments(query, id, &configuration.continuation_arguments, &expected_text, expected_error);
@@ -246,14 +246,14 @@ fn corrupted_arguments(
         }
         *arguments = bytes.into();
         assert!(
-            !actual_feedback(&changed, expected_id, expected_arguments, expected_text, expected_error),
+            !feedback(&changed, expected_id, expected_arguments, expected_text, expected_error),
             "changed nested value or dropped extra field cannot satisfy the exact outside continuation oracle"
         );
     }
 }
 
 #[test]
-fn both_shared_configurations_convey_whole_host_contract_actual_input_and_exact_feedback() {
+fn both_shared_configurations_convey_whole_host_contract_input_and_exact_feedback() {
     for configuration in &wire::configurations() {
         for error in [false, true] {
             conveys(configuration, error);
@@ -365,7 +365,7 @@ fn two_calls(
         },
         bounds,
     )
-    .expect("real admitted Client reserves every possible fixed decoded cell");
+    .expect("admitted Client reserves every possible fixed decoded cell");
     let scripts = Box::new([Script {
         cue: b"@client-host".as_slice().into(),
         turns: Box::new([Turn {
@@ -398,7 +398,7 @@ fn owned_completion(peer: &mut skein_llm_world::fake::Exchange) -> (Token, skein
             | skein_llm::client::Event::Closed => None,
         })
         .collect();
-    assert_eq!(actual.len(), 1, "one real Client terminal");
+    assert_eq!(actual.len(), 1, "one Client terminal");
     let value = actual.pop().expect("one actual owned terminal");
     assert_eq!(value.0, Token::new(31));
     value
@@ -478,7 +478,7 @@ fn oversized_first_decoding_retains_its_cell_before_exact_residual_host_admissio
 }
 
 #[test]
-fn unknown_actual_call_uses_its_full_secured_fallback_cell() {
+fn unknown_call_uses_its_full_secured_fallback_cell() {
     for configuration in &wire::configurations() {
         let mut bounds = limits();
         bounds.client.dialect.parts = 1;

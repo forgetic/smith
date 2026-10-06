@@ -163,7 +163,7 @@ fn completed(configuration: &Configuration, calls: bool) -> (Context, Exchange, 
 }
 
 #[test]
-fn actual_completed_owner_is_preserved_and_a_different_owner_is_refused() {
+fn completed_owner_is_preserved_and_a_different_owner_is_refused() {
     for configuration in &wire::configurations() {
         for wrong_owner in [false, true] {
             let (context, mut peer, owner, completion) = completed(configuration, false);
@@ -173,7 +173,7 @@ fn actual_completed_owner_is_preserved_and_a_different_owner_is_refused() {
                 assert!(matches!(returned, Err(adapter::Error::Invalid)));
             } else {
                 let Ok(Event::Completed { owner, completion }) = returned else {
-                    panic!("the real successful terminal translates once");
+                    panic!("the successful terminal translates once");
                 };
                 assert_eq!(owner, OWNER);
                 assert_eq!(completion.stop, llm::Stop::EndTurn);
@@ -221,7 +221,7 @@ fn failed(configuration: &Configuration) -> (Context, Exchange, client::Event) {
 }
 
 #[test]
-fn actual_failed_owner_class_evidence_and_detail_survive_only_the_matching_context() {
+fn failed_owner_class_evidence_and_detail_survive_only_the_matching_context() {
     for configuration in &wire::configurations() {
         for wrong_owner in [false, true] {
             let (context, mut peer, terminal) = failed(configuration);
@@ -233,7 +233,7 @@ fn actual_failed_owner_class_evidence_and_detail_survive_only_the_matching_conte
                 assert!(matches!(returned, Err(adapter::Error::Invalid)));
             } else {
                 let Ok(Event::Failed { owner, failure, evidence, detail }) = returned else {
-                    panic!("real failure translates once");
+                    panic!("failure translates once");
                 };
                 assert_eq!(owner, OWNER);
                 assert_eq!(failure, llm::Failure::Overloaded);
@@ -246,7 +246,7 @@ fn actual_failed_owner_class_evidence_and_detail_survive_only_the_matching_conte
 }
 
 #[test]
-fn actual_cancelled_owner_is_checked_only_after_genuine_lower_settlement() {
+fn cancelled_owner_is_checked_only_after_genuine_lower_settlement() {
     for configuration in &wire::configurations() {
         for wrong_owner in [false, true] {
             let (context, mut peer) = adopt(input(configuration), false);
@@ -256,7 +256,7 @@ fn actual_cancelled_owner_is_checked_only_after_genuine_lower_settlement() {
             assert!(!peer.seen.iter().any(|event| matches!(event, client::Event::Cancelled { .. })));
             peer.settle();
             let client::Event::Cancelled { owner } = take_terminal(&mut peer) else {
-                panic!("real lower settlement yields the native cancellation terminal");
+                panic!("lower settlement yields the native cancellation terminal");
             };
             assert_eq!(owner, OWNER);
             let returned = adapter::cancelled(context, if wrong_owner { OTHER } else { owner });
@@ -275,7 +275,7 @@ fn actual_cancelled_owner_is_checked_only_after_genuine_lower_settlement() {
 }
 
 #[test]
-fn actual_schema_inventory_admits_first_then_refuses_missing_duplicate_and_unoffered_entries() {
+fn schema_inventory_admits_first_then_refuses_missing_duplicate_and_unoffered_entries() {
     for configuration in &wire::configurations() {
         let (context, mut peer, owner, completion) = completed(configuration, false);
         let [query] = peer.queries.as_slice() else { panic!("one observed actual query") };
@@ -423,7 +423,7 @@ fn resolutions(case: Attestation) -> Box<[ResolvedCall]> {
 }
 
 #[test]
-fn actual_call_attestation_checks_position_name_literal_input_kind_uniqueness_and_consumption() {
+fn call_attestation_checks_position_name_literal_input_kind_uniqueness_and_consumption() {
     for configuration in &wire::configurations() {
         for case in [
             Attestation::Exact,
@@ -442,7 +442,7 @@ fn actual_call_attestation_checks_position_name_literal_input_kind_uniqueness_an
                 shared::Block::Text { text: last, .. },
             ] = completion.content.as_ref()
             else {
-                panic!("the real native call has its independent text/call/text positions");
+                panic!("the native call has its independent text/call/text positions");
             };
             assert_eq!(first.as_ref(), b"before");
             assert_eq!(last.as_ref(), b"after");
@@ -453,7 +453,7 @@ fn actual_call_attestation_checks_position_name_literal_input_kind_uniqueness_an
             match case {
                 Attestation::Exact => {
                     let Ok(Event::Completed { owner, completion }) = returned else {
-                        panic!("the exact actual Wait attestation is admitted first");
+                        panic!("the exact Wait attestation is admitted first");
                     };
                     assert_eq!(owner, OWNER);
                     assert_eq!(completion.stop, llm::Stop::ToolUse);

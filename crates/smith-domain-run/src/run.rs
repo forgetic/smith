@@ -5,9 +5,9 @@
 //! The run knows no host policy, forge, receipt encoding, authentication or
 //! provider syntax. Generic final forms are judged before effects; delivery is
 //! one exclusive checked snapshot. Before submission checks may abort; after
-//! submission the actual bounded host terminal remains owed. Final Change
+//! submission the bounded host terminal remains owed. Final Change
 //! landing wins shutdown; a mid-run delivery settles before the pending
-//! ending answers. Sessions alone price actual own usage;
+//! ending answers. Sessions alone price own usage;
 //! global scalar admission sums monotonic own deltas, while inclusive subtree
 //! totals transfer only as child bills. A charge that cannot fit ends the
 //! session before it is added (domain/run.md, sections 9, 10 and 14).
@@ -36,7 +36,7 @@
 //! A conversation opens as Pending, then Opening. Started makes it Running;
 //! closing before Started marks it Unwanted and Started closes it. Closing
 //! retains its call terminals until Ended makes it Closed. A host relay may
-//! withdraw or retry before it settles, but its actual `HostReturned` terminal
+//! withdraw or retry before it settles, but its `HostReturned` terminal
 //! remains owed. A delivery checks an exclusive snapshot and may abort before
 //! submission; once submitted, Delivered remains owed even after withdrawal,
 //! caller expiry or process shutdown (domain/run.md, sections 5.2 and 8.2).
@@ -169,7 +169,7 @@ enum Phase {
 pub(crate) enum Alarm {
     /// The budget's time of the run `run` runs out.
     Deadline { run: Id<Run> },
-    /// Idle expiry of an actual waiting main. Contract: domain/run.md, section 6.
+    /// Idle expiry of a waiting main. Contract: domain/run.md, section 6.
     Park { run: Id<Run> },
     /// The deadline of the call `call` passes.
     Call { call: Id<Call> },

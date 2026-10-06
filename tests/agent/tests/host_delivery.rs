@@ -1,4 +1,4 @@
-//! Actual root submissions cross the real host kit; parent operation, concrete
+//! Actual root submissions cross the host kit; parent operation, concrete
 //! Turn commitment, Send and physical containment have independent rights.
 //! Full Debug payloads are bounded test encodings, not production codecs.
 //! The EOF control stops driving the simulated root after actual process exit:
@@ -148,7 +148,7 @@ fn submitted(agent: &mut Agent, host: &mut Host, next: &mut usize) -> DeliverySu
     });
     assert!(
         host.trace.lines().iter().any(|line| line.ends_with(&expected_called)),
-        "real parent Called preserves complete observed scope/name/deadline/fields: {:?}",
+        "parent Called preserves complete observed scope/name/deadline/fields: {:?}",
         host.trace.lines()
     );
     assert!(host.seen.calls.contains(&submission.owner), "actual Called owns the parent right");
@@ -160,7 +160,7 @@ fn submitted(agent: &mut Agent, host: &mut Host, next: &mut usize) -> DeliverySu
 fn cancel(agent: &mut Agent, host: &mut Host, submission: &DeliverySubmission, next: &mut usize) {
     host.event(Event::Stop { agent: host.agent() });
     assert!(host.seen.calls.contains(&submission.owner));
-    host.sent(); // Completes the earlier ACK; now the real Cancel Send is issued.
+    host.sent(); // Completes the earlier ACK; now the Cancel Send is issued.
     assert!(matches!(host.seen.down.last(), Some(Down::Cancel)));
     agent.cancel_run();
     host.sent();
@@ -236,7 +236,7 @@ fn live_story() {
             break;
         }
     }
-    assert!(done, "real root and all its lower operations settle");
+    assert!(done, "root and all its lower operations settle");
     assert_eq!(agent.delivery_submissions().len(), 1);
     assert_eq!(agent.pushes().len(), 1);
     assert_eq!(agent.return_delivery(submission.owner, run::Delivery::Nothing), Err("no actual parent delivery right"));
@@ -255,12 +255,12 @@ fn live_story() {
 }
 
 #[test]
-fn actual_root_delivery_receipt_turn_and_host_rights_settle_after_cancel() {
+fn root_delivery_receipt_turn_and_host_rights_settle_after_cancel() {
     live_story();
 }
 
 #[test]
-fn actual_root_submission_parent_right_outlives_exit_tree_eof_without_fabricated_return() {
+fn root_submission_parent_right_outlives_exit_tree_eof_without_fabricated_return() {
     let (mut agent, mut host) = setup();
     let mut next = 0;
     let submission = submitted(&mut agent, &mut host, &mut next);

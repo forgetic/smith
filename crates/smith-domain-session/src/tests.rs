@@ -410,8 +410,7 @@ fn opening(spec: Spec) -> Box<crate::record::Opening> {
     })
 }
 
-/// Preserve the original pressure bytes and add only this scene's actual
-/// provider/result reservation envelope; all payload lengths remain unchanged.
+/// Preserve the original pressure bytes and add only this scene's /// provider/result reservation envelope; all payload lengths remain unchanged.
 fn receiving_limits(pressure: u64, content: &[Block], result_credit: u64) -> Limits {
     let limits = Limits {
         completion_bytes: crate::session::content_cost(content).expect("fixture completion fits"),
@@ -777,7 +776,7 @@ fn closing_a_session_with_a_batch_in_flight_closes_its_kit_and_waits_for_every_r
 }
 
 #[test]
-fn result_space_is_refused_before_any_batch_and_actual_maximum_winners_fit() {
+fn result_space_is_refused_before_any_batch_and_maximum_winners_fit() {
     let content = Box::new([tool_call(b"a", cat(b"a")), tool_call(b"b", cat(b"b"))]);
     let refusal_limits = receiving_limits(2048, &content[..], 0);
     let mut h = Harness::new(refusal_limits);
@@ -939,7 +938,7 @@ fn closing_withdraws_the_delegated_calls_in_flight_and_waits_for_their_terminals
 }
 
 #[test]
-fn delegated_result_space_is_refused_before_effects_and_actual_answers_count() {
+fn delegated_result_space_is_refused_before_effects_and_answers_count() {
     let content = Box::new([delegated(b"b", 9, Effect::Read), tool_call(b"a", cat(b"a"))]);
     let mut h = Harness::new(receiving_limits(2048, &content[..], 0));
     let (owner, _) = h.open(1);
@@ -1647,7 +1646,7 @@ fn completion_name_exhaustion_ends_before_any_owned_or_delegated_effect() {
     }
 }
 
-/// A concrete recording entrance owns its real provider reservation.
+/// A concrete recording entrance owns its provider reservation.
 /// This fixture retains the original raw receiving caps and tools authority.
 fn reserved_recorded_call(harness: &mut Harness) -> Token {
     step(
@@ -1675,7 +1674,7 @@ fn reserved_recorded_call(harness: &mut Harness) -> Token {
 }
 
 #[test]
-fn unsent_denial_releases_actual_reserved_provider_credit_before_kit_settlement() {
+fn unsent_denial_releases_reserved_provider_credit_before_kit_settlement() {
     for (reason, dimension) in
         [(crate::BudgetDenial::Turns, Dimension::Turns), (crate::BudgetDenial::Spend, Dimension::Unit)]
     {
@@ -1722,7 +1721,7 @@ fn raw_overflow_ends_before_the_completion_is_charged_or_told() {
 }
 
 #[test]
-fn unsent_close_releases_actual_provider_credit_without_requesting_a_cancel() {
+fn unsent_close_releases_provider_credit_without_requesting_a_cancel() {
     let mut harness = Harness::new(Limits { spend: 100, ..LIMITS });
     let owner = reserved_recorded_call(&mut harness);
     let (reserved, credit) = crate::session::provider_credit_for_test(&harness.domain, owner);

@@ -15,7 +15,7 @@ use skein_llm_world::fake::Exchange;
 use smith_domain::{Event, llm, tools};
 use smith_protocol_llm::{self as adapter, Context, Limits, Receiving, ResolvedCall, ToolKind, ToolSchema};
 
-/// Caller-supplied endpoint and credential data for the real wire fixture.
+/// Caller-supplied endpoint and credential data for the wire fixture.
 /// Caller owns this finite configuration; admission and terminals belong to Wire.
 /// Contract: scratch/client.md, sections 1 and 6.
 #[expect(missing_debug_implementations, reason = "fixture owns caller credential bytes")]
@@ -213,7 +213,7 @@ impl Composition {
     }
 
     /// Actual root cancellation addresses only its current physical Client.
-    /// The terminal remains owed until genuine lower settlement. Contract: scratch/client.md, 5.
+    /// The terminal remains owed until lower settlement. Contract: scratch/client.md, 5.
     pub(crate) fn cancel(&mut self, owner: Token, now: Time, wall: Wall) {
         if let Some(index) = self.active.get(&owner) {
             let wire = self.bindings[*index].wire.as_mut().expect("an active physical binding is retained");
@@ -315,7 +315,7 @@ impl core::fmt::Debug for Wire {
 
 impl Wire {
     /// The root's actual Complete request supplies owner/prompt/receiving metadata.
-    /// Preparation is effect free; start is a separate real Client entrance.
+    /// Preparation is effect free; start is a separate Client entrance.
     /// Success owns one prepared Client/context; failure starts nothing.
     /// Contract: scratch/client.md, sections 1 and 6.
     ///
@@ -367,7 +367,7 @@ impl Wire {
         self.take()
     }
 
-    /// One real shared-world progress step. The root world may interleave timers,
+    /// One shared-world progress step. The root world may interleave timers,
     /// actual cancellation requests and other delegated effects between steps.
     /// Returns immediate progress and at most one actual root terminal, preserving
     /// its complete receiving contract. Contract: scratch/client.md, sections 4 and 5.

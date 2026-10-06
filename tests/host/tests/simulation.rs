@@ -243,7 +243,7 @@ fn a_run_may_fail_as_it_reports_it() {
 }
 
 #[test]
-fn busy_overflow_reserves_names_and_pauses_reads_until_actual_send_terminal() {
+fn busy_overflow_reserves_names_and_pauses_reads_until_send_terminal() {
     let mut bounds = limits();
     bounds.calls = 1;
     let mut world = World::new(16, bounds);
@@ -345,7 +345,7 @@ fn payloads_beyond_the_limits_break_the_rules() {
 }
 
 #[test]
-fn malformed_hangup_and_unsent_have_actual_lower_terminals() {
+fn malformed_hangup_and_unsent_have_lower_terminals() {
     let mut world = World::new(21, limits());
     world.live();
     world.event(Event::Malformed { owner: world.owner() });
@@ -483,7 +483,7 @@ fn exact_ack_metadata_preserves_parent_payloads_and_shutdown_rights() {
     assert_eq!(world.seen.fault, None);
     world.event(Event::Acknowledge { agent: world.agent(), turn: 2 });
     assert!(world.seen.turns.contains_key(&1));
-    assert!(!world.lower.contains(Lower::Read), "ACK metadata still reserved during its real Send");
+    assert!(!world.lower.contains(Lower::Read), "ACK metadata still reserved during its Send");
     world.sent();
     assert!(world.lower.contains(Lower::Read));
     world.event(Event::Acknowledge { agent: world.agent(), turn: 2 });
@@ -523,7 +523,7 @@ fn turn_numbers_spend_and_answer_counts_are_fenced() {
 }
 
 #[test]
-fn a_withdrawn_call_keeps_its_actual_once_only_answer_right() {
+fn a_withdrawn_call_keeps_its_once_only_answer_right() {
     let mut world = World::new(32, limits());
     world.live();
     call(&mut world, 20, 1, false, 100);
@@ -546,7 +546,7 @@ fn a_withdrawn_call_keeps_its_actual_once_only_answer_right() {
 }
 
 #[test]
-fn an_oversized_generic_answer_is_too_large_but_actual_delivery_always_fits() {
+fn an_oversized_generic_answer_is_too_large_but_delivery_always_fits() {
     let mut world = World::new(34, limits());
     world.live();
     call(&mut world, 20, 1, false, 100);
@@ -711,7 +711,7 @@ fn buffered_answer_after_exit_is_heard_before_tree_empty_and_gone() {
 }
 
 #[test]
-fn actual_delivery_right_outlives_process_tree_and_eof_without_abandonment() {
+fn delivery_right_outlives_process_tree_and_eof_without_abandonment() {
     for delivered in [false, true] {
         let mut world = World::new(46, limits());
         world.live();
@@ -750,7 +750,7 @@ fn ordinary_earlier_landing_then_later_stop_remains_an_ordinary_answer() {
 }
 
 #[test]
-fn every_actual_delivery_terminal_survives_withdrawal_and_expired_deadline() {
+fn every_delivery_terminal_survives_withdrawal_and_expired_deadline() {
     let terminals = [
         Delivery::Nothing,
         Delivery::Stale,
@@ -791,7 +791,7 @@ fn every_actual_delivery_terminal_survives_withdrawal_and_expired_deadline() {
 }
 
 #[test]
-fn grant_generation_races_are_fenced_by_actual_emission_not_queued_refresh() {
+fn grant_generation_races_are_fenced_by_emission_not_queued_refresh() {
     let mut world = World::new(51, limits());
     world.spawn(start());
     world.spawned();
@@ -823,7 +823,7 @@ fn grant_generation_races_are_fenced_by_actual_emission_not_queued_refresh() {
 }
 
 #[test]
-fn credential_refresh_coalescing_preserves_other_traffic_and_actual_answer_order() {
+fn credential_refresh_coalescing_preserves_other_traffic_and_answer_order() {
     let mut world = World::new(53, limits());
     world.live();
     message(&mut world, 30, 1);
@@ -839,7 +839,7 @@ fn credential_refresh_coalescing_preserves_other_traffic_and_actual_answer_order
 }
 
 #[test]
-fn an_agent_has_gone_only_after_every_actual_io_right_even_after_answer() {
+fn an_agent_has_gone_only_after_every_io_right_even_after_answer() {
     let mut world = World::new(54, limits());
     world.live();
     last(&mut world, RunResult::Parked, 0, 0);
@@ -1007,7 +1007,7 @@ fn cancelled_and_draining_paths_keep_work_and_drop_answers_only_after_a_reported
 }
 
 #[test]
-fn wall_shutdown_hangup_exit_and_breach_report_the_actual_original_cause() {
+fn wall_shutdown_hangup_exit_and_breach_report_the_original_cause() {
     for mode in 0..4 {
         let mut bounds = limits();
         bounds.wall_time = Duration::from_secs(20);
@@ -1042,7 +1042,7 @@ fn wall_shutdown_hangup_exit_and_breach_report_the_actual_original_cause() {
 }
 
 #[test]
-fn continual_actual_progress_reaches_only_the_independent_wall_deadline() {
+fn continual_progress_reaches_only_the_independent_wall_deadline() {
     let mut bounds = limits();
     bounds.wall_time = Duration::from_secs(20);
     let mut world = World::new(69, bounds);
@@ -1090,7 +1090,7 @@ fn surviving_descendants_keep_reap_right_through_terminate_and_kill() {
     world.at(7);
     assert_eq!(world.seen.signals, [Signal::Terminate, Signal::Kill]);
     assert_eq!(world.seen.gone, None);
-    assert!(world.lower.contains(Lower::Reap), "real descendant containment is still outstanding");
+    assert!(world.lower.contains(Lower::Reap), "descendant containment is still outstanding");
     world.event(Event::Hangup { owner: world.owner() });
     world.event(Event::Reaped { owner: world.owner(), detail: Box::from(&b"descendants gone"[..]) });
     assert_eq!(world.seen.gone, None, "both actual signal rights also remain");

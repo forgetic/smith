@@ -119,7 +119,7 @@ fn an_answer_that_omits_a_provider_turn_is_rejected() {
 fn a_missing_host_answer_expires_the_liveness_obligation() {
     let mut referee = started();
     referee.fire(Time::ZERO.saturating_add(Duration::from_secs(6)), &mut Vec::new());
-    assert!(matches!(referee.verdict(), Verdict::Failed(_)), "the host answer deadline is real");
+    assert!(matches!(referee.verdict(), Verdict::Failed(_)), "the host answer deadline is enforced");
 }
 
 #[test]
@@ -291,7 +291,7 @@ fn an_ordinary_mid_report_cannot_invent_a_forbidden_final_change() {
 }
 
 #[test]
-fn duplicate_actual_terminal_and_reused_durable_name_are_rejected_after_positive_prefix() {
+fn duplicate_terminal_and_reused_durable_name_are_rejected_after_positive_prefix() {
     broken(
         mid_history(),
         Seen::Delivered { owner: Token::new(70), push: smith_agent_world::delivered(), tree: b"checked".to_vec() },

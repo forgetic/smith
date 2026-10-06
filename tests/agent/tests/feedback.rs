@@ -9,7 +9,7 @@ fn bytes(text: &[u8]) -> Box<[u8]> {
 }
 
 #[test]
-fn actual_host_and_ordinary_child_text_move_exactly_with_error_and_no_copy() {
+fn host_and_ordinary_child_text_move_exactly_with_error_and_no_copy() {
     for error in [false, true] {
         let text = bytes("actual ✓\n".as_bytes());
         let pointer = text.as_ptr();
@@ -50,7 +50,7 @@ fn child_cut_and_every_stop_survive_canonical_feedback() {
 }
 
 #[test]
-fn actual_opaque_receipts_diagnostics_markers_and_check_tail_are_lossless_ascii() {
+fn opaque_receipts_diagnostics_markers_and_check_tail_are_lossless_ascii() {
     let opaque = [0xff, b'"', b'\\', 0, b'\n', b' ', b'a'];
     let encoded = br#""\xff\x22\x5c\x00\x0a a""#;
     let receipts = run::Delivered::new(Box::new([run::Receipt::new(2, bytes(&opaque)).expect("bounded receipt")]))

@@ -1,5 +1,5 @@
-//! Live composition: each loop round drives the real root/run/session/shared
-//! fake, then translates its actual outputs into the real host kit. Opaque turn
+//! Live composition: each loop round drives the root/run/session/shared
+//! fake, then translates its actual outputs into the host kit. Opaque turn
 //! bytes use a test-only full Debug record, not a claimed production codec.
 //! Parent commitment and lower IO rights remain independent of agent settlement.
 //! Contract: domain/host.md, sections 6 and 9; domain/run.md, sections 6 and 13;
@@ -63,7 +63,7 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
 }
 
 #[test]
-fn real_host_turn_ack_and_send_rights_survive_root_parking_and_exit_tree_empty_eof() {
+fn host_turn_ack_and_send_rights_survive_root_parking_and_exit_tree_empty_eof() {
     let calm = Settings::calm(940);
     let mut agent = Agent::new(Settings {
         job: Job::Waiting,
@@ -153,7 +153,7 @@ fn final_accounting(turns: u32, spent: run::Spend, result: RunResult) -> host::A
 }
 
 #[test]
-fn actual_child_completions_and_raw_usage_cross_the_host_final_answer_once() {
+fn child_completions_and_raw_usage_cross_the_host_final_answer_once() {
     let mut agent =
         Agent::new(Settings { job: Job::Spending, budget: run::Budget { turns: 8, ..BUDGET }, ..Settings::calm(4) });
     agent.run(20_000);

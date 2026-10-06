@@ -10,7 +10,7 @@
 //! LLM read or wrote last, or absent if it knows none. An edit runs in two
 //! phases: it loads the file, which must be at the version the kit knows,
 //! makes the edit in memory, and stores the result expecting that version.
-//! io compares that with the real file just before it stores, so a change
+//! io compares that with the current file just before it stores, so a change
 //! made since, by another kit or by anything else, is caught: as `Stale` if
 //! the LLM had read the file, and as `NotRead` if it had not and the write
 //! would have created it. A store follows no symbolic link, so a change lands

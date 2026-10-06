@@ -2,7 +2,7 @@
 //! (domain/run.md, sections 13 and 14; domain/host.md, sections 2 and 11;
 //! testing-strategy.md, sections 2.2, 6 and 7).
 //!
-//! The world owns time, seeds, a fake checkout and the real fake LLM domain.
+//! The world owns time, seeds, a fake checkout and the fake LLM domain.
 //! Its opt-in actual-wire backend adopts prepared shared Clients and byte peers,
 //! passes each actual root Complete receiving contract through the adapter, and
 //! synchronizes their clocks with the root iteration. Active logical callbacks
@@ -11,10 +11,10 @@
 //! Its separate opt-in parent-delivery bridge exposes only actual root requests
 //! and accepts one actual sealed terminal through the existing shared schedule
 //! and flight ledger (domain/run.md, section 8.2; domain/host.md, section 9).
-//! It calls the real agent's step, fire and resume entrances under bounded
+//! It calls the agent's step, fire and resume entrances under bounded
 //! output pressure. Its host starts one charter, receives one answer and
 //! supplies typed push replies. No engine, host, forge, channel or agent
-//! protocol is linked. Opaque host objects are attested by the real skein JSON
+//! protocol is linked. Opaque host objects are attested by the skein JSON
 //! parser in the test protocol face. Whole fixture schemas are explicit caller
 //! data; shared Skein owns provider grammar and transport. Arbitrary application
 //! Finish decoding and deployment remain later migration work.

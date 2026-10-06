@@ -1,4 +1,4 @@
-//! Bounded seeded interleavings of the real copied agent tree and scripted
+//! Bounded seeded interleavings of the copied agent tree and scripted
 //! host (domain/run.md, section 14; testing-strategy.md, sections 6 and 7).
 
 use skein_lib::{Duration, Rng};
@@ -41,7 +41,7 @@ fn many_host_schedules_settle_against_the_boundary_referee() {
 }
 
 #[test]
-fn mid_delivery_schedules_settle_with_all_actual_terminals() {
+fn mid_delivery_schedules_settle_with_all_terminals() {
     for seed in 0..40 {
         let mut rng = Rng::new(seed);
         let calm = Settings::calm(seed + 2000);

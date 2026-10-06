@@ -7,8 +7,8 @@
 //!   answered by exactly one [`Request::Answer`], after a
 //!   [`Request::Admitted`] that names the run if it was admitted, so that a
 //!   [`Event::Cancel`] can name it. A run's host call, [`Request::Deliver`], is
-//!   ended by exactly one actual [`Event::Delivered`]. After submission the
-//!   host operation is never abandoned; its deadline bounds the real terminal.
+//!   ended by exactly one [`Event::Delivered`]. After submission the
+//!   host operation is never abandoned; its deadline bounds the host terminal.
 //!   Duplicate or stale callback owners are inert (domain/run.md, sections 8 and 10).
 //!   [`Request::Checking`] is a notice, with no terminal.
 //! - LLM providers, for the sessions: a [`Request::Complete`] is ended by one
@@ -70,7 +70,7 @@ pub enum Event {
     HostReturned {
         /// Live attempt identity, distinct from durable operation scope. Contract: domain/run.md, section 5.2.
         relay: run::RelayName,
-        /// Bounded host text or actual settled retry classification. Contract: domain/run.md, section 5.2.
+        /// Bounded host text or settled retry classification. Contract: domain/run.md, section 5.2.
         reply: run::HostReply,
     },
     /// From the host, a call: start a run on `charter`, and answer once it
@@ -91,7 +91,7 @@ pub enum Event {
         /// Optional immutable host mounts and initial conflicts, moved to run admission.
         /// Contract: domain/run.md, sections 3.2, 8.3 and 14.
         workspace: Option<run::Workspace>,
-        /// Typed V2 history including committed post-transcript actual results.
+        /// Typed V2 history including committed post-transcript results.
         /// False charter.resume ignores it; semantic refusal never starts fresh.
         /// Receiving record/count caps are checked before root retention.
         /// Contract: domain/run.md, sections 3 and 13; domain/session.md, section 3.
@@ -153,7 +153,7 @@ pub enum Event {
         /// Typed reason why the pending operation produced no successful value.
         failure: Failure,
 
-        /// Exact content-free transport evidence carried by the actual terminal.
+        /// Exact content-free transport evidence carried by the terminal.
         /// Contract: domain/run.md, sections 4, 5 and 12.
         evidence: crate::llm::Evidence,
 
@@ -209,13 +209,13 @@ pub enum Event {
 pub enum Request {
     /// Settled main wait and yield with empty inbox; wall time keeps running.
     /// This observation to the parent owes no terminal; Start's reply right
-    /// remains pending until the run's actual final Answer.
+    /// remains pending until the run's final Answer.
     /// Contract: domain/run.md, sections 6 and 10.
     Waiting {
         /// Stable parent run scope. Contract: domain/run.md, section 6.
         host_run: Token,
 
-        /// Latest name consumed by an actual turn. Contract: domain/run.md, section 6.
+        /// Latest name consumed by a turn. Contract: domain/run.md, section 6.
         read: Option<Token>,
     },
 
@@ -229,20 +229,20 @@ pub enum Request {
         /// One-based output number within this activation. Contract: domain/run.md, section 13.
         number: u32,
 
-        /// Latest message consumed by this actual turn. Contract: domain/run.md, section 6.
+        /// Latest message consumed by this turn. Contract: domain/run.md, section 6.
         read: Option<Token>,
 
-        /// Cumulative actual token usage, independently enforced from record prices.
+        /// Cumulative token usage, independently enforced from record prices.
         /// Contract: domain/run.md, sections 9 and 13.
         spent: run::Spend,
 
-        /// Full concrete record including replay and actual terminal results.
+        /// Full concrete record including replay and terminal results.
         /// Contract: domain/session.md, section 3.
         turn: smith_domain_session::record::Turn,
     },
 
     /// Opaque declared main host tool, forwarded without interpreting its input.
-    /// One actual terminal is owed per attempt; durable decisions replay by name.
+    /// One terminal is owed per attempt; durable decisions replay by name.
     /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     HostCall {
         /// Stable logical run scope supplied by Start. Contract: domain/host.md, section 2.
@@ -257,7 +257,7 @@ pub enum Request {
         effect: run::HostEffect,
         /// Complete bounded attested object bytes, unchanged. Contract: domain/run.md, sections 5.2 and 12.
         input: run::HostInput,
-        /// Per-relay bounded deadline; withdrawal still owes its actual terminal.
+        /// Per-relay bounded deadline; withdrawal still owes its terminal.
         /// Contract: domain/run.md, section 5.2.
         deadline: Time,
     },
@@ -265,7 +265,7 @@ pub enum Request {
     /// Submitted delivery has no such cancellation operation.
     /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     WithdrawHost {
-        /// The live relay attempt, echoed by its actual `HostReturned` terminal.
+        /// The live relay attempt, echoed by its `HostReturned` terminal.
         /// Contract: domain/run.md, section 5.2.
         relay: run::RelayName,
     },
@@ -294,7 +294,7 @@ pub enum Request {
     },
     /// To the host, deliver the exact checked writable-directory state under
     /// the logical run named `host_run`. The host interprets the unchanged
-    /// generic fields and returns its real bounded terminal. Final Change
+    /// generic fields and returns its bounded host terminal. Final Change
     /// and separately granted main delivery share the same exclusive checks;
     /// the terminal remains owed through shutdown.
     ///
@@ -304,7 +304,7 @@ pub enum Request {
         /// Callback `owner` is separate; retries of this operation reuse this name.
         /// Contract: domain/run.md, section 8.2; domain/host.md, section 2.
         name: run::CallName,
-        /// Bounded actual host-operation deadline; the host supplies exactly one
+        /// Bounded host-operation deadline; the host supplies exactly one
         /// terminal even during shutdown. The run never abandons submission.
         /// Contract: domain/run.md, sections 8.2 and 10.
         deadline: Time,
@@ -331,18 +331,17 @@ pub enum Request {
 
         /// Maximum owned translated completion bytes, including block cells,
         /// replay envelopes and decoded calls. The adapter verifies its configured
-        /// bound before preparing the provider request; actual terminals obey it.
+        /// bound before preparing the provider request; terminals obey it.
         /// Contract: domain/run.md, sections 3 and 14.
         max_completion_bytes: u64,
 
         /// Maximum translated completion blocks, reserved with result skeletons
-        /// before this request. One actual terminal remains owed after Cancel.
+        /// before this request. One terminal remains owed after Cancel.
         /// Contract: domain/run.md, sections 3 and 14.
         max_completion_blocks: u32,
 
         /// Maximum exact shared-client failure diagnostic bytes. The adapter
-        /// verifies compatibility before prepare; policy consumes the actual
-        /// terminal and drops detail without retaining text in facts/history.
+        /// verifies compatibility before prepare; policy consumes the         /// terminal and drops detail without retaining text in facts/history.
         /// Contract: domain/run.md, sections 4, 5 and 12.
         max_failure_bytes: u32,
 

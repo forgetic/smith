@@ -27,9 +27,9 @@ pub struct Limits {
     /// Contract: domain/run.md, sections 6 and 10.
     pub waiting: Duration,
 
-    /// Maximum actual host operation duration after checked submission. It must
+    /// Maximum host operation duration after checked submission. It must
     /// be positive for a delivery-capable charter; caller expiry may be earlier.
-    /// The host supplies the bounded real terminal even after run shutdown.
+    /// The host supplies the bounded host terminal even after run shutdown.
     /// Contract: domain/run.md, sections 8.2 and 10.
     pub delivery_timeout: Duration,
     /// Runs at once. A start beyond them is refused as busy.
@@ -82,7 +82,7 @@ pub struct Limits {
     /// Contract: domain/run.md, section 5.2.
     pub host_backoff: Duration,
 
-    /// Maximum actual relay attempts per durable operation, including the first.
+    /// Maximum relay attempts per durable operation, including the first.
     /// Contract: domain/run.md, section 5.2.
     pub host_attempts: u32,
     /// Verdicts an outcome spec may list.

@@ -113,7 +113,7 @@ fn accounting(world: &World, prefixes: &[Vec<Message>], outputs: &[u64], prior: 
                 !matches!(block, smith_domain::session::llm::Block::ToolCall { call, .. }
                 if !matches!(call, smith_domain::session::llm::Decoded::Historical))
             }),
-            "persisted calls are genuine concrete history"
+            "persisted calls are concrete history"
         );
     }
     assert!(
@@ -146,7 +146,7 @@ fn no_workspace(world: &World, settings: &Settings) {
 }
 
 #[test]
-fn no_workspace_host_answer_wait_park_and_actual_native_transcript_resume() {
+fn no_workspace_host_answer_wait_park_and_native_transcript_resume() {
     for index in 0..2 {
         let mut bounds = Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 };
         bounds.client.http.request = 16384;

@@ -73,7 +73,7 @@ fn a_writable_review_still_lands_only_its_verdict() {
 fn a_report_answers_the_host_without_checks_or_pushes() {
     let world = settled(&Settings { job: Job::Reporting, writable: false, ..Settings::calm(10) });
     let Answer::Accepted { outcome: Declared::Report(report), .. } = world.answer() else {
-        panic!("a real report answers its typed host contract")
+        panic!("a report answers its typed host contract")
     };
     assert_eq!(&*report.text, b"The answer is 42, and the checks want 43.");
     assert_eq!(&*report.fields[0].name, b"source");
@@ -269,7 +269,7 @@ fn a_declared_failure_with_an_empty_reason_is_an_accepted_result() {
 }
 
 #[test]
-fn separately_granted_mid_delivery_continues_to_a_real_report() {
+fn separately_granted_mid_delivery_continues_to_a_report() {
     let world = settled(&Settings { job: Job::MidReport, ..Settings::calm(40) });
     assert!(matches!(world.answer(), Answer::Accepted { outcome: Declared::Report(_), .. }));
     assert_eq!(world.checked(), [true]);
@@ -297,7 +297,7 @@ fn named_marker_refusal_is_corrected_before_the_next_checked_delivery() {
 }
 
 #[test]
-fn five_actual_host_terminals_preserve_report_only_contract_and_stale_ends_it() {
+fn five_host_terminals_preserve_report_only_contract_and_stale_ends_it() {
     for reply in [
         HostReply::Delivered,
         HostReply::Nothing,
@@ -317,7 +317,7 @@ fn five_actual_host_terminals_preserve_report_only_contract_and_stale_ends_it() 
 }
 
 #[test]
-fn mid_landing_during_explicit_shutdown_preserves_actual_receipts_and_spend() {
+fn mid_landing_during_explicit_shutdown_preserves_receipts_and_spend() {
     // Deterministic zero-latency provider/IO except the host terminal: choose a
     // cancellation within that actual pending operation by replaying its observed
     // submission timestamp, never by inspecting private state.
@@ -352,7 +352,7 @@ fn mid_delivery_replays_same_names_and_facts_are_observations() {
 }
 
 #[test]
-fn submitted_delivery_gets_a_real_timed_out_host_terminal_during_shutdown() {
+fn submitted_delivery_gets_a_timed_out_host_terminal_during_shutdown() {
     let baseline = settled(&Settings { job: Job::MidReport, ..Settings::calm(45) });
     let submitted = baseline.delivery_names()[0].1;
     let mut settings = Settings {
@@ -368,7 +368,7 @@ fn submitted_delivery_gets_a_real_timed_out_host_terminal_during_shutdown() {
 }
 
 #[test]
-fn real_mid_delivery_then_final_change_checks_and_lands_each_snapshot() {
+fn mid_delivery_then_final_change_checks_and_lands_each_snapshot() {
     let world = settled(&Settings { job: Job::MidChange, ..Settings::calm(46) });
     assert!(matches!(world.answer(), Answer::Accepted { outcome: Declared::Change(_), .. }));
     assert_eq!(world.pushes(), [smith_agent_world::delivered(), smith_agent_world::delivered()]);

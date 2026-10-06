@@ -232,7 +232,7 @@ impl World {
     }
 
     /// Settle physical exit, empty tree and EOF in that order. Pending sends,
-    /// signals, calls and turns deliberately remain owed to their real owners.
+    /// signals, calls and turns deliberately remain owed to their owners.
     pub fn cleanup(&mut self) {
         if self.lower.contains(Lower::Send) {
             self.sent();
@@ -257,7 +257,7 @@ impl World {
     /// Final independent quiescence checks (testing-strategy.md, section 6).
     pub fn settled(&self) {
         self.lower.assert_settled();
-        assert!(self.seen.calls.is_empty(), "every real parent call right returned");
+        assert!(self.seen.calls.is_empty(), "every parent call right returned");
         assert!(self.seen.turns.is_empty(), "every parent-owned turn committed");
         assert!(self.seen.gone.is_some());
         assert_eq!(self.domain.agents(), 0);
@@ -356,7 +356,7 @@ impl World {
                     if end == End::Stopped {
                         assert!(
                             self.seen.exited && self.seen.empty && self.seen.eof,
-                            "Gone needs all three real lower proofs"
+                            "Gone needs all three lower proofs"
                         );
                         self.lower.assert_settled();
                         assert!(self.seen.calls.is_empty());
