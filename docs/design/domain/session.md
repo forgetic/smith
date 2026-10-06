@@ -111,7 +111,8 @@ What is still open is listed in section 11.
   completion** is rounded upwards once, using checked arithmetic; the
   result and the cumulative spend must fit `u64`. Overflow is a typed
   failure ending the session with a report of it, never a saturated
-  charge.
+  charge: the charge that cannot be added is not, and the spend reported
+  is what was charged before it.
 - **Spend is cumulative** within an activation, sub-agents included. A
   delegated terminal, answered or withdrawn, carries the sub-agent's
   cumulative spend once under its call's identity; a duplicate or stale
