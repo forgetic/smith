@@ -539,7 +539,11 @@ pub(crate) fn yielded(
                 Some(message) => continue_message(run, reply_to, main, peer, message, out),
                 None if run.waiting => {
                     out.push(Request::Waiting { worker: run.worker, read: run.read });
-                    State::Waiting { reply_to, main, until: env.now.saturating_add(run.charter.waiting) }
+                    if run.charter.waiting == Duration::ZERO {
+                        wind_down(conversations, reply_to, main, Ending::Parked, out)
+                    } else {
+                        State::Waiting { reply_to, main, until: env.now.saturating_add(run.charter.waiting) }
+                    }
                 }
                 None => match nudge(run, stop, &env.limits) {
                     Ok(()) => say(reply_to, main, peer, prompt::nudge(stop, run.nudges, env.limits.nudges), out),

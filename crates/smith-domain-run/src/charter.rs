@@ -29,8 +29,8 @@ pub struct Charter {
     /// Contract: domain/run.md, sections 3 and 13.
     pub resume: bool,
 
-    /// Positive idle interval after a settled main wait and yield, bounded by
-    /// the receiving waiting limit. Wall time continues independently.
+    /// Idle interval after a settled main wait and yield, bounded by the
+    /// receiving waiting limit. Zero parks at once. Wall time continues.
     /// Contract: domain/run.md, sections 6 and 10.
     pub waiting: Duration,
 
@@ -250,11 +250,7 @@ pub(crate) fn check(charter: &Charter, workspace: Option<&crate::Workspace>, lim
         Ok(sections) if sections <= limits.brief_sections => {}
         Ok(_) | Err(_) => return Err(Invalid::TooLarge),
     }
-    if !budget.is_workable()
-        || !budget.within(&limits.budget)
-        || *waiting == Duration::ZERO
-        || *waiting > limits.waiting
-    {
+    if !budget.is_workable() || !budget.within(&limits.budget) || *waiting > limits.waiting {
         return Err(Invalid::Budget);
     }
     if !fits(llm, limits) || count(models.len()) > limits.models || repeated_model(models) {

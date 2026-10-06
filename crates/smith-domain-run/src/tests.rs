@@ -2310,6 +2310,45 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
 }
 
 #[test]
+fn zero_waiting_time_parks_when_main_yields() {
+    let mut harness = Harness::new(LIMITS);
+    let mut policy = charter();
+    policy.waiting = Duration::ZERO;
+    let emitted = harness.start_workspace(70, policy, None);
+    let [Request::Admitted { .. }, Request::Open { conversation, opening }] = emitted.as_ref() else {
+        panic!("zero waiting time is admitted: {emitted:?}");
+    };
+    assert!(opening.wait);
+    let conversation = *conversation;
+    assert!(harness.step(Event::Started { conversation, peer: Token::new(71) }).is_empty());
+    let call = Token::new(72);
+    assert_eq!(
+        harness
+            .step(Event::Delegated {
+                conversation,
+                call,
+                name: crate::CallName { activation: 1, completion: 1, position: 0 },
+                ask: Ask::Wait,
+                deadline: Time::from_nanos(u64::MAX),
+            })
+            .as_ref(),
+        [Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Waiting }]
+    );
+    assert_eq!(
+        harness.step(Event::Turn { conversation, record: Token::new(73), sequence: 1 }).as_ref(),
+        [Request::Turn { worker: Token::new(70), record: Token::new(73), number: 1, read: None, spent: Spend::ZERO }]
+    );
+    assert_eq!(
+        harness.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }).as_ref(),
+        [Request::Waiting { worker: Token::new(70), read: None }, Request::Close { peer: Token::new(71) }]
+    );
+    assert_eq!(
+        answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })),
+        (70, Answer::Parked { spent: Spend::ZERO, turns: 1 })
+    );
+}
+
+#[test]
 fn bounded_messages_and_input_at_idle_deadline_preserve_existing_fifo() {
     let limits = Limits { messages: 1, message_bytes: 4, ..LIMITS };
     let mut h = Harness::new(limits);
