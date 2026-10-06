@@ -3,7 +3,7 @@
 //!
 //! All three of the run's faces cross here:
 //!
-//! - The worker's, which the parent routes to and from the protocol layer. A
+//! - The host's, which the parent routes to and from the protocol layer. A
 //!   [`Event::Start`] is a call, answered by exactly one [`Request::Answer`].
 //!   An admitted run is named by [`Request::Admitted`] first, so that a
 //!   [`Event::Cancel`] can name it. A run's host call, [`Request::Deliver`], is
@@ -58,8 +58,8 @@ pub enum Event {
         /// Bounded actual answer or settled retry classification. Contract: domain/run.md, section 5.2.
         reply: crate::HostReply,
     },
-    /// From the worker, a call: start a run on `charter`, and answer once it
-    /// has ended. `worker` is the worker's name for the run, echoed on
+    /// From the host, a call: start a run on `charter`, and answer once it
+    /// has ended. `host_run` is the host's name for the run, echoed on
     /// `Admitted`.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -74,8 +74,8 @@ pub enum Event {
         /// Contract: domain/run.md, sections 3.2 and 5.2; domain/host.md, section 2.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        worker: Token,
-        /// Host-supplied positive activation number, unique within `worker` across starts.
+        host_run: Token,
+        /// Host-supplied positive activation number, unique within `host_run` across starts.
         /// Contract: domain/run.md, sections 3.2 and 8.2; domain/host.md, section 2.
         activation: u64,
         /// Host-supplied admission policy, validated before the run starts.
@@ -119,7 +119,7 @@ pub enum Event {
         sequence: u32,
     },
 
-    /// From the worker: end the run `run` as cancelled. A run that has already
+    /// From the host: end the run `run` as cancelled. A run that has already
     /// answered, or decided how it ends, ignores it.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -315,7 +315,7 @@ pub enum Event {
         /// Typed terminal for the host's change-delivery request.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        push: Delivery,
+        delivery: Delivery,
     },
 }
 
@@ -329,7 +329,7 @@ pub enum Request {
     /// Contract: domain/run.md, sections 6 and 10.
     Waiting {
         /// Stable parent logical run scope. Contract: domain/run.md, section 6.
-        worker: Token,
+        host_run: Token,
 
         /// Latest message consumed by an actual told turn. Contract: domain/run.md, section 6.
         read: Option<Token>,
@@ -339,7 +339,7 @@ pub enum Request {
     /// Contract: domain/run.md, sections 6 and 13.
     Turn {
         /// Stable parent logical run scope. Contract: domain/run.md, section 13.
-        worker: Token,
+        host_run: Token,
 
         /// Single-use root-owned concrete body binding. Contract: domain/run.md, section 13.
         record: Token,
@@ -359,7 +359,7 @@ pub enum Request {
     /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     HostCall {
         /// Host logical run identity, preserved across restart. Contract: domain/host.md, section 2.
-        worker: Token,
+        host_run: Token,
         /// Live relay attempt, never the durable operation name. Contract: domain/run.md, section 5.2.
         relay: crate::RelayName,
         /// Immutable transcript-derived name, identical on every recovery attempt.
@@ -384,21 +384,21 @@ pub enum Request {
         /// Contract: domain/run.md, section 5.2.
         relay: crate::RelayName,
     },
-    /// To the worker: the run it names `worker` was admitted, and is `run` to
+    /// To the host: the run it names `host_run` was admitted, and is `run` to
     /// the run child domain from now on.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Admitted {
-        /// Scripted host or worker's opaque run name, echoed without interpretation.
+        /// Scripted host or host's opaque run name, echoed without interpretation.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        worker: Token,
+        host_run: Token,
         /// Admitted run token, retained and echoed within this child's boundary.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
     },
-    /// To the worker, the answer to a `Start`: exactly one per start.
+    /// To the host, the answer to a `Start`: exactly one per start.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Answer {
@@ -520,7 +520,7 @@ pub enum Request {
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         owner: Token,
     },
-    /// To the worker: checks of the run it names `worker` are running until
+    /// To the host: checks of the run it names `host_run` are running until
     /// `deadline` at the latest, so its watchdog waits that long. A notice,
     /// with no terminal. It is a request, not only a fact (`CheckStarted`),
     /// because the watchdog decides on it, and nothing may depend on whether
@@ -528,17 +528,17 @@ pub enum Request {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Checking {
-        /// Scripted host or worker's opaque run name, echoed without interpretation.
+        /// Scripted host or host's opaque run name, echoed without interpretation.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        worker: Token,
+        host_run: Token,
         /// Injected monotonic deadline, never obtained from a live clock.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         deadline: Time,
     },
     /// To the host, deliver the exact checked writable-directory state under
-    /// the logical run named `worker`. The host interprets the unchanged
+    /// the logical run named `host_run`. The host interprets the unchanged
     /// generic fields and returns its real bounded terminal. Final Change
     /// and separately granted main delivery share the same exclusive checks;
     /// the terminal remains owed through shutdown.
@@ -553,10 +553,10 @@ pub enum Request {
         /// terminal even during shutdown. The run never abandons submission.
         /// Contract: domain/run.md, sections 8.2 and 10.
         deadline: Time,
-        /// Scripted host or worker's opaque run name, echoed without interpretation.
+        /// Scripted host or host's opaque run name, echoed without interpretation.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        worker: Token,
+        host_run: Token,
         /// Requester-issued opaque name, echoed on the one terminal for this request.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -1319,7 +1319,7 @@ pub enum Invalid {
     Conversation,
 }
 
-/// Why a run ended without an outcome: what the worker acts on.
+/// Why a run ended without an outcome: what the host acts on.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -1359,7 +1359,7 @@ pub enum Failure {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Policy(Policy),
-    /// The worker cancelled the run.
+    /// The host cancelled the run.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Cancelled,

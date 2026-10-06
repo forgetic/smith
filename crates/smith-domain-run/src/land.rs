@@ -177,7 +177,7 @@ fn next(landing: &Landing, id: Id<Call>, run: &Run, check: u32, env: &Env<Limits
         let deadline = landing.deadline.min(env.now.saturating_add(env.limits.delivery_timeout));
         assert!(env.now < deadline, "admission and completed checks refuse expired submission");
         out.push(Request::Deliver {
-            worker: run.worker,
+            host_run: run.host_name,
             owner: id.token(),
             name: landing.name,
             deadline,
@@ -189,7 +189,7 @@ fn next(landing: &Landing, id: Id<Call>, run: &Run, check: u32, env: &Env<Limits
     let deadline = landing.deadline.min(env.now.saturating_add(env.limits.check_timeout));
     let program = Place { root, path: copy_of(conventions::checks(&run.charter)) };
     out.push(Request::Check { owner: id.token(), program, deadline, tail: env.limits.check_tail });
-    out.push(Request::Checking { worker: run.worker, deadline });
+    out.push(Request::Checking { host_run: run.host_name, deadline });
     Stage::Checking { check }
 }
 

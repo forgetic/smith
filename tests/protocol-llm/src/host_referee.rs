@@ -14,7 +14,7 @@ use smith_domain::{llm, run};
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Submission {
     /// Parent-supplied logical scope. Contract: domain/run.md, section 5.2.
-    pub worker: Token,
+    pub host_run: Token,
     /// Actual callback generation and attempt. Contract: domain/run.md, section 5.2.
     pub relay: run::RelayName,
     /// Immutable durable transcript name. Contract: domain/run.md, section 5.2.
@@ -84,8 +84,8 @@ impl History {
             return Err("relay differs from observed provider call");
         }
         if let Some(first) = self.submissions.first() {
-            if (first.worker, first.name, &first.tool, first.effect, &first.input)
-                != (submission.worker, submission.name, &submission.tool, submission.effect, &submission.input)
+            if (first.host_run, first.name, &first.tool, first.effect, &first.input)
+                != (submission.host_run, submission.name, &submission.tool, submission.effect, &submission.input)
             {
                 return Err("recovery changed immutable operation");
             }

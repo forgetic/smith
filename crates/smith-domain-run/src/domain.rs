@@ -10,7 +10,7 @@ use crate::run::{self, Alarm, Conversation, Run};
 
 /// The most requests an entry point emits per call: an admitted start names
 /// the run and opens its main conversation or asks io for its first look; a
-/// check goes with its notice to the worker; a call returns as main is
+/// check goes with its notice to the host; a call returns as main is
 /// closed. The parent reserves this much room in `out` before calling it.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -133,8 +133,8 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
 fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     match event {
         Event::HostReturned { relay, reply } => run::host_returned(domain, env, relay, reply, out),
-        Event::Start { reply_to, worker, activation, charter, workspace, transcript } => {
-            run::start(domain, env, run::Start { reply_to, worker, activation, charter, workspace, transcript }, out);
+        Event::Start { reply_to, host_run, activation, charter, workspace, transcript } => {
+            run::start(domain, env, run::Start { reply_to, host_run, activation, charter, workspace, transcript }, out);
         }
         Event::Message { run, name, text } => run::message(domain, env, run, name, text, out),
         Event::Turn { conversation, record, sequence } => run::turn(domain, conversation, record, sequence, out),
@@ -154,7 +154,7 @@ fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Re
         Event::Withdraw { conversation, call } => run::withdraw(domain, conversation, call, out),
         Event::Checked { owner, ran } => run::checked(domain, env, owner, ran, out),
         Event::Aborted { owner } => run::aborted(domain, owner, out),
-        Event::Delivered { owner, push } => run::delivered(domain, owner, push, out),
+        Event::Delivered { owner, delivery } => run::delivered(domain, owner, delivery, out),
     }
 }
 

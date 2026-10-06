@@ -13,8 +13,8 @@
 //! The root translates run conversations into sessions; siblings share no
 //! state or vocabulary, and tools remain beneath sessions.
 //!
-//! The host boundary retains the copied `worker` field names. They are opaque
-//! host request identities; a worker process or byte protocol is not required
+//! The `host_run` fields carry opaque logical run identities supplied by the host.
+//! A host process or byte protocol is not required
 //! to call this typed domain. The domain never knows credential secrets,
 //! authentication, channel bytes, forge state, CI, posting or merge policy.
 //! IO owns confined paths and process effects; the host owns delivery.

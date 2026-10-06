@@ -2,7 +2,7 @@
 //! a counting allocator: the top level driven at random through runs on
 //! charters as large as they may be, their conversations' completions (calls
 //! to the tools, finishes and sub-agents among them, at sizes up to what a
-//! session holds), what io and the worker answer, and cancels; its peak
+//! session holds), what io and the host answer, and cancels; its peak
 //! measured in every entry point, as the loop calls them.
 
 use skein_lib::{Duration, Env, Queue, ReplyTo, Rng, Time, Token, Wall};
@@ -206,7 +206,7 @@ enum Asked {
     },
     Delivery {
         owner: Token,
-        worker: Token,
+        host_run: Token,
         stopped: bool,
     },
 }
@@ -263,7 +263,7 @@ impl Driver {
                 Request::HostCall { .. } | Request::WithdrawHost { .. } => {
                     panic!("random legacy driver has no host declarations")
                 }
-                Request::Admitted { worker, run } => self.runs.push((worker, run)),
+                Request::Admitted { host_run, run } => self.runs.push((host_run, run)),
                 Request::Answer { answer, .. } => {
                     self.seen[5] += 1;
                     if matches!(answer, run::Answer::Refused(_)) {
@@ -275,9 +275,9 @@ impl Driver {
                 | Request::Checking { .. }
                 | Request::Rejected { .. }
                 | Request::Exhausted { .. } => {}
-                Request::Deliver { owner, worker, .. } => {
+                Request::Deliver { owner, host_run, .. } => {
                     self.seen[4] += 1;
-                    self.ask(Asked::Delivery { owner, worker, stopped: false });
+                    self.ask(Asked::Delivery { owner, host_run, stopped: false });
                 }
                 Request::Complete {
                     owner,
@@ -379,7 +379,7 @@ impl Driver {
                 return self.cancel_run();
             }
             self.workers += 1;
-            let worker = Token::new(self.workers);
+            let host_run = Token::new(self.workers);
             // Most charters as large as a run may hold, some a byte larger.
             let brief = limits.run.run_bytes - 900 + self.rng.below(901);
             return Some(Event::Start {
@@ -388,8 +388,8 @@ impl Driver {
                     name: smith_domain::GrantName { account: 0, generation: 0 },
                     valid: Duration::from_secs(100_000),
                 }]),
-                reply_to: ReplyTo::new(worker),
-                worker,
+                reply_to: ReplyTo::new(host_run),
+                host_run,
                 activation: self.workers,
                 charter: charter(brief),
                 transcript: None,
@@ -454,7 +454,7 @@ impl Driver {
                 if stopped {
                     self.seen[12] += 1;
                 }
-                Event::Delivered { owner, push }
+                Event::Delivered { owner, delivery: push }
             }
         })
     }
@@ -465,7 +465,9 @@ impl Driver {
         }
         let pending_delivery = if self.rng.chance(500) {
             self.asked.iter().find_map(|asked| match asked {
-                Asked::Delivery { worker, .. } => self.runs.iter().find(|(candidate, _)| candidate == worker).copied(),
+                Asked::Delivery { host_run, .. } => {
+                    self.runs.iter().find(|(candidate, _)| candidate == host_run).copied()
+                }
                 Asked::Complete { .. }
                 | Asked::Io { .. }
                 | Asked::Read { .. }
@@ -477,10 +479,10 @@ impl Driver {
         };
         // Actual submissions make this race reachable; the other half retains
         // arbitrary stale parent cancellation handles from the original sweep.
-        let (worker, run) = pending_delivery.unwrap_or_else(|| self.runs[index(&mut self.rng, self.runs.len())]);
+        let (host_run, run) = pending_delivery.unwrap_or_else(|| self.runs[index(&mut self.rng, self.runs.len())]);
         for asked in &mut self.asked {
-            if let Asked::Delivery { worker: delivery_worker, stopped, .. } = asked
-                && *delivery_worker == worker
+            if let Asked::Delivery { host_run: delivery_worker, stopped, .. } = asked
+                && *delivery_worker == host_run
             {
                 *stopped = true;
             }

@@ -36,7 +36,7 @@ pub(crate) const fn session_env(env: &Env<Limits>) -> Env<session::Limits> {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
     let event = match event {
-        Event::Start { reply_to, worker, activation, charter, workspace, grants, transcript } => {
+        Event::Start { reply_to, host_run, activation, charter, workspace, grants, transcript } => {
             if !takes_grants(domain, &grants, env.limits.accounts) {
                 domain.notices.push(Request::Answer {
                     to: reply_to,
@@ -47,13 +47,13 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
             for grant in grants {
                 granted(domain, env, grant);
             }
-            return start(domain, env, reply_to, worker, activation, charter, workspace, transcript);
+            return start(domain, env, reply_to, host_run, activation, charter, workspace, transcript);
         }
         Event::Grant { grant } => return granted(domain, env, grant),
         Event::Message { run, name, text } => run::Event::Message { run, name, text },
         Event::Cancel { run } => run::Event::Cancel { run },
         Event::HostReturned { relay, reply } => run::Event::HostReturned { relay, reply },
-        Event::Delivered { owner, push } => run::Event::Delivered { owner, push },
+        Event::Delivered { owner, delivery } => run::Event::Delivered { owner, delivery },
         Event::Read { owner, read } => run::Event::Read { owner, read },
         Event::Probed { owner, executable } => run::Event::Probed { owner, executable },
         Event::Checked { owner, ran } => run::Event::Checked { owner, ran },
@@ -160,7 +160,7 @@ fn start(
     domain: &mut Domain,
     env: &Env<Limits>,
     reply_to: ReplyTo,
-    worker: Token,
+    host_run: Token,
     activation: u64,
     charter: run::Charter,
     workspace: Option<run::Workspace>,
@@ -200,7 +200,7 @@ fn start(
         env,
         run::Event::Start {
             reply_to: ReplyTo::new(id.token()),
-            worker,
+            host_run,
             activation,
             charter,
             workspace,
@@ -382,11 +382,11 @@ fn delegated(
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: &mut Queue<Request>) {
     let event = match request {
-        run::Request::HostCall { worker, relay, name, tool, effect, input, deadline } => {
-            return out.push(Request::HostCall { worker, relay, name, tool, effect, input, deadline });
+        run::Request::HostCall { host_run, relay, name, tool, effect, input, deadline } => {
+            return out.push(Request::HostCall { host_run, relay, name, tool, effect, input, deadline });
         }
         run::Request::WithdrawHost { relay } => return out.push(Request::WithdrawHost { relay }),
-        run::Request::Admitted { worker, run } => return out.push(Request::Admitted { worker, run }),
+        run::Request::Admitted { host_run, run } => return out.push(Request::Admitted { host_run, run }),
         run::Request::Answer { to, answer } => {
             let id = Id::<StartContext>::from_token(to.into_token());
             let context = domain.starts.get_mut(id).expect("root issued the start reply binding");
@@ -395,17 +395,17 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
             domain.starts.retire(id);
             return out.push(Request::Answer { to, answer });
         }
-        run::Request::Waiting { worker, read } => return out.push(Request::Waiting { worker, read }),
-        run::Request::Turn { worker, record, number, read, spent } => {
+        run::Request::Waiting { host_run, read } => return out.push(Request::Waiting { host_run, read }),
+        run::Request::Turn { host_run, record, number, read, spent } => {
             let id = Id::<TurnHandoff>::from_token(record);
             let handoff = domain.turns.get_mut(id).expect("root issued the concrete turn binding");
             let turn = handoff.turn.take().expect("one actual output takes the concrete body");
             domain.turns.retire(id);
-            return out.push(Request::Turn { worker, number, read, spent, turn });
+            return out.push(Request::Turn { host_run, number, read, spent, turn });
         }
-        run::Request::Checking { worker, deadline } => return out.push(Request::Checking { worker, deadline }),
-        run::Request::Deliver { worker, owner, change, name, deadline } => {
-            return out.push(Request::Deliver { worker, owner, change, name, deadline });
+        run::Request::Checking { host_run, deadline } => return out.push(Request::Checking { host_run, deadline }),
+        run::Request::Deliver { host_run, owner, change, name, deadline } => {
+            return out.push(Request::Deliver { host_run, owner, change, name, deadline });
         }
         run::Request::Read { owner, at, max, deadline } => return out.push(Request::Read { owner, at, max, deadline }),
         run::Request::Probe { owner, at, deadline } => return out.push(Request::Probe { owner, at, deadline }),

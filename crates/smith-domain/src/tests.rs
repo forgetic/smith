@@ -289,12 +289,12 @@ impl Harness {
                 valid: Duration::from_secs(100_000),
             }]),
             reply_to: ReplyTo::new(Token::new(call)),
-            worker: Token::new(call),
+            host_run: Token::new(call),
             activation: 1,
             charter,
             transcript: None,
         });
-        let [Request::Admitted { worker: _, run }, Request::Read { owner, .. }] = &*emitted else {
+        let [Request::Admitted { host_run: _, run }, Request::Read { owner, .. }] = &*emitted else {
             panic!("expected an admitted run, got {emitted:?}");
         };
         assert_eq!(owner, run);
@@ -534,7 +534,7 @@ fn no_grant_fails_locally_and_exhaustion_reports_the_account() {
     let emitted = h.step(Event::Start {
         workspace: Some(workspace()),
         reply_to: ReplyTo::new(Token::new(7)),
-        worker: Token::new(7),
+        host_run: Token::new(7),
         activation: 1,
         charter: ungranted,
         grants: Box::new([]),
@@ -663,7 +663,7 @@ fn an_unsafe_workspace_mount_refuses_start_before_discovery() {
             valid: Duration::from_secs(100_000),
         }]),
         reply_to: ReplyTo::new(Token::new(7)),
-        worker: Token::new(7),
+        host_run: Token::new(7),
         activation: 1,
         charter: charter(),
         workspace: Some(checkout),
@@ -704,7 +704,7 @@ fn an_opening_larger_than_a_session_holds_refuses_main_as_invalid() {
             valid: Duration::from_secs(100_000),
         }]),
         reply_to: ReplyTo::new(Token::new(7)),
-        worker: Token::new(7),
+        host_run: Token::new(7),
         activation: 1,
         charter: Charter { instructions: brief, ..charter() },
         transcript: None,
@@ -793,11 +793,14 @@ fn a_change_lands_through_the_worker_and_the_run_answers_with_it() {
     };
     let finish = Ask::Finish { outcome: Declared::Change(change.clone()) };
     let emitted = h.answer(main, Box::new([served(b"f1", finish)]));
-    let [Request::Deliver { worker, owner, change: pushed, name: _, deadline: _ }] = &*emitted else {
+    let [Request::Deliver { host_run, owner, change: pushed, name: _, deadline: _ }] = &*emitted else {
         panic!("expected the change pushed, got {emitted:?}");
     };
-    assert_eq!((worker, pushed), (&Token::new(7), &change));
-    assert!(h.step(Event::Delivered { owner: *owner, push: delivered() }).is_empty(), "the answer and the close wait");
+    assert_eq!((host_run, pushed), (&Token::new(7), &change));
+    assert!(
+        h.step(Event::Delivered { owner: *owner, delivery: delivered() }).is_empty(),
+        "the answer and the close wait"
+    );
     let emitted = h.next();
     let [Request::Answer { to: _, answer: run::Answer::Accepted { outcome, spent: _, .. } }] = &*emitted else {
         panic!("expected the run accepted, got {emitted:?}");
@@ -1209,7 +1212,7 @@ fn convention_main(harness: &mut Harness, selected: Option<run::Conventions>) ->
     };
     let emitted = harness.step(Event::Start {
         reply_to: ReplyTo::new(Token::new(77)),
-        worker: Token::new(77),
+        host_run: Token::new(77),
         activation: 1,
         charter,
         workspace: mounted,
@@ -1301,14 +1304,14 @@ fn caller_conventions_select_actual_default_custom_and_explicit_legacy_check_del
             main,
             Box::new([served(b"finish-convention", Ask::Finish { outcome: Declared::Change(change.clone()) })]),
         );
-        let [Request::Check { owner, program, deadline, tail }, Request::Checking { worker, deadline: said }] =
+        let [Request::Check { owner, program, deadline, tail }, Request::Checking { host_run, deadline: said }] =
             emitted.as_ref()
         else {
             panic!("actual exclusive Check precedes host delivery: {emitted:?}");
         };
         assert_eq!(program.root, Token::new(900), "readonly mount is never checked");
         assert_eq!(program.path.as_ref(), expected_path);
-        assert_eq!(*worker, Token::new(77));
+        assert_eq!(*host_run, Token::new(77));
         assert_eq!(deadline, said);
         assert_eq!(*tail, LIMITS.run.check_tail);
         assert_eq!(*deadline, Time::ZERO.saturating_add(LIMITS.run.check_timeout));
@@ -1322,7 +1325,7 @@ fn caller_conventions_select_actual_default_custom_and_explicit_legacy_check_del
         };
         assert_eq!(*delivered_owner, owner);
         assert_eq!(delivered_change, &change);
-        assert!(harness.step(Event::Delivered { owner, push: delivered() }).is_empty());
+        assert!(harness.step(Event::Delivered { owner, delivery: delivered() }).is_empty());
         let emitted = harness.next();
         let [Request::Answer { answer: run::Answer::Accepted { outcome, .. }, .. }] = emitted.as_ref() else {
             panic!("one actual accepted terminal after settled Check and delivery: {emitted:?}");
@@ -1396,7 +1399,7 @@ fn invalid_conventions_are_refused_at_original_root_start_before_any_effect() {
             let emitted = harness.step(Event::Start {
                 workspace: Some(workspace()),
                 reply_to: ReplyTo::new(Token::new(77)),
-                worker: Token::new(77),
+                host_run: Token::new(77),
                 activation: 1,
                 charter: Charter { conventions: Some(conventions), ..charter() },
                 transcript: None,
@@ -1467,7 +1470,7 @@ fn maximum_custom_guide_headings_obey_the_actual_session_receiving_limit_after_d
         };
         let emitted = harness.step(Event::Start {
             reply_to: ReplyTo::new(Token::new(7)),
-            worker: Token::new(7),
+            host_run: Token::new(7),
             activation: 1,
             workspace: Some(Workspace {
                 directories: Box::new([

@@ -3,7 +3,7 @@
 //!
 //! Three peers are behind it, and each record names which by its variant:
 //!
-//! - The worker, the run child domain's face. A [`Event::Start`] is a call,
+//! - The host, the run child domain's face. A [`Event::Start`] is a call,
 //!   answered by exactly one [`Request::Answer`], after a
 //!   [`Request::Admitted`] that names the run if it was admitted, so that a
 //!   [`Event::Cancel`] can name it. A run's host call, [`Request::Deliver`], is
@@ -87,8 +87,8 @@ pub enum Event {
         /// Bounded host text or actual settled retry classification. Contract: domain/run.md, section 5.2.
         reply: run::HostReply,
     },
-    /// From the worker, a call: start a run on `charter`, and answer once it
-    /// has ended. `worker` is the worker's name for the run, echoed on
+    /// From the host, a call: start a run on `charter`, and answer once it
+    /// has ended. `host_run` is the host's name for the run, echoed on
     /// `Admitted`.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -102,8 +102,8 @@ pub enum Event {
         /// Contract: domain/run.md, sections 3.2 and 5.2; domain/host.md, section 2.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-        worker: Token,
-        /// Host-supplied positive number, unique for each activation of `worker`.
+        host_run: Token,
+        /// Host-supplied positive number, unique for each activation of `host_run`.
         /// Contract: domain/run.md, sections 3.2 and 8.2; domain/host.md, section 2.
         activation: u64,
         /// Host-supplied admission policy, validated before the run starts.
@@ -141,7 +141,7 @@ pub enum Event {
         text: Box<[u8]>,
     },
 
-    /// A refreshed credential, pushed by the engine through the worker.
+    /// A refreshed credential, pushed by the engine through the host.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     Grant {
@@ -150,7 +150,7 @@ pub enum Event {
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         grant: Grant,
     },
-    /// From the worker: end the run `run` as cancelled. A run that has already
+    /// From the host: end the run `run` as cancelled. A run that has already
     /// answered, or decided how it ends, ignores it.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
@@ -174,7 +174,7 @@ pub enum Event {
         /// Typed terminal for the host's change-delivery request.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-        push: run::Delivery,
+        delivery: run::Delivery,
     },
 
     /// Terminal for `Complete`: the LLM produced its next message.
@@ -297,7 +297,7 @@ pub enum Request {
     /// Contract: domain/run.md, sections 6 and 10.
     Waiting {
         /// Stable parent run scope. Contract: domain/run.md, section 6.
-        worker: Token,
+        host_run: Token,
 
         /// Latest name consumed by an actual turn. Contract: domain/run.md, section 6.
         read: Option<Token>,
@@ -308,7 +308,7 @@ pub enum Request {
     /// Contract: domain/run.md, section 13; domain/host.md, section 6.
     Turn {
         /// Stable parent run scope. Contract: domain/run.md, section 13.
-        worker: Token,
+        host_run: Token,
 
         /// One-based output number within this activation. Contract: domain/run.md, section 13.
         number: u32,
@@ -330,7 +330,7 @@ pub enum Request {
     /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     HostCall {
         /// Stable logical run scope supplied by Start. Contract: domain/host.md, section 2.
-        worker: Token,
+        host_run: Token,
         /// One live relay attempt. Contract: domain/run.md, section 5.2.
         relay: run::RelayName,
         /// Immutable accepted-transcript operation name. Contract: domain/run.md, section 5.2.
@@ -353,21 +353,21 @@ pub enum Request {
         /// Contract: domain/run.md, section 5.2.
         relay: run::RelayName,
     },
-    /// To the worker: the run it names `worker` was admitted, and is `run`
+    /// To the host: the run it names `host_run` was admitted, and is `run`
     /// from now on.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     Admitted {
-        /// Scripted host or worker's opaque run name, echoed without interpretation.
+        /// Scripted host or host's opaque run name, echoed without interpretation.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-        worker: Token,
+        host_run: Token,
         /// Root-issued admitted run token, supplied in `Request::Admitted` and echoed by cancellation.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         run: Token,
     },
-    /// To the worker, the answer to a `Start`: exactly one per start.
+    /// To the host, the answer to a `Start`: exactly one per start.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     Answer {
@@ -380,22 +380,22 @@ pub enum Request {
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         answer: run::Answer,
     },
-    /// To the worker: checks of the run it names `worker` are running until
+    /// To the host: checks of the run it names `host_run` are running until
     /// `deadline` at the latest, so its watchdog waits that long.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     Checking {
-        /// Scripted host or worker's opaque run name, echoed without interpretation.
+        /// Scripted host or host's opaque run name, echoed without interpretation.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-        worker: Token,
+        host_run: Token,
         /// Injected monotonic deadline, never obtained from a live clock.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
         deadline: Time,
     },
     /// To the host, deliver the exact checked writable-directory state under
-    /// the logical run named `worker`. The host interprets the unchanged
+    /// the logical run named `host_run`. The host interprets the unchanged
     /// generic fields and returns its real bounded terminal. Final Change
     /// and separately granted main delivery share the same exclusive checks;
     /// the terminal remains owed through shutdown.
@@ -410,10 +410,10 @@ pub enum Request {
         /// terminal even during shutdown. The run never abandons submission.
         /// Contract: domain/run.md, sections 8.2 and 10.
         deadline: Time,
-        /// Scripted host or worker's opaque run name, echoed without interpretation.
+        /// Scripted host or host's opaque run name, echoed without interpretation.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-        worker: Token,
+        host_run: Token,
         /// Requester-issued opaque name, echoed on the one terminal for this request.
         ///
         /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.

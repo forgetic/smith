@@ -5,11 +5,11 @@
 //!
 //! The world owns the clock and the seeds, and stands in for everything around
 //! the run: the top level that will route its conversations to sessions, the
-//! sessions and their LLMs ([`partner`]), the worker with both protocol layers
+//! sessions and their LLMs ([`partner`]), the host with both protocol layers
 //! and the channel between it and the agent ([`host`]), and io, which makes
 //! the checkouts' files and runs their checks. Both scripts speak the run's
 //! vocabulary, as the top level will once it translates its neighbours'. The
-//! host takes liberties a worker does not, to reach every state of a run: it
+//! host takes liberties a host does not, to reach every state of a run: it
 //! cancels runs twice, and after they have answered.
 //!
 //! The world checks the boundary contracts as it goes (one answer per start,

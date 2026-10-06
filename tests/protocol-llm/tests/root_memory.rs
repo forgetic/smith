@@ -837,8 +837,8 @@ impl Counted {
     fn drain(&mut self, measured: skein_world::domain::heap::Measured) {
         while let Some(request) = self.out.pop() {
             match request {
-                Request::Admitted { worker, run } => {
-                    assert_eq!(worker, WORKER);
+                Request::Admitted { host_run, run } => {
+                    assert_eq!(host_run, WORKER);
                     assert!(self.admitted.replace(run).is_none());
                 }
                 Request::Read { owner, at, .. } => {
@@ -883,13 +883,13 @@ impl Counted {
                             .is_none()
                     );
                 }
-                Request::Turn { worker, number, turn, .. } => {
-                    assert_eq!(worker, WORKER);
+                Request::Turn { host_run, number, turn, .. } => {
+                    assert_eq!(host_run, WORKER);
                     assert_eq!(number, u32::try_from(self.records.len()).expect("bounded records") + 1);
                     self.records.push(turn);
                 }
-                Request::Waiting { worker, .. } => {
-                    assert_eq!(worker, WORKER);
+                Request::Waiting { host_run, .. } => {
+                    assert_eq!(host_run, WORKER);
                     self.waiting = true;
                 }
                 Request::Answer { to, answer } => {
@@ -945,7 +945,7 @@ impl Counted {
         self.step(Event::Start {
             workspace: Some(workspace()),
             reply_to: ReplyTo::new(PARENT),
-            worker: WORKER,
+            host_run: WORKER,
             activation: if restoring { 2 } else { 1 },
             charter: charter(restoring),
             transcript: history,
@@ -1512,7 +1512,7 @@ fn maximum_brief_and_convention_paths_coexist_with_caller_start_actual_prompt_an
     counted.caller_charter = Some(caller);
     counted.step(Event::Start {
         reply_to: ReplyTo::new(PARENT),
-        worker: WORKER,
+        host_run: WORKER,
         activation: 1,
         charter: run::Charter { instructions, brief, conventions: selected, outcome, ..charter(false) },
         workspace: mounted,

@@ -300,11 +300,11 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
     let spend = Spend { units: 0, turns: 1, input: 1, output: 1, cache_read: 1, cache_write: 1 };
     let expiry = Time::ZERO.saturating_add(limits.budget.time);
     for run in 0..limits.runs {
-        let worker = Token::new(u64::from(run));
+        let host_run = Token::new(u64::from(run));
         let start = Event::Start {
             workspace: Some(workspace()),
-            reply_to: ReplyTo::new(worker),
-            worker,
+            reply_to: ReplyTo::new(host_run),
+            host_run,
             activation: 1,
             charter: selected_charter(limits.run_bytes, selected),
             transcript: None,
@@ -319,7 +319,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
         let [Asked::Open { conversation }] = step(Event::Probed { owner, executable: true })[..] else {
             panic!("the run opens main once it has prepared");
         };
-        assert!(step(Event::Started { conversation, peer: worker }).is_empty(), "starting is quiet");
+        assert!(step(Event::Started { conversation, peer: host_run }).is_empty(), "starting is quiet");
         assert!(step(Event::Used { conversation, spend }).is_empty(), "within the budget");
         let yielded = Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(100) };
         assert_eq!(step(yielded), [Asked::Other], "nudged");
@@ -328,14 +328,14 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
         let delegated = Event::Delegated {
             name: smith_domain_run::CallName { activation: 1, completion: 1, position: 0 },
             conversation,
-            call: worker,
+            call: host_run,
             ask,
             deadline: expiry,
         };
         let [Asked::Open { conversation: child }] = step(delegated)[..] else {
             panic!("the sub-agent opens");
         };
-        assert!(step(Event::Started { conversation: child, peer: worker }).is_empty(), "starting is quiet");
+        assert!(step(Event::Started { conversation: child, peer: host_run }).is_empty(), "starting is quiet");
         assert!(step(Event::Used { conversation: child, spend }).is_empty(), "within the budget");
         let answer = bytes(u64::from(limits.answer_bytes) + 10);
         let yielded = Event::Yielded { conversation: child, stop: Stop::EndTurn, text: answer };
@@ -357,7 +357,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
         };
         let ran = Ran { exit: Exit::Code { code: 0 }, output: bytes(0), cut: 0 };
         assert_eq!(step(Event::Checked { owner, ran }), [Asked::Other], "checked, it is pushed");
-        assert_eq!(step(Event::Delivered { owner, push: delivered() }), [Asked::Other, Asked::Other], "accepted");
+        assert_eq!(step(Event::Delivered { owner, delivery: delivered() }), [Asked::Other, Asked::Other], "accepted");
     }
     let held = meter.held();
     let charters = limits.run_bytes + u64::from(limits.guide_bytes);
@@ -372,11 +372,11 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
 fn refuse_oversized_charter(limits: Limits, env: &Env<Limits>, out: &mut Queue<Request>) {
     // A byte more is refused.
     let mut domain = Domain::new(&Limits { runs: 1, conversations: 2, ..limits });
-    let worker = Token::new(0);
+    let host_run = Token::new(0);
     let start = Event::Start {
         workspace: Some(workspace()),
-        reply_to: ReplyTo::new(worker),
-        worker,
+        reply_to: ReplyTo::new(host_run),
+        host_run,
         activation: 1,
         charter: charter(limits.run_bytes + 1),
         transcript: None,
@@ -513,7 +513,7 @@ fn full_receipt_delivery_settles_before_a_cancelled_answer() {
     let meter = Meter::new();
     let mut domain = Domain::new(&limits);
     let charter = full_delivery_charter(limits);
-    let worker = Token::new(10);
+    let host_run = Token::new(10);
     let (owner, _) = delivery_memory_step(
         &mut domain,
         &env,
@@ -521,8 +521,8 @@ fn full_receipt_delivery_settles_before_a_cancelled_answer() {
         &meter,
         Event::Start {
             workspace: Some(full_delivery_workspace()),
-            reply_to: ReplyTo::new(worker),
-            worker,
+            reply_to: ReplyTo::new(host_run),
+            host_run,
             activation: 1,
             charter,
             transcript: None,
@@ -539,7 +539,7 @@ fn full_receipt_delivery_settles_before_a_cancelled_answer() {
         owner = next.expect("next read or main opening");
     }
     let conversation = owner;
-    delivery_memory_step(&mut domain, &env, &mut out, &meter, Event::Started { conversation, peer: worker });
+    delivery_memory_step(&mut domain, &env, &mut out, &meter, Event::Started { conversation, peer: host_run });
     let (owner, _) = delivery_memory_step(
         &mut domain,
         &env,
@@ -547,7 +547,7 @@ fn full_receipt_delivery_settles_before_a_cancelled_answer() {
         &meter,
         Event::Delegated {
             conversation,
-            call: worker,
+            call: host_run,
             name: smith_domain_run::CallName { activation: 1, completion: 1, position: 0 },
             ask: Ask::Deliver { change: Change { fields: Box::new([]) } },
             deadline: Time::ZERO.saturating_add(BUDGET.time),
@@ -573,7 +573,7 @@ fn full_receipt_delivery_settles_before_a_cancelled_answer() {
         &env,
         &mut out,
         &meter,
-        Event::Delivered { owner, push: smith_domain_run::Delivery::Delivered(terminal) },
+        Event::Delivered { owner, delivery: smith_domain_run::Delivery::Delivered(terminal) },
     );
     let (_, answered) = delivery_memory_step(
         &mut domain,
@@ -723,7 +723,7 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
         Some(Event::Start {
             workspace: mounted,
             reply_to: ReplyTo::new(Token::new(88)),
-            worker: Token::new(91),
+            host_run: Token::new(91),
             activation: 1,
             charter,
             transcript: None,
@@ -802,7 +802,7 @@ fn answered_host_call_before_turn_crash_wakes_as_text_with_a_new_call_namespace(
     }
 
     fn open(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>, activation: u64) -> (Token, Token) {
-        let worker = Token::new(91);
+        let host_run = Token::new(91);
         let mut selected = charter(env.limits.run_bytes);
         selected.resume = true;
         let started = take(
@@ -811,7 +811,7 @@ fn answered_host_call_before_turn_crash_wakes_as_text_with_a_new_call_namespace(
             out,
             Event::Start {
                 reply_to: ReplyTo::new(Token::new(88)),
-                worker,
+                host_run,
                 activation,
                 charter: selected,
                 workspace: Some(workspace()),

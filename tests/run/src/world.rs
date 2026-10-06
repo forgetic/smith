@@ -291,7 +291,7 @@ enum Delivery {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Start {
         reply_to: ReplyTo,
-        worker: Token,
+        host_run: Token,
         charter: run::Charter,
         workspace: Option<run::Workspace>,
     },
@@ -309,17 +309,17 @@ enum Delivery {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Admitted {
-        worker: Token,
+        host_run: Token,
         run: Token,
     },
     Answered {
-        worker: Token,
+        host_run: Token,
     },
     Checking {
-        worker: Token,
+        host_run: Token,
     },
     Submit {
-        worker: Token,
+        host_run: Token,
         owner: Token,
         deadline: Time,
     },
@@ -789,11 +789,11 @@ impl World {
         self.log(&format!("run -> {request:?}"));
         let mut current = current;
         match request {
-            run::Request::Turn { worker, number, read, spent, record: _ } => {
-                current = Some(self.observed_turn(worker, number, read, spent));
+            run::Request::Turn { host_run, number, read, spent, record: _ } => {
+                current = Some(self.observed_turn(host_run, number, read, spent));
             }
-            run::Request::Waiting { worker, read } => {
-                let run = self.run_of_owner[&worker];
+            run::Request::Waiting { host_run, read } => {
+                let run = self.run_of_owner[&host_run];
                 let view = &self.views[&run];
                 assert_eq!(read, view.read, "Waiting carries the actual last Turn fence");
                 assert!(view.started && !view.decided, "only a working main waits");
@@ -808,10 +808,10 @@ impl World {
             run::Request::HostCall { .. } | run::Request::WithdrawHost { .. } => {
                 panic!("legacy run scripts do not invoke generic host tools")
             }
-            run::Request::Admitted { worker, run } => {
-                self.admitted(worker, run);
+            run::Request::Admitted { host_run, run } => {
+                self.admitted(host_run, run);
                 current = Some(run);
-                self.send(Lane::Host, Delivery::Admitted { worker, run });
+                self.send(Lane::Host, Delivery::Admitted { host_run, run });
             }
             run::Request::Answer { to, answer } => {
                 let owner = self.answer(to, answer);
@@ -853,20 +853,20 @@ impl World {
                 self.landing.insert(owner);
                 self.check(owner, &program, deadline, tail);
             }
-            run::Request::Checking { worker, deadline: _ } => self.send(Lane::Host, Delivery::Checking { worker }),
-            run::Request::Deliver { worker, owner, change: _, name: _, deadline } => {
+            run::Request::Checking { host_run, deadline: _ } => self.send(Lane::Host, Delivery::Checking { host_run }),
+            run::Request::Deliver { host_run, owner, change: _, name: _, deadline } => {
                 let run = current.expect("a push is made in a step about its run");
                 self.assert_alone(run);
                 self.run_of_call.insert(owner, run);
                 self.landing.insert(owner);
-                self.pushes.open(owner, Pushing { job: worker });
+                self.pushes.open(owner, Pushing { job: host_run });
                 // Checked is pushed: every repository whose checks the change
                 // must pass passed them, for this landing.
                 let passed = self.passed.remove(&owner).unwrap_or_default();
                 let run = &self.views[&self.run_of_call[&owner]];
                 assert!(run.checks.is_subset(&passed), "a change is pushed once every repository's checks passed it");
                 self.stats.pushes += 1;
-                self.send(Lane::Host, Delivery::Submit { worker, owner, deadline });
+                self.send(Lane::Host, Delivery::Submit { host_run, owner, deadline });
             }
         }
         current
@@ -874,8 +874,8 @@ impl World {
 
     /// Retain the independent start budget and checks at actual admission.
     /// Contract: domain/run.md, sections 3, 9 and 13.
-    fn admitted(&mut self, worker: Token, run: Token) {
-        let Start { budget, checks, .. } = &self.starts[&worker];
+    fn admitted(&mut self, host_run: Token, run: Token) {
+        let Start { budget, checks, .. } = &self.starts[&host_run];
         let view = RunView {
             budget: *budget,
             checks: checks.clone(),
@@ -891,13 +891,13 @@ impl World {
             answered: None,
         };
         self.views.insert(run, view);
-        self.run_of_owner.insert(worker, run);
+        self.run_of_owner.insert(host_run, run);
     }
 
     /// Count only actual main output; this component neighbour owns opaque records.
     /// Contract: domain/run.md, sections 6 and 13.
-    fn observed_turn(&mut self, worker: Token, number: u32, read: Option<Token>, spent: run::Spend) -> Token {
-        let run = self.run_of_owner[&worker];
+    fn observed_turn(&mut self, host_run: Token, number: u32, read: Option<Token>, spent: run::Spend) -> Token {
+        let run = self.run_of_owner[&host_run];
         let view = self.views.get_mut(&run).expect("Turn belongs to an admitted run");
         assert_eq!(number, view.turns + 1, "actual main outputs are consecutive");
         assert_eq!(spent, view.spent, "Turn carries the observed cumulative spend");
@@ -1157,7 +1157,7 @@ impl World {
             }
         }
         start.answer = Some(answer);
-        self.send(Lane::Host, Delivery::Answered { worker: owner });
+        self.send(Lane::Host, Delivery::Answered { host_run: owner });
         owner
     }
 
@@ -1236,23 +1236,23 @@ impl World {
     fn host_out(&mut self, out: Vec<run::Event>) {
         for event in out {
             match event {
-                run::Event::Start { reply_to, worker, charter, workspace, .. } => {
+                run::Event::Start { reply_to, host_run, charter, workspace, .. } => {
                     let start = Start { budget: charter.budget, checks: BTreeSet::new(), answer: None };
-                    assert!(self.starts.insert(worker, start).is_none(), "jobs have distinct names");
+                    assert!(self.starts.insert(host_run, start).is_none(), "jobs have distinct names");
                     self.stats.starts += 1;
-                    self.send(Lane::Agent, Delivery::Start { reply_to, worker, charter, workspace });
+                    self.send(Lane::Agent, Delivery::Start { reply_to, host_run, charter, workspace });
                 }
                 event @ run::Event::Message { .. } => self.send(Lane::Agent, Delivery::Host(event)),
                 run::Event::Cancel { run } => {
                     self.stats.cancels += 1;
                     self.send(Lane::Agent, Delivery::Cancel { run });
                 }
-                run::Event::Delivered { owner, push } => {
+                run::Event::Delivered { owner, delivery: push } => {
                     let Pushing { job } = self.pushes.end(owner);
                     if matches!(push, run::Delivery::Delivered(_)) {
                         self.pushed.insert(job);
                     }
-                    self.send(Lane::Agent, Delivery::Host(run::Event::Delivered { owner, push }));
+                    self.send(Lane::Agent, Delivery::Host(run::Event::Delivered { owner, delivery: push }));
                 }
                 run::Event::HostReturned { .. }
                 | run::Event::Turn { .. }
@@ -1277,15 +1277,15 @@ impl World {
     fn deliver(&mut self) {
         while let Some(delivery) = self.wire.next(self.now) {
             match delivery {
-                Delivery::Start { reply_to, worker, charter, workspace } => {
-                    self.start_delivery(reply_to, worker, charter, workspace);
+                Delivery::Start { reply_to, host_run, charter, workspace } => {
+                    self.start_delivery(reply_to, host_run, charter, workspace);
                 }
                 Delivery::Cancel { run } => self.run_stage.push(run::Event::Cancel { run }),
                 Delivery::Host(event) => self.hand(event),
-                Delivery::Admitted { worker, run } => self.host.admitted(self.now, worker, run),
-                Delivery::Answered { worker } => self.host.answered(self.now, worker),
-                Delivery::Checking { worker } => self.host.checking(worker),
-                Delivery::Submit { worker, owner, deadline } => self.host.push(self.now, worker, owner, deadline),
+                Delivery::Admitted { host_run, run } => self.host.admitted(self.now, host_run, run),
+                Delivery::Answered { host_run } => self.host.answered(self.now, host_run),
+                Delivery::Checking { host_run } => self.host.checking(host_run),
+                Delivery::Submit { host_run, owner, deadline } => self.host.push(self.now, host_run, owner, deadline),
                 Delivery::Open { conversation, opening } => {
                     let mut out = Vec::new();
                     self.partner.open(self.now, conversation, &opening, &mut out);
@@ -1363,7 +1363,7 @@ impl World {
     fn start_delivery(
         &mut self,
         reply_to: ReplyTo,
-        worker: Token,
+        host_run: Token,
         charter: run::Charter,
         workspace: Option<run::Workspace>,
     ) {
@@ -1376,10 +1376,10 @@ impl World {
                 checks.insert(repository.root);
             }
         }
-        self.starts.get_mut(&worker).expect("a start is tracked").checks = checks;
+        self.starts.get_mut(&host_run).expect("a start is tracked").checks = checks;
         self.run_stage.push(run::Event::Start {
             reply_to,
-            worker,
+            host_run,
             activation: 1,
             charter,
             workspace,

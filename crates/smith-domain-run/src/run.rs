@@ -42,10 +42,10 @@ pub(crate) struct Run {
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) found: Found,
-    /// The worker's name for it.
+    /// The host's name for it.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub(crate) worker: Token,
+    pub(crate) host_name: Token,
     /// Host-supplied number that distinguishes this activation's call names.
     /// Contract: domain/run.md, sections 3.2 and 8.2.
     pub(crate) activation: u64,
@@ -216,8 +216,8 @@ pub(crate) struct Start {
     /// Affine right to the run's one final answer (domain/run.md, section 10).
     pub(crate) reply_to: ReplyTo,
 
-    /// Host-selected worker identity (domain/run.md, sections 3.2 and 10).
-    pub(crate) worker: Token,
+    /// Host-selected logical run identity (domain/run.md, sections 3.2 and 10).
+    pub(crate) host_run: Token,
     /// Host-supplied positive activation number (domain/run.md, sections 3.2 and 8.2).
     pub(crate) activation: u64,
 
@@ -232,7 +232,7 @@ pub(crate) struct Start {
 }
 
 pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &mut Queue<Request>) {
-    let Start { reply_to, worker, activation, charter, workspace, transcript } = start;
+    let Start { reply_to, host_run, activation, charter, workspace, transcript } = start;
     let Domain { runs, conversations, calls: _, alarms, facts } = domain;
     // A charter that can never fit is invalid, room or not: busy invites a
     // retry.
@@ -256,7 +256,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         charter,
         workspace,
         found,
-        worker,
+        host_name: host_run,
         activation,
         spent: Spend::ZERO,
         nudges: 0,
@@ -287,7 +287,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         phase: Phase::Pending,
     };
     let main = conversations.insert(conversation).expect("checked for room above");
-    out.push(Request::Admitted { worker, run: id.token() });
+    out.push(Request::Admitted { host_run, run: id.token() });
     let run = runs.get_mut(id).expect("inserted above");
     run.state = match prepare::next(&run.charter, run.workspace.as_ref(), None) {
         Some(step) => look(run, id, reply_to, main, step, env, out),
@@ -377,7 +377,7 @@ pub(crate) fn turn(domain: &mut Domain, conversation: Token, record: Token, sequ
         run.read = Some(name);
     }
     domain.facts.about(conversation.run.token());
-    out.push(Request::Turn { worker: run.worker, record, number: run.turns, read: run.read, spent: run.spent });
+    out.push(Request::Turn { host_run: run.host_name, record, number: run.turns, read: run.read, spent: run.spent });
 }
 
 pub(crate) fn park(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request>) {
@@ -519,7 +519,7 @@ pub(crate) fn yielded(
             match run.inbox.pop() {
                 Some(message) => continue_message(run, reply_to, main, peer, message, out),
                 None if run.waiting => {
-                    out.push(Request::Waiting { worker: run.worker, read: run.read });
+                    out.push(Request::Waiting { host_run: run.host_name, read: run.read });
                     if run.charter.waiting == Duration::ZERO {
                         wind_down(conversations, reply_to, main, Ending::Parked, out)
                     } else {
@@ -859,7 +859,7 @@ pub(crate) fn checked(domain: &mut Domain, env: &Env<Limits>, owner: Token, ran:
     domain.facts.push(Fact::CheckFinished { run: call.run.token(), exit: ran.exit });
     let settled = match &mut call.work {
         Work::Landing(landing) => land::checked(landing, id, call.owner, run, may_finish(&run.state), ran, env, out),
-        Work::Child(_) | Work::Host(_) => unreachable!("io and the worker answer only a landing's requests"),
+        Work::Child(_) | Work::Host(_) => unreachable!("io and the host answer only a landing's requests"),
     };
     settle(domain, id, settled, out);
 }
@@ -870,7 +870,7 @@ pub(crate) fn aborted(domain: &mut Domain, owner: Token, out: &mut Queue<Request
     domain.facts.about(call.run.token());
     let settled = match &mut call.work {
         Work::Landing(landing) => land::aborted(landing, call.owner, out),
-        Work::Child(_) | Work::Host(_) => unreachable!("io and the worker answer only a landing's requests"),
+        Work::Child(_) | Work::Host(_) => unreachable!("io and the host answer only a landing's requests"),
     };
     settle(domain, id, settled, out);
 }
@@ -886,7 +886,7 @@ pub(crate) fn delivered(domain: &mut Domain, owner: Token, delivery: Delivery, o
     let call = domain.calls.get_mut(id).expect("the named call is live");
     let run = domain.runs.get(call.run).expect("run waits for the terminal");
     domain.facts.about(call.run.token());
-    domain.facts.push(Fact::Delivered { run: call.run.token(), push: delivery.status() });
+    domain.facts.push(Fact::Delivered { run: call.run.token(), status: delivery.status() });
     let settled = match &mut call.work {
         Work::Landing(landing) => land::delivered(landing, call.owner, delivery, run, out),
         Work::Child(_) | Work::Host(_) => unreachable!("host answers a delivery call"),
@@ -1547,7 +1547,7 @@ fn closing(peer: Token, out: &mut Queue<Request>) -> Phase {
     Phase::Closing
 }
 
-/// Answers the worker: the run is done.
+/// Answers the host: the run is done.
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn answer(reply_to: ReplyTo, answer: Answer, out: &mut Queue<Request>) -> State {
@@ -1725,7 +1725,7 @@ fn host_call(
     let work = Work::Host(relay);
     let id = begin_call(calls, alarms, Call { run: run_id, conversation, owner: call, work }, deadline);
     match &mut calls.get_mut(id).expect("inserted above").work {
-        Work::Host(relay) => host_send(relay, id, run.worker, 1, env.now, out),
+        Work::Host(relay) => host_send(relay, id, run.host_name, 1, env.now, out),
         Work::Child(_) | Work::Landing(_) => unreachable!("inserted as host relay"),
     }
     let caller = conversations.get_mut(conversation).expect("caller lives");
@@ -1736,7 +1736,7 @@ fn host_call(
 fn host_send(
     relay: &mut crate::host::Relay,
     id: Id<Call>,
-    worker: Token,
+    host_run: Token,
     attempt: u32,
     now: Time,
     out: &mut Queue<Request>,
@@ -1744,7 +1744,7 @@ fn host_send(
     let deadline = now.saturating_add(relay.timeout).min(relay.caller_deadline);
     assert!(now < deadline, "admission and recovery refuse expired relays");
     out.push(Request::HostCall {
-        worker,
+        host_run,
         relay: crate::RelayName { owner: id.token(), attempt },
         name: relay.name,
         tool: relay.tool.clone(),
@@ -1827,7 +1827,7 @@ pub(crate) fn host_alarm(domain: &mut Domain, env: &Env<Limits>, id: Id<Call>, o
         }
         crate::host::Stage::Backoff { attempt, .. } => {
             if active && relay.stopped.is_none() && env.now < relay.caller_deadline {
-                host_send(relay, id, run.worker, attempt, env.now, out);
+                host_send(relay, id, run.host_name, attempt, env.now, out);
                 None
             } else {
                 Some(if relay.unknown { Returned::HostUnknown } else { Returned::Busy })

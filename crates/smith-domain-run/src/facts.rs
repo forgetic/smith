@@ -1,12 +1,12 @@
 //! What the runs tell whoever watches the agent (domain/run.md, section 14):
 //! a fact for each thing that happened, content-free (tokens, counts and
-//! classifications, never what an LLM, the charter or the worker said), in a
+//! classifications, never what an LLM, the charter or the host said), in a
 //! bounded queue the parent drains at its own pace.
 //!
 //! Facts are outside the boundary's flow control: they are not requests, take
 //! no room in `out`, and when the queue is full they are dropped and counted.
 //! Nothing the run decides depends on whether a fact was kept, and nothing
-//! outside may either: the worker's watchdog hears of a check's deadline from
+//! outside may either: the host's watchdog hears of a check's deadline from
 //! `Request::Checking`, which is not lossy.
 //!
 //! A start refused at the entrance tells nothing: no run was. Each step of an
@@ -162,7 +162,7 @@ pub enum Fact {
         /// Typed terminal for the host's change-delivery request.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        push: crate::DeliveryStatus,
+        status: crate::DeliveryStatus,
     },
     /// The run answered.
     ///
@@ -352,7 +352,7 @@ pub(crate) fn tell(
     let made = usize::try_from(mark).expect("a u32 fits in a usize");
     for request in out.iter().skip(made) {
         let fact = match request {
-            Request::Admitted { worker: _, run } => Fact::Admitted { run: *run },
+            Request::Admitted { host_run: _, run } => Fact::Admitted { run: *run },
             Request::Open { conversation, opening: _ } => {
                 let (depth, prepared) = run::opened(runs, conversations, *conversation);
                 // Main opens once its run has prepared.

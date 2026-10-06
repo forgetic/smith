@@ -1,8 +1,8 @@
-//! A scripted host: what the worker would be to the runs, played from a seed.
+//! A scripted host: what the host would be to the runs, played from a seed.
 //!
-//! It speaks the run's vocabulary for the worker, as the top level will route
-//! it to and from the protocol layer, and plays the worker beyond it, with
-//! some liberties a real worker does not take:
+//! It speaks the run's vocabulary for the host, as the top level will route
+//! it to and from the protocol layer, and plays the host beyond it, with
+//! some liberties a real host does not take:
 //!
 //! - It has jobs to run, and starts a run for each at a time drawn from the
 //!   first `window`, on a charter drawn from the script. It checks out the
@@ -409,7 +409,7 @@ impl Host {
                     .collect();
                 out.push(Event::Start {
                     reply_to: ReplyTo::new(job),
-                    worker: job,
+                    host_run: job,
                     activation: 1,
                     charter,
                     workspace,
@@ -448,7 +448,7 @@ impl Host {
         } else {
             delivered(&self.jobs[&job].writable)
         };
-        out.push(Event::Delivered { owner, push });
+        out.push(Event::Delivered { owner, delivery: push });
     }
 
     fn assert_running(&self, job: Token, contract: &str) {

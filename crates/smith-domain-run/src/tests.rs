@@ -127,7 +127,7 @@ impl Harness {
         let reply_to = ReplyTo::new(Token::new(call));
         self.step(Event::Start {
             reply_to,
-            worker: Token::new(call),
+            host_run: Token::new(call),
             activation: 1,
             charter,
             workspace,
@@ -139,10 +139,10 @@ impl Harness {
     /// the run's token, once it has looked for its one repository's guide.
     fn prepare(&mut self, call: u64) -> Token {
         let emitted = self.start(call, charter());
-        let [Request::Admitted { worker, run }, Request::Read { owner, .. }] = &*emitted else {
+        let [Request::Admitted { host_run, run }, Request::Read { owner, .. }] = &*emitted else {
             panic!("expected an admitted run, got {emitted:?}");
         };
-        assert_eq!((*worker, owner), (Token::new(call), run));
+        assert_eq!((*host_run, owner), (Token::new(call), run));
         *run
     }
 
@@ -286,10 +286,10 @@ fn failed(failure: Failure, spent: Spend) -> Answer {
 fn an_admitted_run_reads_its_checkout_then_opens_main_with_the_whole_budget() {
     let mut h = Harness::new(LIMITS);
     let emitted = h.start(7, charter());
-    let [Request::Admitted { worker, run }, Request::Read { owner, at, max, deadline }] = &*emitted else {
+    let [Request::Admitted { host_run, run }, Request::Read { owner, at, max, deadline }] = &*emitted else {
         panic!("expected an admitted run, got {emitted:?}");
     };
-    assert_eq!((*worker, owner), (Token::new(7), run));
+    assert_eq!((*host_run, owner), (Token::new(7), run));
     assert_eq!(at, &Place { root: Token::new(900), path: bytes(b"AGENTS.md") });
     assert_eq!((*max, *deadline), (LIMITS.guide_bytes, Time::ZERO.saturating_add(LIMITS.io_timeout)));
     assert_eq!((h.domain.runs(), h.domain.conversations()), (1, 1), "main has its slot from the start");
@@ -550,7 +550,7 @@ fn zero_activation_has_its_own_refusal_before_admission() {
     let mut harness = Harness::new(LIMITS);
     let emitted = harness.step(Event::Start {
         reply_to: ReplyTo::new(Token::new(81)),
-        worker: Token::new(81),
+        host_run: Token::new(81),
         activation: 0,
         charter: charter(),
         workspace: Some(workspace()),
@@ -783,7 +783,7 @@ impl Harness {
     /// landing, whose first check is in flight.
     fn land(&mut self, conversation: Token, call: u64) -> Token {
         let emitted = self.step(finish(conversation, call, Declared::Change(change())));
-        let [Request::Check { owner, program, deadline, tail }, Request::Checking { worker: _, deadline: until }] =
+        let [Request::Check { owner, program, deadline, tail }, Request::Checking { host_run: _, deadline: until }] =
             &*emitted
         else {
             panic!("expected the first check, got {emitted:?}");
@@ -852,7 +852,7 @@ fn a_change_runs_each_repositorys_checks_then_is_pushed_and_accepted() {
     assert_eq!(
         &*emitted,
         &[Request::Deliver {
-            worker: Token::new(1),
+            host_run: Token::new(1),
             owner,
             change: change(),
             name: crate::CallName { activation: 1, completion: 1, position: 0 },
@@ -860,7 +860,7 @@ fn a_change_runs_each_repositorys_checks_then_is_pushed_and_accepted() {
         }]
     );
     assert_eq!(h.domain.calls(), 1);
-    let emitted = h.step(Event::Delivered { owner, push: delivered() });
+    let emitted = h.step(Event::Delivered { owner, delivery: delivered() });
     assert_eq!(&*emitted, &[returned(7, Returned::Delivered(receipts())), Request::Close { peer: Token::new(100) }]);
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
     let accepted = Answer::Accepted { outcome: Declared::Change(change()), spent: Spend::ZERO, turns: 0 };
@@ -884,7 +884,7 @@ fn a_change_that_fails_its_checks_or_its_push_goes_back_to_the_llm() {
     assert_eq!(
         &*h.step(Event::Delivered {
             owner,
-            push: Delivery::Failed(crate::DeliveryFailure::new(crate::DeliveryReason::Unknown))
+            delivery: Delivery::Failed(crate::DeliveryFailure::new(crate::DeliveryReason::Unknown))
         }),
         &[returned(
             8,
@@ -910,7 +910,7 @@ fn a_change_can_be_delivered_after_failing_checks_when_its_contract_allows_it() 
         .step(Event::Checked { owner, ran: Ran { exit: Exit::Signalled, output: bytes(b"second failed"), cut: 0 } });
     let [Request::Deliver { .. }] = requests.as_ref() else { panic!("delivery follows both checks: {requests:?}") };
     assert_eq!(
-        harness.step(Event::Delivered { owner, push: delivered() }).as_ref(),
+        harness.step(Event::Delivered { owner, delivery: delivered() }).as_ref(),
         [returned(7, Returned::Delivered(receipts())), Request::Close { peer: Token::new(100) }]
     );
     assert_eq!(
@@ -926,7 +926,7 @@ fn a_change_whose_branch_moved_ends_the_run_as_stale() {
     let owner = h.land(conversation, 7);
     drop(h.step(Event::Checked { owner, ran: ran(0, b"") }));
     drop(h.step(Event::Checked { owner, ran: ran(0, b"") }));
-    let emitted = h.step(Event::Delivered { owner, push: Delivery::Stale });
+    let emitted = h.step(Event::Delivered { owner, delivery: Delivery::Stale });
     assert_eq!(&*emitted, &[returned(7, Returned::Stale), Request::Close { peer: Token::new(100) }]);
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
     assert_eq!(answered(emitted), (1, failed(Failure::Stale, Spend::ZERO)));
@@ -971,7 +971,7 @@ fn a_withdrawn_landing_stops_what_is_in_flight_and_returns_once_it_has() {
         h.step(Event::Withdraw { conversation, call: Token::new(8) }).is_empty(),
         "submitted delivery is never abandoned"
     );
-    let emitted = h.step(Event::Delivered { owner, push: delivered() });
+    let emitted = h.step(Event::Delivered { owner, delivery: delivered() });
     assert_eq!(&*emitted, &[returned(8, Returned::Delivered(receipts())), Request::Close { peer: Token::new(100) }]);
 }
 
@@ -1009,7 +1009,7 @@ fn a_landing_past_its_deadline_is_stopped_and_returns_timed_out_once_it_has() {
     assert_eq!(
         &*h.step(Event::Delivered {
             owner,
-            push: Delivery::Failed(crate::DeliveryFailure::new(crate::DeliveryReason::TimedOut))
+            delivery: Delivery::Failed(crate::DeliveryFailure::new(crate::DeliveryReason::TimedOut))
         }),
         &[returned(
             8,
@@ -1140,7 +1140,7 @@ fn a_push_that_lands_while_a_cancel_closes_main_wins_over_it() {
     );
     // The actual host terminal reports a landing while run cancellation settles.
     assert_eq!(
-        &*h.step(Event::Delivered { owner, push: delivered() }),
+        &*h.step(Event::Delivered { owner, delivery: delivered() }),
         &[returned(7, Returned::Delivered(receipts()))]
     );
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
@@ -1158,7 +1158,7 @@ fn a_push_that_lands_while_a_cancel_closes_main_wins_over_it() {
     assert_eq!(
         &*h.step(Event::Delivered {
             owner,
-            push: Delivery::Failed(crate::DeliveryFailure::new(crate::DeliveryReason::TimedOut))
+            delivery: Delivery::Failed(crate::DeliveryFailure::new(crate::DeliveryReason::TimedOut))
         }),
         &[returned(
             8,
@@ -1182,7 +1182,7 @@ fn a_push_that_lands_after_the_deadline_wins_over_it() {
     assert!(h.fire().is_empty(), "call expiry retains the submitted host operation");
     // The push wins the race with its cancel.
     assert_eq!(
-        &*h.step(Event::Delivered { owner, push: delivered() }),
+        &*h.step(Event::Delivered { owner, delivery: delivered() }),
         &[returned(7, Returned::Delivered(receipts()))]
     );
     assert!(h.step(Event::Withdraw { conversation, call: Token::new(7) }).is_empty(), "returned already");
@@ -1202,7 +1202,7 @@ fn a_push_that_lands_after_the_deadline_wins_over_it() {
     assert!(h.fire().is_empty(), "call expiry retains the submitted host operation");
     assert!(h.step(Event::Withdraw { conversation, call: Token::new(8) }).is_empty(), "stopped already");
     assert_eq!(
-        &*h.step(Event::Delivered { owner, push: delivered() }),
+        &*h.step(Event::Delivered { owner, delivery: delivered() }),
         &[returned(8, Returned::Delivered(receipts()))]
     );
     let total = spend(BUDGET.spend + 1);
@@ -1628,7 +1628,7 @@ fn nothing_to_push_is_specific_feedback_and_the_run_can_retry() {
     let owner = h.land(conversation, 7);
     drop(h.step(Event::Checked { owner, ran: ran(0, b"") }));
     drop(h.step(Event::Checked { owner, ran: ran(0, b"") }));
-    assert_eq!(&*h.step(Event::Delivered { owner, push: Delivery::Nothing }), &[returned(7, Returned::Nothing)]);
+    assert_eq!(&*h.step(Event::Delivered { owner, delivery: Delivery::Nothing }), &[returned(7, Returned::Nothing)]);
     assert_eq!(h.step(end_turn(conversation)).len(), 1, "a retry is nudged");
 }
 
@@ -1644,13 +1644,13 @@ fn failed_push_reason_and_diagnostics_return_to_the_finish_caller() {
         diagnostic: crate::Diagnostic::new(b"remote: protected branch", 17),
     };
     assert_eq!(
-        &*h.step(Event::Delivered { owner, push: Delivery::Failed(failure) }),
+        &*h.step(Event::Delivered { owner, delivery: Delivery::Failed(failure) }),
         &[returned(7, Returned::DeliveryFailed { failure })]
     );
     let mut pushed = None;
     for fact in facts(&mut h) {
         match fact {
-            Fact::Delivered { push, .. } => pushed = Some(push),
+            Fact::Delivered { status: push, .. } => pushed = Some(push),
             Fact::Admitted { .. }
             | Fact::Prepared { .. }
             | Fact::Opened { .. }
@@ -1828,7 +1828,7 @@ fn a_mid_run_delivery_uses_the_change_contracts_optional_checks() {
     let requests = harness.step(Event::Checked { owner, ran: ran(1, b"draft failed") });
     let [Request::Deliver { .. }] = requests.as_ref() else { panic!("delivery follows the check: {requests:?}") };
     assert_eq!(
-        harness.step(Event::Delivered { owner, push: delivered() }).as_ref(),
+        harness.step(Event::Delivered { owner, delivery: delivered() }).as_ref(),
         [returned(50, Returned::Delivered(receipts()))]
     );
 }
@@ -1864,10 +1864,10 @@ fn mid_report_landing_settles_before_an_interrupted_run_answers() {
             drop(harness.step(Event::Cancel { run }));
             assert!(harness.step(Event::Withdraw { conversation, call: Token::new(50) }).is_empty());
         }
-        let requests = harness.step(Event::Delivered { owner, push: delivered() });
+        let requests = harness.step(Event::Delivered { owner, delivery: delivered() });
         assert_eq!(requests.as_ref(), &[returned(50, Returned::Delivered(receipts()))]);
         assert!(
-            harness.step(Event::Delivered { owner, push: delivered() }).is_empty(),
+            harness.step(Event::Delivered { owner, delivery: delivered() }).is_empty(),
             "stale duplicate is inert before reclaim"
         );
         if !interrupted {
@@ -1881,7 +1881,7 @@ fn mid_report_landing_settles_before_an_interrupted_run_answers() {
         }
         harness.domain.reclaim();
         assert!(
-            harness.step(Event::Delivered { owner, push: delivered() }).is_empty(),
+            harness.step(Event::Delivered { owner, delivery: delivered() }).is_empty(),
             "stale generation is inert after reclaim"
         );
     }
@@ -1899,7 +1899,7 @@ fn malformed_host_mount_or_zero_origin_never_becomes_successful_delivery() {
     let wrong = crate::Delivered::new(Box::new([crate::Receipt::new(1, bytes(b"unmounted")).expect("sealed ordinal")]))
         .expect("sealed terminal");
     assert_eq!(
-        harness.step(Event::Delivered { owner, push: Delivery::Delivered(wrong) }).as_ref(),
+        harness.step(Event::Delivered { owner, delivery: Delivery::Delivered(wrong) }).as_ref(),
         &[returned(
             50,
             Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(crate::DeliveryReason::Broken) }
@@ -1933,7 +1933,7 @@ fn time_and_spend_shutdown_keep_an_already_submitted_mid_landing() {
             Failure::Budget(Exhausted::Spend)
         };
         let expected_spend = if timed { Spend::ZERO } else { spend(BUDGET.spend + 1) };
-        let requests = harness.step(Event::Delivered { owner, push: delivered() });
+        let requests = harness.step(Event::Delivered { owner, delivery: delivered() });
         if timed {
             assert_eq!(requests.as_ref(), &[returned(50, Returned::Delivered(receipts()))]);
         } else {
@@ -1957,7 +1957,7 @@ fn generic_non_marker_host_refusal_is_feedback_and_report_can_finish() {
     let refusal = crate::DeliveryRefusal::new(None, bytes(b"host asks for corrected metadata"))
         .expect("bounded generic correctable feedback");
     assert_eq!(
-        harness.step(Event::Delivered { owner, push: Delivery::Refused(refusal.clone()) }).as_ref(),
+        harness.step(Event::Delivered { owner, delivery: Delivery::Refused(refusal.clone()) }).as_ref(),
         &[returned(50, Returned::DeliveryRefused(refusal))]
     );
     drop(harness.step(finish(conversation, 51, report())));
@@ -2006,7 +2006,7 @@ fn caller_only_stop_keeps_submitted_mid_delivery_and_ordinary_continuation() {
                 assert!(harness.step(Event::Withdraw { conversation, call: Token::new(50) }).is_empty());
             }
             assert_eq!(
-                harness.step(Event::Delivered { owner, push: delivered() }).as_ref(),
+                harness.step(Event::Delivered { owner, delivery: delivered() }).as_ref(),
                 &[returned(50, Returned::Delivered(receipts()))],
                 "caller-only stop neither abandons the host nor closes main"
             );
@@ -2044,10 +2044,10 @@ fn host_ask(conversation: Token, call: u64, deadline: Time) -> Event {
 }
 
 fn host_submission(emitted: &[Request]) -> crate::RelayName {
-    let [Request::HostCall { relay, worker, name, input, deadline, tool, effect }] = emitted else {
+    let [Request::HostCall { relay, host_run, name, input, deadline, tool, effect }] = emitted else {
         panic!("one opaque relay, got {emitted:?}");
     };
-    assert_eq!(*worker, Token::new(71));
+    assert_eq!(*host_run, Token::new(71));
     assert_eq!(*name, crate::CallName { activation: 1, completion: 7, position: 3 });
     assert_eq!(tool.as_ref(), b"comment");
     assert_eq!(*effect, crate::HostEffect::Read);
@@ -2244,11 +2244,11 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
     );
     assert_eq!(
         &*h.step(Event::Turn { conversation, record: Token::new(50), sequence: 1 }),
-        &[Request::Turn { worker: Token::new(1), record: Token::new(50), number: 1, read: None, spent: Spend::ZERO }]
+        &[Request::Turn { host_run: Token::new(1), record: Token::new(50), number: 1, read: None, spent: Spend::ZERO }]
     );
     assert_eq!(
         &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }),
-        &[Request::Waiting { worker: Token::new(1), read: None }]
+        &[Request::Waiting { host_run: Token::new(1), read: None }]
     );
     assert_eq!(
         &*h.step(Event::Message { run, name: Token::new(0), text: bytes(b"person: first") }),
@@ -2263,7 +2263,7 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
         assert_eq!(
             &*h.step(Event::Turn { conversation, record: Token::new(u64::from(sequence)), sequence }),
             &[Request::Turn {
-                worker: Token::new(1),
+                host_run: Token::new(1),
                 record: Token::new(u64::from(sequence)),
                 number: sequence,
                 read: Some(Token::new(read)),
@@ -2287,7 +2287,7 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
     assert_eq!(&*h.step(wait), &[Request::Return { spent: 0, call, result: Returned::Waiting }]);
     assert_eq!(
         &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }),
-        &[Request::Waiting { worker: Token::new(1), read: Some(Token::new(7)) }]
+        &[Request::Waiting { host_run: Token::new(1), read: Some(Token::new(7)) }]
     );
     h.after(Duration::from_secs(30));
     assert_eq!(&*h.fire(), &[Request::Close { peer: Token::new(9) }]);
@@ -2327,11 +2327,11 @@ fn zero_waiting_time_parks_when_main_yields() {
     );
     assert_eq!(
         harness.step(Event::Turn { conversation, record: Token::new(73), sequence: 1 }).as_ref(),
-        [Request::Turn { worker: Token::new(70), record: Token::new(73), number: 1, read: None, spent: Spend::ZERO }]
+        [Request::Turn { host_run: Token::new(70), record: Token::new(73), number: 1, read: None, spent: Spend::ZERO }]
     );
     assert_eq!(
         harness.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }).as_ref(),
-        [Request::Waiting { worker: Token::new(70), read: None }, Request::Close { peer: Token::new(71) }]
+        [Request::Waiting { host_run: Token::new(70), read: None }, Request::Close { peer: Token::new(71) }]
     );
     assert_eq!(
         answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })),
@@ -2352,7 +2352,7 @@ fn bounded_message_and_input_at_idle_deadline_preserve_existing_fifo() {
     assert_eq!(
         &*h.step(Event::Turn { conversation, record: Token::new(40), sequence: 1 }),
         &[Request::Turn {
-            worker: Token::new(1),
+            host_run: Token::new(1),
             record: Token::new(40),
             number: 1,
             read: Some(Token::new(5)),
@@ -2371,7 +2371,7 @@ fn bounded_message_and_input_at_idle_deadline_preserve_existing_fifo() {
     );
     assert_eq!(
         &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }),
-        &[Request::Waiting { worker: Token::new(1), read: Some(Token::new(5)) }]
+        &[Request::Waiting { host_run: Token::new(1), read: Some(Token::new(5)) }]
     );
     h.after(Duration::from_secs(30));
     assert_eq!(

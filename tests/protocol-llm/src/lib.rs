@@ -13,7 +13,7 @@
 //! and flight ledger (domain/run.md, section 8.2; domain/host.md, section 9).
 //! It calls the real agent's step, fire and resume entrances under bounded
 //! output pressure. Its host starts one charter, receives one answer and
-//! supplies typed push replies. No engine, worker, forge, channel or agent
+//! supplies typed push replies. No engine, host, forge, channel or agent
 //! protocol is linked. Opaque host objects are attested by the real skein JSON
 //! parser in the test protocol face. Whole fixture schemas are explicit caller
 //! data; shared Skein owns provider grammar and transport. Arbitrary application

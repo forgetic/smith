@@ -27,8 +27,8 @@ fn host_busy_lost_then_replayed_answer_preserves_opaque_input_name_scope_and_exa
     let first = &submissions[0];
     for (index, submission) in submissions.iter().enumerate() {
         assert_eq!(
-            (submission.worker, submission.name, &submission.tool, submission.effect, &submission.input),
-            (first.worker, first.name, &first.tool, first.effect, &first.input)
+            (submission.host_run, submission.name, &submission.tool, submission.effect, &submission.input),
+            (first.host_run, first.name, &first.tool, first.effect, &first.input)
         );
         assert_eq!(submission.relay.attempt, u32::try_from(index + 1).expect("three attempts"));
         assert!(submission.deadline <= submission.at.saturating_add(Duration::from_millis(300)));
@@ -65,7 +65,7 @@ fn actual_answer_after_withdrawal_is_retained_without_another_relay() {
 
 fn submission(at: u64, attempt: u32, owner: u64) -> Submission {
     Submission {
-        worker: Token::new(91),
+        host_run: Token::new(91),
         relay: run::RelayName { owner: Token::new(owner), attempt },
         name: run::CallName { activation: 1, completion: 4, position: 2 },
         tool: b"opaque".as_slice().into(),
@@ -99,7 +99,7 @@ fn positive_prefix() -> History {
         .expect("positive actual terminal");
     history
         .submit(submission(2, 2, 99))
-        .expect("new callback after simulated translated activation restart retains logical worker and input");
+        .expect("new callback after simulated translated activation restart retains logical host_run and input");
     history
 }
 
@@ -134,7 +134,7 @@ fn outside_history_positive_control_and_chronology_identity_feedback_negative_co
         Err("feedback erased or fabricated host evidence")
     );
     let mut changed = submission(4, 3, 100);
-    changed.worker = Token::new(92);
+    changed.host_run = Token::new(92);
     assert_eq!(history.submit(changed), Err("recovery changed immutable operation"));
     assert_eq!(history.submit(submission(3, 3, 100)), Err("recovery precedes terminal/backoff"));
     history.feedback(&run::Returned::HostUnknown).expect("closed uncertain positive control");

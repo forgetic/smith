@@ -111,7 +111,7 @@ fn submitted(agent: &mut Agent, host: &mut Host, next: &mut usize) -> DeliverySu
         }
     }
     let [submission] = agent.delivery_submissions() else { panic!("one actual root delivery") };
-    assert_eq!(submission.worker, Token::new(1));
+    assert_eq!(submission.host_run, Token::new(1));
     assert_eq!(submission.name, run::CallName { activation: 1, completion: 2, position: 0 });
     assert!(submission.at < submission.deadline);
     let [field] = submission.change.fields.as_ref() else { panic!("one whole caller field") };

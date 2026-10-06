@@ -1,15 +1,15 @@
 //! The copied smith agent's run child domain
 //! (programming-model.md, section 4.5; domain/run.md, section 14): one agent instance.
-//! A run takes its charter from the worker, opens the conversation that does
+//! A run takes its charter from the host, opens the conversation that does
 //! the work, accounts what it spends against one budget, and answers once.
 //!
 //! Sans-io: [`step`] and [`fire`] turn events into requests and change nothing
 //! but the [`Domain`] they are given. Time is an input; every effect, from
-//! opening a conversation to answering the worker, is a [`Request`] that its
+//! opening a conversation to answering the host, is a [`Request`] that its
 //! parent, the root domain (`smith-domain`), routes on, and its
 //! outcome comes back later through the parent as an [`Event`].
 //!
-//! A run has three faces, all through its parent: the worker's and io's, which
+//! A run has three faces, all through its parent: the host's and io's, which
 //! the parent routes to and from the protocol layer, and its conversations',
 //! which the parent translates to and from the session child domain's
 //! vocabulary. The run names no session type: siblings share none (programming-model.md, section 4.5).
@@ -33,8 +33,7 @@
 //! It also keeps the bounded labelled-message FIFO, current/offered read fence,
 //! settled wait/park state and activation-local turn numbering
 //! (domain/run.md, sections 6 and 13).
-//! The copied worker wording names a typed host; it does not require a process
-//! or channel. The run never knows authentication, provider dialect bytes,
+//! The run never knows authentication, provider dialect bytes,
 //! credential secrets, forge state, CI or the host's delivery policy. Entrances
 //! reserve [`MAX_OUT`] output slots, and the caller delivers pending terminals
 //! even while cancellation is settling (domain/run.md, sections 2, 10 and 14;

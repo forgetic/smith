@@ -210,7 +210,7 @@ pub enum HostSchedule {
 #[derive(Clone, Debug)]
 pub struct DeliverySubmission {
     /// Original parent logical scope, echoed unchanged. Contract: domain/run.md, section 8.2.
-    pub worker: Token,
+    pub host_run: Token,
 
     /// Actual callback right, distinct from the durable name. Contract: domain/run.md, section 8.2.
     pub owner: Token,
@@ -482,7 +482,7 @@ impl World {
         }
         stage.push(Event::Start {
             reply_to: ReplyTo::new(Token::new(1)),
-            worker: Token::new(1),
+            host_run: Token::new(1),
             activation: if settings.resume { 2 } else { 1 },
             charter,
             workspace,
@@ -771,7 +771,7 @@ impl World {
         }
         flight.key = Some(self.schedule.send(
             self.now,
-            Delivery::Terminal { family: Family::Delivery, owner, event: Event::Delivered { owner, push } },
+            Delivery::Terminal { family: Family::Delivery, owner, event: Event::Delivered { owner, delivery: push } },
         ));
         Ok(())
     }
@@ -974,8 +974,8 @@ impl World {
     )]
     fn request(&mut self, request: Request) {
         match request {
-            Request::Turn { worker, number, read, spent, turn } => {
-                assert_eq!(worker, Token::new(1));
+            Request::Turn { host_run, number, read, spent, turn } => {
+                assert_eq!(host_run, Token::new(1));
                 assert_eq!(usize::try_from(number).expect("bounded output number"), self.turns.len() + 1);
                 self.observe(Seen::Turn { number });
                 self.messages_seen
@@ -983,13 +983,13 @@ impl World {
                 self.turn_metadata.push((number, read, spent));
                 self.turns.push(turn);
             }
-            Request::Waiting { worker, read } => {
-                assert_eq!(worker, Token::new(1));
+            Request::Waiting { host_run, read } => {
+                assert_eq!(host_run, Token::new(1));
                 self.messages_seen.push((self.now, crate::messages_referee::Seen::Waiting { read }));
                 self.waiting.push((self.now, read));
             }
-            Request::Admitted { worker, run } => {
-                assert_eq!(worker, Token::new(1), "the host's admitted identity is echoed");
+            Request::Admitted { host_run, run } => {
+                assert_eq!(host_run, Token::new(1), "the host's admitted identity is echoed");
                 assert!(self.admitted.replace(run).is_none(), "a start is admitted at most once");
                 self.messages_seen.push((self.now, crate::messages_referee::Seen::Admitted));
             }
@@ -1017,8 +1017,8 @@ impl World {
                 self.messages_seen.push((self.now, crate::messages_referee::Seen::Answer { turns, parked, spent }));
                 self.answered = Some(self.now);
             }
-            Request::Checking { worker, .. } => {
-                assert_eq!(worker, Token::new(1), "checking notice echoes the host identity");
+            Request::Checking { host_run, .. } => {
+                assert_eq!(host_run, Token::new(1), "checking notice echoes the host identity");
             }
             Request::Complete {
                 owner,
@@ -1185,7 +1185,7 @@ impl World {
                 self.flights.get_mut((Family::Check, owner)).expect("the check is pending").key = Some(key);
             }
             Request::Abort { owner } => self.cancel(Family::Check, owner, Event::Aborted { owner }),
-            Request::Deliver { worker, owner, change, name, deadline } => {
+            Request::Deliver { host_run, owner, change, name, deadline } => {
                 // Title/body are this fixture host's final-Change policy only.
                 // The Report-only mid-run fixture instead requires opaque ticket.
                 let required: &[&[u8]] = if change.fields.iter().any(|field| field.name.as_ref() == b"ticket") {
@@ -1201,7 +1201,7 @@ impl World {
                         .expect("the scripted host requires this field");
                     assert!(!value.value.is_empty(), "the host receives the metadata its own contract required");
                 }
-                assert_eq!(worker, Token::new(1), "the push names the scripted host's request");
+                assert_eq!(host_run, Token::new(1), "the push names the scripted host's request");
                 self.delivery_names.push((name, self.now));
                 let tree = self.code();
                 let finishing = !change.fields.iter().any(|field| field.name.as_ref() == b"ticket");
@@ -1214,7 +1214,7 @@ impl World {
                 if self.parent_deliveries {
                     assert!(self.delivery_submissions.len() < 256, "finite actual parent delivery story ceiling");
                     self.delivery_submissions.push(DeliverySubmission {
-                        worker,
+                        host_run,
                         owner,
                         name,
                         change,
@@ -1247,14 +1247,18 @@ impl World {
                 };
                 let key = self.schedule.send(
                     complete.min(deadline),
-                    Delivery::Terminal { family: Family::Delivery, owner, event: Event::Delivered { owner, push } },
+                    Delivery::Terminal {
+                        family: Family::Delivery,
+                        owner,
+                        event: Event::Delivered { owner, delivery: push },
+                    },
                 );
                 self.flights.get_mut((Family::Delivery, owner)).expect("submitted delivery").key = Some(key);
             }
-            Request::HostCall { worker, relay, name, tool, effect, input, deadline } => {
+            Request::HostCall { host_run, relay, name, tool, effect, input, deadline } => {
                 self.host_history
                     .submit(crate::host_referee::Submission {
-                        worker,
+                        host_run,
                         relay,
                         name,
                         tool,
@@ -1504,7 +1508,7 @@ impl World {
                 self.checked.push(ran.exit == (run::Exit::Code { code: 0 }));
                 self.observe(Seen::Checked { owner, exit: ran.exit });
             }
-            Event::Delivered { push, .. } => {
+            Event::Delivered { delivery: push, .. } => {
                 self.pushes.push(push.clone());
                 let tree = self.snapshots.remove(&owner).expect("a push snapshots its checkout");
                 let landed = if matches!(push, run::Delivery::Delivered(_)) { tree } else { Vec::new() };
