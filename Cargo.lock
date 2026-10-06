@@ -210,6 +210,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-local-domain"
+version = "0.0.0"
+dependencies = [
+ "skein-lib",
+ "smith-agent-world",
+ "smith-domain",
+]
+
+[[package]]
 name = "smith-protocol-llm"
 version = "0.0.0"
 dependencies = [
