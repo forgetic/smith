@@ -99,3 +99,66 @@ fn a_transcript_the_agent_refuses_is_reported_and_nothing_starts() {
     resumed.line(b"Continue after a fresh start");
     assert!(resumed.drive(300), "the replacement history is resumable");
 }
+
+#[test]
+fn an_expired_credential_is_refreshed_and_the_completion_retried() {
+    let mut world = World::new(41);
+    world.reject_first_credential();
+    world.line(b"Hello");
+    assert!(world.drive(300), "the provider retry reaches the next wait");
+    assert_eq!(world.credential_requests(), 2, "the rejected generation triggers one refresh");
+    assert!(world.completions() >= 3, "the rejected completion was retried");
+    assert!(world.shown().iter().any(|text| text.as_ref() == b"Hello from the agent."));
+}
+
+#[test]
+fn an_exhausted_account_is_shown_to_the_person() {
+    let mut world = World::new(44);
+    world.exhaust_first_account();
+    world.line(b"Hello");
+    world.drive(300);
+    assert!(world.shown().iter().any(|text| text.as_ref() == b"A model account is exhausted"));
+}
+
+#[test]
+fn a_run_cancelled_at_the_terminal_answers_cancelled_after_its_last_turn_is_saved() {
+    let mut world = World::new(42);
+    world.slow_store();
+    world.line(b"Hello");
+    assert!(!world.drive(300), "the slow store holds a turn acknowledgement");
+    assert!(world.delayed_turns() > 0);
+    world.interrupt();
+    assert!(!world.drive_to_cancelled(300), "the cancelled answer waits for the store");
+    assert!(!world.shown().iter().any(|text| text.as_ref() == b"Run cancelled"));
+    for _ in 0..4 {
+        assert!(world.release_turn(), "a stalled turn must be acknowledged");
+        if world.drive_to_cancelled(300) {
+            break;
+        }
+    }
+    assert!(
+        world.shown().iter().any(|text| text.as_ref() == b"Run cancelled"),
+        "the answer follows the last saved turn"
+    );
+    assert!(world.saved_turns() > 0);
+}
+
+#[test]
+fn a_slow_store_pauses_the_agent_and_loses_no_turn() {
+    let mut world = World::tight_unsaved(43);
+    world.slow_store();
+    world.line(b"Hello");
+    assert!(!world.drive(300), "the full unsaved window pauses the chat");
+    assert_eq!(world.saved_turns(), 1, "the second completion cannot tell another turn yet");
+    assert_eq!(world.delayed_turns(), 1);
+
+    for _ in 0..8 {
+        if world.waiting() {
+            break;
+        }
+        assert!(world.release_turn(), "each stalled turn has an acknowledgement to release");
+        world.drive(300);
+    }
+    assert!(world.waiting(), "the paused agent resumes after store acknowledgements");
+    assert_eq!(world.saved_turns(), 3, "all three conversation turns reached the store");
+}

@@ -7,7 +7,7 @@ use core::mem;
 use skein_lib::{Env, List, Queue, ReplyTo, Time, Token};
 use smith_domain as agent;
 
-use crate::boundary::{ChatState, Event, ExitStatus, Request};
+use crate::boundary::{AgentIo, ChatState, Event, ExitStatus, Request};
 use crate::chat::{Chat, Phase};
 use crate::credentials::Grants;
 use crate::person::Line;
@@ -34,8 +34,10 @@ pub struct Domain {
     grant_failed: bool,
     run: Option<Token>,
     turns: Turns,
+    held: Queue<AgentIo>,
     stop_failed: bool,
     show_bytes: u32,
+    wall_deadline: Option<Time>,
 }
 
 impl Domain {
@@ -55,8 +57,10 @@ impl Domain {
             grant_failed: false,
             run: None,
             turns: Turns::new(limits.unsaved),
+            held: Queue::with_capacity(1),
             stop_failed: false,
             show_bytes: limits.show_bytes,
+            wall_deadline: None,
         })
     }
 
@@ -69,18 +73,25 @@ impl Domain {
     /// Earliest child deadline.
     #[must_use]
     pub fn next_deadline(&self) -> Option<Time> {
-        self.agent.next_deadline()
+        if self.pressured() { self.wall_deadline } else { self.agent.next_deadline() }
     }
 
     /// Whether the child has a deadline due at `now`.
     #[must_use]
     pub fn is_due(&self, now: Time) -> bool {
-        self.agent.is_due(now)
+        match self.next_deadline() {
+            Some(deadline) => deadline <= now,
+            None => false,
+        }
     }
 
     /// Reclaim child slots after delivering one iteration's output.
     pub fn reclaim(&mut self) {
         self.agent.reclaim();
+    }
+
+    fn pressured(&self) -> bool {
+        self.turns.unsaved.room() == 0 && !self.held.is_empty()
     }
 }
 
@@ -96,16 +107,50 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
         Event::StoreFailed { reason: _ } => store_failed(domain, env, out),
         Event::Credential { grant } => credential(domain, env, grant, out),
         Event::NoCredential { account: _, reason: _ } => no_credential(domain, env, out),
-        Event::Agent(io) => {
-            agent::step(&mut domain.agent, &agent_env(env), io.into_event(), &mut domain.agent_out);
-        }
+        Event::Agent(io) => agent_terminal(domain, env, io),
     }
+    route_agent(domain, env, out);
+    release_held(domain, env, out);
+}
+
+fn agent_terminal(domain: &mut Domain, env: &Env<Limits>, io: AgentIo) {
+    let completion = match &io {
+        AgentIo::Completed { .. } | AgentIo::Failed { .. } | AgentIo::Cancelled { .. } => true,
+        AgentIo::Done { .. }
+        | AgentIo::Read { .. }
+        | AgentIo::Probed { .. }
+        | AgentIo::Checked { .. }
+        | AgentIo::Aborted { .. } => false,
+    };
+    if completion && domain.turns.unsaved.room() == 0 {
+        domain.held.push(io);
+    } else {
+        agent::step(&mut domain.agent, &agent_env(env), io.into_event(), &mut domain.agent_out);
+    }
+}
+
+fn release_held(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
+    if domain.turns.unsaved.room() == 0 {
+        return;
+    }
+    let Some(io) = domain.held.pop() else { return };
+    agent::step(&mut domain.agent, &agent_env(env), io.into_event(), &mut domain.agent_out);
     route_agent(domain, env, out);
 }
 
 /// Fire one child deadline and route its output.
 pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
-    agent::fire(&mut domain.agent, &agent_env(env), &mut domain.agent_out);
+    if domain.pressured() {
+        if let Some(deadline) = domain.wall_deadline
+            && deadline <= env.now
+            && domain.chat.phase == Phase::Running
+        {
+            interrupt(domain, env, out);
+            domain.wall_deadline = None;
+        }
+    } else {
+        agent::fire(&mut domain.agent, &agent_env(env), &mut domain.agent_out);
+    }
     route_agent(domain, env, out);
 }
 
@@ -258,6 +303,7 @@ fn maybe_start(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
     }
     let grants = mem::replace(&mut domain.grants.values, List::with_capacity(env.limits.agent.accounts)).into_boxed();
     let history = if domain.config.resume { domain.transcript.take() } else { None };
+    domain.wall_deadline = Some(env.now.saturating_add(domain.config.budget.time));
     agent::step(
         &mut domain.agent,
         &agent_env(env),
@@ -302,6 +348,7 @@ fn interrupt(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
         }
         Phase::Running => {
             domain.chat.phase = Phase::Ending;
+            domain.wall_deadline = None;
             if let Some(run) = domain.run {
                 agent::step(&mut domain.agent, &agent_env(env), agent::Event::Cancel { run }, &mut domain.agent_out);
             }
@@ -367,8 +414,12 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
             agent::Request::HostCall { .. } | agent::Request::WithdrawHost { .. } | agent::Request::Deliver { .. } => {
                 unreachable!("local chat grants no host tools or delivery");
             }
+            agent::Request::Cancel { owner } => {
+                if !held_completion(domain, owner) {
+                    out.push(Request::Agent(agent::Request::Cancel { owner }));
+                }
+            }
             forwarded @ (agent::Request::Complete { .. }
-            | agent::Request::Cancel { .. }
             | agent::Request::Io { .. }
             | agent::Request::CancelIo { .. }
             | agent::Request::Read { .. }
@@ -401,6 +452,7 @@ fn finish_answer(domain: &mut Domain, out: &mut Queue<Request>) {
     };
     out.push(Request::Show { text: crate::person::bounded_text(&text, domain.show_bytes) });
     domain.run = None;
+    domain.wall_deadline = None;
     domain.line = None;
     if domain.chat.closed {
         domain.chat.phase = Phase::Done;
@@ -411,4 +463,23 @@ fn finish_answer(domain: &mut Domain, out: &mut Queue<Request>) {
         domain.chat.load_requested = true;
         out.push(Request::Load);
     }
+}
+
+fn held_completion(domain: &Domain, owner: Token) -> bool {
+    for io in &domain.held {
+        let pending = match io {
+            AgentIo::Completed { owner: held, .. }
+            | AgentIo::Failed { owner: held, .. }
+            | AgentIo::Cancelled { owner: held } => *held,
+            AgentIo::Done { .. }
+            | AgentIo::Read { .. }
+            | AgentIo::Probed { .. }
+            | AgentIo::Checked { .. }
+            | AgentIo::Aborted { .. } => unreachable!("only completion terminals are held"),
+        };
+        if pending == owner {
+            return true;
+        }
+    }
+    false
 }

@@ -231,3 +231,9 @@ with `measure -j 1`: six focused local-world tests passed in 0.037 seconds,
 including resumed invocation, activation and turn crash cuts, and refusal
 of incompatible saved history. There are still no local fuzzy tests. The
 workspace timeouts remain unchanged.
+
+Local credential, cancellation and store-pressure stories were measured
+serially on 2026-10-06 with `measure -j 1`: ten focused local-world tests
+passed in 0.044 seconds. There are no local fuzzy tests yet. The parallel
+workspace gate passed 557 focused tests in 3.526 seconds and eleven fuzzy
+tests in 4.638 seconds. The suite budgets are unchanged.

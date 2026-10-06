@@ -6,7 +6,7 @@ use core::mem::size_of;
 use skein_lib::{Queue, Token};
 use smith_domain::{self as agent, run};
 
-use crate::{Fact, Request};
+use crate::{AgentIo, Fact, Request};
 
 /// Capacity of one local chat and its child agent.
 #[derive(Clone, Debug)]
@@ -59,11 +59,13 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(u64::from(limits.show_bytes))?;
     let child_out = Queue::<agent::Request>::worst_case(agent::max_out(&limits.agent))?
         .checked_add(u64::from(agent::max_out(&limits.agent)).checked_mul(record.max(limits.agent.run.run_bytes))?)?;
+    let held = Queue::<AgentIo>::worst_case(1)?.checked_add(limits.agent.session.completion_bytes)?;
     agent
         .checked_add(configuration)?
         .checked_add(lines)?
         .checked_add(unsaved)?
         .checked_add(out)?
         .checked_add(child_out)?
+        .checked_add(held)?
         .checked_add(Queue::<Fact>::worst_case(limits.facts)?)
 }

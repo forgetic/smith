@@ -1,7 +1,7 @@
 //! A typed local host over a durable fake store and the shared scripted
 //! agent-provider translation (domain/host.md, sections 8–10).
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use skein_fake_llm_domain as provider;
 use skein_lib::{Duration, Env, Queue, ReplyTo, Time, Token, Wall};
@@ -73,11 +73,20 @@ pub enum Cut {
     AfterTurnSaved(u32),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum Goal {
     Waiting,
     Parked,
     Cut,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum FirstFailure {
+    None,
+    Reject,
+    Exhaust,
+    Used,
 }
 
 /// One invocation; the store can be taken into a later invocation.
@@ -90,17 +99,20 @@ pub struct World {
     provider_env: Env<provider::Config>,
     provider_out: Queue<provider::Request>,
     pending: BTreeMap<Token, (tools::Grants, Box<[agent::llm::Served]>)>,
+    cancelled: BTreeSet<Token>,
     events: VecDeque<Event>,
     store: Store,
     shown: Vec<Box<[u8]>>,
-    waiting: bool,
-    parked: bool,
+    reached: BTreeSet<Goal>,
     exit: Option<ExitStatus>,
     completions: u32,
     prompt_assistants: Vec<usize>,
     activation_turns: u32,
     cut: Option<Cut>,
-    cut_reached: bool,
+    slow_store: bool,
+    delayed_turns: VecDeque<u32>,
+    first_failure: FirstFailure,
+    credential_requests: u32,
 }
 
 impl World {
@@ -108,6 +120,12 @@ impl World {
     #[must_use]
     pub fn new(seed: u64) -> World {
         Self::with_store(seed, Store::default())
+    }
+
+    /// A one-turn unsaved window for store-pressure stories.
+    #[must_use]
+    pub fn tight_unsaved(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 1)
     }
 
     /// A fresh local domain over an existing durable fake store.
@@ -123,6 +141,10 @@ impl World {
     }
 
     fn with_resume(seed: u64, store: Store, resume: bool) -> World {
+        Self::with_capacity(seed, store, resume, 2)
+    }
+
+    fn with_capacity(seed: u64, store: Store, resume: bool, unsaved: u32) -> World {
         let limits = local::Limits {
             agent: agent_world::LIMITS,
             endpoints: Box::new([run::charter::Endpoint(0)]),
@@ -132,7 +154,7 @@ impl World {
             line_bytes: 1024,
             show_bytes: 4096,
             lines: 8,
-            unsaved: 2,
+            unsaved,
             facts: 64,
         };
         let config = local::Config {
@@ -167,17 +189,20 @@ impl World {
             provider_env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits: provider_config },
             provider_out: Queue::with_capacity(provider::MAX_OUT),
             pending: BTreeMap::new(),
+            cancelled: BTreeSet::new(),
             events: VecDeque::new(),
             store,
             shown: Vec::new(),
-            waiting: false,
-            parked: false,
+            reached: BTreeSet::new(),
             exit: None,
             completions: 0,
             prompt_assistants: Vec::new(),
             activation_turns: 0,
             cut: None,
-            cut_reached: false,
+            slow_store: false,
+            delayed_turns: VecDeque::new(),
+            first_failure: FirstFailure::None,
+            credential_requests: 0,
         }
     }
 
@@ -185,6 +210,50 @@ impl World {
     #[must_use]
     pub fn into_store(self) -> Store {
         self.store
+    }
+
+    /// Make the first completion reject its initial credential generation.
+    pub fn reject_first_credential(&mut self) {
+        self.first_failure = FirstFailure::Reject;
+    }
+
+    /// Make the first completion report account exhaustion.
+    pub fn exhaust_first_account(&mut self) {
+        self.first_failure = FirstFailure::Exhaust;
+    }
+
+    /// Hold store turn acknowledgements until released by the story.
+    pub fn slow_store(&mut self) {
+        self.slow_store = true;
+    }
+
+    /// Release the oldest delayed turn acknowledgement.
+    pub fn release_turn(&mut self) -> bool {
+        let Some(number) = self.delayed_turns.pop_front() else { return false };
+        self.events.push_back(Event::TurnSaved { number });
+        true
+    }
+
+    /// Number of delayed turn acknowledgements.
+    #[must_use]
+    pub fn delayed_turns(&self) -> usize {
+        self.delayed_turns.len()
+    }
+
+    /// Number of credential requests actually made by the local host.
+    #[must_use]
+    pub fn credential_requests(&self) -> u32 {
+        self.credential_requests
+    }
+
+    /// The person interrupts the live run.
+    pub fn interrupt(&mut self) {
+        self.events.push_back(Event::Interrupt);
+    }
+
+    /// Drive until a cancelled answer is shown.
+    pub fn drive_to_cancelled(&mut self, iterations: u32) -> bool {
+        self.drive_until(iterations, Goal::Cancelled)
     }
 
     /// Type a person line; its name becomes durable before agent delivery.
@@ -207,7 +276,7 @@ impl World {
     /// Whether the child reported that it waits for another person message.
     #[must_use]
     pub fn waiting(&self) -> bool {
-        self.waiting
+        self.reached.contains(&Goal::Waiting)
     }
 
     /// Number of actual fake provider completion calls.
@@ -266,7 +335,7 @@ impl World {
                 if let (Some(Cut::AfterTurnSaved(target)), Some(number)) = (self.cut, saved)
                     && target == number
                 {
-                    self.cut_reached = true;
+                    self.reached.insert(Goal::Cut);
                 }
             }
             if self.domain.is_due(self.env.now) {
@@ -282,6 +351,9 @@ impl World {
                 let provider::Request::Reply { to, result } = reply;
                 let owner = to.into_token();
                 let (grants, served) = self.pending.remove(&owner).expect("one provider terminal per call");
+                if self.cancelled.remove(&owner) {
+                    continue;
+                }
                 let event = match result {
                     Ok(answer) => Event::Agent(AgentIo::Completed {
                         owner,
@@ -298,15 +370,14 @@ impl World {
             }
             self.domain.reclaim();
             self.provider.reclaim();
-            let reached = match goal {
-                Goal::Waiting => self.waiting && self.saved_turns() > 0,
-                Goal::Parked => self.parked,
-                Goal::Cut => self.cut_reached,
-            };
+            let reached = self.reached.contains(&goal) && (goal != Goal::Waiting || self.saved_turns() > 0);
             if reached {
                 return true;
             }
             if !self.domain.is_ready() && self.events.is_empty() && self.out.is_empty() {
+                if self.slow_store && !self.delayed_turns.is_empty() && self.pending.is_empty() {
+                    return false;
+                }
                 let next = [self.domain.next_deadline(), self.provider.next_deadline()].into_iter().flatten().min();
                 let Some(next) = next else { return false };
                 self.env.now = next;
@@ -320,10 +391,13 @@ impl World {
         match request {
             Request::Show { text } => {
                 if text.as_ref() == b"Waiting for a message" {
-                    self.waiting = true;
+                    self.reached.insert(Goal::Waiting);
                 }
                 if text.as_ref() == b"Chat parked" {
-                    self.parked = true;
+                    self.reached.insert(Goal::Parked);
+                }
+                if text.as_ref() == b"Run cancelled" {
+                    self.reached.insert(Goal::Cancelled);
                 }
                 self.shown.push(text);
             }
@@ -341,12 +415,12 @@ impl World {
                 self.store.state = Some(state);
                 self.events.push_back(Event::StateSaved);
                 if self.cut == Some(Cut::AfterSaveState) {
-                    self.cut_reached = true;
+                    self.reached.insert(Goal::Cut);
                 }
             }
             Request::SaveTurn { number, read, turn } => {
                 if self.cut == Some(Cut::BeforeSaveTurn(number)) {
-                    self.cut_reached = true;
+                    self.reached.insert(Goal::Cut);
                     return;
                 }
                 assert_eq!(number, self.activation_turns.saturating_add(1));
@@ -354,14 +428,21 @@ impl World {
                 let state = self.store.state.as_mut().expect("activation state saved before any turn");
                 state.read = read;
                 self.store.turns.push(turn);
-                self.events.push_back(Event::TurnSaved { number });
+                if self.slow_store {
+                    self.delayed_turns.push_back(number);
+                } else {
+                    self.events.push_back(Event::TurnSaved { number });
+                }
             }
-            Request::Credential { account } => self.events.push_back(Event::Credential {
-                grant: agent::Grant {
-                    name: agent::GrantName { account, generation: 1 },
-                    valid: Duration::from_secs(7200),
-                },
-            }),
+            Request::Credential { account } => {
+                self.credential_requests = self.credential_requests.saturating_add(1);
+                self.events.push_back(Event::Credential {
+                    grant: agent::Grant {
+                        name: agent::GrantName { account, generation: u64::from(self.credential_requests) },
+                        valid: Duration::from_secs(7200),
+                    },
+                });
+            }
             Request::Agent(request) => self.agent_request(request),
             Request::Exit { status } => self.exit = Some(status),
         }
@@ -375,6 +456,26 @@ impl World {
                     .push(prompt.messages.iter().filter(|message| message.role == agent::llm::Role::Assistant).count());
                 let grants = prompt.tools;
                 let served = prompt.served.clone();
+                if matches!(self.first_failure, FirstFailure::Exhaust) {
+                    self.first_failure = FirstFailure::Used;
+                    self.events.push_back(Event::Agent(AgentIo::Failed {
+                        owner,
+                        failure: agent::llm::Failure::Exhausted { retry_after: Duration::from_secs(60) },
+                        evidence: agent::llm::Evidence::Response,
+                        detail: Box::new([]),
+                    }));
+                    return;
+                }
+                if matches!(self.first_failure, FirstFailure::Reject) {
+                    self.first_failure = FirstFailure::Used;
+                    self.events.push_back(Event::Agent(AgentIo::Failed {
+                        owner,
+                        failure: agent::llm::Failure::Unauthorized,
+                        evidence: agent::llm::Evidence::Response,
+                        detail: Box::new([]),
+                    }));
+                    return;
+                }
                 assert!(self.pending.insert(owner, (grants, served)).is_none());
                 let query = translate::query(prompt);
                 provider::step(
@@ -384,7 +485,10 @@ impl World {
                     &mut self.provider_out,
                 );
             }
-            agent::Request::Cancel { owner } => self.events.push_back(Event::Agent(AgentIo::Cancelled { owner })),
+            agent::Request::Cancel { owner } => {
+                self.cancelled.insert(owner);
+                self.events.push_back(Event::Agent(AgentIo::Cancelled { owner }));
+            }
             agent::Request::Io { .. }
             | agent::Request::CancelIo { .. }
             | agent::Request::Read { .. }
