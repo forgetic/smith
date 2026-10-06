@@ -245,9 +245,9 @@ a host (temper's worker, smith's local host, ...)
     it speaks, and the highest version both speak is chosen. With none in
     common, the channel ends before a run starts.
   - **Adding a kind:** a kind may be added within a version, as optional.
-    A reader that does not know it skips it and answers unsupported, and
-    the writer carries on without it (programming-model.md, section 8).
-    Every other change is a new version.
+    A peer that does not take it leaves it out of its terms; the writer,
+    refused at its entrance, carries on without it (skein's `channel.md`,
+    section 5.2). Every other change is a new version.
 - **The charter carries its own version.** The party that writes it may
   not be the host, and may run another release of smith: temper's engine
   writes charters that its workers carry unread. The run's result is
