@@ -144,7 +144,7 @@ fn charter(context_bytes: u64) -> Charter {
         instructions,
         brief: run::Brief { sections: sections.into_boxed_slice() },
 
-        grants: Grants { deliver: None, tools: all, agents: true, host_tools: Box::new([]) },
+        grants: Grants { wait: true, deliver: None, tools: all, agents: true, host_tools: Box::new([]) },
         outcome: OutcomeSpec {
             change: Some(ChangeSpec {
                 fields: Box::new([

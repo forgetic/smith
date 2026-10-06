@@ -1688,6 +1688,7 @@ fn charter(settings: &Settings) -> run::Charter {
         },
 
         grants: Grants {
+            wait: true,
             deliver: if matches!(settings.job, Job::MidReport | Job::MidChange | Job::MarkerReport) {
                 Some(ChangeSpec { fields: Box::new([FieldRule { name: b"ticket".as_slice().into(), max: 128 }]) })
             } else {

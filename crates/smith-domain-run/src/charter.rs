@@ -115,6 +115,10 @@ pub struct Section {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Grants {
+    /// Main-only waiting authority. When absent the main session cannot call
+    /// `wait`; children never inherit it. Contract: domain/run.md, sections 3.1 and 5.1.
+    pub wait: bool,
+
     /// Separately granted main-only delivery with required host field caps.
     /// Final Change permission does not grant this tool; children never inherit it.
     /// Admission checks minimum container/name/value fit before session or IO.

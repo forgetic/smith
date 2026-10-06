@@ -231,6 +231,7 @@ pub(crate) fn charter() -> Charter {
         },
 
         grants: Grants {
+            wait: true,
             deliver: None,
             tools: Tools { inspect: true, modify: false, shell: true },
 
@@ -2492,6 +2493,45 @@ fn absent_workspace_suppresses_workspace_families_and_preserves_main_services() 
     assert_eq!(opening.host_tools.len(), 1);
     assert_eq!(opening.host_tools[0].name.as_ref(), b"host_action");
     assert!(skein_lib::bytes::find(&opening.system, b"There is no checkout.").is_some());
+}
+
+#[test]
+fn a_run_with_only_finish_does_not_offer_or_accept_wait() {
+    let mut harness = Harness::new(LIMITS);
+    let mut policy = charter();
+    policy.grants.wait = false;
+    policy.grants.tools = Tools { inspect: false, modify: false, shell: false };
+    policy.grants.agents = false;
+    policy.grants.host_tools = Box::new([]);
+    let emitted = harness.start_workspace(53, policy, None);
+    let [Request::Admitted { .. }, Request::Open { conversation, opening }] = emitted.as_ref() else {
+        panic!("workspace-free start opens main: {emitted:?}");
+    };
+    assert!(!opening.wait);
+    assert!(opening.finish);
+    assert!(!opening.deliver);
+    assert_eq!(opening.tools, Tools { inspect: false, modify: false, shell: false });
+    assert!(opening.host_tools.is_empty());
+    let conversation = *conversation;
+    assert!(harness.step(Event::Started { conversation, peer: Token::new(54) }).is_empty());
+    let call = Token::new(55);
+    assert_eq!(
+        harness
+            .step(Event::Delegated {
+                conversation,
+                call,
+                name: crate::CallName { activation: 1, completion: 1, position: 0 },
+                ask: Ask::Wait,
+                deadline: Time::from_nanos(u64::MAX),
+            })
+            .as_ref(),
+        [Request::Return {
+            spent: 0,
+            spend_overflow: false,
+            call,
+            result: Returned::Refused { refusal: AskRefusal::NotGranted }
+        }]
+    );
 }
 
 fn refuse_workspace(mounted: Option<Workspace>, limits: Limits, expected: Invalid) {

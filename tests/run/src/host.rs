@@ -569,7 +569,7 @@ impl Host {
                 sections: Box::new([smith_domain_run::Section { title: b"Task".as_slice().into(), text: brief }]),
             },
 
-            grants: Grants { deliver: None, tools, agents, host_tools: host_tools.into() },
+            grants: Grants { wait: true, deliver: None, tools, agents, host_tools: host_tools.into() },
             outcome: OutcomeSpec {
                 change: change.then_some(ChangeSpec {
                     fields: Box::new([

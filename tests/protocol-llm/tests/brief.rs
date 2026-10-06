@@ -89,6 +89,7 @@ fn charter(settings: &Settings, instructions: &str) -> run::Charter {
             ]),
         },
         grants: Grants {
+            wait: true,
             deliver: None,
             tools: Tools { inspect: true, modify: true, shell: false },
             agents: true,

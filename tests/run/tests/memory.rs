@@ -121,6 +121,7 @@ fn charter(held: u64) -> Charter {
         brief,
 
         grants: Grants {
+            wait: true,
             deliver: None,
             tools: Tools { inspect: true, modify: true, shell: true },
 
@@ -625,6 +626,7 @@ fn full_delivery_charter(limits: Limits) -> Charter {
         brief,
 
         grants: Grants {
+            wait: true,
             deliver: Some(ChangeSpec { fields: Box::new([]) }),
             tools: Tools { inspect: true, modify: true, shell: true },
 

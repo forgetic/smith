@@ -463,6 +463,7 @@ mod tests {
     fn absent_workspace_and_empty_field_rules_are_said_plainly() {
         let charter = Charter {
             grants: Grants {
+                wait: true,
                 deliver: None,
                 tools: Tools { inspect: false, modify: false, shell: false },
                 ..charter().grants

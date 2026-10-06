@@ -786,7 +786,7 @@ fn serve(
     let Serving { reply_to, main, conversation, over, made } = serving;
     match ask {
         Ask::Wait => {
-            let result = if main == conversation {
+            let result = if main == conversation && run.charter.grants.wait {
                 run.waiting = true;
                 Returned::Waiting
             } else {
@@ -1611,7 +1611,7 @@ fn opening(
     Opening {
         activation,
         transcript: None,
-        wait: true,
+        wait: charter.grants.wait,
         host_tools: charter.grants.host_tools.clone(),
         deliver: charter.grants.deliver.is_some(),
         llm: charter.llm.clone(),

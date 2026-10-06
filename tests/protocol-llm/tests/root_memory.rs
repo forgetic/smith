@@ -175,6 +175,7 @@ fn charter(restoring: bool) -> run::Charter {
         },
 
         grants: run::charter::Grants {
+            wait: true,
             deliver: None,
             tools: run::charter::Tools { inspect: false, modify: false, shell: false },
             agents: false,

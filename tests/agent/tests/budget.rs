@@ -126,6 +126,7 @@ fn charter(settings: &Settings, cue: &[u8], rates: &[Rate]) -> run::Charter {
             }]),
         },
         grants: Grants {
+            wait: true,
             deliver: None,
             tools: Tools { inspect: true, modify: settings.writable, shell: false },
             agents: true,
