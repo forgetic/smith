@@ -22,8 +22,10 @@ host's tools and MCP servers. What is still open is listed in section 8.
 
 - **Directories side by side.** A workspace is one or more directories
   (documents, data, notes, code), each mounted under the name the LLM
-  calls it, so what refers to a sibling by path works. Each may be
-  writable or not; its host decides which (run.md, 3.2).
+  calls it, so what refers to a sibling by path works. Relative paths
+  and commands start in the first directory; the others are its
+  siblings. Each may be writable or not; its host decides which (run.md,
+  3.2).
 - **Repositories are directories with git.** A directory that is a git
   working tree gets git's protections: its git directory is never
   written (section 4), and it may start from a merge in progress.
@@ -59,7 +61,8 @@ modify (`write`, `edit`), shell.
 - **The workspace is shared, knowledge is not.** What a session's LLM has
   read, and at which version, is that session's own state.
 - **Read before write.** A session may change a file only if its LLM has
-  read the current version; creating a file needs no read. The version is
+  read the current version; creating a file needs no read, and a version
+  the session wrote itself counts as read. The version is
   checked against the real file when writing, so a change made meanwhile
   by another session, or by anything else, is caught.
 - **Confined.** Paths resolve inside the workspace's directories, and

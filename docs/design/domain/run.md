@@ -112,8 +112,9 @@ those are what it enforces: the workspace, if any, and what it may
 write, the tools, each directory's guide, the checks, how to finish
 (the contract, as the LLM must meet it) and how waiting works. The
 domain decides what each says and in which order, and writes it as text,
-as it writes every result and problem the LLM reads, so a transcript
-keeps exactly what the LLM was told.
+as it writes the results and problems of the run's own tools and the
+host's, so a transcript keeps exactly what the LLM was told. The
+workspace tools' outcomes stay typed (tools.md, section 4).
 
 A guide is read from each workspace directory at the path the
 conventions name,
@@ -410,8 +411,8 @@ delivered (turns, calls, the answer, what was spent) is not a fact.
   host's on as given; it decodes owned and served calls into typed
   entities, and checks host tools' inputs only for being JSON objects
   within limits.
-- **Text as written:** the system text, results and problems the domain
-  wrote (3.3), placed in each provider's request.
+- **Text as written:** the system text, and the results and problems the
+  domain wrote (3.3), placed in each provider's request.
 - **The channel** to the host (host.md, section 3).
 - **Files and processes,** through io, when there is a workspace: guides
   read as text, checks run
