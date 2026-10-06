@@ -151,16 +151,12 @@ version = "0.0.0"
 dependencies = [
  "skein-fake-checkout",
  "skein-fake-llm-domain",
- "skein-json",
  "skein-lib",
- "skein-llm",
- "skein-llm-world",
  "skein-world",
  "smith-domain",
  "smith-domain-tools",
  "smith-host-domain",
  "smith-host-world",
- "smith-protocol-llm",
  "smith-session-world",
  "smith-tools-world",
 ]
@@ -275,6 +271,26 @@ dependencies = [
  "skein-lib",
  "skein-llm",
  "smith-domain",
+]
+
+[[package]]
+name = "smith-protocol-llm-world"
+version = "0.0.0"
+dependencies = [
+ "skein-fake-checkout",
+ "skein-fake-llm-domain",
+ "skein-json",
+ "skein-lib",
+ "skein-llm",
+ "skein-llm-world",
+ "skein-world",
+ "smith-domain",
+ "smith-domain-tools",
+ "smith-host-domain",
+ "smith-host-world",
+ "smith-protocol-llm",
+ "smith-session-world",
+ "smith-tools-world",
 ]
 
 [[package]]

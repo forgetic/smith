@@ -1,6 +1,5 @@
 //! Actual shared completions into root blocks, with immutable declaration lookup.
 //! No provider ID, assistant position or declared host effect comes from a caller override.
-//! Contract: scratch/client.md, sections 2, 4 and 6.
 
 use alloc::boxed::Box;
 use core::mem::size_of;
@@ -17,7 +16,6 @@ use crate::types::{Context, ResolvedCall, ToolKind};
 /// caller handoff. Excess decoded ownership becomes `TooLarge` without losing
 /// original provider bytes. Invalid caller handoff or incompatible replay is a
 /// typed translation refusal; an admitted actual Client replay fits its envelope.
-/// Contract: scratch/client.md, sections 2, 4 and 6.
 pub fn completion(
     context: Context,
     owner: Token,

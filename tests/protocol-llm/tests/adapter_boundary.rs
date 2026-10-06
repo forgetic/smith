@@ -7,11 +7,11 @@ use skein_fake_llm_domain::{self as fake, api};
 use skein_lib::{Env, Queue, Time, Token, Wall};
 use skein_llm::{self as shared, client};
 use skein_llm_world::fake::Exchange;
-use smith_agent_world::wire::{self, Configuration};
 use smith_domain::{Event, llm, run, tools};
 use smith_protocol_llm::{
     self as adapter, Context, Input, Limits, Receiving, ResolvedCall, ResultText, ToolKind, ToolSchema,
 };
+use smith_protocol_llm_world::wire::{self, Configuration};
 
 const OWNER: Token = Token::new(71);
 const OTHER: Token = Token::new(72);

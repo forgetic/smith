@@ -15,12 +15,12 @@ use skein_fake_llm_domain::api::{Finish, Line, Script, Turn as ScriptTurn};
 use skein_lib::{Duration, Env, Queue, ReplyTo, Time, Token, Wall};
 use skein_llm_world::fake::{ObservationLimits, extra_worst_case};
 use skein_world::domain::heap::{Counting, Meter};
-use smith_agent_world::{
+use smith_domain::{self as root, Domain, Event, Grant, GrantName, Limits, Request, llm, run, session};
+use smith_protocol_llm::{self as adapter, Receiving, ResolvedCall, ToolKind, ToolSchema};
+use smith_protocol_llm_world::{
     LIMITS,
     wire::{self, Configuration, Observed, Wire},
 };
-use smith_domain::{self as root, Domain, Event, Grant, GrantName, Limits, Request, llm, run, session};
-use smith_protocol_llm::{self as adapter, Receiving, ResolvedCall, ToolKind, ToolSchema};
 
 #[global_allocator]
 static HEAP: Counting = Counting;

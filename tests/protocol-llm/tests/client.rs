@@ -5,9 +5,9 @@
 //! serialization preserves the complete nested value and every extra field.
 use skein_fake_llm_domain::api::{Finish, Line, Part, Script, Turn};
 use skein_lib::{Duration, Token};
-use smith_agent_world::wire::{self, Configuration, Observed, Wire};
 use smith_domain::{Event, llm, run, tools};
 use smith_protocol_llm::{self as adapter, Limits, Receiving};
+use smith_protocol_llm_world::wire::{self, Configuration, Observed, Wire};
 
 const BODY: &[u8] = br#"{ "opaque" : {"future":[1,true,null]}, "extra":"unchanged" }"#;
 const SCHEMA: &[u8] = br#"{"type":"object","properties":{"opaque":{"type":"object"}},"required":["opaque"],"x-caller":{"nested":[1,null,true]}}"#;

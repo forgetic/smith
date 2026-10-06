@@ -1,8 +1,19 @@
-//! Scripted agent domain world (domain/run.md, sections 13 and 14).
-//! It keeps schedules, pending boundary requests, checkout bytes and observations.
-//! It never knows provider grammar or transport bytes. Entry points start a
-//! charter, drive the typed fake LLM, inject parent input, and return host
-//! terminals. Only public counters are read for final quiescence checks.
+//! The scripted shell for the copied domain tree (domain/host.md, sections 2
+//! and 11; domain/run.md, section 14). It keeps schedules, pending boundary
+//! requests, checkout bytes and observations; it never uses private state to
+//! choose replies. Only final quiescence checks read public domain counters.
+//! An opt-in wire composition retains actual Clients separately from root callback
+//! lookup, exposes byte-peer queries, and closes physical owners bottom-up. The
+//! root's iteration supplies both clocks; pending wire progress prevents timer
+//! jumps. Provider grammar and generic stream scheduling remain unknown here.
+//! Exactly one backend is selected before construction: wire worlds retain no
+//! unused typed provider, provider queues or provider-call ledger.
+//! Entrances are original Start, bounded drive, parent message/cancel and wall
+//! injection (scratch/client.md, sections 1, 4 and 5; programming-model.md, section 9).
+//! The separate parent-delivery entrance exposes whole actual submissions and
+//! retains their existing flight/snapshot until an actual outside terminal is
+//! scheduled. It never chooses that parent's durable decision or fabricates a
+//! channel return (domain/run.md, section 8.2; domain/host.md, section 9).
 
 use std::collections::BTreeMap;
 
@@ -11,13 +22,14 @@ use skein_fake_llm_domain as provider;
 use skein_lib::{Duration, ReplyTo, Rng, Time, Token, Wall};
 use skein_world::domain::{Key, Ledger, Referee, Schedule, Span, Stage, Trace};
 use smith_domain::{self as agent, Event, Fact, Grant, GrantName, Limits, Request, llm, run, tools};
+use smith_protocol_llm::{Limits as WireLimits, Receiving};
 use smith_tools_world::translate as io;
 
 use crate::{
     BUDGET, LIMITS, fixture,
     referee::{Meeting, Seen},
     script::{self, Job},
-    translate,
+    translate, wire,
 };
 
 /// Scripted host choice; materialized as a sealed actual terminal at submission.
@@ -260,6 +272,7 @@ enum Backend {
         stage: Stage<provider::Config, provider::Event, provider::Request>,
         calls: Ledger<Token, (tools::Grants, Box<[llm::Served]>)>,
     },
+    Wire(wire::Composition),
 }
 
 impl Backend {
@@ -280,18 +293,21 @@ impl Backend {
     fn has_events(&self) -> bool {
         match self {
             Self::Typed { stage, .. } => stage.has_events(),
+            Self::Wire(_) => false,
         }
     }
 
     fn is_settled(&self) -> bool {
         match self {
             Self::Typed { provider, .. } => provider.calls() == 0,
+            Self::Wire(wire) => wire.is_settled(),
         }
     }
 
     fn next_deadline(&self) -> Option<Time> {
         match self {
             Self::Typed { provider, .. } => provider.next_deadline(),
+            Self::Wire(_) => None,
         }
     }
 }
@@ -352,7 +368,7 @@ pub enum CompletionTerminal {
     Completed(
         /// SDK usage shape copied at the genuine terminal.
         /// Contract: scratch/client.md, section 4.
-        llm::Usage,
+        skein_llm::Usage,
     ),
 
     /// Genuine provider failure. Contract: scratch/client.md, section 4.
@@ -541,6 +557,30 @@ impl World {
         }
     }
 
+    /// Opt into actual adapter/Client/byte-peer routing for the queued original
+    /// Start and discovery. Caller data supplies native endpoint, credentials,
+    /// limits and scripts; typed worlds keep their existing backend.
+    /// The selected wire backend constructs no typed provider or provider queues;
+    /// actual Clients are prepared only when the root issues Complete. Receiving
+    /// metadata comes only from each actual Complete. The fixture asserts a
+    /// 256-call ceiling and compatible admission before any wire effect.
+    /// The host supplies optional concrete history and committed results; the
+    /// charter's resume flag selects it, and root/session admission precedes
+    /// any provider effect. Success queues the original Start; its one Answer
+    /// and every actual lower Closed remain owed while the caller drives it.
+    /// Contract: scratch/client.md, sections 1, 3, 5 and 6; domain/run.md,
+    /// sections 3, 6.2, 10 and 14; domain/session.md, section 3.
+    #[must_use]
+    pub fn with_wire(
+        settings: Settings,
+        transcript: Option<agent::Transcript>,
+        configuration: wire::Configuration,
+        limits: WireLimits,
+        scripts: Box<[provider::api::Script]>,
+    ) -> World {
+        Self::with_backend(&settings, transcript, Backend::Wire(wire::Composition::new(configuration, limits, scripts)))
+    }
+
     /// Caller-selected workspace/disk and actual typed scripts; no default roots
     /// are seeded. All accepted metadata and lower terminals use the existing world.
     /// Contract: domain/run.md, sections 3.2, 8.3 and 14; testing-strategy.md, section 2.3.
@@ -563,8 +603,32 @@ impl World {
                 )
                 .expect("caller scripts obey provider admission");
             }
+            Backend::Wire(_) => unreachable!("typed constructor"),
         }
         Self::with_selected_backend(&settings, transcript, workspace, disk, backend, None)
+    }
+
+    /// Caller-selected mounts and actual Client/byte-peer scripts, using the same
+    /// receiving and settling paths as `with_wire`; no unused fixture root is seeded.
+    /// Contract: domain/run.md, sections 3.2 and 14; scratch/client.md, sections 1 and 5.
+    #[must_use]
+    pub fn with_workspace_wire(
+        settings: Settings,
+        transcript: Option<agent::Transcript>,
+        workspace: Option<run::Workspace>,
+        disk: Checkout,
+        configuration: wire::Configuration,
+        limits: WireLimits,
+        scripts: Box<[provider::api::Script]>,
+    ) -> World {
+        Self::with_selected_backend(
+            &settings,
+            transcript,
+            workspace,
+            disk,
+            Backend::Wire(wire::Composition::new(configuration, limits, scripts)),
+            None,
+        )
     }
 
     /// Caller supplies the complete typed Charter before the original Start;
@@ -592,8 +656,36 @@ impl World {
                 )
                 .expect("caller scripts obey provider admission");
             }
+            Backend::Wire(_) => unreachable!("typed constructor"),
         }
         Self::with_selected_backend(&settings, transcript, workspace, disk, backend, Some(charter))
+    }
+
+    /// Caller-selected complete Charter, concrete saved history and native
+    /// configuration/limits use the original root Start, actual Client and byte
+    /// peer. Only the selected native backend exists; real receiving bounds and
+    /// all pending lower terminals apply through the one host Answer.
+    /// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14;
+    /// scratch/client.md, sections 1, 3 and 5.
+    #[must_use]
+    pub fn with_workspace_wire_charter(
+        settings: Settings,
+        transcript: Option<agent::Transcript>,
+        workspace: Option<run::Workspace>,
+        disk: Checkout,
+        wire: (wire::Configuration, WireLimits),
+        scripts: Box<[provider::api::Script]>,
+        charter: run::Charter,
+    ) -> World {
+        let (configuration, limits) = wire;
+        Self::with_selected_backend(
+            &settings,
+            transcript,
+            workspace,
+            disk,
+            Backend::Wire(wire::Composition::new(configuration, limits, scripts)),
+            Some(charter),
+        )
     }
 
     /// Route subsequent genuine checked submissions to the outside parent.
@@ -635,6 +727,7 @@ impl World {
         self.stage.env.wall = wall;
         match &mut self.backend {
             Backend::Typed { stage, .. } => stage.env.wall = wall,
+            Backend::Wire(_) => {}
         }
     }
 
@@ -700,6 +793,17 @@ impl World {
         self.now
     }
 
+    /// Actual physical-binding observations; typed-only worlds expose none.
+    /// Retired records keep no Client or credential. Contract: scratch/client.md,
+    /// section 5; testing-strategy.md, sections 2.3 and 6.
+    #[must_use]
+    pub fn wire_bindings(&self) -> &[wire::Binding] {
+        match &self.backend {
+            Backend::Wire(wire) => wire.bindings(),
+            Backend::Typed { .. } => &[],
+        }
+    }
+
     /// Script an actual parent input; delivery requires prior Admitted, as the host does.
     /// Contract: domain/run.md, section 6; testing-strategy.md, section 7.
     pub fn message_at(&mut self, at: Time, name: Token, text: Box<[u8]>) {
@@ -731,6 +835,7 @@ impl World {
             self.stage.tick(self.now);
             match &mut self.backend {
                 Backend::Typed { stage, .. } => stage.tick(self.now),
+                Backend::Wire(_) => {}
             }
             while let Some(delivery) = self.schedule.next(self.now) {
                 self.deliver(delivery);
@@ -752,10 +857,11 @@ impl World {
                 self.trace.log(self.now, format!("agent -> {request:?}"));
                 self.request(request);
             }
-            self.advance_provider();
+            let wire_immediate = self.advance_provider();
             self.agent.reclaim();
             match &mut self.backend {
                 Backend::Typed { provider, .. } => provider.reclaim(),
+                Backend::Wire(_) => {}
             }
             if self.referee.is_due(self.now) {
                 self.referee.fire(self.now, &mut self.stimuli);
@@ -776,10 +882,11 @@ impl World {
                 self.settled();
                 return true;
             }
-            let immediate = (self.parent_deliveries
-                && self.flights.keys().any(|key| {
-                    key.0 == Family::Delivery && self.flights.get(*key).is_some_and(|flight| flight.key.is_none())
-                }))
+            let immediate = wire_immediate
+                || (self.parent_deliveries
+                    && self.flights.keys().any(|key| {
+                        key.0 == Family::Delivery && self.flights.get(*key).is_some_and(|flight| flight.key.is_none())
+                    }))
                 || self.stage.has_events()
                 || self.backend.has_events()
                 || self.agent.is_ready();
@@ -801,6 +908,17 @@ impl World {
 
     fn advance_provider(&mut self) -> bool {
         match &mut self.backend {
+            Backend::Wire(wire) => {
+                let progress = wire.advance(self.stage.env.now, self.stage.env.wall, self.answer.is_some());
+                for query in progress.queries {
+                    self.messages_seen.push((self.now, crate::messages_referee::Seen::Prompt { query: query.clone() }));
+                    self.prompts.push(query);
+                }
+                for (owner, event) in progress.terminals {
+                    self.terminal(Family::Completion, owner, event);
+                }
+                return progress.immediate;
+            }
             Backend::Typed { provider, stage, .. } => {
                 while let Some(event) = stage.next_event() {
                     provider::step(provider, &stage.env, event, &mut stage.out);
@@ -818,6 +936,7 @@ impl World {
                     let (grants, served) = calls.end(owner);
                     (owner, grants, served, result)
                 }),
+                Backend::Wire(_) => unreachable!("wire progress returns before typed replies"),
             };
             let Some((owner, grants, served, result)) = reply else { break };
             if self.flights.get((Family::Completion, owner)).is_some_and(|flight| !flight.cancelled) {
@@ -911,7 +1030,15 @@ impl World {
             Request::Checking { worker, .. } => {
                 assert_eq!(worker, Token::new(1), "checking notice echoes the host identity");
             }
-            Request::Complete { owner, prompt, .. } => {
+            Request::Complete {
+                owner,
+                prompt,
+                max_completion_bytes,
+                max_completion_blocks,
+                max_failure_bytes,
+                decoded_call_bytes,
+                ..
+            } => {
                 self.host_history.prompt(&prompt).expect("exact feedback for observed provider host call");
                 self.observe(Seen::Completing { owner });
                 let starts = u64::from(self.settings.limits.run.budget.turns)
@@ -946,6 +1073,15 @@ impl World {
                     },
                 );
                 match &mut self.backend {
+                    Backend::Wire(wire) => {
+                        let receiving = Receiving {
+                            max_completion_bytes,
+                            max_completion_blocks,
+                            max_failure_bytes,
+                            decoded_call_bytes,
+                        };
+                        wire.start(owner, prompt, receiving, self.stage.env.now, self.stage.env.wall);
+                    }
                     Backend::Typed { stage, calls, .. } => {
                         calls.open(owner, (prompt.tools, prompt.served.clone()));
                         let query = translate::query(prompt);
@@ -957,6 +1093,7 @@ impl World {
                 }
             }
             Request::Cancel { owner } => match &mut self.backend {
+                Backend::Wire(wire) => wire.cancel(owner, self.stage.env.now, self.stage.env.wall),
                 Backend::Typed { .. } => self.cancel(Family::Completion, owner, Event::Cancelled { owner }),
             },
             Request::Io { owner, op, deadline } => {
@@ -1310,11 +1447,24 @@ impl World {
     /// Native usage comes directly from the matching SDK binding; typed usage
     /// is the exact callback value. No event or completion body is cloned.
     /// Contract: scratch/client.md, section 4; domain/run.md, sections 9 and 13.
-    fn observe_completion_terminal(&mut self, index: usize, event: &Event) {
+    fn observe_completion_terminal(&mut self, owner: Token, index: usize, event: &Event) {
         let outcome = match event {
             Event::Completed { completion, .. } => {
                 let usage = match &self.backend {
-                    Backend::Typed { .. } => completion.usage,
+                    Backend::Wire(wire) => wire
+                        .bindings()
+                        .iter()
+                        .rev()
+                        .find(|binding| binding.owner == owner)
+                        .expect("genuine physical binding")
+                        .accepted_usage
+                        .expect("actual SDK completed usage"),
+                    Backend::Typed { .. } => skein_llm::Usage {
+                        input_tokens: completion.usage.input_tokens,
+                        output_tokens: completion.usage.output_tokens,
+                        cache_read_tokens: completion.usage.cache_read_tokens,
+                        cache_write_tokens: completion.usage.cache_write_tokens,
+                    },
                 };
                 CompletionTerminal::Completed(usage)
             }
@@ -1339,7 +1489,7 @@ impl World {
         let flight = self.flights.end((family, owner));
         self.terminals += 1;
         if let Some(index) = flight.completion_index {
-            self.observe_completion_terminal(index, &event);
+            self.observe_completion_terminal(owner, index, &event);
         }
         match &event {
             Event::Completed { completion, .. } => {
@@ -1426,6 +1576,7 @@ impl World {
         self.flights.assert_settled();
         match &self.backend {
             Backend::Typed { calls, .. } => calls.assert_settled(),
+            Backend::Wire(_) => {}
         }
         self.referee.assert_passed(self.settings.seed);
         assert_eq!(

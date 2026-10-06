@@ -1,6 +1,5 @@
 //! Lossless neutral failure/evidence and bounded mechanical invalid-input feedback.
 //! No diagnostic wording participates in application decisions.
-//! Contract: scratch/client.md, sections 3, 5 and 6.
 
 use alloc::boxed::Box;
 
@@ -15,7 +14,6 @@ use crate::Context;
 /// after observation and retains only typed class/evidence in facts and End.
 /// Incorrect owner or over-cap diagnostic is a sender contract refusal.
 /// The actual Client remains owned until its independent lower Closed terminal.
-/// Contract: scratch/client.md, sections 5 and 6.
 pub fn failed(
     context: Context,
     owner: Token,
@@ -54,7 +52,6 @@ pub fn failed(
 /// A cancellation request alone never permits calling this function; already
 /// won Completed/Failed terminals keep their values and consume context instead.
 /// An incorrect callback owner is Invalid and confers no terminal authority.
-/// Contract: scratch/client.md, section 5.
 pub fn cancelled(context: Context, owner: Token) -> Result<Event, Error> {
     if owner == context.owner { Ok(Event::Cancelled { owner }) } else { Err(Error::Invalid) }
 }
@@ -62,7 +59,6 @@ pub fn cancelled(context: Context, owner: Token) -> Result<Event, Error> {
 /// Reports a preparation refusal as an unsent root terminal; no wire call existed.
 /// Unsupported is explicitly Invalid, with its distinct bounded diagnostic.
 /// Fixed local ASCII detail is clipped only to the receiving diagnostic allowance.
-/// Contract: scratch/client.md, sections 1, 5 and 6.
 #[must_use]
 pub fn refusal(owner: Token, error: Error, max_failure_bytes: u32) -> Event {
     let (failure, text): (llm::Failure, &[u8]) = match error {

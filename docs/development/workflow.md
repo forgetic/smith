@@ -201,3 +201,11 @@ commands in section 2 on an idle machine: 591 focused tests passed in
 The run world adds the answered-host-call crash story, and the host world adds
 the wrong-activation rule control. The default 15-second and fuzzy 60-second
 budgets are unchanged.
+
+The domain/protocol world separation was measured serially on 2026-10-06
+with the `measure` commands in section 2: 594 focused tests passed in
+9.395 seconds and eleven fuzzy tests in 8.543 seconds, with no skips. The
+new protocol LLM world contributes 28 focused tests in 2.051 seconds and
+no fuzzy tests. It owns the moved wire fixture and tests; the agent world
+uses only the typed fake LLM, including three domain feature controls.
+Both suite budgets are unchanged.

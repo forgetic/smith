@@ -14,7 +14,7 @@
 //! once for an actual terminal, while [`refusal`] reports preparation refusal
 //! before wire work. The caller separately keeps and drives the Client through
 //! Reusable or Close/Closed settlement.
-//! Contract: scratch/client.md, sections 1–7; programming-model.md, sections 4.4 and 6.3.
+//! Contract: programming-model.md, sections 4.4 and 6.3.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]

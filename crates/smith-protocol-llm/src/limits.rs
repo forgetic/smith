@@ -1,6 +1,5 @@
 //! Static receiving compatibility and simultaneous translation ownership.
 //! All prices use checked arithmetic before preparation or final allocation.
-//! Contract: scratch/client.md, sections 1 and 6.
 
 use core::mem::size_of;
 
@@ -12,41 +11,32 @@ use crate::types::{Context, ResolvedCall, ResultText, ToolSchema};
 
 /// Immutable protocol bounds for application translation and the shared Client.
 /// The caller supplies these at startup, independently from application scheduling limits.
-/// Contract: scratch/client.md, sections 1 and 6.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
     /// Actual shared Client document, HTTP/SSE and receiving bounds.
-    /// Contract: scratch/client.md, sections 1 and 6.
     pub client: client::Limits,
 
     /// Aggregate retained served/application declaration wrappers and all owned fields.
-    /// Contract: scratch/client.md, sections 2 and 6.
     pub tool_bytes: u64,
 
     /// Aggregate caller-supplied result rendering wrappers, IDs and text for one prompt.
-    /// Contract: scratch/client.md, sections 3 and 6.
     pub result_bytes: u64,
 }
 
 /// Actual root Complete receiving contract, checked before preparing the Client.
 /// No receiving field is inferred from an application's token budget.
-/// Contract: scratch/client.md, sections 1 and 6.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Receiving {
     /// Maximum complete translated content ownership, including all block cells and replay envelopes.
-    /// Contract: scratch/client.md, sections 4 and 6.
     pub max_completion_bytes: u64,
 
     /// Maximum actual assistant blocks, including text, refusal and opaque blocks.
-    /// Contract: scratch/client.md, sections 4 and 6.
     pub max_completion_blocks: u32,
 
     /// Aggregate decoded-call ownership across this whole completion, including wrappers and fields.
-    /// Contract: scratch/client.md, sections 4 and 6.
     pub decoded_call_bytes: u64,
 
     /// Exact diagnostic bytes accepted on the actual Failed boundary.
-    /// Contract: scratch/client.md, sections 5 and 6.
     pub max_failure_bytes: u32,
 }
 
@@ -56,7 +46,6 @@ pub struct Receiving {
 /// Decoded ownership is one aggregate allowance, never multiplied per block.
 /// It must first cover one full fallback `Decoded` cell per possible output part.
 /// Returns None on overflow or an invalid shared-client configuration.
-/// Contract: scratch/client.md, sections 4 and 6.
 #[must_use]
 pub fn completion_worst_case(client_limits: &client::Limits, decoded_call_bytes: u64) -> Option<u64> {
     client::worst_case(client_limits)?;
@@ -79,7 +68,6 @@ pub fn completion_worst_case(client_limits: &client::Limits, decoded_call_bytes:
 /// Caller-owned root input, endpoint/credential grants, application decoder input
 /// and observation queues are priced separately by their owners. None means
 /// receiving incompatibility or arithmetic overflow; no Client is prepared.
-/// Contract: scratch/client.md, sections 1 and 6.
 #[must_use]
 pub fn worst_case(limits: &Limits, receiving: &Receiving) -> Option<u64> {
     let completion = completion_worst_case(&limits.client, receiving.decoded_call_bytes)?;

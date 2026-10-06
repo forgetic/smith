@@ -2,7 +2,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/*", "testing/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/fake-llm", "tests/host"]
+members = ["crates/*", "testing/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/fake-llm", "tests/host"]
 
 [workspace.package]
 version = "0.0.0"

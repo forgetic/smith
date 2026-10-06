@@ -1,6 +1,5 @@
 //! Whole bounded application declarations and concrete conversations into Skein.
 //! Parsing is generic JSON attestation, never schema-policy validation.
-//! Contract: scratch/client.md, sections 1–3 and 6.
 
 use alloc::boxed::Box;
 use core::mem::size_of;
@@ -17,7 +16,6 @@ use crate::{Limits, worst_case};
 /// Receiving compatibility, inventory and JSON/replay admission precede wire effects.
 /// The returned context owns declarations until actual terminal translation.
 /// Refusal is typed Invalid/Limit/Unsupported and has no lower right to settle.
-/// Contract: scratch/client.md, sections 1–3 and 6.
 pub fn prepare(input: Input, limits: &Limits) -> Result<Prepared, Error> {
     let Input { owner, prompt, endpoint_name, endpoint, credential, application, results, receiving } = input;
     if prompt.endpoint != endpoint_name {
@@ -40,7 +38,6 @@ pub fn prepare(input: Input, limits: &Limits) -> Result<Prepared, Error> {
 /// before directly preparing a Client; prepare performs that step itself.
 /// Missing or conflicting application descriptors/results are Invalid, exceeded
 /// bounds are Limit and incompatible replay remains Unsupported.
-/// Contract: scratch/client.md, sections 2, 3 and 6.
 pub fn prompt(
     input: llm::Prompt,
     application: &[ToolSchema],

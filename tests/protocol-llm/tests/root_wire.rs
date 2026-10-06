@@ -7,12 +7,12 @@
 use skein_fake_llm_domain::api::{Finish, Line, Part, Query, Script, Turn};
 use skein_lib::{Time, Wall};
 use skein_world::domain::Span;
-use smith_agent_world::{
+use smith_domain::{run, session::llm};
+use smith_protocol_llm::{self as adapter, Limits};
+use smith_protocol_llm_world::{
     Job, Settings, World,
     wire::{self, Configuration, Observed},
 };
-use smith_domain::{run, session::llm};
-use smith_protocol_llm::{self as adapter, Limits};
 
 const BODY: &[u8] = br#"{ "opaque" : {"future":[1,true,null]}, "extra":"unchanged" }"#;
 const ID: &[u8] = b"call_0000000000000001";

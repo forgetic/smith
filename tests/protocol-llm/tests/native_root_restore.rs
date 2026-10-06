@@ -8,12 +8,12 @@
 use skein_fake_llm_domain::api::{Finish, Line, Message, Part, Query, Role, Script, Turn};
 use skein_lib::Duration;
 use skein_world::domain::Span;
-use smith_agent_world::{
+use smith_domain::{Transcript, run, session::llm};
+use smith_protocol_llm::{self as adapter, Limits};
+use smith_protocol_llm_world::{
     Job, Settings, World,
     wire::{self, Configuration, Observed},
 };
-use smith_domain::{Transcript, run, session::llm};
-use smith_protocol_llm::{self as adapter, Limits};
 
 const BEGIN: &[u8] = b"Begin the work your brief describes.";
 const ID: &[u8] = b"call_0000000000000001";

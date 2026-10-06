@@ -5,16 +5,27 @@
 //! testing-strategy.md, sections 2.3, 6 and 7.
 
 use skein_fake_checkout::Checkout;
-use skein_fake_llm_domain::api::{Finish, Line, Part, Query, Script, Turn};
-use skein_lib::Token;
+use skein_fake_llm_domain::api::{Finish, Line, Message, Part, Query, Role, Script, Turn};
+use skein_lib::{Duration, Token};
 use skein_world::domain::Span;
-use smith_agent_world::{Boundary, Job, Settings, World};
-use smith_domain::{run, session::llm, tools};
+use smith_domain::{Transcript, run, session::llm, tools};
+use smith_protocol_llm::{self as adapter, Limits};
+use smith_protocol_llm_world::{
+    Boundary, Job, Settings, World,
+    wire::{self, Observed},
+};
 
+const BEGIN: &[u8] = b"Begin the work your brief describes.";
+const ID: &[u8] = b"call_0000000000000001";
 const MAIN_INSTRUCTIONS: &str = "@brief-main PARENT-INSTRUCTIONS: coordinate this task.\nSeparate role line.";
+const NATIVE_INSTRUCTIONS: &str = "@brief-native PARENT-INSTRUCTIONS: native first activation.";
+const RESUME_INSTRUCTIONS: &str = "@brief-native RESUME-INSTRUCTIONS: use the saved history.\n";
 const CHILD_INPUT: &[u8] = br#"{"brief":"@brief-child CHILD-TASK-ONLY: inspect both mounts.","tools":["inspect"]}"#;
 const CHILD_RESULT: &[u8] = b"CHILD-RESULT: parent-change in work; unchanged in archive.";
 const FINISH_INPUT: &[u8] = br#"{"report":"The child inspected the changed workspace.","source":"workspace"}"#;
+const FIRST: &[u8] = b"Native structured brief first activation parked.";
+const RESUMED: &[u8] = b"Native structured brief history restored.";
+const LAST: &[u8] = b"Native structured brief second activation parked.";
 
 // These literals do not call the production renderer or reproduce its algorithm.
 // Duplicate Zulu titles and the intervening Alpha title must stay in host order.
@@ -318,4 +329,245 @@ fn ordered_sections_and_instructions_reach_main_but_child_receives_only_its_own_
         }]));
     assert!(world.checked().is_empty() && world.pushes().is_empty() && world.host_submissions().is_empty());
     assert!(world.judged().0 > 0 && world.judged().1 > 0);
+}
+
+fn native_scripts() -> Box<[Script]> {
+    Box::new([Script {
+        cue: b"@brief-native".as_slice().into(),
+        turns: Box::new([
+            calls(vec![call(b"wait", b"{}")], 17),
+            says(FIRST, 3),
+            calls(vec![Line::Text { text: RESUMED.into() }, call(b"wait", b"{}")], 11),
+            says(LAST, 5),
+        ]),
+    }])
+}
+
+fn text(text: &[u8]) -> Part {
+    Part::Text { text: text.into() }
+}
+
+fn message(role: Role, parts: Vec<Part>) -> Message {
+    Message { role, parts: parts.into() }
+}
+
+fn wait_call() -> Part {
+    Part::ToolCall { id: ID.into(), name: b"wait".as_slice().into(), arguments: b"{}".as_slice().into() }
+}
+
+fn wait_result() -> Part {
+    Part::ToolOutput { id: ID.into(), output: b"waiting".as_slice().into(), is_error: false }
+}
+
+fn part_bytes(part: &Part) -> usize {
+    match part {
+        Part::Text { text } | Part::Opaque { bytes: text } => text.len(),
+        Part::ToolCall { name, arguments, .. } => name.len() + arguments.len(),
+        Part::ToolOutput { output, .. } => output.len(),
+    }
+}
+
+fn native_accounting(
+    world: &World,
+    system: &[u8],
+    prefixes: &[Vec<Message>],
+    outputs: &[u64],
+    prior: u32,
+    cache_write: bool,
+) {
+    assert_eq!(world.prompts().len(), prefixes.len());
+    assert_eq!(world.turns().len(), prefixes.len());
+    let mut spent = run::Spend::ZERO;
+    for (index, ((query, turn), prefix)) in world.prompts().iter().zip(world.turns()).zip(prefixes).enumerate() {
+        assert_eq!(query.system.as_ref(), system, "whole native structured opening at completion {index}");
+        assert_eq!(query.model.as_ref(), b"fake-1");
+        assert_eq!(query.messages.as_ref(), prefix, "whole native history and concrete feedback at completion {index}");
+        let (last, earlier) = prefix.split_last().expect("handwritten user-ending native history");
+        let last_bytes = last.parts.iter().map(part_bytes).sum::<usize>();
+        let (fresh, cached) = if earlier.is_empty() {
+            (system.len() + last_bytes, 0)
+        } else {
+            (
+                last_bytes,
+                system.len() + earlier.iter().flat_map(|message| &message.parts).map(part_bytes).sum::<usize>(),
+            )
+        };
+        let input = u64::try_from(fresh / 4).expect("bounded outside fixture");
+        let read = u64::try_from(cached / 4).expect("bounded outside fixture");
+        let write = if cache_write { input } else { 0 };
+        assert_eq!(
+            [
+                turn.usage.input_tokens,
+                turn.usage.output_tokens,
+                turn.usage.cache_read_tokens,
+                turn.usage.cache_write_tokens
+            ],
+            [input, outputs[index], read, write],
+            "all four usage fields independently priced from literal system and native query"
+        );
+        spent.turns += 1;
+        spent.input += input;
+        spent.output += outputs[index];
+        spent.cache_read += read;
+        spent.cache_write += write;
+        assert_eq!(world.turn_metadata()[index], (spent.turns, None, spent));
+        assert_eq!(turn.sequence, prior + spent.turns);
+        assert_eq!(turn.version, 2);
+        assert_eq!(turn.endpoint, llm::Endpoint(0));
+        assert_eq!(turn.dialect, 1);
+        assert_eq!(turn.spent, 0);
+    }
+    assert!(matches!(world.answer(), run::Answer::Parked { turns, spent: actual }
+        if *turns == spent.turns && *actual == spent));
+}
+
+fn native_settled(world: &World, settings: &Settings, roots: &[Token]) {
+    assert_eq!(world.waiting().len(), 1);
+    assert_eq!(world.waiting()[0].1, None);
+    assert!(world.answered_at() >= world.waiting()[0].0.saturating_add(settings.waiting));
+    assert!(world.checked().is_empty() && world.pushes().is_empty() && world.host_submissions().is_empty());
+    assert!(world.host_terminals().is_empty() && world.delivery_submissions().is_empty());
+    let discovery = world
+        .boundaries()
+        .iter()
+        .map(|(_, boundary)| match boundary {
+            Boundary::Read { at } => (b"read".as_slice(), at.root, at.path.as_ref()),
+            Boundary::Probe { at } => (b"probe".as_slice(), at.root, at.path.as_ref()),
+            Boundary::Io { .. } | Boundary::Check { .. } => panic!("Wait-only native script does no workspace effects"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        discovery,
+        [(b"read".as_slice(), roots[0], b"AGENTS.md".as_slice()), (b"read", roots[1], b"AGENTS.md"),]
+    );
+    assert_eq!(world.wire_bindings().len(), world.turns().len());
+    for binding in world.wire_bindings() {
+        assert_eq!(binding.receiving.max_completion_bytes, settings.limits.session.completion_bytes);
+        assert_eq!(binding.receiving.max_completion_blocks, settings.limits.session.completion_blocks);
+        assert_eq!(binding.receiving.max_failure_bytes, settings.limits.session.failure_bytes);
+        assert_eq!(binding.receiving.decoded_call_bytes, settings.limits.decoded_call_bytes);
+        assert_eq!(
+            binding.observed.iter().map(|(_, _, seen)| *seen).collect::<Vec<_>>(),
+            [Observed::Completed(binding.owner), Observed::Reusable, Observed::Close, Observed::Closed]
+        );
+        assert!(binding.retired.is_some(), "actual lower Closed precedes physical retirement");
+    }
+}
+
+fn recorded_wait(turn: &smith_domain::Turn, resumed: bool) {
+    let call = turn
+        .messages
+        .iter()
+        .flat_map(|message| &message.content)
+        .find_map(|block| {
+            if let llm::Block::ToolCall { id, name, input, call: llm::Decoded::Historical, .. } = block {
+                assert_eq!(id.as_ref(), ID);
+                assert_eq!(name.as_ref(), b"wait");
+                assert_eq!(input.as_ref(), b"{}");
+                Some(id)
+            } else {
+                None
+            }
+        })
+        .expect("genuine actual historical Wait call");
+    assert_eq!(
+        turn.messages
+            .iter()
+            .flat_map(|message| &message.content)
+            .filter(|block| {
+                matches!(block, llm::Block::ToolResult { id, result: llm::Returned::Text {
+            text, error: false, replay: None
+        }} if id == call && text.as_ref() == b"waiting")
+            })
+            .count(),
+        1,
+        "actual settled Wait feedback saved once"
+    );
+    if resumed {
+        assert!(
+            turn.messages
+                .iter()
+                .flat_map(|message| &message.content)
+                .any(|block| { matches!(block, llm::Block::Text { text, .. } if text.as_ref() == RESUMED) })
+        );
+    } else {
+        assert!(matches!(turn.messages[0].content.as_ref(), [llm::Block::Text { text, replay: None }]
+            if text.as_ref() == BEGIN));
+    }
+}
+
+#[test]
+fn structured_brief_native_wait_park_and_genuine_transcript_restore_in_both_wire_forms() {
+    for index in 0..2 {
+        let mut bounds = Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 };
+        bounds.client.http.request = 16384;
+        bounds.client.dialect.request_bytes = 16384;
+        let mut settings = Settings {
+            job: Job::Waiting,
+            waiting: Duration::from_secs(1),
+            network: Span::millis(1, 1),
+            ..Settings::calm(1102)
+        };
+        settings.limits.session.completion_bytes =
+            adapter::completion_worst_case(&bounds.client, settings.limits.decoded_call_bytes)
+                .expect("real Client receiving reservation before original Start");
+        settings.limits.session.completion_blocks = bounds.client.dialect.parts;
+        let (disk, mounted) = workspace();
+        let roots = mounted.directories.iter().map(|directory| directory.root).collect::<Vec<_>>();
+        let mut first = World::with_workspace_wire_charter(
+            settings,
+            None,
+            Some(mounted),
+            disk,
+            (wire::configurations().into_iter().nth(index).expect("two native wire forms"), bounds),
+            native_scripts(),
+            charter(&settings, NATIVE_INSTRUCTIONS),
+        );
+        first.run(100_000);
+        let first_system = expected_main("@brief-native PARENT-INSTRUCTIONS: native first activation.\n\n");
+        let opening = vec![message(Role::User, vec![text(BEGIN)])];
+        let mut waited = opening.clone();
+        waited.extend([message(Role::Assistant, vec![wait_call()]), message(Role::User, vec![wait_result()])]);
+        native_accounting(&first, &first_system, &[opening, waited.clone()], &[17, 3], 0, index == 1);
+        native_settled(&first, &settings, &roots);
+        recorded_wait(&first.turns()[0], false);
+        assert!(matches!(first.turns()[1].messages[0].content.as_ref(), [llm::Block::Text { text, .. }]
+            if text.as_ref() == FIRST));
+        let actual = &first.turns()[0];
+        let saved = Transcript {
+            version: actual.version,
+            endpoint: actual.endpoint,
+            dialect: actual.dialect,
+            turns: first.turns().into(),
+            after: Box::new([]),
+        };
+        assert_eq!(saved.turns.last().expect("actual persisted transcript tail").sequence, 2);
+        settings.resume = true;
+        let (disk, mounted) = workspace();
+        let roots = mounted.directories.iter().map(|directory| directory.root).collect::<Vec<_>>();
+        let mut restored = World::with_workspace_wire_charter(
+            settings,
+            Some(saved),
+            Some(mounted),
+            disk,
+            (wire::configurations().into_iter().nth(index).expect("same native wire form"), bounds),
+            native_scripts(),
+            charter(&settings, RESUME_INSTRUCTIONS),
+        );
+        restored.run(100_000);
+        let restored_system = expected_main("@brief-native RESUME-INSTRUCTIONS: use the saved history.\n\n");
+        waited.extend([message(Role::Assistant, vec![text(FIRST)]), message(Role::User, vec![text(BEGIN)])]);
+        let mut continued = waited.clone();
+        continued.extend([
+            message(Role::Assistant, vec![text(RESUMED), wait_call()]),
+            message(Role::User, vec![wait_result()]),
+        ]);
+        native_accounting(&restored, &restored_system, &[waited, continued], &[11, 5], 2, index == 1);
+        native_settled(&restored, &settings, &roots);
+        recorded_wait(&restored.turns()[0], true);
+        assert!(matches!(restored.turns()[1].messages[0].content.as_ref(), [llm::Block::Text { text, .. }]
+            if text.as_ref() == LAST));
+        assert_eq!(first.turn_metadata()[1].2.output, 20);
+        assert_eq!(restored.turn_metadata()[1].2.output, 16, "new activation charges only its actual completions");
+    }
 }
