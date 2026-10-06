@@ -665,6 +665,10 @@ fn plain_status(domain: &mut Domain, env: &Env<Limits>, owner: Token, changed: b
     advance_delivery(domain, env, in_place, out);
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one exhaustive git terminal transition owns status, markers, commit and push"
+)]
 fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitResult, out: &mut Queue<Request>) {
     let mut in_place = domain.delivery.take().expect("git terminal answers one delivery operation");
     assert_eq!(in_place.owner, owner, "git terminal matches active delivery");
@@ -703,7 +707,9 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
             GitResult::Failed { reason, diagnostic } => {
                 delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
             }
-            GitResult::Markers { .. } | GitResult::Committed { .. } => unreachable!("status awaits a status terminal"),
+            GitResult::Markers { .. } | GitResult::Committed { .. } | GitResult::Pushed | GitResult::Stale => {
+                unreachable!("status awaits a status terminal")
+            }
         },
         Step::Markers => match result {
             GitResult::Markers { first: None } => commit_request(domain, in_place, out),
@@ -727,7 +733,9 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
             GitResult::Failed { reason, diagnostic } => {
                 delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
             }
-            GitResult::Status { .. } | GitResult::Committed { .. } => unreachable!("markers await a marker terminal"),
+            GitResult::Status { .. } | GitResult::Committed { .. } | GitResult::Pushed | GitResult::Stale => {
+                unreachable!("markers await a marker terminal")
+            }
         },
         Step::Commit => match result {
             GitResult::Committed { receipt } => {
@@ -743,13 +751,47 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
                     return;
                 }
                 in_place.receipt(directory, receipt);
-                in_place.next = directory.checked_add(1).expect("admitted directory position");
-                advance_delivery(domain, env, in_place, out);
+                let target = match &domain.config.push {
+                    Some(targets) => match targets.get(usize::try_from(directory).expect("bounded directory position"))
+                    {
+                        Some(target) => target.as_ref(),
+                        None => None,
+                    },
+                    None => None,
+                };
+                if let Some(target) = target {
+                    in_place.step = Step::Push;
+                    out.push(Request::Git {
+                        owner,
+                        directory,
+                        op: GitOp::Push { remote: target.remote.clone(), branch: target.branch.clone() },
+                        deadline: in_place.deadline,
+                    });
+                    domain.delivery = Some(in_place);
+                } else {
+                    in_place.next = directory.checked_add(1).expect("admitted directory position");
+                    advance_delivery(domain, env, in_place, out);
+                }
             }
             GitResult::Failed { reason, diagnostic } => {
                 delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
             }
-            GitResult::Status { .. } | GitResult::Markers { .. } => unreachable!("commit awaits a commit terminal"),
+            GitResult::Status { .. } | GitResult::Markers { .. } | GitResult::Pushed | GitResult::Stale => {
+                unreachable!("commit awaits a commit terminal")
+            }
+        },
+        Step::Push => match result {
+            GitResult::Pushed => {
+                in_place.next = directory.checked_add(1).expect("admitted directory position");
+                advance_delivery(domain, env, in_place, out);
+            }
+            GitResult::Stale => save_delivery(domain, in_place.name, owner, agent::run::Delivery::Stale, out),
+            GitResult::Failed { reason, diagnostic } => {
+                delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
+            }
+            GitResult::Status { .. } | GitResult::Markers { .. } | GitResult::Committed { .. } => {
+                unreachable!("push awaits a push terminal")
+            }
         },
         Step::Plain => unreachable!("git terminal cannot answer a plain status"),
     }

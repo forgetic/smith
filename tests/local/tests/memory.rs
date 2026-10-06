@@ -43,6 +43,7 @@ fn a_local_domain_with_every_line_slot_full_stays_within_its_worst_case() {
         resume: true,
         accounts: Box::new([0]),
         workspace: None,
+        push: None,
     };
     let bound = local::worst_case(&limits).expect("valid memory bound");
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };

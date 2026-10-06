@@ -25,6 +25,7 @@ pub(crate) enum Step {
     Status,
     Markers,
     Commit,
+    Push,
 }
 
 /// One child delivery call and the directories already made durable.

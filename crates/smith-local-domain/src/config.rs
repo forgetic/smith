@@ -18,6 +18,15 @@ pub enum Contract {
     Change(outcome::ChangeSpec),
 }
 
+/// Where a git workspace directory sends its new commits.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct PushTarget {
+    /// Named remote for this directory.
+    pub remote: Box<[u8]>,
+    /// Branch on that remote.
+    pub branch: Box<[u8]>,
+}
+
 /// One configured chat and the policy for each activation.
 #[derive(Debug)]
 pub struct Config {
@@ -47,6 +56,8 @@ pub struct Config {
     pub accounts: Box<[u32]>,
     /// Workspace authority; absent for a chat without files.
     pub workspace: Option<run::Workspace>,
+    /// Optional push target by workspace position; a missing entry stays local.
+    pub push: Option<Box<[Option<PushTarget>]>>,
 }
 
 /// Why configuration cannot be built within its receiving limits.
@@ -66,6 +77,8 @@ pub enum Invalid {
     Limits,
     /// A configured delivery has no bounded title field.
     Contract,
+    /// Push targets do not match the configured git directories.
+    Push,
 }
 
 impl Config {
@@ -134,6 +147,24 @@ impl Config {
                 || workspace.directories.len() > usize::try_from(limits.agent.run.directories).expect("u32 fits usize"))
         {
             return Err(Invalid::Limits);
+        }
+        if let Some(push) = &self.push {
+            let Some(workspace) = &self.workspace else { return Err(Invalid::Push) };
+            if push.len() != workspace.directories.len() {
+                return Err(Invalid::Push);
+            }
+            for (target, directory) in push.iter().zip(workspace.directories.iter()) {
+                if let Some(target) = target
+                    && (!directory.git
+                        || !directory.writable
+                        || target.remote.is_empty()
+                        || target.branch.is_empty()
+                        || target.remote.len() > usize::try_from(limits.text_bytes).expect("u32 fits usize")
+                        || target.branch.len() > usize::try_from(limits.text_bytes).expect("u32 fits usize"))
+                {
+                    return Err(Invalid::Push);
+                }
+            }
         }
         for (index, account) in self.accounts.iter().enumerate() {
             if self.accounts.get(index.saturating_add(1)..).unwrap_or_default().contains(account) {

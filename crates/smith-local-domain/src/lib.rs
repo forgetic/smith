@@ -44,7 +44,7 @@ mod tests;
 pub use boundary::{
     AgentIo, ChatState, CredentialFailure, DeliveryRecord, Event, ExitStatus, GitOp, GitResult, Request, StoreFailure,
 };
-pub use config::{Config, Contract, Invalid, charter};
+pub use config::{Config, Contract, Invalid, PushTarget, charter};
 pub use domain::{Domain, fire, max_out, resume, step};
 pub use facts::Fact;
 pub use limits::{Limits, worst_case};

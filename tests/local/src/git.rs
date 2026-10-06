@@ -34,6 +34,17 @@ impl History {
     pub(crate) fn commit_message(&self, commit: u64) -> &[u8] {
         &self.commits.get(&commit).expect("local commit exists").message
     }
+
+    pub(crate) fn remote_head(&self) -> u64 {
+        self.branch
+    }
+
+    pub(crate) fn move_remote(&mut self) {
+        let mut tree = self.tree(self.branch);
+        tree.insert(b"remote.txt".to_vec(), b"another change".to_vec());
+        let previous = self.branch;
+        self.branch = self.store(previous, None, tree, b"remote moved").expect("remote commit exists");
+    }
 }
 
 impl Remote for History {
@@ -64,12 +75,15 @@ impl Remote for History {
         if branch == b"main" { Ok(Created::Exists) } else { Err(Fault::Refused) }
     }
 
-    fn push(&mut self, remote: &[u8], branch: &[u8], commit: u64, _expected: Option<u64>) -> Result<Pushed, Fault> {
+    fn push(&mut self, remote: &[u8], branch: &[u8], commit: u64, expected: Option<u64>) -> Result<Pushed, Fault> {
         if remote != b"repo" {
             return Err(Fault::Missing(What::Repository));
         }
         if branch != b"main" {
             return Err(Fault::Missing(What::Branch));
+        }
+        if expected.is_some_and(|head| self.branch != head) {
+            return Ok(Pushed::Rejected);
         }
         self.branch = commit;
         Ok(Pushed::Pushed)

@@ -115,6 +115,8 @@ enum Scenario {
     PlainNothing,
     GitChange,
     GitMarker,
+    PushLands,
+    PushStale,
     SecondFails,
     MidReport,
 }
@@ -151,6 +153,7 @@ pub struct World {
     disk_start: skein_fake_checkout::git::Tree,
     history: Option<History>,
     git_head: Option<u64>,
+    git_expected: Option<u64>,
     pending: BTreeMap<Token, (tools::Grants, Box<[agent::llm::Served]>)>,
     cancelled: BTreeSet<Token>,
     events: VecDeque<Event>,
@@ -262,6 +265,24 @@ impl World {
         Self::with_capacity(seed, store, true, 2, 64, Scenario::GitChange)
     }
 
+    /// A configured git change whose push reaches the remote.
+    #[must_use]
+    pub fn with_push(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::PushLands)
+    }
+
+    /// A configured git change whose branch moved before push.
+    #[must_use]
+    pub fn with_moved_remote(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::PushStale)
+    }
+
+    /// Head of the remote branch in this fixture.
+    #[must_use]
+    pub fn remote_head(&self) -> Option<u64> {
+        Some(self.history.as_ref()?.remote_head())
+    }
+
     /// Provider prompts, including the next waking message.
     #[must_use]
     pub fn prompt_texts(&self) -> &[Vec<u8>] {
@@ -308,6 +329,8 @@ impl World {
             | Scenario::PlainNothing
             | Scenario::GitChange
             | Scenario::GitMarker
+            | Scenario::PushLands
+            | Scenario::PushStale
             | Scenario::MidReport => meeting.writable(&[0], &[1]),
         };
         let referee = Referee::new(meeting);
@@ -328,21 +351,37 @@ impl World {
         let mut disk = saved_disk.unwrap_or_default();
         let mut history = store.history.take();
         let mut git_head = store.git_head.take();
+        let git_expected = git_head.or(Some(1));
         let workspace = if scenario == Scenario::Chat {
             None
         } else {
             if matches!(
                 scenario,
-                Scenario::GitChange | Scenario::GitMarker | Scenario::SecondFails | Scenario::MidReport
+                Scenario::GitChange
+                    | Scenario::GitMarker
+                    | Scenario::SecondFails
+                    | Scenario::MidReport
+                    | Scenario::PushLands
+                    | Scenario::PushStale
             ) && !restored
             {
                 let mut tree = BTreeMap::from([(b"src/lib.rs".to_vec(), b"pub fn answer() -> u32 { 42 }\n".to_vec())]);
-                if matches!(scenario, Scenario::GitChange | Scenario::SecondFails | Scenario::MidReport) {
+                if matches!(
+                    scenario,
+                    Scenario::GitChange
+                        | Scenario::SecondFails
+                        | Scenario::MidReport
+                        | Scenario::PushLands
+                        | Scenario::PushStale
+                ) {
                     tree.insert(b".temper/pre-pr".to_vec(), b"#!checks\nsrc/lib.rs 43\n".to_vec());
                 }
                 let mut graph = History::new(tree);
                 git::clone_repository(&mut graph, &mut disk, b"repo", b"work").expect("fixture git clone");
                 git::check_out(&graph, &mut disk, b"work", 1).expect("fixture initial checkout");
+                if scenario == Scenario::PushStale {
+                    graph.move_remote();
+                }
                 if scenario == Scenario::GitMarker {
                     disk.write(b"work/src/lib.rs", b"<<<<<<< ours\nleft\n=======\nright\n>>>>>>> theirs\n");
                     disk.write(b"work/.git/MERGE_HEAD", &1_u64.to_le_bytes());
@@ -372,7 +411,12 @@ impl World {
                 writable: true,
                 git: matches!(
                     scenario,
-                    Scenario::GitChange | Scenario::GitMarker | Scenario::SecondFails | Scenario::MidReport
+                    Scenario::GitChange
+                        | Scenario::GitMarker
+                        | Scenario::SecondFails
+                        | Scenario::MidReport
+                        | Scenario::PushLands
+                        | Scenario::PushStale
                 ),
                 conflicts: if scenario == Scenario::GitMarker {
                     Box::new([b"src/lib.rs".as_slice().into()])
@@ -407,6 +451,8 @@ impl World {
                 | Scenario::GitChange
                 | Scenario::GitMarker
                 | Scenario::SecondFails
+                | Scenario::PushLands
+                | Scenario::PushStale
         );
         let instructions: &[u8] = if scenario == Scenario::MidReport {
             b"@midreport Deliver then report."
@@ -464,6 +510,14 @@ impl World {
             resume,
             accounts: Box::new([0]),
             workspace,
+            push: if matches!(scenario, Scenario::PushLands | Scenario::PushStale) {
+                Some(Box::new([Some(local::PushTarget {
+                    remote: b"repo".as_slice().into(),
+                    branch: b"main".as_slice().into(),
+                })]))
+            } else {
+                None
+            },
         };
         let provider_config = smith_session_world::Settings::calm(seed).provider;
         let disk_start = disk.tree(b"work");
@@ -481,6 +535,7 @@ impl World {
             disk_start,
             history,
             git_head,
+            git_expected,
             pending: BTreeMap::new(),
             cancelled: BTreeSet::new(),
             events: VecDeque::new(),
@@ -873,7 +928,7 @@ impl World {
                             reason: run::DeliveryReason::Broken,
                             diagnostic: Box::new(run::Diagnostic::new(b"simulated git commit failure", 0)),
                         },
-                        GitOp::Markers { .. } => unreachable!("second directory has no merge"),
+                        GitOp::Markers { .. } | GitOp::Push { .. } => unreachable!("second directory has no merge"),
                     }
                 } else {
                     assert_eq!(directory, 0, "fixture has at most two git directories");
@@ -943,6 +998,20 @@ impl World {
                     None => GitResult::Failed {
                         reason: run::DeliveryReason::Missing,
                         diagnostic: Box::new(run::Diagnostic::empty()),
+                    },
+                }
+            }
+            GitOp::Push { remote, branch } => {
+                let expected = self.git_expected.expect("checkout kept the remote head it started from");
+                match git::push_expected(history, &self.disk, &remote, b"work", head, &branch, expected) {
+                    Ok(git::Pushed::Pushed) => {
+                        self.git_expected = Some(head);
+                        GitResult::Pushed
+                    }
+                    Ok(git::Pushed::Rejected) => GitResult::Stale,
+                    Err(fault) => GitResult::Failed {
+                        reason: run::DeliveryReason::Broken,
+                        diagnostic: Box::new(run::Diagnostic::new(format!("{fault:?}").as_bytes(), 0)),
                     },
                 }
             }

@@ -252,3 +252,9 @@ no changes, markers, a later directory failure, repeated names, a crash
 after recording a commit, and cancellation during delivery. The world's
 64-seed fuzzy sweep remains its one fuzzy test. The one-second focused and
 five-second fuzzy world shares and workspace budgets are unchanged.
+
+Configured local pushes were measured serially on 2026-10-06 with
+`measure -j 1`: 36 focused local-world tests passed in 0.166 seconds.
+The two added stories cover a push that lands and a remote branch that
+moved before the push. The existing one-test, 64-seed local fuzzy sweep
+remains. The workspace and local-world budgets are unchanged.

@@ -37,6 +37,8 @@ pub enum GitOp {
     Markers { paths: Box<[Box<[u8]>]> },
     /// Commit the checked tree with the configured result message.
     Commit { message: Box<[u8]> },
+    /// Conditionally push the new commit to the configured branch.
+    Push { remote: Box<[u8]>, branch: Box<[u8]> },
 }
 
 /// One terminal for a typed git operation.
@@ -48,6 +50,10 @@ pub enum GitResult {
     Markers { first: Option<Box<[u8]>> },
     /// The new commit identity to show the agent and person.
     Committed { receipt: Box<[u8]> },
+    /// The configured branch now names the commit.
+    Pushed,
+    /// The remote branch moved since this checkout began.
+    Stale,
     /// Git operation failed with a bounded diagnostic tail.
     Failed { reason: run::DeliveryReason, diagnostic: Box<run::Diagnostic> },
 }

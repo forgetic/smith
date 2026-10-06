@@ -46,6 +46,7 @@ fn config() -> Config {
         resume: true,
         accounts: Box::new([7]),
         workspace: None,
+        push: None,
     }
 }
 

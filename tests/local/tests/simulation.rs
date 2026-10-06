@@ -105,6 +105,26 @@ fn a_change_is_checked_and_committed_in_place() {
 }
 
 #[test]
+fn a_configured_push_lands_after_the_local_commit() {
+    let mut world = World::with_push(205);
+    world.line(b"Make the answer 43 and push");
+    world.drive(500);
+    assert_eq!(world.remote_head(), Some(2), "the remote branch names the committed change");
+    assert!(matches!(world.delivery(), Some(smith_domain::run::Delivery::Delivered(_))));
+    assert!(world.shown().iter().any(|text| text.as_ref() == b"Change delivered"));
+}
+
+#[test]
+fn a_moved_remote_makes_a_configured_push_stale() {
+    let mut world = World::with_moved_remote(206);
+    world.line(b"Make the answer 43 and push");
+    world.drive(500);
+    assert_eq!(world.remote_head(), Some(2), "the remote stayed on its outside commit");
+    assert!(matches!(world.delivery(), Some(smith_domain::run::Delivery::Stale)));
+    assert!(world.shown().iter().any(|text| text.as_ref() == b"Run failed"));
+}
+
+#[test]
 fn a_crash_after_a_commit_before_its_turn_is_saved_tells_the_next_run_what_was_committed() {
     let mut first = World::with_git_change(201);
     first.line(b"Make the answer 43");
