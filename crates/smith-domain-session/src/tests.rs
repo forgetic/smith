@@ -611,11 +611,14 @@ fn an_invalid_call_is_answered_with_its_problem_and_nothing_runs_for_it() {
 }
 
 #[test]
-fn a_message_of_invalid_calls_goes_straight_back() {
+fn a_message_of_invalid_calls_waits_on_the_ready_list() {
     let mut h = Harness::new(LIMITS);
     let (owner, _) = h.open(1);
     let content = Box::new([invalid(b"c1", Problem::UnknownTool)]);
-    let (_, prompt) = calling(h.step(Event::Completed { owner, completion: completion(content, Stop::ToolUse) }));
+    assert_eq!(h.step(Event::Completed { owner, completion: completion(content, Stop::ToolUse) }), None);
+    assert!(!h.domain.is_ready(), "the ready list waits for reclaim");
+    h.domain.reclaim();
+    let (_, prompt) = calling(h.resume());
     let answer = Block::ToolResult { id: bytes(b"c1"), result: Returned::Invalid { problem: Problem::UnknownTool } };
     assert_eq!(&*prompt.messages[2].content, &[answer]);
 }
@@ -625,7 +628,9 @@ fn a_call_too_large_for_the_agent_is_answered_so_like_any_invalid_call() {
     let mut h = Harness::new(LIMITS);
     let (owner, _) = h.open(1);
     let content = Box::new([invalid(b"c1", Problem::TooLarge)]);
-    let (_, prompt) = calling(h.step(Event::Completed { owner, completion: completion(content, Stop::ToolUse) }));
+    assert_eq!(h.step(Event::Completed { owner, completion: completion(content, Stop::ToolUse) }), None);
+    h.domain.reclaim();
+    let (_, prompt) = calling(h.resume());
     let answer = Block::ToolResult { id: bytes(b"c1"), result: Returned::Invalid { problem: Problem::TooLarge } };
     assert_eq!(&*prompt.messages[2].content, &[answer]);
 }

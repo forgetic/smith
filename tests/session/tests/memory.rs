@@ -221,11 +221,22 @@ fn fill(original: Limits, route: Route, full_service: bool) {
     let meter = Meter::new();
     let mut domain = Domain::new(&limits, 1);
     let mut step = |event: Event| -> Option<Asked> {
+        let may_rest = matches!(route, Route::Invalid) && matches!(event, Event::Completed { .. });
         meter.start();
         smith_domain_session::step(&mut domain, &env, event, &mut out);
         let measured = meter.end();
-        let asked = observe_fill(&mut out, &mut observed, full_service);
+        let mut asked = observe_fill(&mut out, &mut observed, full_service);
         meter.check(measured, bound, &limits);
+        if may_rest {
+            domain.reclaim();
+        }
+        if domain.is_ready() {
+            meter.start();
+            smith_domain_session::resume(&mut domain, &env, &mut out);
+            let measured = meter.end();
+            asked = observe_fill(&mut out, &mut observed, full_service).or(asked);
+            meter.check(measured, bound, &limits);
+        }
         asked
     };
     for opener in 0..limits.sessions {
@@ -293,10 +304,19 @@ fn fill(original: Limits, route: Route, full_service: bool) {
         && recorded == turns
         && priced >= turns
         && ended == full_service));
+    assert_retained_payload(&meter, &limits, route, full_service, pressure);
+}
+
+fn assert_retained_payload(meter: &Meter, limits: &Limits, route: Route, full_service: bool, pressure: u64) {
     let payload = if full_service { limits.session_bytes } else { pressure };
+    // An all-invalid batch resumes after reclaim, so full-service terminal
+    // payloads of different sessions do not coexist.
+    let simultaneous = if full_service && matches!(route, Route::Invalid) { 1 } else { limits.sessions };
     assert!(
-        meter.held() >= u64::from(limits.sessions) * payload,
-        "{limits:?}: every session retains its exact full payload in the selected maximum state"
+        meter.held() >= u64::from(simultaneous) * payload,
+        "{route:?}, full_service={full_service}, {limits:?}: held {} below target {}",
+        meter.held(),
+        u64::from(simultaneous) * payload
     );
 }
 
@@ -777,6 +797,22 @@ fn measured_step(
     seen
 }
 
+fn measured_resume(
+    domain: &mut Domain,
+    env: &Env<Limits>,
+    out: &mut Queue<Request>,
+    meter: &Meter,
+    bound: u64,
+) -> MemorySeen {
+    assert!(domain.is_ready());
+    meter.start();
+    smith_domain_session::resume(domain, env, out);
+    let measured = meter.end();
+    let seen = memory_seen(out);
+    meter.check(measured, bound, &env.limits);
+    seen
+}
+
 fn read_completion(width: u32) -> Completion {
     let mut blocks = Vec::with_capacity(usize::try_from(width).expect("bounded width"));
     for number in 0..width {
@@ -1061,27 +1097,32 @@ fn the_original_four_message_cap_refuses_the_next_provider_before_work() {
                     Event::Done { owner: op, done: Done::Loaded { content: bytes(output), version: VERSION } },
                 )
             }
-            Route::Invalid => measured_step(
-                &mut domain,
-                &env,
-                &mut out,
-                &meter,
-                bound,
-                Event::Completed {
-                    owner,
-                    completion: Completion {
-                        content: Box::new([Block::ToolCall {
-                            id: bytes(1),
-                            name: bytes(1),
-                            input: bytes(1),
-                            replay: None,
-                            call: Decoded::Invalid { problem: Problem::Missing { field: bytes(field) } },
-                        }]),
-                        stop: Stop::ToolUse,
-                        usage: Usage::ZERO,
+            Route::Invalid => {
+                let seen = measured_step(
+                    &mut domain,
+                    &env,
+                    &mut out,
+                    &meter,
+                    bound,
+                    Event::Completed {
+                        owner,
+                        completion: Completion {
+                            content: Box::new([Block::ToolCall {
+                                id: bytes(1),
+                                name: bytes(1),
+                                input: bytes(1),
+                                replay: None,
+                                call: Decoded::Invalid { problem: Problem::Missing { field: bytes(field) } },
+                            }]),
+                            stop: Stop::ToolUse,
+                            usage: Usage::ZERO,
+                        },
                     },
-                },
-            ),
+                );
+                assert!(seen.complete.is_none() && seen.end.is_none());
+                domain.reclaim();
+                measured_resume(&mut domain, &env, &mut out, &meter, bound)
+            }
             Route::Talk => {
                 let block = size(size_of::<Block>());
                 let spec_cost = 2 + 2 * size(size_of::<Descriptor>()) + block + 1;

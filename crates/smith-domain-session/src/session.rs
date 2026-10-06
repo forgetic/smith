@@ -1185,6 +1185,7 @@ fn advance(
     }
     let message = conversation.transcript.last().expect("the assistant message is last while tooling");
     let end = u32::try_from(message.content.len()).expect("a message whose calls were counted has its blocks counted");
+    let begin = tools.next;
     let mut batch: Option<Effect> = None;
     let mut started: u32 = 0;
     let mut next = end;
@@ -1266,7 +1267,7 @@ fn advance(
     if tools.running > 0 {
         return State::Tooling { tools };
     }
-    if started > 0 && next < end {
+    if begin < end {
         return State::Resting { tools };
     }
     finish_tools(conversation, id, tools, env, out)

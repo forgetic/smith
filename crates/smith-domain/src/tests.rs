@@ -948,9 +948,10 @@ fn a_sub_agent_opens_a_child_session_whose_last_message_answers_the_call() {
     assert_eq!(&*prompt.served, &[Served::SubAgent], "a child never finishes");
     assert_eq!((h.domain.peers(), h.domain.flights()), (2, 1));
 
-    // The child calls finish, which it was not offered: no call, answered at
-    // once, and its LLM is called again.
-    let (again, prompt) = completing(h.answer(child, Box::new([served(b"f1", verdict(b"approve"))])));
+    // The child calls finish, which it was not offered: no call. Its next
+    // provider request waits until the next iteration's reclaim point.
+    assert!(h.answer(child, Box::new([served(b"f1", verdict(b"approve"))])).is_empty());
+    let (again, prompt) = completing(h.next());
     assert_eq!(again, child);
     let [Block::ToolResult { id: _, result: Returned::Invalid { problem: Problem::UnknownTool } }] = last(&prompt)
     else {
@@ -1167,7 +1168,8 @@ fn an_ask_larger_than_the_session_may_hold_is_too_large() {
     }
     let brief = brief.into_boxed();
     let ask = Ask::SubAgent { brief, families: Families { tools: TOOLS, agents: false }, llm: None, share: None };
-    let (_, prompt) = completing(h.answer(main, Box::new([served(b"a1", ask)])));
+    assert!(h.answer(main, Box::new([served(b"a1", ask)])).is_empty());
+    let (_, prompt) = completing(h.next());
     let [Block::ToolResult { id: _, result: Returned::Invalid { problem: Problem::TooLarge } }] = last(&prompt) else {
         panic!("expected the call too large, got {:?}", last(&prompt));
     };
@@ -1288,8 +1290,8 @@ fn declared_host_reads_run_together_write_waits_and_mismatched_effect_never_rela
         panic!("exact error reaches next completion");
     };
     assert_eq!(actual.as_ref(), answer.text());
-    let emitted = h.answer(owner, Box::new([opaque_call(b"bad", b"outside_write", run::HostEffect::Read)]));
-    let (_, prompt) = completing(emitted);
+    assert!(h.answer(owner, Box::new([opaque_call(b"bad", b"outside_write", run::HostEffect::Read)])).is_empty());
+    let (_, prompt) = completing(h.next());
     let [Block::ToolResult { result: Returned::Invalid { problem: Problem::UnknownTool }, .. }] = last(&prompt) else {
         panic!("effect mismatch is rejected before session scheduling");
     };
