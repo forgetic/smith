@@ -13,18 +13,12 @@ use smith_domain_tools::{Authority, Effect, Grants, Name, Repo};
 
 /// The ticket of `finish` among the tools a session is offered: tickets are
 /// the top level's, and name values within one session.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const FINISH: Token = Token::new(0);
 
 /// The ticket of the sub-agent tool.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const SUB_AGENT: Token = Token::new(1);
 
 /// The first ticket of a session's calls and answers.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const DELIVER: Token = Token::new(2);
 
 /// First live ticket, separate from the fixed served-tool descriptors.
@@ -36,8 +30,6 @@ pub(crate) const WAIT: Token = Token::new(3);
 pub(crate) const FIRST: u64 = 4;
 
 /// The tools the run serves a conversation.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -62,8 +54,6 @@ pub(crate) struct Offered {
 /// offered as descriptors: `finish` if the opening says so, a write, run
 /// alone; sub-agents if its families have them, a write when the families
 /// asked for may write, which the widest the asker may give them do.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn spec(opening: Opening, receiving: Budget) -> Option<(Spec, Offered)> {
     let Opening {
         host_tools,
@@ -124,8 +114,6 @@ pub(crate) fn spec(opening: Opening, receiving: Budget) -> Option<(Spec, Offered
 /// run names it to the LLM; relative paths start in the first repository, the
 /// one the work is about, or at the root if there is none. Commands run with
 /// an empty environment: a charter carries none yet.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn authority(workspace: Option<Workspace>, tools: Tools) -> Option<Authority> {
     let mounted = match workspace {
         Some(workspace) => workspace.directories,
@@ -149,15 +137,11 @@ fn authority(workspace: Option<Workspace>, tools: Tools) -> Option<Authority> {
 
 /// The effect of a call that opens a sub-agent with `families`: a write if it
 /// may write.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn writes(families: Families) -> Effect {
     if families.tools.modify || families.tools.shell { Effect::Write } else { Effect::Read }
 }
 
 /// The effect of a call to a tool the run serves.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn effect(ask: &Ask) -> Effect {
     match ask {
         Ask::Host { effect, .. } => host_effect(*effect),
@@ -167,8 +151,6 @@ pub(crate) fn effect(ask: &Ask) -> Effect {
 }
 
 /// Why the session yielded, as the run hears it.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn stop(stop: Yield) -> run::Stop {
     match stop {
         Yield::Done => run::Stop::EndTurn,
@@ -179,8 +161,6 @@ pub(crate) const fn stop(stop: Yield) -> run::Stop {
 }
 
 /// What `turns` completions that used `usage` spent.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn spend(turns: u32, usage: llm::Usage) -> Spend {
     let llm::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens } = usage;
     Spend {
@@ -196,8 +176,6 @@ pub(crate) const fn spend(turns: u32, usage: llm::Usage) -> Spend {
 /// How the session ended, as the run hears it: a failed call is its
 /// provider's fault, but for a conversation too long for the model, which is
 /// a full context, as is a transcript past the session's limits.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn end(end: session::End) -> run::End {
     match end {
         session::End::TranscriptRefused { reason } => {
@@ -231,8 +209,6 @@ fn exhausted(spent: Dimension) -> run::End {
 
 /// Whether the run's answer to a call is a failure, for the LLM to read as
 /// one.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn failed(returned: &run::Returned) -> bool {
     match returned {
         run::Returned::HostAnswered(answer) => answer.error(),

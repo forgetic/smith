@@ -24,10 +24,6 @@
 //! What happens is also told as content-free [`Fact`]s, kept in a bounded
 //! queue the parent drains ([`Domain::pop_fact`]); what does not fit is dropped
 //! and counted, and nothing the session decides depends on it.
-
-//!
-//! Copy baseline: temper `25ac2ad`, migration 05s2 (domain/session.md, section 12).
-
 //!
 //! One concrete opening admits fresh or restored bounded messages. It keeps
 //! live call/descriptor tickets, completion/retry state,

@@ -22,56 +22,36 @@ use crate::land::Landing;
 use crate::run::{Conversation, Run};
 
 /// A call in flight.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) struct Call {
     pub(crate) run: Id<Run>,
     /// The conversation that made it.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) conversation: Id<Conversation>,
     /// The conversation's token for it.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) owner: Token,
     pub(crate) work: Work,
 }
 
 /// What a call is doing.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) enum Work {
     Host(crate::host::Relay),
     /// A finish, landing its change.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Landing(Landing),
     /// A sub-agent's.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Child(Child),
 }
 
 /// Why a call is stopped before it is done.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Withdrawal {
     /// Its conversation withdrew it, closing.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Withdrawn,
     /// Its deadline passed first.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Expired,
 }
 
 /// What a call stopped for `why` returns, once what it was doing has settled.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn stopped(why: Withdrawal) -> Returned {
     match why {
         Withdrawal::Withdrawn => Returned::Cancelled,
@@ -80,8 +60,6 @@ pub(crate) fn stopped(why: Withdrawal) -> Returned {
 }
 
 /// The calls in flight, and the names their conversations know them by.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) struct Calls {
     slab: Slab<Call>,
@@ -95,30 +73,22 @@ impl Calls {
 
     /// The most heap calls take under a capacity of `capacity`, or `None` past
     /// a `u64`. What their work holds is theirs to count.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn worst_case(capacity: u32) -> Option<u64> {
         let named = Map::<(Id<Conversation>, Token), Id<Call>>::worst_case(capacity)?;
         Slab::<Call>::worst_case(capacity)?.checked_add(named)
     }
 
     /// Calls present, returned ones included until they are reclaimed.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn len(&self) -> u32 {
         self.slab.len()
     }
 
     /// Whether another call would be refused.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn is_full(&self) -> bool {
         self.slab.is_full() || self.named.len() >= self.named.capacity()
     }
 
     /// Stores `call` and names it; there must be room.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn insert(&mut self, call: Call) -> Id<Call> {
         let name = (call.conversation, call.owner);
         let id = self.slab.insert(call).expect("checked for room before a call is made");
@@ -136,16 +106,12 @@ impl Calls {
     }
 
     /// The call `conversation` names `owner`, if it has not returned.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn find(&self, conversation: Id<Conversation>, owner: Token) -> Option<Id<Call>> {
         self.named.get(&(conversation, owner)).copied()
     }
 
     /// Retires a call that has returned: its name is forgotten at once, its
     /// slot freed at the reclaim point.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn retire(&mut self, id: Id<Call>) {
         let call = self.slab.get(id).expect("a call lives until it returns");
         let named = self.named.remove(&(call.conversation, call.owner));

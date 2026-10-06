@@ -22,32 +22,22 @@ use crate::llm::{self, Block, Decoded, Message, Prompt, Returned, Said, Served};
 use crate::translate::{self, DELIVER, FINISH, FIRST, Offered, SUB_AGENT, WAIT};
 
 /// A conversation the run opened, and its session's tickets.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 #[derive(Debug)]
 pub(crate) struct Peer {
     /// Host-supplied activation used in every name made by this conversation.
     /// Contract: domain/run.md, sections 3.2 and 8.2.
     pub(crate) activation: u64,
     /// The run's token for the conversation, which is its session's opener.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) conversation: Token,
     pub(crate) account: u32,
     /// The session's token for itself, once it has opened.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) session: Option<Token>,
     offered: Offered,
     /// The asks of the last completion's calls to the tools the run serves,
     /// by ticket, until the session dispatches them; and what they hold.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     asks: Map<u64, Ask>,
     held: u64,
     /// The next ticket to give.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     next: u64,
 }
 
@@ -76,8 +66,6 @@ impl Peer {
     }
 
     /// The tickets it holds.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) fn tickets(&self) -> u32 {
         self.asks.len()
     }
@@ -85,8 +73,6 @@ impl Peer {
     /// The session's view of `completion`: each call to a tool the run serves
     /// becomes a ticket for its ask, while what the asks hold fits `limit`; a
     /// call to one the session was not offered is no call.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) fn completion(&mut self, completion: llm::Completion, limit: u64) -> sllm::Completion {
         let llm::Completion { content, stop, usage } = completion;
         let mut blocks = List::with_capacity(u32::try_from(content.len()).expect("a completion fits in memory"));
@@ -174,16 +160,12 @@ impl Peer {
     }
 
     /// The ask the session dispatches as `ticket`.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) fn take(&mut self, ticket: Token) -> Ask {
         self.asks.remove(&ticket.raw()).expect("a session dispatches a call once, by the ticket it was given")
     }
 
     /// The session goes on without the calls it has not dispatched: it
     /// yielded, or called the LLM again. How many tickets went.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) fn forget_asks(&mut self, limits: &session::Limits) -> u32 {
         let forgotten = self.asks.len();
         self.asks = Map::with_capacity(asks(limits));
@@ -193,8 +175,6 @@ impl Peer {
 
     /// The protocol layer's view of the session's `prompt`: every ticket in it
     /// resolved, the answers copied.
-    ///
-    /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
     pub(crate) fn prompt(&self, prompt: sllm::Prompt) -> Prompt {
         let sllm::Prompt { endpoint, model, system, tools, delegated, messages, max_tokens } = prompt;
         let mut served = List::with_capacity(u32::try_from(delegated.len()).expect("bounded declaration inventory"));
@@ -261,8 +241,6 @@ impl Peer {
 
 /// The most asks a peer holds: as many as fit the session's byte limit at
 /// their fixed size.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn asks(limits: &session::Limits) -> u32 {
     per(limits.session_bytes, size_of::<Ask>()).min(limits.completion_blocks)
 }
@@ -274,8 +252,6 @@ fn per(bytes: u64, size: usize) -> u32 {
 
 /// What an ask holds: its fixed size, and each part held in a box at its
 /// fixed size plus its payload.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn ask_cost(ask: &Ask) -> Option<u64> {
     let payload = match ask {
         Ask::Wait => 0,
@@ -298,8 +274,6 @@ pub(crate) fn ask_cost(ask: &Ask) -> Option<u64> {
 /// answer; a failed check's tail and its repository's name, which the charter
 /// holds; or the problems listed of an outcome rejected, each naming a field
 /// of the outcome spec, which the charter holds, or of the outcome declared.
-///
-/// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) fn payload(limits: &run::Limits) -> Option<u64> {
     let answered = u64::from(limits.answer_bytes);
     let failed = u64::from(limits.check_tail).checked_add(limits.run_bytes)?;

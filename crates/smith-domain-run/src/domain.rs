@@ -1,4 +1,9 @@
-//! The run child domain's state and its entry points (programming-model.md, sections 4.5 and 6.3).
+//! The run child domain's state and its entry points (domain/run.md, sections
+//! 3, 5, 6 and 10; programming-model.md, sections 4.5 and 6.3). [`Domain`]
+//! retains runs, conversations, delegated calls, alarms and bounded facts.
+//! [`step`] accepts parent events and [`fire`] handles due alarms; both emit
+//! bounded requests. This module never knows provider syntax, credential
+//! secrets, host policy or the contents of a delivered receipt.
 
 use skein_lib::{Deadlines, Env, Queue, Slab, Time, Token};
 
@@ -12,20 +17,14 @@ use crate::run::{self, Alarm, Conversation, Run};
 /// the run and opens its main conversation or asks io for its first look; a
 /// check goes with its notice to the host; a call returns as main is
 /// closed. The parent reserves this much room in `out` before calling it.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub const MAX_OUT: u32 = 2;
 
 /// The run child domain's state.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub struct Domain {
     pub(crate) runs: Slab<Run>,
     pub(crate) conversations: Slab<Conversation>,
     /// Calls of conversations to the run.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) calls: Calls,
     pub(crate) alarms: Deadlines<Alarm>,
     pub(crate) facts: Facts,
@@ -33,8 +32,6 @@ pub struct Domain {
 
 impl Domain {
     /// A domain with room for `limits`.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub fn new(limits: &Limits) -> Domain {
         Domain {
@@ -49,24 +46,18 @@ impl Domain {
     }
 
     /// Runs present, closed ones included until they are reclaimed.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub fn runs(&self) -> u32 {
         self.runs.len()
     }
 
     /// Conversations present, ended ones included until they are reclaimed.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub fn conversations(&self) -> u32 {
         self.conversations.len()
     }
 
     /// When the earliest alarm falls due.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub fn next_deadline(&self) -> Option<Time> {
         self.alarms.next()
@@ -74,8 +65,6 @@ impl Domain {
 
     /// Whether an alarm is due at `now`. While one is, the loop fires the
     /// root domain, which calls [`fire`].
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub fn is_due(&self, now: Time) -> bool {
         match self.alarms.next() {
@@ -86,8 +75,6 @@ impl Domain {
 
     /// Calls of conversations to the run, returned ones included until they
     /// are reclaimed.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub fn calls(&self) -> u32 {
         self.calls.len()
@@ -95,24 +82,18 @@ impl Domain {
 
     /// The oldest fact not yet drained. The parent drains them at its own
     /// pace; what does not fit meanwhile is dropped and counted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub fn pop_fact(&mut self) -> Option<Fact> {
         self.facts.pop()
     }
 
     /// How many facts were dropped for want of room, since the domain was
     /// made.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     #[must_use]
     pub fn facts_lost(&self) -> u64 {
         self.facts.lost()
     }
 
     /// The reclaim point: frees what closed in this iteration.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub fn reclaim(&mut self) {
         self.runs.reclaim();
         self.conversations.reclaim();
@@ -121,8 +102,6 @@ impl Domain {
 }
 
 /// Handles one event, emitting at most [`MAX_OUT`] requests.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     domain.facts.begin();
     let mark = out.len();
@@ -162,8 +141,6 @@ fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Re
 /// [`MAX_OUT`] requests. A stage fires its alarms after its input events, so
 /// progress that arrived in the same iteration wins over a deadline that passed
 /// while the loop waited.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     let Some(alarm) = domain.alarms.expire(env.now) else {
         return;

@@ -219,8 +219,6 @@ pub enum CompletionEvidence {
 }
 
 /// What kept an LLM from going on.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ModelFault {
     /// Full neutral actual failure and evidence after session retry policy.
@@ -237,30 +235,18 @@ pub enum ModelFault {
     },
 
     /// The account spent its provider allowance. The host decides whether to retry after cooldown.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Exhausted,
     /// Its provider failed for good: unreachable, overloaded past the
     /// retries, or refusing the call or its credentials.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Provider,
     /// The conversation outgrew the model's context, or the bytes a
     /// conversation may hold.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     ContextFull,
     /// It kept declining to answer.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Refused,
     /// It kept running out of tokens mid-answer.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Truncated,
     /// It kept asking for tools and naming none.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Malformed,
 }
 
@@ -331,8 +317,6 @@ pub enum TranscriptRefusal {
 }
 
 /// Why a run ended without an outcome: what the host parent acts on.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RunFailure {
     /// Agent currency arithmetic failed; the reported spend is what was
@@ -364,45 +348,27 @@ pub enum RunFailure {
     ),
 
     /// The LLM could not do the work.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Model(ModelFault),
     /// The run's budget ran out.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Budget(Exhausted),
     /// The LLM did not keep to the run's rules.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Policy(Policy),
     /// The host parent cancelled the run.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Cancelled,
     /// The host's delivery context moved: no later delivery from this run can
     /// land. The host decides what context a new run receives.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Stale,
 }
 
 /// The run's rules, as the LLM broke them.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Policy {
     /// It kept stopping without finishing, through `nudges` nudges, having
     /// called `finish` with `rejected` outcomes that were refused.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Unfinished {
         /// Number of run nudges already given after unfinished turns.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         nudges: u32,
         /// Number of declared outcomes rejected by the charter contract.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         rejected: u32,
     },
 }

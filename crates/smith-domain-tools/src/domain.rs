@@ -1,4 +1,9 @@
-//! The tools child domain's state and its entry point (programming-model.md, sections 4.5 and 6.3).
+//! The tools child domain's state and its entry point (domain/tools.md,
+//! sections 4–6 and 9; programming-model.md, sections 4.5 and 6.3). [`Domain`]
+//! retains kits, pending IO jobs and bounded facts. [`step`] emits the kit's
+//! bounded requests and accepts its typed terminals. This module never knows
+//! provider text, run outcomes, credentials or filesystem contents beyond
+//! what typed IO terminals supply.
 
 use skein_lib::{Env, Queue, Slab};
 

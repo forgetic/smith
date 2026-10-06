@@ -152,49 +152,33 @@ pub(crate) struct Session {
 }
 
 /// What a session holds in every state.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Debug)]
 struct Conversation {
     /// The opener's token, echoed on every record back to it.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     opener: Token,
     endpoint: Endpoint,
     model: Box<[u8]>,
     system: Box<[u8]>,
     /// The families of its own tools it offers the LLM, as its kit has them.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     tools: Grants,
     delegated: Box<[Descriptor]>,
     max_tokens: u32,
     /// The conversation so far, oldest first, starting with the spec's prompt.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     transcript: List<Message>,
     /// Bytes held, counted against `Limits::session_bytes`.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     bytes: u64,
     /// Logical space owed to actual provider and tool terminals.
     reserved: u64,
     provider_credit: Option<u64>,
     /// What the session may spend, and what it has: completions received, and
     /// the tokens they used.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     budget: Budget,
     turns: u32,
     usage: Usage,
     /// When the time budget runs out.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     expires: Time,
     /// Its kit in the tools it owns, as the tools name it. A session is
     /// inserted Closed, holding nothing, and given its kit as it opens.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     kit: Token,
     recording: Recording,
     closing_tools: Option<Tools>,
@@ -215,43 +199,27 @@ struct Recording {
 #[derive(Debug)]
 enum State {
     /// A call is in flight, after `attempt` retries.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Calling { attempt: u32 },
     /// The last call failed transiently: calling again at `until`.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Backoff { attempt: u32, until: Time },
     /// Running the tool calls of the last assistant message.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Tooling { tools: Tools },
     /// The tools answered every call of the last batch in the step that
     /// started it: the session is on the ready list, and the next batch
     /// starts once the runs it ended have been reclaimed.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Resting { tools: Tools },
     /// The LLM stopped calling tools: waiting for the opener to continue or
     /// close the session.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Yielded,
     /// Ending with `end`, once what it waits for has settled, its kit's close
     /// among it.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Closing { end: End, waiting: Waiting },
     /// Terminal: holds nothing.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Closed,
 }
 
 /// What a closing session waits for: the terminal event of its call, and of
 /// each of its tool runs still `runs`, and its kit's close.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 struct Waiting {
     call: bool,
@@ -261,8 +229,6 @@ struct Waiting {
 
 /// A closing session's kit: open until the session closes it as it settles
 /// ([`settle`]), closing, its calls cancelled, or closed.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Kit {
     Open,
@@ -272,53 +238,35 @@ enum Kit {
 
 /// What a session waits for once nothing it asked for is in flight but its
 /// kit, which it closes.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 const KIT: Waiting = Waiting { call: false, runs: 0, kit: Kit::Open };
 
 /// A closing session that waits for nothing: it has ended.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 const SETTLED: Waiting = Waiting { call: false, runs: 0, kit: Kit::Closed };
 
 /// The tool calls of the last assistant message, run in batches: adjacent
 /// calls that read, up to `Limits::parallel_tools` of them, run together, and
 /// one that writes runs alone.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Debug)]
 struct Tools {
     /// A slot for each call reached, in call order, with room for them all.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     slots: List<Slot>,
     /// The runs of the batch still in flight.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     running: u32,
     /// The block where the calls not reached yet begin.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     next: u32,
 }
 
 #[derive(Debug)]
 pub(crate) enum Slot {
     /// The call is running as `run`.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Running { run: Id<Run> },
     /// The call has its result.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Done { result: Block },
 }
 
 /// A tool call running for a session, named by its own token: the call at
 /// `block` of the session's last message, which fills `slot`, run `by` the
 /// tools or the opener.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Debug)]
 pub(crate) struct Run {
     ended: bool,
@@ -330,8 +278,6 @@ pub(crate) struct Run {
 }
 
 /// Who runs a call: the tools, or the opener, which serves a delegated one.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum By {
     Tools,
@@ -340,8 +286,6 @@ enum By {
 
 /// What runs the sessions' tool calls: the runs, the tools child domain, which
 /// the session owns (programming-model.md, section 4.5), and room for what the tools emit in a step.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Debug)]
 pub(crate) struct Calls {
     pub(crate) runs: Slab<Run>,
@@ -350,8 +294,6 @@ pub(crate) struct Calls {
 }
 
 /// A session's timers, named by what they are for.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Alarm {
     Expiry { session: Id<Session> },
@@ -361,8 +303,6 @@ pub(crate) enum Alarm {
 /// The sessions that rest (programming-model.md, section 2), each at most once:
 /// those that rested before the last reclaim point, which [`crate::resume`]
 /// starts again, and those that rested since, which wait for the next.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Debug)]
 pub(crate) struct Ready {
     now: Set<Id<Session>>,
@@ -376,8 +316,6 @@ impl Ready {
 
     /// The most heap the list takes for `sessions` sessions, or `None` past a
     /// `u64`.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub(crate) fn worst_case(sessions: u32) -> Option<u64> {
         Set::<Id<Session>>::worst_case(sessions)?.checked_mul(2)
     }
@@ -387,8 +325,6 @@ impl Ready {
     }
 
     /// Takes a session that may be started again now.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub(crate) fn pop(&mut self) -> Option<Id<Session>> {
         let id = *self.now.first()?;
         self.now.remove(&id);
@@ -397,8 +333,6 @@ impl Ready {
 
     /// Keeps the session `id` on the list if it is `resting`, and off it if
     /// not.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     fn keep(&mut self, id: Id<Session>, resting: bool) {
         if !resting {
             self.now.remove(&id);
@@ -410,8 +344,6 @@ impl Ready {
 
     /// The reclaim point: what rested in this iteration may be started again
     /// in the next.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub(crate) fn promote(&mut self) {
         for _ in 0..self.next.capacity() {
             let Some(id) = self.next.first().copied() else {
@@ -714,8 +646,6 @@ pub(crate) fn cancelled(domain: &mut Domain, env: &Env<Limits>, owner: Token, ou
 
 /// An operation the tools asked of io has ended: the tools take it, and it may
 /// answer one of their calls, or end a closing kit with its last.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub(crate) fn io_done(
     domain: &mut Domain,
     env: &Env<Limits>,
@@ -745,8 +675,6 @@ pub(crate) fn io_done(
 
 /// The tools answered the call of the run `run`: Tooling, the result goes in
 /// its slot; Closing, one run fewer to wait for. Returns the run's session.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn owned_answered(
     domain: &mut Domain,
     env: &Env<Limits>,
@@ -777,8 +705,6 @@ fn owned_answered(
 }
 
 /// The kit of `id`, closing, has closed.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn kit_closed(sessions: &mut Slab<Session>, id: Id<Session>) {
     let session = sessions.get_mut(id).expect("a session lives until its kit has closed");
     let state = mem::replace(&mut session.state, State::Closed);
@@ -835,8 +761,6 @@ pub(crate) fn retry(domain: &mut Domain, env: &Env<Limits>, id: Id<Session>, out
 
 /// Off the ready list: the session rested after a batch the tools answered at
 /// once, and starts the next.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub(crate) fn rested(domain: &mut Domain, env: &Env<Limits>, id: Id<Session>, out: &mut Queue<Request>) {
     let mark = out.len();
     let session = domain.sessions.get_mut(id).expect("an alarm is cancelled before its session closes");
@@ -859,8 +783,6 @@ pub(crate) fn rested(domain: &mut Domain, env: &Env<Limits>, id: Id<Session>, ou
 /// the tools' queue, which holds no more facts than it takes, so a fact goes
 /// on at the end of the entry point that told it, while its session is there
 /// still: a session is reclaimed at the reclaim point at the earliest.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub(crate) fn pass_on_facts(domain: &mut Domain, env: &Env<Limits>) {
     for _ in 0..env.limits.tools.facts {
         let Some(fact) = domain.calls.tools.pop_fact() else {
@@ -873,8 +795,6 @@ pub(crate) fn pass_on_facts(domain: &mut Domain, env: &Env<Limits>) {
 }
 
 /// The session, as the tools name it, whose kit `fact` is of.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 const fn kit_session(fact: tools::Fact) -> Token {
     match fact {
         tools::Fact::Opened { session }
@@ -888,8 +808,6 @@ const fn kit_session(fact: tools::Fact) -> Token {
 
 /// The run `run` names, whose terminal event has come: retired, and copied
 /// out.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn ended_run(runs: &mut Slab<Run>, run: Id<Run>) -> Run {
     let found = runs.get_mut(run).expect("a run lives until its terminal event");
     assert!(!found.ended, "one terminal per run");
@@ -908,8 +826,6 @@ fn ended_run(runs: &mut Slab<Run>, run: Id<Run>) -> Run {
 
 /// What a step of the tools gave back: the answer to a call, if one came, and
 /// news of a kit.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 struct Heard {
     answer: Option<(Id<Run>, Outcome)>,
     kit: Option<News>,
@@ -927,8 +843,6 @@ enum News {
 /// cancels; what is for the session comes back. One step of the tools answers
 /// at most one call: an open, a close or an operation's end concerns one kit,
 /// and a call is answered at the entrance or later.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn tools_step(calls: &mut Calls, env: &Env<Limits>, event: tools::Event, out: &mut Queue<Request>) -> Heard {
     let tools_env = Env { now: env.now, wall: env.wall, limits: env.limits.tools };
     tools::step(&mut calls.tools, &tools_env, event, &mut calls.out);
@@ -956,8 +870,6 @@ fn tools_step(calls: &mut Calls, env: &Env<Limits>, event: tools::Event, out: &m
 /// The session an opener's handle names, or `None` if it has ended: the handle
 /// travelled down while the session's `Ended` travelled up, and is dropped
 /// (5.2).
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn addressed(sessions: &Slab<Session>, session: Token) -> Option<Id<Session>> {
     let id = Id::from_token(session);
     match &sessions.get(id)?.state {
@@ -975,8 +887,6 @@ fn addressed(sessions: &Slab<Session>, session: Token) -> Option<Id<Session>> {
 /// session ends once nothing is left ([`settle`]); then what the transition
 /// tells, and what the new state implies. `mark` is where the requests the
 /// transition made begin in `out`.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn conclude(domain: &mut Domain, env: &Env<Limits>, id: Id<Session>, out: &mut Queue<Request>, mark: u32) {
     let session = domain.sessions.get_mut(id).expect("the transition's session lives");
     match session.state {
@@ -1010,8 +920,6 @@ fn conclude(domain: &mut Domain, env: &Env<Limits>, id: Id<Session>, out: &mut Q
 /// What Closing implies: the session's kit closes, which cancels the calls the
 /// tools are running for it; and once the kit has closed and nothing the
 /// session waits for is left, the opener is told it has ended.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn settle(domain: &mut Domain, env: &Env<Limits>, id: Id<Session>, out: &mut Queue<Request>) {
     let session = domain.sessions.get_mut(id).expect("a session lives until it is retired");
     let (end, waiting) = match &session.state {
@@ -1052,8 +960,6 @@ fn settle(domain: &mut Domain, env: &Env<Limits>, id: Id<Session>, out: &mut Que
 
 /// What a transition tells, derived from the requests it made: a fact for
 /// each but the cancels and the tools' operations, which the tools tell.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn tell(facts: &mut Facts, runs: &Slab<Run>, session: &Session, out: &Queue<Request>, mark: u32) {
     let opener = session.conversation.opener;
     let made = usize::try_from(mark).expect("a u32 fits in a usize");
@@ -1094,8 +1000,6 @@ fn tell(facts: &mut Facts, runs: &Slab<Run>, session: &Session, out: &Queue<Requ
 }
 
 /// The retries of the call a session has just asked for.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn attempt(state: &State) -> u32 {
     match state {
         State::Calling { attempt } => *attempt,
@@ -1110,8 +1014,6 @@ fn attempt(state: &State) -> u32 {
 
 /// What a session's state implies, applied after every transition: which
 /// alarms run, whether it is on the ready list, and whether it is retired.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn follow(sessions: &mut Slab<Session>, alarms: &mut Deadlines<Alarm>, ready: &mut Ready, id: Id<Session>) {
     let session = sessions.get(id).expect("a session lives until it is retired");
     let expires = session.conversation.expires;
@@ -1142,8 +1044,6 @@ fn set(alarms: &mut Deadlines<Alarm>, alarm: Alarm, at: Option<Time>) {
 // target state.
 
 /// Calling, completed: the LLM produced its next message.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn answered(
     conversation: &mut Conversation,
     id: Id<Session>,
@@ -1193,8 +1093,6 @@ fn answered(
 /// Closing, completed: the call won the race with its cancel. The session
 /// ends as it was going to, but the provider counted the tokens, and so does
 /// the session.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn answered_late(
     conversation: &mut Conversation,
     end: End,
@@ -1240,8 +1138,6 @@ fn answered_late(
 
 /// Calling, completed with tool use: record the message and go through its
 /// calls.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn use_tools(
     conversation: &mut Conversation,
     id: Id<Session>,
@@ -1275,8 +1171,6 @@ fn use_tools(
 /// the session rests on the ready list before it starts another, so that
 /// the runs it ended are reclaimed first, and what one step emits and the runs
 /// a session holds stay bounded ([`crate::limits`]).
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn advance(
     conversation: &mut Conversation,
     id: Id<Session>,
@@ -1408,8 +1302,6 @@ fn finish_tools(
 /// Whether a call with `effect` joins a batch of `batch` that has started
 /// `started` runs: a read joins reads while there is room, and a write runs
 /// alone.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 const fn joins(batch: Option<Effect>, effect: Effect, started: u32, parallel: u32) -> bool {
     match batch {
         None => true,
@@ -1423,8 +1315,6 @@ const fn joins(batch: Option<Effect>, effect: Effect, started: u32, parallel: u3
 
 /// Calling, completed without tools to run: record the message, and yield to
 /// the opener with its text.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn pause(
     conversation: &mut Conversation,
     stop: Yield,
@@ -1448,8 +1338,6 @@ fn pause(
 
 /// Yielded, continue: the opener's message goes to the LLM, after a result for
 /// each tool call the yielded message made, as every call needs one.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn resumed(
     conversation: &mut Conversation,
     id: Id<Session>,
@@ -1475,8 +1363,6 @@ fn resumed(
 
 /// The opener's message `text`, after a `NotRun` result for each tool call of
 /// the last message, the one the session yielded with.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn unrun(conversation: &Conversation, text: Box<[u8]>) -> Box<[Block]> {
     let message = conversation.transcript.last().expect("a yielded session's transcript ends with its answer");
     let (calls, _) = tally(&message.content);
@@ -1496,8 +1382,6 @@ fn unrun(conversation: &Conversation, text: Box<[u8]>) -> Box<[Block]> {
 
 /// Tooling, a run done: keep the result of the call at `block` in its slot,
 /// and once the batch is done, go on through the calls after it.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[expect(clippy::too_many_arguments, reason = "a cell handler takes what its cell needs, and the calls to start more")]
 fn tool_ran(
     conversation: &mut Conversation,
@@ -1528,8 +1412,6 @@ fn tool_ran(
 }
 
 /// Closing, a tool run ended: one fewer to wait for.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn settled(end: End, waiting: Waiting) -> State {
     let runs = waiting.runs.checked_sub(1).expect("the run that ended was waited for");
     State::Closing { end, waiting: Waiting { runs, ..waiting } }
@@ -1537,8 +1419,6 @@ fn settled(end: End, waiting: Waiting) -> State {
 
 /// Calling, failed: wait and call again if the failure is transient and
 /// retries remain; end otherwise.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn call_failed(
     attempt: u32,
     failure: Failure,
@@ -1555,8 +1435,6 @@ fn call_failed(
 /// Calls the LLM with the conversation so far, if the budget pays for another
 /// completion and the transcript has room for its answer; ends the session
 /// otherwise, rather than pay for an answer it could not keep.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn call(
     conversation: &mut Conversation,
     id: Id<Session>,
@@ -1588,8 +1466,6 @@ fn cancel_call(id: Id<Session>, end: End, out: &mut Queue<Request>) -> State {
 
 /// Withdraws the delegated runs in flight, to end with `end` once every run
 /// has settled. The tools' runs end as the kit's close cancels them.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn cancel_tools(
     conversation: &mut Conversation,
     runs: &Slab<Run>,
@@ -1613,8 +1489,6 @@ fn cancel_tools(
 }
 
 /// Ends with `end` at once, or once the runs in flight have settled.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn abandon(
     conversation: &mut Conversation,
     runs: &Slab<Run>,
@@ -1629,8 +1503,6 @@ fn abandon(
 }
 
 /// Counts a completion that came back, and tells the opener.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn used(conversation: &mut Conversation, usage: Usage, out: &mut Queue<Request>) -> Result<(), End> {
     let price = conversation.recording.prices.price(usage).ok_or(End::PriceOverflow)?;
     let own = conversation.recording.own_spent.checked_add(price).ok_or(End::PriceOverflow)?;
@@ -1660,8 +1532,6 @@ fn checked_usage(previous: Usage, received: Usage) -> Option<Usage> {
 
 /// Ends the session with `end`, which has nothing in flight but its kit: the
 /// kit closes, and the opener is told once it has ([`settle`]).
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 const fn finish(end: End) -> State {
     State::Closing { end, waiting: KIT }
 }
@@ -1669,13 +1539,9 @@ const fn finish(end: End) -> State {
 // Helpers.
 
 /// How a session ends when its time budget runs out.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 const OUT_OF_TIME: End = End::Budget { spent: Dimension::Time };
 
 /// Refuses an open at the entrance: the session ends without having opened.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn refuse(facts: &mut Facts, opener: Token, end: End, out: &mut Queue<Request>) {
     facts.push(Fact::Ended { opener, end, turns: 0, usage: Usage::ZERO });
     out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO });
@@ -1683,8 +1549,6 @@ fn refuse(facts: &mut Facts, opener: Token, end: End, out: &mut Queue<Request>) 
 
 /// The conversation for `spec`, and the authority its kit opens with; or
 /// `None` if the spec does not fit the limits.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn admit(
     opener: Token,
     spec: Spec,
@@ -1728,8 +1592,6 @@ fn admit(
 }
 
 /// Whether `budget` asks for no more than `most` in any dimension.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn affordable(budget: &Budget, most: &Budget) -> bool {
     budget.turns <= most.turns
         && budget.input <= most.input
@@ -1743,8 +1605,6 @@ fn affordable(budget: &Budget, most: &Budget) -> bool {
 /// another completion at `now`, if any: its turns, input or output tokens used
 /// up, its cache reads or writes taken past their budget by a completion (whose
 /// tokens are known only once it comes back), or its time run out.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn spent(conversation: &Conversation, now: Time) -> Option<Dimension> {
     {
         let Recording { budget, spent, .. } = conversation.recording;
@@ -1778,8 +1638,6 @@ fn spent(conversation: &Conversation, now: Time) -> Option<Dimension> {
 /// The request for the next assistant message, its answer cut to the output
 /// budget left. The conversation is copied: the session keeps it, and the
 /// protocol layer holds the copy (copy at emission).
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn complete(id: Id<Session>, conversation: &Conversation, limits: &Limits) -> Request {
     let left = conversation.budget.output.saturating_sub(conversation.usage.output_tokens);
     let max_tokens = u32::try_from(left).unwrap_or(u32::MAX).min(conversation.max_tokens);
@@ -1804,8 +1662,6 @@ fn complete(id: Id<Session>, conversation: &Conversation, limits: &Limits) -> Re
 
 /// The provider's name for the tool call at `block` of the last message, which
 /// its result echoes.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn call_id(conversation: &Conversation, block: u32) -> Box<[u8]> {
     let message = conversation.transcript.last().expect("the assistant message is last while tooling");
     let index = usize::try_from(block).expect("a u32 fits in a usize");
@@ -1820,8 +1676,6 @@ fn call_id(conversation: &Conversation, block: u32) -> Box<[u8]> {
 /// The text blocks of `content`, one after another, in a box of their own: the
 /// transcript keeps the message, and the opener gets the copy (copy at
 /// emission).
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn text_of(content: &[Block]) -> Box<[u8]> {
     let mut len: usize = 0;
     for block in content {
@@ -1846,8 +1700,6 @@ fn text_of(content: &[Block]) -> Box<[u8]> {
 
 /// How many tool calls `content` holds, and how many of them are invalid. A
 /// message too long to count in a `u32` counts as having none, and yields.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn tally(content: &[Block]) -> (u32, u32) {
     if u32::try_from(content.len()).is_err() {
         return (0, 0);
@@ -1872,8 +1724,6 @@ fn tally(content: &[Block]) -> (u32, u32) {
 
 /// How long to wait before retrying a call that failed with `failure` after
 /// `attempt` retries, or `None` if it is not to be retried.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn backoff(failure: Failure, attempt: u32, limits: &Limits, rng: &mut Rng) -> Option<Duration> {
     let floor = match failure {
         Failure::Overloaded | Failure::Unavailable | Failure::TimedOut | Failure::Unauthorized => Duration::ZERO,
@@ -1898,8 +1748,6 @@ fn backoff(failure: Failure, attempt: u32, limits: &Limits, rng: &mut Rng) -> Op
 
 /// Counts `cost` more bytes against the session's limit, or says they do not
 /// fit.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[must_use]
 fn charge(conversation: &mut Conversation, cost: Option<u64>, limits: &Limits) -> bool {
     let Some(cost) = cost else {
@@ -2051,8 +1899,6 @@ fn receive_result(conversation: &mut Conversation, credit: u64, result: &Returne
 
 /// What a spec costs: its names, the tools its opener serves, and its first
 /// message.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn spec_cost(model: &[u8], system: &[u8], delegated: &[Descriptor], content: &[Block]) -> Option<u64> {
     let descriptor = u64::try_from(size_of::<Descriptor>()).ok()?;
     let delegated = descriptor.checked_mul(u64::try_from(delegated.len()).ok()?)?;
@@ -2066,8 +1912,6 @@ fn spec_cost(model: &[u8], system: &[u8], delegated: &[Descriptor], content: &[B
 /// before effects. The actual terminal transfers its credit into held bytes.
 /// Slot containers and their transient coexistence with assembled Block arrays
 /// are independently priced by `worst_case`; no Slot/Block size inequality is assumed.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn held(content: &[Block], calls: u32) -> Option<u64> {
     let slots = u64::try_from(size_of::<Block>()).ok()?.checked_mul(u64::from(calls))?;
     let mut cost = content_cost(content)?.checked_add(slots)?;
@@ -2100,16 +1944,12 @@ pub(crate) fn content_cost(content: &[Block]) -> Option<u64> {
 }
 
 /// A block's fixed size plus its payload.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn block_cost(block: &Block) -> Option<u64> {
     u64::try_from(size_of::<Block>()).ok()?.checked_add(payload_cost(block)?)
 }
 
 /// The bytes a block holds beyond its fixed size: its own, and those of the
 /// call or outcome it carries.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn payload_cost(block: &Block) -> Option<u64> {
     match block {
         Block::Text { text, replay } | Block::Refusal { text, replay } => {
@@ -2143,8 +1983,6 @@ fn replay_cost(replay: Option<&crate::llm::Replay>) -> Option<u64> {
 }
 
 /// The bytes a tool call's result holds beyond its block and its id.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn returned_cost(result: &Returned) -> Option<u64> {
     match result {
         Returned::Owned { outcome } => outcome_cost(outcome),
@@ -2216,15 +2054,11 @@ fn len(bytes: &[u8]) -> Option<u64> {
 
 /// A count for a fact, which saturates rather than fails: facts decide
 /// nothing.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn count(items: usize) -> u32 {
     u32::try_from(items).unwrap_or(u32::MAX)
 }
 
 /// Admit concrete history before acquiring a tools kit or making a completion.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub(crate) fn open(
     domain: &mut Domain,
     env: &Env<Limits>,
@@ -2435,8 +2269,6 @@ fn initial_text(prompt: &Message) -> &[u8] {
 /// The waking user message plus a `NotRun` result for every unanswered call.
 /// Counts the eventual concrete blocks and copied provider ids without owning
 /// any of them, so a refusal allocates no tail-sized scratch.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn unrun_cost(content: &[Block], text: &[u8]) -> Option<u64> {
     let block = u64::try_from(size_of::<Block>()).ok()?;
     let mut cost = block.checked_add(len(text)?)?;
@@ -2663,8 +2495,6 @@ fn finish_closing(conversation: &mut Conversation) {
 
 /// Result ids must resolve to the preceding assistant's calls, in call order.
 /// A yielded assistant may be the tail; resuming supplies its `NotRun` results.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn validate_link(previous: Option<&Message>, message: &Message) -> Result<(), crate::record::Refusal> {
     use crate::record::Refusal;
     let Some(previous) = previous else {

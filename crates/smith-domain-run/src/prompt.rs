@@ -20,14 +20,10 @@ use crate::prepare::{Found, Guide};
 use crate::workspace::{self, Directory, Workspace};
 
 /// The first user message of a main conversation.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) const BEGIN: &[u8] = b"Begin the work your brief describes.";
 
 /// The system text of a run's main conversation, given what the run found in
 /// its checkout.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn system(charter: &Charter, mounted: Option<&Workspace>, found: &Found) -> Box<[u8]> {
     let families = workspace::families(mounted, Families::of(&charter.grants));
     let mut measured = Text::measuring();
@@ -40,8 +36,6 @@ pub(crate) fn system(charter: &Charter, mounted: Option<&Workspace>, found: &Fou
 }
 
 /// The system text of a sub-agent asked for with `brief` and `families`.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn child(
     charter: &Charter,
     mounted: Option<&Workspace>,
@@ -60,8 +54,6 @@ pub(crate) fn child(
 
 /// What a run says to an LLM that stopped for `stop` without finishing, in its
 /// nudge numbered `nudge` of `nudges`.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn nudge(stop: Stop, nudge: u32, nudges: u32) -> Box<[u8]> {
     let mut measured = Text::measuring();
     render_nudge(&mut measured, stop, nudge, nudges);
@@ -173,8 +165,6 @@ fn render_agents(text: &mut Text, models: &[Llm]) {
 
 /// One blank line after a text that came as it is, whether or not it ends
 /// its last line.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn end_paragraph(text: &mut Text, came: &[u8]) {
     if !came.ends_with(b"\n") {
         text.put(b"\n");
@@ -302,8 +292,6 @@ fn name(repositories: &[Directory], index: u32) -> &Directory {
 }
 
 /// A verdict and its contract, as one item of a list.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn render_verdict(text: &mut Text, rule: &VerdictRule) {
     text.put(b"- `");
     text.put(&rule.name);
@@ -340,16 +328,10 @@ fn render_nudge(text: &mut Text, stop: Stop, nudge: u32, nudges: u32) {
 
 /// A text being rendered: measured first, then written into a box of exactly
 /// the length measured.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 struct Text {
     /// The bytes put so far.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     len: usize,
     /// Where they go, once the text has been measured.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     writer: Option<Writer>,
 }
 
@@ -359,8 +341,6 @@ impl Text {
     }
 
     /// A text to write what this one measured.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     fn writing(self) -> Text {
         Text { len: 0, writer: Some(Writer::new(self.len)) }
     }
@@ -373,8 +353,6 @@ impl Text {
     }
 
     /// `n` in decimal digits.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     fn put_decimal(&mut self, n: u32) {
         let mut digits = [b'0'; 10];
         let mut rest = n;

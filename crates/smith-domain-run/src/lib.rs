@@ -1,5 +1,5 @@
-//! The copied smith agent's run child domain
-//! (programming-model.md, section 4.5; domain/run.md, section 14): one agent instance.
+//! The smith agent's run child domain
+//! (programming-model.md, section 4.5; domain/run.md, sections 2 and 14): one agent instance.
 //! A run takes its charter from the host, opens the conversation that does
 //! the work, accounts what it spends against one budget, and answers once.
 //!
@@ -17,17 +17,8 @@
 //! What a run is given is policy as data ([`charter`]): the run interprets no
 //! workflow vocabulary, and compares the labels in it byte for byte. So is what
 //! it may finish with ([`outcome`]), which [`outcome::judge`] checks a declared
-//! outcome against.
+//! outcome against (domain/run.md, sections 7 and 8).
 
-//!
-//! Copy baseline: temper `25ac2ad`, migration 05s2 (domain/run.md, section 14).
-//! Generic result contracts implement domain/run.md, section 7 in 05s4.
-//! Generic delivery implements domain/run.md, section 8; opaque host tools and
-//! bounded settled recovery implement section 5.2. Host-selected conventions
-//! implement sections 3.1, 3.3 and 8.1. The typed optional workspace implements section 3.2; literal instructions and
-//! ordered titled Brief implement sections 3.1, 3.3 and 5.3. Scalar host-unit budgets and model rates replace the token split; sessions alone price actual usage (domain/run.md, sections 9 and 14).
-
-//!
 //! The retained state is each admitted charter, conversation binding, shared
 //! usage, preparation/check/delivery phase and its pending terminal rights.
 //! It also keeps the bounded labelled-message FIFO, current/offered read fence,

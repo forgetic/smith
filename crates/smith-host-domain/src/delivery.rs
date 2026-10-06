@@ -1,6 +1,6 @@
 //! Host-owned sealed delivery terminals (domain/host.md, section 2; domain/run.md, section 8).
-//! Full sibling vocabulary extracted from Smith DELIVERY `2a621a5`; composition
-//! translates exhaustively without sharing agent internal types.
+//! Composition translates these outcomes exhaustively without sharing agent
+//! internal types.
 //! This module keeps no runtime state. Constructors bound owned receipts and
 //! marker feedback before they cross a domain boundary; the receiver additionally
 //! validates directory ordinals against its admitted writable mounts. It never

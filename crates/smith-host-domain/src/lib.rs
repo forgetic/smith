@@ -1,5 +1,4 @@
-//! V2 host supervision extracted from Temper `19735a066cd485ca9d39e70ffb8ca8bd902ad55a`
-//! (worker-agent behavior `e2a6a719`; domain/host.md, sections 2–7 and 10–12).
+//! Host supervision (domain/host.md, sections 2–7 and 10).
 //! Keeps process proof, channel order, bounded call/turn metadata and terminal rights.
 //! Charter, transcript, post-transcript answers and host policy are opaque; credentials
 //! are names only. No IO, frame codec, durable policy record or agent internal state.

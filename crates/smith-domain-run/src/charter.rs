@@ -21,8 +21,6 @@ pub use crate::conventions::Conventions;
 pub use crate::host::{HostEffect, HostTool};
 
 /// What a run is given when it starts.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Charter {
     /// Select supplied concrete history at the root entrance; false starts fresh.
@@ -54,26 +52,16 @@ pub struct Charter {
     pub conventions: Option<Conventions>,
 
     /// Explicit authority supplied by the opener, never inferred from role or text.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub grants: Grants,
     /// Host-supplied permitted result forms and their field/text/item rules;
     /// admission refuses malformed or impossible contracts before effects.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub outcome: OutcomeSpec,
     /// What the run may spend, across all its conversations.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub budget: Budget,
     /// The LLM the main conversation starts with.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub llm: Llm,
     /// The LLMs a sub-agent may be opened on, each named by its model, which
     /// it lists once.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub models: Box<[Llm]>,
 }
 
@@ -111,8 +99,6 @@ pub struct Section {
 }
 
 /// What the LLM may do besides talking. Data, never derived from a role.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Grants {
     /// Main-only waiting authority. When absent the main session cannot call
@@ -125,12 +111,8 @@ pub struct Grants {
     /// Contract: domain/run.md, sections 7.1, 8.1 and 8.4.
     pub deliver: Option<outcome::ChangeSpec>,
     /// The tools that act on the checkout, which conversations run themselves.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub tools: Tools,
     /// Asking for sub-agents: conversations of the LLM's own, opened by the run.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub agents: bool,
     /// Host-declared main-only tools. Names, descriptions, schemas, effects and
     /// relay deadlines are admitted as bounded data before session or IO.
@@ -140,31 +122,21 @@ pub struct Grants {
 
 /// The families of tools a conversation has: those it runs on the checkout,
 /// and those the run serves. Host declarations stay with main.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Families {
     /// Tools offered or granted by this record; their names confer no additional authority.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub tools: Tools,
     /// Whether this conversation may ask its run to open sub-agents.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub agents: bool,
 }
 
 impl Families {
     /// The families `grants` give.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn of(grants: &Grants) -> Families {
         Families { tools: grants.tools, agents: grants.agents }
     }
 
     /// Whether these families are among `wider`'s.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn within(self, wider: Families) -> bool {
         let (Tools { inspect, modify, shell }, wide) = (self.tools, wider.tools);
         (!inspect || wide.inspect)
@@ -175,27 +147,17 @@ impl Families {
 }
 
 /// The tool families a conversation runs on the checkout.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Tools {
     /// Read, list and search.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub inspect: bool,
     /// Write and edit, in the writable repositories.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub modify: bool,
     /// Run commands.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub shell: bool,
 }
 
 /// An LLM to talk to.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Llm {
     /// Host model rates; unit zero refuses before discovery.
@@ -207,28 +169,18 @@ pub struct Llm {
     pub dialect: u32,
 
     /// The credential account configured for the endpoint.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub account: u32,
     /// Configured provider endpoint identity; the domain never resolves its address.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub endpoint: Endpoint,
     /// The provider's name for the model.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub model: Box<[u8]>,
     /// The most tokens each answer may take.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub max_tokens: u32,
 }
 
 /// A provider endpoint the agent is configured with: which provider, where,
 /// with which credentials. The protocol layer holds all of that; the domain
 /// only names it.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Endpoint(
     /// Host-configured numeric provider endpoint name, echoed without address resolution or authority inference.
@@ -240,8 +192,6 @@ pub struct Endpoint(
 /// Whether a run may start on `charter` under `limits`, or what about it does
 /// not fit them. Counts are checked before anything that compares names in
 /// pairs.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn check(charter: &Charter, workspace: Option<&crate::Workspace>, limits: &Limits) -> Result<(), Invalid> {
     let Charter { instructions: _, brief, grants, outcome, budget, llm, models, resume: _, waiting, conventions } =
         charter;
@@ -320,8 +270,6 @@ fn has_writable(workspace: Option<&crate::Workspace>) -> bool {
 
 /// The bytes a charter holds beyond its fixed size: each part held in a box
 /// at its fixed size, plus its payload. `None` past a `u64`.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn cost(charter: &Charter) -> Option<u64> {
     let mut cost = len(&charter.instructions)?.checked_add(len(&charter.llm.model)?)?;
     let section_bytes = u64::try_from(size_of::<Section>()).ok()?;
@@ -353,8 +301,6 @@ pub(crate) fn cost(charter: &Charter) -> Option<u64> {
 }
 
 /// Whether an LLM asks for an answer that fits the limits.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn fits(llm: &Llm, limits: &Limits) -> bool {
     if llm.prices.unit == 0 {
         return false;
@@ -385,8 +331,6 @@ fn repeated_host_tool(host_tools: &[HostTool]) -> bool {
 }
 
 /// A length as a count, saturating: anything past a `u32` is past every limit.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn count(len: usize) -> u32 {
     u32::try_from(len).unwrap_or(u32::MAX)
 }

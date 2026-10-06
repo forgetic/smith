@@ -22,166 +22,92 @@ use crate::run::{self, Conversation, Run};
 
 /// Something that happened in the run `run` (the run's token for it, as
 /// `Admitted` gives it).
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Fact {
     /// The run was admitted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Admitted {
         /// Admitted run token, retained and echoed within this child's boundary.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
     },
     /// It looked in its checkout, and found `guides` guides and `checks`
     /// repositories with checks.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Prepared {
         /// Admitted run token, retained and echoed within this child's boundary.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
         /// Number of repository guides retained during preparation.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         guides: u32,
         /// Number of prepared repository check executables.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         checks: u32,
     },
     /// It opened the conversation `conversation`, at `depth`: zero for main.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Opened {
         /// Admitted run token, retained and echoed within this child's boundary.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
         /// Run-issued opaque conversation name, echoed on every conversation event.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         conversation: Token,
         /// Nesting or JSON depth, bounded by the enclosing immutable limits.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         depth: u32,
     },
     /// The conversation ended, or was refused at its entrance.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Ended {
         /// Admitted run token, retained and echoed within this child's boundary.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
         /// Run-issued opaque conversation name, echoed on every conversation event.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         conversation: Token,
         /// Terminal classification after everything started beneath this entity has settled.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         end: End,
     },
     /// A conversation made the call `call` of the run.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Called {
         /// Admitted run token, retained and echoed within this child's boundary.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
         /// Run-issued opaque conversation name, echoed on every conversation event.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         conversation: Token,
         /// Run-issued call token, identifying the observed finish or sub-agent ask.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         call: Token,
         /// Typed run tool ask, validated against the asker's authority and charter.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         ask: Asked,
     },
     /// The call returned.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Returned {
         /// Admitted run token, retained and echoed within this child's boundary.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
         /// Run-issued call token, identifying the observed finish or sub-agent ask.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         call: Token,
         /// The one terminal value for the enclosing call; ownership passes to its receiver.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         result: Return,
     },
     /// Checks started, to be stopped at `deadline` at the latest.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     CheckStarted {
         /// Admitted run token, retained and echoed within this child's boundary.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
         /// Injected monotonic deadline, never obtained from a live clock.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         deadline: Time,
     },
     /// Checks ended.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     CheckFinished {
         /// Admitted run token, retained and echoed within this child's boundary.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
         /// Terminal process classification; only a zero exit code passes checks.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         exit: Exit,
     },
     /// An actual host delivery ended with its content-free classification.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Delivered {
         /// Admitted run token, retained and echoed within this child's boundary.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
         /// Typed terminal for the host's change-delivery request.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         status: crate::DeliveryStatus,
     },
     /// The run answered.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Answered {
         /// Admitted run token, retained and echoed within this child's boundary.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         run: Token,
         /// Single terminal value returned to the caller.
-        ///
-        /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         answer: Answered,
     },
 }
 
 /// What a call asked for.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Asked {
     /// Main requested settled waiting. Contract: domain/run.md, section 6.
@@ -191,18 +117,12 @@ pub enum Asked {
     /// Main requested separately granted delivery. Contract: domain/run.md, sections 8.4 and 12.
     Deliver,
     /// The LLM declared a run result.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Finish,
     /// The LLM asked its run to open a sub-agent.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     SubAgent,
 }
 
 /// How a call returned.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Return {
     /// Main wait intent accepted. Contract: domain/run.md, section 6.
@@ -220,76 +140,44 @@ pub enum Return {
     /// Named correctable host refusal. Contract: domain/run.md, sections 8.2 and 12.
     DeliveryRefused,
     /// The run accepted its declared result.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Accepted,
     /// The declared result failed the charter's contract.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Rejected,
     /// Required checks did not pass.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     ChecksFailed,
     /// The host found its delivery context stale.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Stale,
     /// The actual host delivery failed and returned bounded feedback.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     DeliveryFailed,
     /// The caller cancelled and the terminal settled.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Cancelled,
     /// The injected operation deadline won the race.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     TimedOut,
     /// No capacity is currently available; a later call may fit.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Busy,
     /// The sub-agent answered or the run supplied its terminal, as classified by the enclosing fact.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Answered,
     /// The sub-agent ended without an accepted answer.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Unanswered,
     /// The entrance or operation was refused with the enclosing typed reason.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Refused,
 }
 
 /// How a run answered.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Answered {
     /// Settled idle main parked. Contract: domain/run.md, section 6.
     Parked,
     /// The entrance or operation was refused with the enclosing typed reason.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Refused(Refusal),
     /// The run accepted its declared result.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Accepted,
     /// One failed terminal with bounded diagnostics.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Failed(Failure),
 }
 
 /// The facts not yet drained, how many did not fit, and the run the step
 /// being taken is about.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Debug)]
 pub(crate) struct Facts {
     queue: Queue<Fact>,
@@ -303,8 +191,6 @@ impl Facts {
     }
 
     /// Keeps `fact` if there is room for it, and counts it otherwise.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn push(&mut self, fact: Fact) {
         if self.queue.try_push(fact).is_err() {
             self.lost = self.lost.saturating_add(1);
@@ -320,15 +206,11 @@ impl Facts {
     }
 
     /// The step being taken is about the run `run`.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn about(&mut self, run: Token) {
         self.about = Some(run);
     }
 
     /// A step begins, about no run yet.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn begin(&mut self) {
         self.about = None;
     }
@@ -337,8 +219,6 @@ impl Facts {
 /// What the step that made the requests in `out` from `mark` on tells, a fact
 /// for each but the requests whose outcome is told when it comes (closes,
 /// says, cancels, deliveries) or that tell nothing of their own (looks).
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 pub(crate) fn tell(
     facts: &mut Facts,
     runs: &Slab<Run>,

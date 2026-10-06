@@ -13,8 +13,6 @@ use crate::run::{Alarm, Conversation, Run};
 
 /// The run child domain's limits (programming-model.md, sections 4.5 and 6.3), handed by its parent to every
 /// step read-only.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
     /// Live FIFO messages per admitted run. Full admission bounces before retention.
@@ -35,19 +33,13 @@ pub struct Limits {
     /// Contract: domain/run.md, sections 8.2 and 10.
     pub delivery_timeout: Duration,
     /// Runs at once. A start beyond them is refused as busy.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub runs: u32,
     /// Conversations at once, across runs. A start with no room for its main
     /// conversation is refused as busy.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub conversations: u32,
     /// Bytes a run holds beyond inline slab fields: its charter and separate
     /// workspace, including Brief cells, instructions, title/text payloads and every
     /// Directory cell, name, conflict Box cell and path.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub run_bytes: u64,
 
     /// Host-written main Brief sections. Exact count is checked before section
@@ -56,8 +48,6 @@ pub struct Limits {
     /// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
     pub brief_sections: u32,
     /// Directories a present workspace may list; empty present workspaces refuse.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub directories: u32,
 
     /// Maximum opaque safe mount component bytes, checked before pairwise admission.
@@ -96,72 +86,42 @@ pub struct Limits {
     /// Contract: domain/run.md, section 5.2.
     pub host_attempts: u32,
     /// Verdicts an outcome spec may list.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub verdicts: u32,
     /// Calls of conversations to the run in flight at once, across runs, each
     /// with an alarm for its deadline. A call beyond them is answered as busy.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub calls: u32,
     /// The largest budget a charter may ask for, part by part.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub budget: Budget,
     /// The largest `max_tokens` a charter's LLM may ask for.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub max_tokens: u32,
     /// The LLMs a charter may list for sub-agents.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub models: u32,
     /// How deep sub-agents may nest: main is at depth zero, a sub-agent one
     /// deeper than its asker.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub depth: u32,
     /// Conversations a run may have at once, main included.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub run_conversations: u32,
     /// The most bytes of a sub-agent's last message its asker is given.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub answer_bytes: u32,
     /// Nudges a run gives its LLM when it stops without finishing, after which
     /// the run fails.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub nudges: u32,
     /// The most bytes of a repository's selected guide a run reads and puts in
     /// its system text.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub guide_bytes: u32,
     /// How long io has for each look in the checkout.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub io_timeout: Duration,
     /// Largest aggregate result ownership beyond its inline declaration,
     /// counting every field/item container, name and value as
     /// `outcome::owned_bytes` does. A larger finish is feedback, before
     /// shape judgement or any checks/Delivery.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub outcome_bytes: u64,
     /// How long a repository's checks may run.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub check_timeout: Duration,
     /// The most bytes of a failed check's output the LLM is shown: its tail.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub check_tail: u32,
     /// Facts kept until the parent drains them. Beyond them, facts are
     /// dropped and counted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub facts: u32,
 }
 
@@ -171,8 +131,6 @@ pub struct Limits {
 /// It counts the containers, their bookkeeping included, and the payloads, not
 /// allocator overhead. What a run sends is a copy, which its receiver counts;
 /// what it receives and only passes on (a check's output) is the sender's.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     if limits.conflict_path_bytes > u32::try_from(crate::Marker::CAPACITY).ok()? {
