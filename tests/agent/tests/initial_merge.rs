@@ -25,6 +25,7 @@ struct Commit {
     parent: Option<u64>,
     merging: Option<u64>,
     tree: Tree,
+    message: Vec<u8>,
 }
 
 // Only the shared kit's store boundary lives here. This fixture neither merges
@@ -46,7 +47,7 @@ impl Store {
                 (b"src/lib.rs".to_vec(), b"pub fn answer() -> u32 { 43 }\n".to_vec()),
             ]
             .into();
-            assert!(commits.insert(id, Commit { parent, merging: None, tree }).is_none());
+            assert!(commits.insert(id, Commit { parent, merging: None, tree, message: Vec::new() }).is_none());
         }
         Self { commits }
     }
@@ -82,7 +83,11 @@ impl Remote for Store {
         self.commits[&commit].tree.clone()
     }
 
-    fn store(&mut self, parent: u64, merging: Option<u64>, tree: Tree) -> Option<u64> {
+    fn message(&self, commit: u64) -> Vec<u8> {
+        self.commits[&commit].message.clone()
+    }
+
+    fn store(&mut self, parent: u64, merging: Option<u64>, tree: Tree, message: &[u8]) -> Option<u64> {
         assert!(self.commits.contains_key(&parent));
         if let Some(merging) = merging {
             assert!(self.commits.contains_key(&merging));
@@ -91,7 +96,11 @@ impl Remote for Store {
             return None;
         }
         let id = self.commits.last_key_value().expect("finite initial graph").0 + 1;
-        assert!(self.commits.insert(id, Commit { parent: Some(parent), merging, tree }).is_none());
+        assert!(
+            self.commits
+                .insert(id, Commit { parent: Some(parent), merging, tree, message: message.to_vec() })
+                .is_none()
+        );
         Some(id)
     }
 }
@@ -320,7 +329,7 @@ fn initial_merge_refusal_resolution_checks_and_two_parent_commit() {
     let first = submitted(&mut world, 1);
     assert_eq!(world.checked(), [true, true]);
     assert_eq!(world.delivery_submissions()[0].name, run::CallName { activation: 1, completion: 1, position: 1 });
-    let unresolved = git::commit_merging(&mut store, world.delivery_checkout(first), b"work", 2, 3);
+    let unresolved = git::commit_merging(&mut store, world.delivery_checkout(first), b"work", 2, 3, b"initial merge");
     assert_eq!(unresolved, Err(CommitFailure::Unresolved { files: actual_conflicts.clone() }));
     assert_eq!(store.commits.len(), 3, "failed actual commit creates no object");
     let Err(CommitFailure::Unresolved { files }) = unresolved else { panic!("actual remaining marker paths") };
@@ -335,10 +344,11 @@ fn initial_merge_refusal_resolution_checks_and_two_parent_commit() {
     assert_eq!(world.checked(), [true, true, true, true], "both writable checks rerun after actual resolution");
     assert_eq!(world.disk().content(b"work/conflict.txt"), Some(b"resolved by the actual LLM".as_slice()));
     assert_eq!(world.disk().content(b"notes/data.txt"), Some(b"delivered-plain".as_slice()));
-    let commit = git::commit_merging(&mut store, world.delivery_checkout(second), b"work", 2, 3)
+    let commit = git::commit_merging(&mut store, world.delivery_checkout(second), b"work", 2, 3, b"initial merge")
         .expect("actual shared merge commit after checked resolution");
     assert_eq!(store.parent(commit), Some(2));
     assert_eq!(store.merge_parent(commit), Some(3));
+    assert_eq!(store.message(commit), b"initial merge");
     assert_eq!(store.tree(commit).get(b"conflict.txt".as_slice()), Some(&b"resolved by the actual LLM".to_vec()));
     assert!(!world.disk().exists(b"work/.git/MERGE_HEAD"));
     assert_eq!(world.disk().content(b"work/.git/temper-head"), Some(commit.to_le_bytes().as_slice()));
