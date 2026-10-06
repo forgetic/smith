@@ -4,7 +4,8 @@
 
 use std::collections::BTreeMap;
 
-use skein_lib::Duration;
+use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
+use smith_domain_run as run;
 use smith_domain_run::{Answer, Budget, Exhausted, Failure, Fault, Invalid, Limits, Policy, Refusal};
 use smith_run_world::host;
 use smith_run_world::partner::Script;
@@ -20,6 +21,197 @@ fn settled(settings: &Settings) -> World {
 
 fn answers(world: &World) -> Vec<&Answer> {
     world.answers().map(|answer| answer.expect("every start is answered")).collect()
+}
+
+/// A retained host decision outlives the crashed domain. The host writes its
+/// own wake message from the answer it actually recorded.
+struct CrashHost {
+    starts: Vec<run::Event>,
+    decision: Option<run::HostAnswer>,
+}
+
+impl CrashHost {
+    fn new() -> Self {
+        let calm = Settings::calm(606);
+        let script = host::Script { jobs: 2, window: Duration::ZERO, host_tools: 1000, ..calm.host };
+        let mut host = host::Host::new(script, 606);
+        let mut starts = Vec::new();
+        host.fire(Time::ZERO, &mut starts);
+        assert_eq!(starts.len(), 2);
+        Self { starts, decision: None }
+    }
+
+    fn start(&mut self, activation: u64) -> run::Event {
+        let start = self.starts.remove(0);
+        let run::Event::Start { charter, workspace, .. } = start else { panic!("scripted host starts a run") };
+        run::Event::Start {
+            reply_to: skein_lib::ReplyTo::new(Token::new(88)),
+            host_run: Token::new(91),
+            activation,
+            charter: run::Charter { resume: true, ..charter },
+            workspace,
+            transcript: None,
+        }
+    }
+
+    fn answer(&mut self, relay: run::RelayName) -> run::Event {
+        let answer = run::HostAnswer::new(b"host accepted change".as_slice().into(), false).expect("bounded answer");
+        self.decision = Some(answer.clone());
+        run::Event::HostReturned { relay, reply: run::HostReply::Answered(answer) }
+    }
+
+    fn waking_text(&self) -> Box<[u8]> {
+        let answer = self.decision.as_ref().expect("the host retained its answer");
+        let mut text = b"host: the previous host call was answered: ".to_vec();
+        text.extend_from_slice(answer.text());
+        text.into_boxed_slice()
+    }
+}
+
+fn crash_take(
+    domain: &mut run::Domain,
+    env: &Env<run::Limits>,
+    out: &mut Queue<run::Request>,
+    event: run::Event,
+) -> Vec<run::Request> {
+    run::step(domain, env, event, out);
+    let mut requests = Vec::new();
+    while let Some(request) = out.pop() {
+        requests.push(request);
+    }
+    requests
+}
+
+fn crash_open(
+    domain: &mut run::Domain,
+    env: &Env<run::Limits>,
+    out: &mut Queue<run::Request>,
+    start: run::Event,
+    activation: u64,
+) -> (Token, Token) {
+    let started = crash_take(domain, env, out, start);
+    let Some(run::Request::Read { owner: run, .. }) =
+        started.iter().find(|request| matches!(request, run::Request::Read { .. }))
+    else {
+        panic!("admitted run prepares its main: {started:?}")
+    };
+    let run = *run;
+    let mut prepared = crash_take(domain, env, out, run::Event::Read { owner: run, read: run::Read::Missing });
+    for _ in 0..8_u32 {
+        let next = match prepared.as_slice() {
+            [run::Request::Read { owner, .. }] => Some(run::Event::Read { owner: *owner, read: run::Read::Missing }),
+            [run::Request::Probe { owner, .. }] => Some(run::Event::Probed { owner: *owner, executable: false }),
+            [run::Request::Open { .. }] => None,
+            _ => panic!("preparation request: {prepared:?}"),
+        };
+        let Some(next) = next else { break };
+        prepared = crash_take(domain, env, out, next);
+    }
+    let Some(run::Request::Open { conversation, opening }) =
+        prepared.iter().find(|request| matches!(request, run::Request::Open { .. }))
+    else {
+        panic!("main opens: {prepared:?}")
+    };
+    assert_eq!(opening.activation, activation);
+    assert!(opening.transcript.is_none());
+    let conversation = *conversation;
+    assert!(crash_take(domain, env, out, run::Event::Started { conversation, peer: Token::new(99) }).is_empty());
+    (run, conversation)
+}
+
+#[test]
+fn answered_host_call_before_turn_crash_wakes_as_host_text_with_new_call_namespace() {
+    let mut host = CrashHost::new();
+    let limits = Settings::calm(606).run;
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut out = Queue::with_capacity(run::MAX_OUT);
+    let mut first = run::Domain::new(&limits);
+    let (_, conversation) = crash_open(&mut first, &env, &mut out, host.start(1), 1);
+    let old_name = run::CallName { activation: 1, completion: 1, position: 0 };
+    let called = crash_take(
+        &mut first,
+        &env,
+        &mut out,
+        run::Event::Delegated {
+            conversation,
+            call: Token::new(101),
+            name: old_name,
+            ask: run::Ask::Host {
+                tool: b"comment".as_slice().into(),
+                effect: run::HostEffect::Read,
+                input: run::HostInput::attested(b"{}".as_slice().into()).expect("object"),
+            },
+            deadline: Time::ZERO.saturating_add(Duration::from_secs(30)),
+        },
+    );
+    let [run::Request::HostCall { relay, name, .. }] = called.as_slice() else { panic!("one host call: {called:?}") };
+    assert_eq!(*name, old_name);
+    let returned = crash_take(&mut first, &env, &mut out, host.answer(*relay));
+    assert!(matches!(returned.as_slice(), [run::Request::Return { result: run::Returned::HostAnswered(_), .. }]));
+    assert!(!returned.iter().any(|request| matches!(request, run::Request::Turn { .. })));
+    drop(first);
+
+    let mut resumed = run::Domain::new(&limits);
+    let (run, conversation) = crash_open(&mut resumed, &env, &mut out, host.start(2), 2);
+    let notice = host.waking_text();
+    assert!(
+        crash_take(
+            &mut resumed,
+            &env,
+            &mut out,
+            run::Event::Message { run, name: Token::new(5), text: notice.clone() },
+        )
+        .is_empty()
+    );
+    let waking = crash_take(
+        &mut resumed,
+        &env,
+        &mut out,
+        run::Event::Yielded { conversation, stop: run::Stop::EndTurn, text: b"ready".as_slice().into() },
+    );
+    assert!(matches!(waking.as_slice(), [run::Request::Say { peer, text }]
+        if *peer == Token::new(99) && text == &notice));
+    assert!(!waking.iter().any(|request| matches!(request, run::Request::Return { .. } | run::Request::Turn { .. })));
+
+    let stale = crash_take(
+        &mut resumed,
+        &env,
+        &mut out,
+        run::Event::Delegated {
+            conversation,
+            call: Token::new(103),
+            name: old_name,
+            ask: run::Ask::Host {
+                tool: b"comment".as_slice().into(),
+                effect: run::HostEffect::Read,
+                input: run::HostInput::attested(b"{}".as_slice().into()).expect("object"),
+            },
+            deadline: Time::ZERO.saturating_add(Duration::from_secs(30)),
+        },
+    );
+    assert!(matches!(
+        stale.as_slice(),
+        [run::Request::Return { result: run::Returned::Refused { refusal: run::AskRefusal::Name }, .. }]
+    ));
+
+    let new_name = run::CallName { activation: 2, completion: 1, position: 0 };
+    let fresh = crash_take(
+        &mut resumed,
+        &env,
+        &mut out,
+        run::Event::Delegated {
+            conversation,
+            call: Token::new(102),
+            name: new_name,
+            ask: run::Ask::Host {
+                tool: b"comment".as_slice().into(),
+                effect: run::HostEffect::Read,
+                input: run::HostInput::attested(b"{}".as_slice().into()).expect("object"),
+            },
+            deadline: Time::ZERO.saturating_add(Duration::from_secs(30)),
+        },
+    );
+    assert!(matches!(fresh.as_slice(), [run::Request::HostCall { name, .. }] if *name == new_name));
 }
 
 fn failure(answer: &Answer) -> Failure {
