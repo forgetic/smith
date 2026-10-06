@@ -38,6 +38,8 @@ mod route;
 #[cfg(test)]
 mod tests;
 mod translate;
+#[cfg(test)]
+mod translation_tests;
 
 pub use boundary::{Event, Grant, GrantName, Request};
 pub use domain::{Domain, fire, max_out, resume, step};
