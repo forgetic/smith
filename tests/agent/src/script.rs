@@ -111,7 +111,17 @@ pub const fn cue(job: Job) -> Option<&'static [u8]> {
 #[must_use]
 pub fn all() -> Box<[Script]> {
     Box::new([
-        script(b"@chat", vec![says("Hello from the agent."), calls(vec![call("wait", "{}")])]),
+        script(
+            b"@chat",
+            vec![
+                says("Hello from the agent."),
+                calls(vec![call("wait", "{}")]),
+                says("Welcome back."),
+                calls(vec![call("wait", "{}")]),
+                says("Welcome back."),
+                calls(vec![call("wait", "{}")]),
+            ],
+        ),
         script(
             b"@waiting",
             vec![

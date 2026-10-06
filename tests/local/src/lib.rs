@@ -4,4 +4,4 @@
 
 mod world;
 
-pub use world::{Store, World};
+pub use world::{Cut, Store, World};

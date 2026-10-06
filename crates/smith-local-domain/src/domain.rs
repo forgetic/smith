@@ -167,7 +167,8 @@ fn dispatch_line(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request
         }
     }
     domain.chat.state_pending = true;
-    out.push(Request::SaveState { state: domain.chat.state });
+    let fresh = domain.chat.phase == Phase::Starting && !domain.config.resume;
+    out.push(Request::SaveState { state: domain.chat.state, fresh });
 }
 
 fn stop_names(domain: &mut Domain, out: &mut Queue<Request>) {
@@ -342,7 +343,7 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
                 let shown = crate::person::turn_text(&turn, env.limits.show_bytes);
                 domain.turns.unsaved.push(number);
                 domain.chat.state.read = read;
-                out.push(Request::SaveTurn { number, turn });
+                out.push(Request::SaveTurn { number, read, turn });
                 if !shown.is_empty() {
                     out.push(Request::Show { text: shown });
                 }

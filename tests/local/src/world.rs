@@ -14,10 +14,14 @@ use smith_local_domain::{self as local, AgentIo, ChatState, Contract, Event, Exi
 pub struct Store {
     state: Option<ChatState>,
     turns: Vec<agent::Turn>,
+    history_override: Option<agent::Transcript>,
 }
 
 impl Store {
     fn history(&self) -> Option<agent::Transcript> {
+        if let Some(history) = &self.history_override {
+            return Some(history.clone());
+        }
         let first = self.turns.first()?;
         Some(agent::Transcript {
             version: agent::session::record::VERSION,
@@ -27,6 +31,53 @@ impl Store {
             after: Box::new([]),
         })
     }
+
+    /// Last durable activation number, including a start whose agent never ran.
+    #[must_use]
+    pub fn activation(&self) -> u64 {
+        self.state.map_or(0, |state| state.activation)
+    }
+
+    /// Number of durable turns across activations.
+    #[must_use]
+    pub fn turns(&self) -> usize {
+        self.turns.len()
+    }
+
+    /// Last person message named by a durable turn.
+    #[must_use]
+    pub fn read(&self) -> Option<Token> {
+        self.state.and_then(|state| state.read)
+    }
+
+    /// Inject an unsupported transcript version for refusal stories.
+    pub fn refuse_version(&mut self) {
+        self.history_override = Some(agent::Transcript {
+            version: agent::session::record::VERSION.saturating_add(1),
+            endpoint: agent::session::llm::Endpoint(0),
+            dialect: 1,
+            turns: Box::new([]),
+            after: Box::new([]),
+        });
+    }
+}
+
+/// A boundary at which the world drops its domain without settling more work.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Cut {
+    /// The next activation metadata is durable; its terminal is not delivered.
+    AfterSaveState,
+    /// A numbered turn request reached the store but was not written.
+    BeforeSaveTurn(u32),
+    /// A numbered turn is durable and its terminal reached the domain.
+    AfterTurnSaved(u32),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Goal {
+    Waiting,
+    Parked,
+    Cut,
 }
 
 /// One invocation; the store can be taken into a later invocation.
@@ -43,8 +94,13 @@ pub struct World {
     store: Store,
     shown: Vec<Box<[u8]>>,
     waiting: bool,
+    parked: bool,
     exit: Option<ExitStatus>,
     completions: u32,
+    prompt_assistants: Vec<usize>,
+    activation_turns: u32,
+    cut: Option<Cut>,
+    cut_reached: bool,
 }
 
 impl World {
@@ -57,6 +113,16 @@ impl World {
     /// A fresh local domain over an existing durable fake store.
     #[must_use]
     pub fn with_store(seed: u64, store: Store) -> World {
+        Self::with_resume(seed, store, true)
+    }
+
+    /// Start fresh despite saved history the agent would refuse.
+    #[must_use]
+    pub fn with_store_fresh(seed: u64, store: Store) -> World {
+        Self::with_resume(seed, store, false)
+    }
+
+    fn with_resume(seed: u64, store: Store, resume: bool) -> World {
         let limits = local::Limits {
             agent: agent_world::LIMITS,
             endpoints: Box::new([run::charter::Endpoint(0)]),
@@ -85,7 +151,7 @@ impl World {
             conventions: None,
             contract: Contract::Report(run::outcome::TextSpec { max: 2048, fields: Box::new([]) }),
             waiting: Duration::from_secs(30),
-            resume: true,
+            resume,
             accounts: Box::new([0]),
             workspace: None,
         };
@@ -105,8 +171,13 @@ impl World {
             store,
             shown: Vec::new(),
             waiting: false,
+            parked: false,
             exit: None,
             completions: 0,
+            prompt_assistants: Vec::new(),
+            activation_turns: 0,
+            cut: None,
+            cut_reached: false,
         }
     }
 
@@ -145,14 +216,58 @@ impl World {
         self.completions
     }
 
+    /// Number of assistant messages in each provider request.
+    #[must_use]
+    pub fn prompt_assistants(&self) -> &[usize] {
+        &self.prompt_assistants
+    }
+
+    /// Last activation saved by this invocation.
+    #[must_use]
+    pub fn activation(&self) -> u64 {
+        self.store.activation()
+    }
+
+    /// Run through the waiting interval until the agent parks.
+    pub fn drive_to_park(&mut self, iterations: u32) -> bool {
+        self.drive_until(iterations, Goal::Parked)
+    }
+
+    /// Drop at a chosen durable-store boundary.
+    pub fn drive_to_cut(&mut self, iterations: u32, cut: Cut) -> bool {
+        self.cut = Some(cut);
+        self.drive_until(iterations, Goal::Cut)
+    }
+
     /// Drive at most `iterations` rounds until the first answered question waits.
     pub fn drive(&mut self, iterations: u32) -> bool {
+        self.drive_until(iterations, Goal::Waiting)
+    }
+
+    fn drive_until(&mut self, iterations: u32, goal: Goal) -> bool {
         for _ in 0..iterations {
             if self.domain.is_ready() {
                 local::resume(&mut self.domain, &self.env, &mut self.out);
             }
             if let Some(event) = self.events.pop_front() {
+                let saved = match &event {
+                    Event::TurnSaved { number } => Some(*number),
+                    Event::Line { .. }
+                    | Event::Interrupt
+                    | Event::Closed
+                    | Event::Loaded { .. }
+                    | Event::StateSaved
+                    | Event::StoreFailed { .. }
+                    | Event::Credential { .. }
+                    | Event::NoCredential { .. }
+                    | Event::Agent(_) => None,
+                };
                 local::step(&mut self.domain, &self.env, event, &mut self.out);
+                if let (Some(Cut::AfterTurnSaved(target)), Some(number)) = (self.cut, saved)
+                    && target == number
+                {
+                    self.cut_reached = true;
+                }
             }
             if self.domain.is_due(self.env.now) {
                 local::fire(&mut self.domain, &self.env, &mut self.out);
@@ -183,7 +298,12 @@ impl World {
             }
             self.domain.reclaim();
             self.provider.reclaim();
-            if self.waiting && self.saved_turns() > 0 {
+            let reached = match goal {
+                Goal::Waiting => self.waiting && self.saved_turns() > 0,
+                Goal::Parked => self.parked,
+                Goal::Cut => self.cut_reached,
+            };
+            if reached {
                 return true;
             }
             if !self.domain.is_ready() && self.events.is_empty() && self.out.is_empty() {
@@ -202,17 +322,37 @@ impl World {
                 if text.as_ref() == b"Waiting for a message" {
                     self.waiting = true;
                 }
+                if text.as_ref() == b"Chat parked" {
+                    self.parked = true;
+                }
                 self.shown.push(text);
             }
             Request::Load => {
                 self.events.push_back(Event::Loaded { state: self.store.state, transcript: self.store.history() });
             }
-            Request::SaveState { state } => {
+            Request::SaveState { state, fresh } => {
+                if self.store.activation() < state.activation {
+                    self.activation_turns = 0;
+                }
+                if fresh {
+                    self.store.turns.clear();
+                    self.store.history_override = None;
+                }
                 self.store.state = Some(state);
                 self.events.push_back(Event::StateSaved);
+                if self.cut == Some(Cut::AfterSaveState) {
+                    self.cut_reached = true;
+                }
             }
-            Request::SaveTurn { number, turn } => {
-                assert_eq!(usize::try_from(number).expect("turn number fits"), self.store.turns.len() + 1);
+            Request::SaveTurn { number, read, turn } => {
+                if self.cut == Some(Cut::BeforeSaveTurn(number)) {
+                    self.cut_reached = true;
+                    return;
+                }
+                assert_eq!(number, self.activation_turns.saturating_add(1));
+                self.activation_turns = number;
+                let state = self.store.state.as_mut().expect("activation state saved before any turn");
+                state.read = read;
                 self.store.turns.push(turn);
                 self.events.push_back(Event::TurnSaved { number });
             }
@@ -231,6 +371,8 @@ impl World {
         match request {
             agent::Request::Complete { owner, prompt, .. } => {
                 self.completions += 1;
+                self.prompt_assistants
+                    .push(prompt.messages.iter().filter(|message| message.role == agent::llm::Role::Assistant).count());
                 let grants = prompt.tools;
                 let served = prompt.served.clone();
                 assert!(self.pending.insert(owner, (grants, served)).is_none());

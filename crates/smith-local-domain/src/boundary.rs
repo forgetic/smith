@@ -117,9 +117,10 @@ pub enum Request {
     /// Load this configured chat's metadata and concrete history.
     Load,
     /// Save the updated activation or person-message counter before using it.
-    SaveState { state: ChatState },
-    /// Append one numbered concrete turn; answered by `TurnSaved` or `StoreFailed`.
-    SaveTurn { number: u32, turn: agent::Turn },
+    /// A fresh start replaces incompatible old history in the same store operation.
+    SaveState { state: ChatState, fresh: bool },
+    /// Append one numbered concrete turn and its read fence atomically; answered by `TurnSaved` or `StoreFailed`.
+    SaveTurn { number: u32, read: Option<Token>, turn: agent::Turn },
     /// Fetch or refresh one account; answered by `Credential` or `NoCredential`.
     Credential { account: u32 },
     /// Forward one agent IO or LLM request unchanged.

@@ -225,3 +225,9 @@ with the `measure` profile and `-j 1`: the new local world has one focused
 story, passing in 0.004 seconds, and no fuzzy test yet. It runs the local
 domain and in-process agent against Skein's fake provider. The default and
 fuzzy workspace budgets are unchanged.
+
+Local transcript and crash-cut stories were measured serially on 2026-10-06
+with `measure -j 1`: six focused local-world tests passed in 0.037 seconds,
+including resumed invocation, activation and turn crash cuts, and refusal
+of incompatible saved history. There are still no local fuzzy tests. The
+workspace timeouts remain unchanged.
