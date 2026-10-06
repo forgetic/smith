@@ -274,5 +274,3 @@ What changes in becoming smith, for temper's migration:
 - **Workspaces beyond directories:** a remote filesystem, an object
   store, a sandbox; today a host mounts them as directories, or offers
   them as host tools.
-- **The host kit's scope:** whether `smith-host-domain` keeps turns until
-  acknowledged for every host, or leaves that to each (host.md, 6).

@@ -152,10 +152,10 @@ policy.
   is room, its watchdog paused.
 - **Before the answer.** The answer says how many turns the run took and
   is sent after them.
-- **Held where?** Whether `smith-host-domain` holds turns for its parent,
-  or passes each on and leaves keeping it to the host, is open
-  (section 12); temper's worker holds them across its own channel's
-  losses.
+- **Held by the kit.** `smith-host-domain` holds each turn for its parent
+  until the parent acknowledges it, as temper's worker holds them across
+  its own channel's losses; a host that keeps no transcript acknowledges
+  at once.
 
 ## 7. Credentials
 
@@ -239,7 +239,6 @@ the terminal.
 
 ## 12. Open questions
 
-- **Turns held by the host kit or by each host** (section 6).
 - **A host without a durable record** and host tools that write: refused
   by rule, as section 2 says, or allowed with a warning to the LLM.
 - **Containment in one process:** whether commands may still run under a

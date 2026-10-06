@@ -11,10 +11,12 @@
   `testing-strategy.md` and `notes.md`. Read them before writing code.
   Source citations use those file names and their sections.
 - smith's contracts are in `docs/design/domain/`. Code cites them as
-  `domain/<file>.md` with the applicable sections. Each public type,
-  variant, field and entry function documents its sender, contract,
-  terminal outcome and bounds where applicable. Module docs say what
-  state is kept, what is never known, and the entry points and contracts.
+  `domain/<file>.md` with a specific section, at module or type level,
+  never stamped on every field. Module docs say what state is kept, what
+  is never known, and the entry points and contracts. Each public type
+  and variant has one line of prose: what it is, who sends it and, where
+  it has one, its terminal. A field is documented only when its name and
+  type do not say it: units, bounds, invariants.
 - Production domains use the strict Rust subset: exhaustive own-enum
   matches, bounded skein containers and checked arithmetic. Review the
   rules the compiler cannot check, including no own-enum if-let or
