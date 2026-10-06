@@ -917,9 +917,8 @@ fn too_large(message: &Up, limits: &Limits) -> bool {
         Up::Turn { turn } => !within(&turn.body, limits.turn_bytes),
         Up::Fact { body } => !within(body, limits.fact_bytes),
         Up::Answer { answer } => match &answer.result {
-            RunResult::Refused { detail } => !within(detail, limits.outcome_bytes),
             RunResult::Accepted { outcome } => !within(outcome, limits.outcome_bytes),
-            RunResult::Parked | RunResult::Failed { .. } => false,
+            RunResult::Refused { .. } | RunResult::Parked | RunResult::Failed { .. } => false,
         },
         Up::Admitted
         | Up::Withdraw { .. }
@@ -1039,9 +1038,7 @@ fn valid_answer(agent: &Agent, answer: &crate::Answer, limits: &Limits) -> bool 
         return false;
     }
     match &answer.result {
-        RunResult::Refused { detail } => {
-            !agent.admitted && answer.turns == 0 && answer.spent == 0 && within(detail, limits.outcome_bytes)
-        }
+        RunResult::Refused { .. } => !agent.admitted && answer.turns == 0 && answer.spent == 0,
         RunResult::Accepted { outcome } => agent.admitted && within(outcome, limits.outcome_bytes),
         RunResult::Parked | RunResult::Failed { .. } => agent.admitted,
     }

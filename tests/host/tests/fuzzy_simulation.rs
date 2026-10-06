@@ -23,7 +23,7 @@ fn random_worlds_settle_and_reach_every_ending() {
             world.spawned();
             world.sent();
             if fate == 1 {
-                last(&mut world, RunResult::Refused { detail: Box::new([]) }, 0);
+                last(&mut world, RunResult::Refused { refusal: smith_host_domain::Refusal::Busy }, 0);
             } else {
                 world.up(Up::Admitted);
                 // Stable names, generic effects and actual late terminals all

@@ -177,13 +177,21 @@ fn admission_refusals_preserve_separate_process_rights() {
 
 #[test]
 fn admission_refusal_and_working_traffic_are_distinct() {
-    let mut world = World::new(11, limits());
-    world.spawn(start());
-    world.spawned();
-    world.sent();
-    last(&mut world, RunResult::Refused { detail: Box::from(&b"refused"[..]) }, 0, 0);
-    world.cleanup();
-    world.settled();
+    for refusal in
+        [smith_host_domain::Refusal::Busy, smith_host_domain::Refusal::Invalid(smith_host_domain::RunInvalid::Endpoint)]
+    {
+        let mut world = World::new(11, limits());
+        world.spawn(start());
+        world.spawned();
+        world.sent();
+        last(&mut world, RunResult::Refused { refusal }, 0, 0);
+        assert_eq!(
+            world.seen.answer.as_ref().expect("refusal reaches the parent").result,
+            RunResult::Refused { refusal }
+        );
+        world.cleanup();
+        world.settled();
+    }
     for record in [Up::Fact { body: Box::new([]) }, Up::Admitted] {
         let mut world = World::new(12, limits());
         world.live();

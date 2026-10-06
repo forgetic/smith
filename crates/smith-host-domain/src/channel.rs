@@ -334,13 +334,47 @@ pub enum Policy {
     },
 }
 
+/// Why the agent refused a start before admission (domain/run.md, section 10).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Refusal {
+    /// The agent has no capacity for the start.
+    Busy,
+    /// The agent rejected the start for a typed contract reason.
+    Invalid(RunInvalid),
+}
+
+/// The agent's reason for rejecting a start before admission.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum RunInvalid {
+    /// The activation name is invalid.
+    Activation,
+    /// A convention path is invalid.
+    Conventions,
+    /// The charter owns too many bytes.
+    TooLarge,
+    /// A workspace mount is invalid.
+    Workspace,
+    /// Tool grants or declarations are invalid.
+    Grants,
+    /// The result contract is invalid.
+    Outcome,
+    /// The budget is invalid.
+    Budget,
+    /// A model declaration is invalid.
+    Llm,
+    /// The main conversation cannot fit.
+    Conversation,
+    /// An endpoint name is not configured.
+    Endpoint,
+}
+
 /// Agent last-word result; Accepted bytes remain opaque to kit.
 #[derive(PartialEq, Eq, Debug)]
 pub enum RunResult {
     /// Run refused before Admitted; requires zero turns/spend.
     Refused {
-        /// Opaque admission refusal bounded by `Limits::outcome_bytes`.
-        detail: Box<[u8]>,
+        /// Typed agent refusal in the kit's own vocabulary.
+        refusal: Refusal,
     },
     /// Agent-declared result allowed by its contract.
     Accepted {
