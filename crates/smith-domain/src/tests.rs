@@ -373,6 +373,88 @@ fn charter() -> Charter {
     }
 }
 
+#[test]
+fn root_refuses_invalid_grants_before_admission() {
+    let mut h = Harness::new();
+    let emitted = h.step(Event::Start {
+        workspace: Some(workspace()),
+        grants: Box::new(
+            [crate::Grant { name: crate::GrantName { account: 0, generation: 0 }, valid: Duration::from_secs(60) }; 5],
+        ),
+        reply_to: ReplyTo::new(Token::new(7)),
+        host_run: Token::new(7),
+        activation: 1,
+        charter: charter(),
+        transcript: None,
+    });
+    let [Request::Answer { answer, .. }] = &*emitted else { panic!("expected admission refusal: {emitted:?}") };
+    assert_eq!(answer, &run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Grants)));
+}
+
+#[test]
+fn root_refuses_incompatible_conversation_limits_before_admission() {
+    let limits = Limits { run: run::Limits { directories: 3, ..LIMITS.run }, ..LIMITS };
+    let mut h = Harness::with(&limits);
+    let emitted = h.step(Event::Start {
+        workspace: Some(workspace()),
+        grants: Box::new([]),
+        reply_to: ReplyTo::new(Token::new(7)),
+        host_run: Token::new(7),
+        activation: 1,
+        charter: charter(),
+        transcript: None,
+    });
+    let [Request::Answer { answer, .. }] = &*emitted else { panic!("expected admission refusal: {emitted:?}") };
+    assert_eq!(answer, &run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Conversation)));
+}
+
+#[test]
+fn oversized_resume_history_is_refused_when_the_conversation_opens() {
+    let mut h = Harness::new();
+    let mut after = List::with_capacity(17);
+    for _ in 0..17_u32 {
+        after
+            .push(session::llm::Message { role: Role::User, content: Box::new([]) })
+            .expect("room for each oversized history message");
+    }
+    let transcript = session::record::Transcript {
+        version: session::record::VERSION,
+        endpoint: session::llm::Endpoint(1),
+        dialect: 1,
+        turns: Box::new([]),
+        after: after.into_boxed(),
+    };
+    let emitted = h.step(Event::Start {
+        workspace: Some(workspace()),
+        grants: Box::new([]),
+        reply_to: ReplyTo::new(Token::new(7)),
+        host_run: Token::new(7),
+        activation: 1,
+        charter: Charter { resume: true, ..charter() },
+        transcript: Some(transcript),
+    });
+    let [Request::Admitted { run, .. }, Request::Read { .. }] = &*emitted else {
+        panic!("expected an admitted run: {emitted:?}")
+    };
+    let emitted = h.step(Event::Read { owner: *run, read: run::Read::Missing });
+    let emitted = match emitted.as_ref() {
+        [Request::Probe { owner, .. }] => h.step(Event::Probed { owner: *owner, executable: false }),
+        _ => emitted,
+    };
+    let [Request::Answer { answer, .. }] = &*emitted else { panic!("expected history refusal: {emitted:?}") };
+    match answer {
+        run::Answer::Failed { failure, spent, turns } => {
+            assert_eq!(
+                (*failure, *spent, *turns),
+                (run::Failure::Transcript(run::TranscriptRefusal::TooLarge), run::Spend::ZERO, 0)
+            );
+        }
+        run::Answer::Refused(_) | run::Answer::Parked { .. } | run::Answer::Accepted { .. } => {
+            panic!("expected transcript refusal: {answer:?}")
+        }
+    }
+}
+
 const TOOLS: Tools = Tools { inspect: true, modify: true, shell: false };
 
 fn rule(name: &[u8]) -> VerdictRule {

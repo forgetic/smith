@@ -740,6 +740,20 @@ fn a_session_closed_while_it_rests_leaves_the_ready_list() {
 }
 
 #[test]
+fn time_expires_while_a_session_rests_between_batches() {
+    let mut h = Harness::new(LIMITS);
+    let (owner, _) = h.open(1);
+    let away = Call::Read { path: outside(), skip: 0, lines: None };
+    let next = Call::Write { path: outside(), content: bytes(b"x") };
+    let content = Box::new([tool_call(b"first", away), tool_call(b"next", next)]);
+    assert_eq!(h.step(Event::Completed { owner, completion: completion(content, Stop::ToolUse) }), None);
+    h.after(BUDGET.time);
+    h.domain.reclaim();
+    assert_eq!(h.resume(), Some(ended(OUT_OF_TIME, 1)));
+    assert_eq!(h.turn_records.len(), 1);
+}
+
+#[test]
 fn a_batch_as_wide_as_the_most_a_step_emits_fits() {
     let limits = Limits { parallel_tools: MAX_PARALLEL, ..LIMITS };
     let mut h = Harness::new(limits);
@@ -1448,6 +1462,40 @@ fn a_conversation_that_outgrows_its_bytes_ends_the_session() {
         Some(ended(End::TranscriptFull, 1)),
         "the accepted full answer is told before refusing another provider effect"
     );
+}
+
+#[test]
+fn oversized_provider_completions_end_before_calls_or_turns() {
+    let mut h = Harness::new(LIMITS);
+    let (owner, _) = h.open(1);
+    let huge = Box::from([b'x'; 4097].as_slice());
+    let oversized = completion(Box::new([text(&huge)]), Stop::EndTurn);
+    assert_eq!(h.step(Event::Completed { owner, completion: oversized }), Some(ended(End::TranscriptFull, 1)));
+    assert_eq!(h.turn_records.len(), 0);
+
+    let mut h = Harness::new(LIMITS);
+    let (owner, _) = h.open(1);
+    let call = Block::ToolCall {
+        id: bytes(b"oversized"),
+        name: bytes(b"finish"),
+        input: huge,
+        call: Decoded::Delegated { ticket: FINISH.ticket, effect: Effect::Write },
+        replay: None,
+    };
+    let completion = completion(Box::new([call]), Stop::ToolUse);
+    assert_eq!(h.step(Event::Completed { owner, completion }), Some(ended(End::TranscriptFull, 1)));
+    assert_eq!((h.domain.runs(), h.turn_records.len()), (0, 0));
+}
+
+#[test]
+fn late_oversized_completion_replaces_the_closing_reason() {
+    let mut h = Harness::new(LIMITS);
+    let (owner, _) = h.open(1);
+    assert_eq!(h.step(Event::Close { session: owner }), Some(Request::Cancel { owner }));
+    let huge = [b'x'; 4097];
+    let completion = completion(Box::new([text(&huge)]), Stop::EndTurn);
+    assert_eq!(h.step(Event::Completed { owner, completion }), Some(ended(End::TranscriptFull, 1)));
+    assert_eq!(h.turn_records.len(), 0);
 }
 
 #[test]
