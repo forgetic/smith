@@ -1,4 +1,6 @@
-use smith_local_world::{Cut, World};
+use skein_world::domain::assert_replays;
+use smith_local_domain::ExitStatus;
+use smith_local_world::{Cut, StoreFault, World};
 
 #[test]
 fn a_question_is_answered_and_the_chat_waits_for_the_next() {
@@ -161,4 +163,41 @@ fn a_slow_store_pauses_the_agent_and_loses_no_turn() {
     }
     assert!(world.waiting(), "the paused agent resumes after store acknowledgements");
     assert_eq!(world.saved_turns(), 3, "all three conversation turns reached the store");
+}
+
+#[test]
+fn a_chat_replays_the_same_boundary_trace_from_its_seed() {
+    let trace = assert_replays(71, 72, |seed| {
+        let mut world = World::new(seed);
+        world.line(b"Hello");
+        assert!(world.drive(300));
+        (world.trace().to_vec(), (world.saved_turns(), world.shown().to_vec()))
+    });
+    assert!(trace.iter().any(|line| line.contains("TurnSaved")));
+}
+
+#[test]
+fn facts_do_not_change_the_chat_when_their_queue_is_full() {
+    let mut observed = World::new(73);
+    observed.line(b"Hello");
+    assert!(observed.drive(300));
+    let mut dropped = World::without_facts(73);
+    dropped.line(b"Hello");
+    assert!(dropped.drive(300));
+    assert_eq!(observed.saved_turns(), dropped.saved_turns());
+    assert_eq!(observed.shown(), dropped.shown());
+    assert!(dropped.facts_lost() > 0);
+    assert!(observed.judged().0 > 0);
+}
+
+#[test]
+fn a_store_failure_stops_the_chat_and_tells_the_person() {
+    for fault in [StoreFault::Load, StoreFault::State, StoreFault::Turn] {
+        let mut world = World::new(75);
+        world.fail_store(fault);
+        world.line(b"Hello");
+        world.drive(300);
+        assert_eq!(world.exit(), Some(ExitStatus::Failed), "{fault:?} failure exits");
+        assert!(world.shown().iter().any(|text| text.as_ref() == b"The chat could not be saved"));
+    }
 }

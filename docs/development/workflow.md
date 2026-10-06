@@ -237,3 +237,10 @@ serially on 2026-10-06 with `measure -j 1`: ten focused local-world tests
 passed in 0.044 seconds. There are no local fuzzy tests yet. The parallel
 workspace gate passed 557 focused tests in 3.526 seconds and eleven fuzzy
 tests in 4.638 seconds. The suite budgets are unchanged.
+
+The local referee, replay, fact-independence, memory and randomized schedules
+were measured serially on 2026-10-06 with `measure -j 1`: 21 focused
+local-world tests passed in 0.087 seconds, and the 64-seed fuzzy sweep passed
+in 0.033 seconds. Store failures at load, metadata save and turn save are
+covered. The world remains within its one-second focused and five-second
+fuzzy shares; workspace timeouts are unchanged.

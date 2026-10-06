@@ -224,6 +224,7 @@ version = "0.0.0"
 dependencies = [
  "skein-fake-llm-domain",
  "skein-lib",
+ "skein-world",
  "smith-agent-world",
  "smith-domain",
  "smith-local-domain",

@@ -12,7 +12,7 @@ use crate::chat::{Chat, Phase};
 use crate::credentials::Grants;
 use crate::person::Line;
 use crate::turns::Turns;
-use crate::{Config, Invalid, Limits, charter};
+use crate::{Config, Fact, Invalid, Limits, charter};
 
 /// Upper bound on local output from one event or ready child step.
 #[must_use]
@@ -38,6 +38,8 @@ pub struct Domain {
     stop_failed: bool,
     show_bytes: u32,
     wall_deadline: Option<Time>,
+    facts: Queue<Fact>,
+    facts_lost: u64,
 }
 
 impl Domain {
@@ -61,6 +63,8 @@ impl Domain {
             stop_failed: false,
             show_bytes: limits.show_bytes,
             wall_deadline: None,
+            facts: Queue::with_capacity(limits.facts),
+            facts_lost: 0,
         })
     }
 
@@ -88,6 +92,17 @@ impl Domain {
     /// Reclaim child slots after delivering one iteration's output.
     pub fn reclaim(&mut self) {
         self.agent.reclaim();
+    }
+
+    /// Oldest content-free observation, if the caller wants it.
+    pub fn pop_fact(&mut self) -> Option<Fact> {
+        self.facts.pop()
+    }
+
+    /// Observations lost because the caller did not drain them.
+    #[must_use]
+    pub fn facts_lost(&self) -> u64 {
+        self.facts_lost
     }
 
     fn pressured(&self) -> bool {
@@ -319,6 +334,7 @@ fn maybe_start(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
         &mut domain.agent_out,
     );
     domain.chat.phase = Phase::Running;
+    observe(domain, Fact::Started { activation: domain.chat.state.activation });
 }
 
 fn send_line(domain: &mut Domain, env: &Env<Limits>) {
@@ -330,9 +346,13 @@ fn send_line(domain: &mut Domain, env: &Env<Limits>) {
         agent::Event::Message { run, name: line.name, text: line.text },
         &mut domain.agent_out,
     );
+    observe(domain, Fact::Message { name: line.name });
 }
 
 fn turn_saved(domain: &mut Domain, number: u32, out: &mut Queue<Request>) {
+    if domain.stop_failed {
+        return;
+    }
     let pending = domain.turns.unsaved.pop().expect("TurnSaved answers a pending SaveTurn");
     assert_eq!(number, pending, "turns become durable in order");
     if domain.turns.unsaved.is_empty() {
@@ -366,8 +386,13 @@ fn closed(domain: &mut Domain, out: &mut Queue<Request>) {
 }
 
 fn store_failed(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
+    if domain.stop_failed {
+        return;
+    }
     domain.stop_failed = true;
     domain.chat.closed = true;
+    domain.wall_deadline = None;
+    domain.turns.unsaved = Queue::with_capacity(env.limits.unsaved);
     out.push(Request::Show { text: Box::from(&b"The chat could not be saved"[..]) });
     if let Some(run) = domain.run {
         agent::step(&mut domain.agent, &agent_env(env), agent::Event::Cancel { run }, &mut domain.agent_out);
@@ -386,16 +411,21 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
                 send_line(domain, env);
             }
             agent::Request::Turn { host_run: _, number, read, spent: _, turn } => {
+                if domain.stop_failed {
+                    continue;
+                }
                 assert!(domain.turns.unsaved.room() > 0, "store backpressure bounds unsaved turns");
                 let shown = crate::person::turn_text(&turn, env.limits.show_bytes);
                 domain.turns.unsaved.push(number);
                 domain.chat.state.read = read;
+                observe(domain, Fact::Turn { number });
                 out.push(Request::SaveTurn { number, read, turn });
                 if !shown.is_empty() {
                     out.push(Request::Show { text: shown });
                 }
             }
             agent::Request::Answer { to: _, answer } => {
+                observe(domain, Fact::Answered { activation: domain.chat.state.activation });
                 domain.turns.answer = Some(answer);
                 if domain.turns.unsaved.is_empty() {
                     finish_answer(domain, out);
@@ -432,6 +462,13 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
 
 fn finish_answer(domain: &mut Domain, out: &mut Queue<Request>) {
     let Some(answer) = domain.turns.answer.take() else { return };
+    if domain.stop_failed {
+        domain.run = None;
+        domain.chat.phase = Phase::Done;
+        out.push(Request::Exit { status: ExitStatus::Failed });
+        return;
+    }
+    observe(domain, Fact::Shown { activation: domain.chat.state.activation });
     let text = match answer {
         agent::run::Answer::Accepted { outcome, .. } => match outcome {
             agent::run::outcome::Declared::Report(report) => report.text,
@@ -482,4 +519,10 @@ fn held_completion(domain: &Domain, owner: Token) -> bool {
         }
     }
     false
+}
+
+fn observe(domain: &mut Domain, fact: Fact) {
+    if domain.facts.try_push(fact).is_err() {
+        domain.facts_lost = domain.facts_lost.saturating_add(1);
+    }
 }

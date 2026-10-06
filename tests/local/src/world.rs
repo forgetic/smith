@@ -5,9 +5,12 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use skein_fake_llm_domain as provider;
 use skein_lib::{Duration, Env, Queue, ReplyTo, Time, Token, Wall};
+use skein_world::domain::{Referee, Trace};
 use smith_agent_world::{self as agent_world, translate};
 use smith_domain::{self as agent, run, tools};
-use smith_local_domain::{self as local, AgentIo, ChatState, Contract, Event, ExitStatus, Request};
+use smith_local_domain::{self as local, AgentIo, ChatState, Contract, Event, ExitStatus, Request, StoreFailure};
+
+use crate::referee::{Meeting, Seen};
 
 /// Typed fake transcript store, movable across independent invocations.
 #[derive(Debug, Default)]
@@ -89,6 +92,17 @@ enum FirstFailure {
     Used,
 }
 
+/// Which store request should fail once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreFault {
+    /// Loading the chat fails.
+    Load,
+    /// Saving activation metadata fails.
+    State,
+    /// Saving a turn fails.
+    Turn,
+}
+
 /// One invocation; the store can be taken into a later invocation.
 #[derive(Debug)]
 pub struct World {
@@ -113,6 +127,11 @@ pub struct World {
     delayed_turns: VecDeque<u32>,
     first_failure: FirstFailure,
     credential_requests: u32,
+    referee: Referee<Meeting>,
+    trace: Trace,
+    seed: u64,
+    collect_facts: bool,
+    store_fault: Option<StoreFault>,
 }
 
 impl World {
@@ -122,10 +141,18 @@ impl World {
         Self::with_store(seed, Store::default())
     }
 
+    /// Same chat with no observation capacity; domain behavior must agree.
+    #[must_use]
+    pub fn without_facts(seed: u64) -> World {
+        let mut world = Self::with_capacity(seed, Store::default(), true, 2, 0);
+        world.collect_facts = false;
+        world
+    }
+
     /// A one-turn unsaved window for store-pressure stories.
     #[must_use]
     pub fn tight_unsaved(seed: u64) -> World {
-        Self::with_capacity(seed, Store::default(), true, 1)
+        Self::with_capacity(seed, Store::default(), true, 1, 64)
     }
 
     /// A fresh local domain over an existing durable fake store.
@@ -141,10 +168,12 @@ impl World {
     }
 
     fn with_resume(seed: u64, store: Store, resume: bool) -> World {
-        Self::with_capacity(seed, store, resume, 2)
+        Self::with_capacity(seed, store, resume, 2, 64)
     }
 
-    fn with_capacity(seed: u64, store: Store, resume: bool, unsaved: u32) -> World {
+    fn with_capacity(seed: u64, store: Store, resume: bool, unsaved: u32, facts: u32) -> World {
+        let referee =
+            Referee::new(Meeting::after(store.activation(), store.state.map_or(0, |state| state.next_message)));
         let limits = local::Limits {
             agent: agent_world::LIMITS,
             endpoints: Box::new([run::charter::Endpoint(0)]),
@@ -155,7 +184,7 @@ impl World {
             show_bytes: 4096,
             lines: 8,
             unsaved,
-            facts: 64,
+            facts,
         };
         let config = local::Config {
             chat: b"main".as_slice().into(),
@@ -203,6 +232,11 @@ impl World {
             delayed_turns: VecDeque::new(),
             first_failure: FirstFailure::None,
             credential_requests: 0,
+            referee,
+            trace: Trace::default(),
+            seed,
+            collect_facts: true,
+            store_fault: None,
         }
     }
 
@@ -227,6 +261,17 @@ impl World {
         self.slow_store = true;
     }
 
+    /// Fail the next store request of the selected kind.
+    pub fn fail_store(&mut self, fault: StoreFault) {
+        self.store_fault = Some(fault);
+    }
+
+    /// Whether the local host exited and with what status.
+    #[must_use]
+    pub fn exit(&self) -> Option<ExitStatus> {
+        self.exit
+    }
+
     /// Release the oldest delayed turn acknowledgement.
     pub fn release_turn(&mut self) -> bool {
         let Some(number) = self.delayed_turns.pop_front() else { return false };
@@ -249,6 +294,29 @@ impl World {
     /// The person interrupts the live run.
     pub fn interrupt(&mut self) {
         self.events.push_back(Event::Interrupt);
+    }
+
+    /// Leave content-free facts undrained to show they cannot change behavior.
+    pub fn ignore_facts(&mut self) {
+        self.collect_facts = false;
+    }
+
+    /// Number of facts dropped because the caller did not drain them.
+    #[must_use]
+    pub fn facts_lost(&self) -> u64 {
+        self.domain.facts_lost()
+    }
+
+    /// Boundary chronology for deterministic replay.
+    #[must_use]
+    pub fn trace(&self) -> &[String] {
+        self.trace.lines()
+    }
+
+    /// Number of independent referee checks performed.
+    #[must_use]
+    pub fn judged(&self) -> (u64, u64) {
+        self.referee.judged()
     }
 
     /// Drive until a cancelled answer is shown.
@@ -317,10 +385,20 @@ impl World {
         for _ in 0..iterations {
             if self.domain.is_ready() {
                 local::resume(&mut self.domain, &self.env, &mut self.out);
+                self.gather_facts();
             }
             if let Some(event) = self.events.pop_front() {
                 let saved = match &event {
-                    Event::TurnSaved { number } => Some(*number),
+                    Event::TurnSaved { number } => {
+                        self.observe(Seen::TurnSaved { number: *number });
+                        Some(*number)
+                    }
+                    Event::Agent(
+                        AgentIo::Completed { owner, .. } | AgentIo::Failed { owner, .. } | AgentIo::Cancelled { owner },
+                    ) => {
+                        self.observe(Seen::Completed { owner: *owner });
+                        None
+                    }
                     Event::Line { .. }
                     | Event::Interrupt
                     | Event::Closed
@@ -332,6 +410,7 @@ impl World {
                     | Event::Agent(_) => None,
                 };
                 local::step(&mut self.domain, &self.env, event, &mut self.out);
+                self.gather_facts();
                 if let (Some(Cut::AfterTurnSaved(target)), Some(number)) = (self.cut, saved)
                     && target == number
                 {
@@ -340,6 +419,7 @@ impl World {
             }
             if self.domain.is_due(self.env.now) {
                 local::fire(&mut self.domain, &self.env, &mut self.out);
+                self.gather_facts();
             }
             while let Some(request) = self.out.pop() {
                 self.request(request);
@@ -370,6 +450,11 @@ impl World {
             }
             self.domain.reclaim();
             self.provider.reclaim();
+            if self.collect_facts
+                && let skein_world::domain::Verdict::Failed(failure) = self.referee.verdict()
+            {
+                panic!("seed {}: {failure}; trace: {:?}", self.seed, self.trace.lines());
+            }
             let reached = self.reached.contains(&goal) && (goal != Goal::Waiting || self.saved_turns() > 0);
             if reached {
                 return true;
@@ -402,9 +487,20 @@ impl World {
                 self.shown.push(text);
             }
             Request::Load => {
-                self.events.push_back(Event::Loaded { state: self.store.state, transcript: self.store.history() });
+                if self.store_fault == Some(StoreFault::Load) {
+                    self.store_fault = None;
+                    self.events.push_back(Event::StoreFailed { reason: StoreFailure::Read });
+                } else {
+                    self.events.push_back(Event::Loaded { state: self.store.state, transcript: self.store.history() });
+                }
             }
             Request::SaveState { state, fresh } => {
+                self.observe(Seen::Activation { number: state.activation, message: state.next_message });
+                if self.store_fault == Some(StoreFault::State) {
+                    self.store_fault = None;
+                    self.events.push_back(Event::StoreFailed { reason: StoreFailure::Write });
+                    return;
+                }
                 if self.store.activation() < state.activation {
                     self.activation_turns = 0;
                 }
@@ -419,6 +515,12 @@ impl World {
                 }
             }
             Request::SaveTurn { number, read, turn } => {
+                self.observe(Seen::SaveTurn { number, read });
+                if self.store_fault == Some(StoreFault::Turn) {
+                    self.store_fault = None;
+                    self.events.push_back(Event::StoreFailed { reason: StoreFailure::Write });
+                    return;
+                }
                 if self.cut == Some(Cut::BeforeSaveTurn(number)) {
                     self.reached.insert(Goal::Cut);
                     return;
@@ -448,9 +550,33 @@ impl World {
         }
     }
 
+    fn gather_facts(&mut self) {
+        if !self.collect_facts {
+            return;
+        }
+        while let Some(fact) = self.domain.pop_fact() {
+            let seen = match fact {
+                local::Fact::Started { activation: _ } => None,
+                local::Fact::Message { name } => Some(Seen::Message { name }),
+                local::Fact::Turn { number } => Some(Seen::Turn { number }),
+                local::Fact::Answered { activation } => Some(Seen::Answered { activation }),
+                local::Fact::Shown { activation } => Some(Seen::Shown { activation }),
+            };
+            if let Some(seen) = seen {
+                self.observe(seen);
+            }
+        }
+    }
+
+    fn observe(&mut self, seen: Seen) {
+        self.trace.log(self.env.now, format!("{seen:?}"));
+        self.referee.observe(self.env.now, seen, &mut Vec::new());
+    }
+
     fn agent_request(&mut self, request: agent::Request) {
         match request {
             agent::Request::Complete { owner, prompt, .. } => {
+                self.observe(Seen::Complete { owner });
                 self.completions += 1;
                 self.prompt_assistants
                     .push(prompt.messages.iter().filter(|message| message.role == agent::llm::Role::Assistant).count());
