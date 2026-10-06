@@ -379,6 +379,28 @@ fn a_run_looks_for_checks_in_writable_repositories_when_a_change_must_pass_them(
 }
 
 #[test]
+fn a_report_only_run_probes_checks_in_its_writable_directory() {
+    let mut h = Harness::new(LIMITS);
+    let mut mounted = workspace();
+    mounted.directories[0].writable = true;
+    let emitted = h.start_workspace(1, text_charter(false), Some(mounted));
+    let [Request::Admitted { run, .. }, Request::Read { .. }] = &*emitted else {
+        panic!("report run begins discovery: {emitted:?}");
+    };
+    let run = *run;
+    let emitted = h.step(Event::Read { owner: run, read: Read::Missing });
+    let [Request::Probe { at, .. }] = &*emitted else {
+        panic!("writable report directory probes checks: {emitted:?}");
+    };
+    assert_eq!(at.root, Token::new(900));
+    let emitted = h.step(Event::Probed { owner: run, executable: true });
+    let [Request::Open { opening, .. }] = &*emitted else {
+        panic!("report opens after the probe: {emitted:?}");
+    };
+    assert!(skein_lib::bytes::find(&opening.system, b"with checks (`.temper/pre-pr`)").is_some());
+}
+
+#[test]
 fn a_run_with_nothing_to_look_for_opens_main_at_once() {
     let mut h = Harness::new(LIMITS);
     let emitted = h.start_workspace(1, charter(), None);

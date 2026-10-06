@@ -82,6 +82,19 @@ fn a_report_answers_the_host_without_checks_or_pushes() {
 }
 
 #[test]
+fn a_report_only_run_with_a_writable_directory_is_told_of_its_checks() {
+    let world = settled(&Settings { job: Job::Reporting, writable: true, ..Settings::calm(1010) });
+    assert!(matches!(world.answer(), Answer::Accepted { outcome: Declared::Report(_), .. }));
+    assert!(world.prompts().iter().any(|query| {
+        query
+            .system
+            .windows(b"with checks (`.temper/pre-pr`)".len())
+            .any(|part| part == b"with checks (`.temper/pre-pr`)")
+    }));
+    assert!(world.checked().is_empty() && world.pushes().is_empty());
+}
+
+#[test]
 fn sub_agents_nest_and_return_results_to_their_askers() {
     let world = settled(&Settings { job: Job::Delegating, ..Settings::calm(3) });
     assert!(matches!(world.answer(), Answer::Accepted { outcome: Declared::Change(_), .. }));

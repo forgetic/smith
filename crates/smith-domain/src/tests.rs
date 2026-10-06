@@ -623,10 +623,9 @@ fn no_grant_fails_locally_and_exhaustion_reports_the_account() {
         transcript: None,
     });
     let [Request::Admitted { run, .. }, Request::Read { .. }] = &*emitted else { panic!("expected admission") };
-    assert!(
-        h.step(Event::Read { owner: *run, read: run::Read::Missing }).is_empty(),
-        "no provider request without a grant"
-    );
+    let emitted = h.step(Event::Read { owner: *run, read: run::Read::Missing });
+    let [Request::Probe { .. }] = &*emitted else { panic!("writable directory probes checks: {emitted:?}") };
+    assert!(h.step(Event::Probed { owner: *run, executable: false }).is_empty(), "no provider request without a grant");
     assert!(h.domain.next_deadline().is_some(), "local unauthorized waits for a grant");
     let mut h = Harness::new();
     let (_, owner, _) = h.admit(7, charter());
@@ -795,6 +794,10 @@ fn an_opening_larger_than_a_session_holds_refuses_main_as_invalid() {
         panic!("expected an admitted run, got {emitted:?}");
     };
     let emitted = h.step(Event::Read { owner: *run, read: run::Read::Missing });
+    let [Request::Probe { .. }] = &*emitted else {
+        panic!("writable directory probes checks before opening: {emitted:?}");
+    };
+    let emitted = h.step(Event::Probed { owner: *run, executable: false });
     let [Request::Answer { to: _, answer }] = &*emitted else {
         panic!("expected the run's answer, got {emitted:?}");
     };

@@ -293,7 +293,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
     let main = conversations.insert(conversation).expect("checked for room above");
     out.push(Request::Admitted { host_run, run: id.token() });
     let run = runs.get_mut(id).expect("inserted above");
-    run.state = match prepare::next(&run.charter, run.workspace.as_ref(), None) {
+    run.state = match prepare::next(run.workspace.as_ref(), None) {
         Some(step) => look(run, id, reply_to, main, step, env, out),
         None => open(run, conversations, reply_to, main, env.now, out),
     };
@@ -1145,7 +1145,7 @@ fn prepared(
     env: &Env<Limits>,
     out: &mut Queue<Request>,
 ) -> State {
-    match prepare::next(&run.charter, run.workspace.as_ref(), Some(step)) {
+    match prepare::next(run.workspace.as_ref(), Some(step)) {
         Some(next) => look(run, id, reply_to, main, next, env, out),
         None => open(run, conversations, reply_to, main, env.now, out),
     }

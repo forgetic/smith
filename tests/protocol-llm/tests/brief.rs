@@ -38,7 +38,7 @@ const MAIN_MECHANICS: &str = "## Tools\n\n\
 You can read, list and search the files in the checkout.\n\
 You can write and edit files in its writable repositories.\n\n\
 ## Checkout\n\n\
-- `work`, which you may change, a git working tree\n\
+- `work`, which you may change, a git working tree, with checks (`.temper/pre-pr`)\n\
 - `archive`, which you may only read, a plain directory\n\n\
 ## Sub-agents\n\n\
 You can ask for a sub-agent: an LLM of its own, working on a brief you write, with tools no wider than \
@@ -53,7 +53,7 @@ Extra fields are allowed within the aggregate result byte limit; no field name m
 const CHILD_MECHANICS: &str = "## Tools\n\n\
 You can read, list and search the files in the checkout.\n\n\
 ## Checkout\n\n\
-- `work`, which you may change, a git working tree\n\
+- `work`, which you may change, a git working tree, with checks (`.temper/pre-pr`)\n\
 - `archive`, which you may only read, a plain directory\n\n\
 ## Answering\n\n\
 When you are done, end your turn with your answer: your last message goes, as it is, to the LLM that asked for \
@@ -438,7 +438,11 @@ fn native_settled(world: &World, settings: &Settings, roots: &[Token]) {
         .collect::<Vec<_>>();
     assert_eq!(
         discovery,
-        [(b"read".as_slice(), roots[0], b"AGENTS.md".as_slice()), (b"read", roots[1], b"AGENTS.md"),]
+        [
+            (b"read".as_slice(), roots[0], b"AGENTS.md".as_slice()),
+            (b"probe", roots[0], b".temper/pre-pr"),
+            (b"read", roots[1], b"AGENTS.md"),
+        ]
     );
     assert_eq!(world.wire_bindings().len(), world.turns().len());
     for binding in world.wire_bindings() {

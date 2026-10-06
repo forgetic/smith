@@ -4,9 +4,8 @@
 //!
 //! - For each repository, the start of its selected guide, which the system text
 //!   carries after the brief.
-//! - For each writable repository, when Change or a delivery grant requires
-//!   checks, whether its selected relative check path
-//!   names an executable, run before host delivery. No executable, no checks.
+//! - For each writable repository, whether its selected relative check path
+//!   names an executable. No executable, no checks.
 //!
 //! One operation at a time, in the checkout's order, each with its deadline.
 //! A file that is missing, that is not text, or that io fails to read, is
@@ -66,7 +65,7 @@ impl Found {
 
 /// The first step, or the step after `after`, or `None` once there is
 /// nothing left to look for.
-pub(crate) fn next(charter: &Charter, mounted: Option<&Workspace>, after: Option<Step>) -> Option<Step> {
+pub(crate) fn next(mounted: Option<&Workspace>, after: Option<Step>) -> Option<Step> {
     let repositories = count(workspace::directories(mounted).len());
     let candidate = match after {
         None => Step { repository: 0, look: Look::Guide },
@@ -77,7 +76,7 @@ pub(crate) fn next(charter: &Charter, mounted: Option<&Workspace>, after: Option
     };
     let step = match candidate.look {
         Look::Guide => candidate,
-        Look::Checks if wants_checks(charter, mounted, candidate.repository) => candidate,
+        Look::Checks if wants_checks(mounted, candidate.repository) => candidate,
         Look::Checks => Step { repository: candidate.repository.saturating_add(1), look: Look::Guide },
     };
     (step.repository < repositories).then_some(step)
@@ -126,10 +125,9 @@ pub(crate) fn checks(found: &mut Found, step: Step, executable: bool) {
     }
 }
 
-/// Whether the run looks for the checks of the repository at `index`: it is
-/// writable, and a change must pass its checks.
-fn wants_checks(charter: &Charter, mounted: Option<&Workspace>, index: u32) -> bool {
-    (charter.outcome.change.is_some() || charter.grants.deliver.is_some()) && repository(mounted, index).writable
+/// Whether the run looks for the checks of the repository at `index`.
+fn wants_checks(mounted: Option<&Workspace>, index: u32) -> bool {
+    repository(mounted, index).writable
 }
 
 fn repository(mounted: Option<&Workspace>, index: u32) -> &Directory {
