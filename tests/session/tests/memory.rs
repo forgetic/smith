@@ -150,8 +150,8 @@ fn observe_fill(
                 assert!(!row.0, "one opening per original full-payload fixture");
                 row.0 = true;
             }
-            Request::Used { opener, usage, usage_overflow } => {
-                assert_eq!((usage, usage_overflow), (Usage::ZERO, false));
+            Request::Used { opener, usage } => {
+                assert_eq!(usage, Usage::ZERO);
                 observed[usize::try_from(opener.raw()).expect("bounded opener")].1 += 1;
             }
             Request::Turn { opener, turn } => {
@@ -161,7 +161,7 @@ fn observe_fill(
                     (turn.version, turn.endpoint, turn.dialect, turn.sequence),
                     (smith_domain_session::record::VERSION, Endpoint(0), 2, row.2)
                 );
-                assert_eq!((turn.usage, turn.spent, turn.spend_overflow), (Usage::ZERO, 0, false));
+                assert_eq!((turn.usage, turn.spent), (Usage::ZERO, 0));
                 assert_eq!(row.1, row.2, "every actual accepted completion emits concrete history");
                 for message in &turn.messages {
                     for block in &message.content {
@@ -171,8 +171,8 @@ fn observe_fill(
                     }
                 }
             }
-            Request::Priced { opener, spent, overflow, own_spent, own_overflow } => {
-                assert_eq!((spent, overflow, own_spent, own_overflow), (0, false, 0, false));
+            Request::Priced { opener, spent, own_spent } => {
+                assert_eq!((spent, own_spent), (0, 0));
                 observed[usize::try_from(opener.raw()).expect("bounded opener")].3 += 1;
             }
             Request::Yielded { .. } => {
@@ -180,12 +180,9 @@ fn observe_fill(
                     asked = Some(Asked::Other);
                 }
             }
-            Request::Ended { opener, end, turns, usage, usage_overflow } => {
+            Request::Ended { opener, end, turns, usage } => {
                 assert!(full_service, "admissible original payload must enter backoff");
-                assert_eq!(
-                    (end, turns, usage, usage_overflow),
-                    (smith_domain_session::End::TranscriptFull, 2, Usage::ZERO, false)
-                );
+                assert_eq!((end, turns, usage), (smith_domain_session::End::TranscriptFull, 2, Usage::ZERO));
                 let row = &mut observed[usize::try_from(opener.raw()).expect("bounded opener")];
                 assert!(!row.4, "one exact-full terminal");
                 row.4 = true;
@@ -536,8 +533,8 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
                 Request::Complete { owner, .. } => completion = Some(owner),
                 Request::Delegate { owner, .. } => delegate = Some(owner),
                 Request::Turn { turn, .. } => saved.push(turn),
-                Request::Priced { spent, overflow, own_spent, own_overflow, .. } => {
-                    assert_eq!((spent, overflow, own_spent, own_overflow), (0, false, 0, false));
+                Request::Priced { spent, own_spent, .. } => {
+                    assert_eq!((spent, own_spent), (0, 0));
                 }
                 Request::Ended { end, .. } => ended = Some(end),
                 Request::Opened { .. }
@@ -594,7 +591,6 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
         text: bytes(output),
         error: false,
         spent: 0,
-        spend_overflow: false,
     });
     assert!(owner.is_none(), "full actual result is retained; next provider reserve fails before work");
     assert_eq!(ended, Some(smith_domain_session::End::TranscriptFull));
@@ -657,7 +653,6 @@ fn restoring_a_maximum_recorded_history_stays_within_the_counted_bound() {
                     content: Box::new([Block::Opaque { bytes: bytes(opaque) }]),
                 },
             ]),
-            spend_overflow: false,
         }]),
         after: Box::default(),
     };
@@ -734,7 +729,6 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
                 Message { role: Role::User, content: Box::new([Block::Text { text: bytes(1), replay: None }]) },
                 Message { role: Role::Assistant, content: tail.into() },
             ]),
-            spend_overflow: false,
         }]),
         after: Box::default(),
     };
@@ -772,7 +766,6 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
             end: smith_domain_session::End::TranscriptRefused { reason: record::Refusal::TooLarge },
             turns: 0,
             usage: Usage::ZERO,
-            usage_overflow: false
         })
     );
     assert!(out.is_empty());
@@ -830,8 +823,8 @@ fn memory_seen(out: &mut Queue<Request>) -> MemorySeen {
                 seen.io_count += 1;
             }
             Request::Opened { .. } => {}
-            Request::Used { usage, usage_overflow, .. } => {
-                assert_eq!((usage, usage_overflow), (Usage::ZERO, false));
+            Request::Used { usage, .. } => {
+                assert_eq!(usage, Usage::ZERO);
                 seen.used += 1;
             }
             Request::Turn { turn, .. } => {
@@ -839,7 +832,7 @@ fn memory_seen(out: &mut Queue<Request>) -> MemorySeen {
                     (turn.version, turn.endpoint, turn.dialect),
                     (smith_domain_session::record::VERSION, Endpoint(0), 2)
                 );
-                assert_eq!((turn.usage, turn.spent, turn.spend_overflow), (Usage::ZERO, 0, false));
+                assert_eq!((turn.usage, turn.spent), (Usage::ZERO, 0));
                 for message in &turn.messages {
                     for block in &message.content {
                         match block {
@@ -865,13 +858,13 @@ fn memory_seen(out: &mut Queue<Request>) -> MemorySeen {
                 }
                 seen.turns += 1;
             }
-            Request::Priced { spent, overflow, own_spent, own_overflow, .. } => {
-                assert_eq!((spent, overflow, own_spent, own_overflow), (0, false, 0, false));
+            Request::Priced { spent, own_spent, .. } => {
+                assert_eq!((spent, own_spent), (0, 0));
                 seen.priced += 1;
             }
             Request::Yielded { .. } => seen.yielded += 1,
-            Request::Ended { end, usage, usage_overflow, .. } => {
-                assert_eq!((usage, usage_overflow), (Usage::ZERO, false));
+            Request::Ended { end, usage, .. } => {
+                assert_eq!(usage, Usage::ZERO);
                 assert!(seen.end.replace(end).is_none());
             }
             Request::Cancel { .. } | Request::CancelIo { .. } | Request::Delegate { .. } | Request::Withdraw { .. } => {

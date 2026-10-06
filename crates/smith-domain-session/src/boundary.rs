@@ -74,10 +74,6 @@ pub enum Event {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         spent: u64,
-        /// The child's cumulative bill overflowed; its unknown remainder is
-        /// never treated as zero. Sets inclusive overflow after identity checks.
-        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
-        spend_overflow: bool,
     },
     /// Parent terminal acknowledging Withdraw. Its current delegated identity
     /// settles exactly once and releases its reserved result space. A withdrawn
@@ -94,10 +90,6 @@ pub enum Event {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         spent: u64,
-        /// A withdrawn child still attests an unknown overflowed remainder.
-        /// Sets inclusive overflow once; stale terminals remain inert.
-        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
-        spend_overflow: bool,
     },
     /// A new user message for a yielded session, which calls the LLM again.
     /// Sent only while the session is yielded; a `session` that has ended
@@ -136,6 +128,15 @@ pub enum Event {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         completion: Completion,
+    },
+    /// The parent received a completion whose checked run-wide charge or usage
+    /// cannot be added. Its content and calls are discarded before any effect.
+    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+    Overflowed {
+        /// The pending provider request whose terminal was received.
+        owner: Token,
+        /// Exact typed arithmetic failure, either price or usage overflow.
+        end: End,
     },
     /// The root denied this requested completion before publishing it to a
     /// provider. Only its current Calling owner releases credit and ends the
@@ -247,24 +248,14 @@ pub enum Request {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         opener: Token,
-        /// This activation's inclusive subtree charge, or its last
-        /// representable prefix when overflow is set. Historical turns do
-        /// not seed it; own completions and delegated terminal bills do.
+        /// This activation's exact inclusive subtree charge. Historical turns
+        /// do not seed it; own completions and delegated terminal bills do.
         /// Contract: domain/session.md, section 6; domain/run.md, section 9.
         spent: u64,
-        /// Inclusive price, sum or child bill overflowed. Sticky and
-        /// independent of the own-completion overflow flag.
-        ///
-        /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-        overflow: bool,
         /// Cumulative price of this activation's own completions only. The
         /// root counts its checked deltas; delegated bills never change it.
         /// Contract: domain/session.md, section 6; domain/run.md, section 9.
         own_spent: u64,
-        /// Own price or sum overflowed. Sticky; `own_spent` remains its last
-        /// representable prefix, independently of inclusive overflow.
-        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
-        own_overflow: bool,
     },
     /// The LLM stopped calling tools, saying `text` (its message's text blocks,
     /// one after another). The session waits for `Continue` or `Close`, and
@@ -299,13 +290,9 @@ pub enum Request {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         usage: Usage,
-        /// Cumulative raw usage overflowed. This completion's usage remains
-        /// exact; the session freezes the whole last representable cumulative prefix.
-        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
-        usage_overflow: bool,
     },
     /// The session for `opener` has ended, after `turns` completions that used
-    /// `usage`, their exact sum when `usage_overflow` is false: exactly one
+    /// `usage`, their exact sum: exactly one
     /// per `Open`, once nothing the session asked for is in flight.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
@@ -322,14 +309,9 @@ pub enum Request {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         turns: u32,
-        /// Cumulative raw usage, exact when `usage_overflow` is false. The session
-        /// otherwise preserves the whole last representable prefix.
+        /// Exact cumulative raw usage of charged completions.
         /// Contract: domain/session.md, section 6; domain/run.md, section 10.
         usage: Usage,
-        /// The cumulative raw counters overflowed; usage is the last exact
-        /// whole prefix.
-        /// Contract: domain/session.md, section 6; domain/run.md, section 10.
-        usage_overflow: bool,
     },
     /// Ask an LLM for the next assistant message, giving up after `timeout`.
     ///
@@ -645,9 +627,8 @@ pub enum End {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     PriceOverflow,
-    /// Cumulative raw usage did not fit all four counters. Its accepted
-    /// completion and exact usage were told before this settled failure.
-    /// `PriceOverflow` takes precedence if both attestations fail.
+    /// Cumulative raw usage did not fit; the rejected completion is not
+    /// charged or told. `PriceOverflow` takes precedence when both fail.
     /// Contract: domain/session.md, section 6; domain/run.md, sections 9 and 10.
     UsageOverflow,
 }

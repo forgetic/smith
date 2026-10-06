@@ -133,11 +133,6 @@ pub struct Turn {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub spent: u64,
-    /// Inclusive activation spend overflowed. The spent field retains its last
-    /// representable prefix; this metadata is preserved as historical data and
-    /// never seeds a restored activation's accounting.
-    /// Contract: domain/session.md, sections 3 and 6; domain/run.md, section 9.
-    pub spend_overflow: bool,
     /// Oldest-first conversation messages, with provider call/result pairing preserved.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.

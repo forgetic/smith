@@ -1591,5 +1591,27 @@ fn a_priced_crossing_finish_settles_without_publishing_another_completion() {
     assert_eq!((spent.units, spent.turns, *turns), (130, 1, 1));
     assert_eq!(harness.turns.len(), 1);
     assert_eq!(harness.turns.iter().next().expect("genuine final record").spent, 130);
-    assert!(!harness.turns.iter().next().expect("genuine final record").spend_overflow);
+}
+
+#[test]
+fn overflowing_completion_runs_no_calls_and_tells_no_turn() {
+    let mut harness = Harness::with(&scalar_limits());
+    let selected = Charter {
+        llm: Llm { prices: run::Prices { input: u64::MAX, cached: 0, output: 0, unit: 1 }, ..scalar_charter().llm },
+        ..scalar_charter()
+    };
+    let (_, main, _) = harness.admit(1, selected);
+    let completion = Completion {
+        content: Box::new([served(b"call", Ask::Wait)]),
+        stop: Stop::ToolUse,
+        usage: Usage { input_tokens: 2, ..Usage::ZERO },
+    };
+    let emitted = harness.step(Event::Completed { owner: main, completion });
+    let [Request::Answer { answer: run::Answer::Failed { failure, spent, turns }, .. }] = emitted.as_ref() else {
+        panic!("overflow settles with a typed answer: {emitted:?}");
+    };
+    assert_eq!(*failure, run::Failure::PriceOverflow);
+    assert_eq!((spent.units, spent.turns, *turns), (0, 0, 0));
+    assert!(harness.turns.is_empty());
+    assert_eq!(harness.domain.flights(), 0);
 }

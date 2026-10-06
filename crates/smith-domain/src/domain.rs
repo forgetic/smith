@@ -146,11 +146,11 @@ pub(crate) enum Due {
     /// The run's answer, kept under a ticket, waiting on the ready list.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-    Answered { feedback: crate::Feedback, spent: u64, spend_overflow: bool },
+    Answered { feedback: crate::Feedback, spent: u64 },
     /// The run returned it cancelled, after the session withdrew it.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-    Cancelled { spent: u64, spend_overflow: bool },
+    Cancelled { spent: u64 },
 }
 
 /// A hand-off from the run to a session, held by what it is about.

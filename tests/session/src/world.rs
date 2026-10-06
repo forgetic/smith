@@ -1070,24 +1070,22 @@ impl World {
         self.log(&format!("agent -> {}", describe_agent_request(&request)));
         match request {
             agent::Request::Turn { opener, turn } => self.recorded(opener.raw(), turn),
-            agent::Request::Priced { opener, spent, overflow, own_spent, own_overflow } => {
+            agent::Request::Priced { opener, spent, own_spent } => {
                 let session = self.sessions.get_mut(&opener.raw()).expect("a price names its opener");
                 assert!(session.ended.is_none(), "prices precede the terminal");
                 assert_eq!(
-                    (spent, overflow, own_spent, own_overflow),
-                    (0, false, 0, false),
+                    (spent, own_spent),
+                    (0, 0),
                     "zero-rate provider and zero-bill fake children have exact zero inclusive and own prices"
                 );
                 session.priced += 1;
             }
             agent::Request::Opened { opener, session } => self.opened(opener.raw(), session),
             agent::Request::Yielded { opener, stop, text } => self.yielded(opener.raw(), stop, text),
-            agent::Request::Used { opener, usage, usage_overflow } => {
-                assert!(!usage_overflow, "the scheduled peer stays within representable raw usage");
+            agent::Request::Used { opener, usage } => {
                 self.used(opener.raw(), usage);
             }
-            agent::Request::Ended { opener, end, turns, usage, usage_overflow } => {
-                assert!(!usage_overflow, "the scheduled terminal attests its exact accumulated usage");
+            agent::Request::Ended { opener, end, turns, usage } => {
                 self.ended(opener.raw(), Ended { end, turns, usage });
             }
             agent::Request::Complete { owner, prompt, timeout, .. } => {
@@ -1227,7 +1225,7 @@ impl World {
         let index = session.records.len();
         assert_eq!(turn.sequence, u32::try_from(index + 1).expect("bounded sequence"));
         assert_eq!(turn.usage, session.accepted[index], "each Turn records its actual accepted provider usage");
-        assert_eq!((turn.spent, turn.spend_overflow), (0, false), "zero-price exact bill");
+        assert_eq!(turn.spent, 0, "zero-price exact bill");
         let assistant_index = turn
             .messages
             .iter()
@@ -1708,7 +1706,7 @@ impl World {
                 }
                 Delivery::Cancelled { owner } => self.agent_stage.push(agent::Event::Cancelled { owner }),
                 Delivery::AnswerCancelled { owner } => {
-                    self.agent_stage.push(agent::Event::AnswerCancelled { owner, spent: 0, spend_overflow: false });
+                    self.agent_stage.push(agent::Event::AnswerCancelled { owner, spent: 0 });
                 }
                 Delivery::Answered { owner, text, error } => {
                     // A withdrawn call's answer is withdrawn.
@@ -1721,13 +1719,7 @@ impl World {
                     if self.run_cancel_lost.remove(&owner) {
                         self.stats.answered_after_withdraw += 1;
                     }
-                    self.agent_stage.push(agent::Event::Answered {
-                        owner,
-                        text,
-                        error,
-                        spent: 0,
-                        spend_overflow: false,
-                    });
+                    self.agent_stage.push(agent::Event::Answered { owner, text, error, spent: 0 });
                     // The opener has its finish, and closes the session.
                     if run.accepts {
                         let opener = *self.openers.get(&run.session).expect("a session lives while its calls run");
@@ -1953,6 +1945,7 @@ fn ended_run(event: &agent::Event) -> Option<Token> {
         | agent::Event::Continue { .. }
         | agent::Event::Close { .. }
         | agent::Event::Completed { .. }
+        | agent::Event::Overflowed { .. }
         | agent::Event::BudgetDenied { .. }
         | agent::Event::UnsentClosed { .. }
         | agent::Event::Failed { .. }
@@ -1975,6 +1968,7 @@ fn describe_agent_event(event: &agent::Event) -> String {
         agent::Event::Completed { owner, completion } => {
             format!("completed {} {:?} with {} blocks", owner.raw(), completion.stop, completion.content.len())
         }
+        agent::Event::Overflowed { owner, end } => format!("overflowed {} {end:?}", owner.raw()),
         agent::Event::UnsentClosed { owner } => format!("unsent closed {}", owner.raw()),
         agent::Event::BudgetDenied { owner, reason } => format!("budget denied {} {reason:?}", owner.raw()),
         agent::Event::Failed { owner, failure, .. } => format!("failed {} {failure:?}", owner.raw()),
@@ -1986,8 +1980,8 @@ fn describe_agent_event(event: &agent::Event) -> String {
 fn describe_agent_request(request: &agent::Request) -> String {
     match request {
         agent::Request::Turn { opener, turn } => format!("turn {} {turn:?}", opener.raw()),
-        agent::Request::Priced { opener, spent, overflow, own_spent, own_overflow } => {
-            format!("priced {} {spent} {overflow} own {own_spent} {own_overflow}", opener.raw())
+        agent::Request::Priced { opener, spent, own_spent } => {
+            format!("priced {} {spent} own {own_spent}", opener.raw())
         }
         agent::Request::Opened { opener, session } => format!("opened {} as {}", opener.raw(), session.raw()),
         agent::Request::Yielded { opener, stop, text } => {

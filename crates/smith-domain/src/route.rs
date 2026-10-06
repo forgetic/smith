@@ -63,6 +63,23 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
             let ended = domain.completions.remove(&owner);
             assert!(ended.is_some(), "completed calls were emitted");
             let id = *domain.sessions.get(&owner).expect("a session lives until its call has ended");
+            let conversation = domain.peers.get(id).expect("a peer lives as its session").conversation;
+            let overflow = match session::preview_completion(&domain.session, owner, completion.usage) {
+                Err(end) => Some(end),
+                Ok(price) => match run::completion_overflow(
+                    &domain.run,
+                    conversation,
+                    price,
+                    translate::spend(1, completion.usage),
+                ) {
+                    Some(run::Failure::PriceOverflow) => Some(session::End::PriceOverflow),
+                    Some(run::Failure::UsageOverflow) => Some(session::End::UsageOverflow),
+                    Some(_) | None => None,
+                },
+            };
+            if let Some(end) = overflow {
+                return session_step(domain, env, session::Event::Overflowed { owner, end });
+            }
             let peer = domain.peers.get_mut(id).expect("a peer lives as its session");
             let before = peer.tickets();
             let completion =
@@ -124,16 +141,10 @@ pub(crate) fn deliver(domain: &mut Domain, env: &Env<Limits>, handoff: Handoff) 
         Handoff::Answer { owner } => {
             let flight = domain.flights.remove(&owner).expect("a call is in flight until it is answered");
             match flight.answer {
-                Due::Answered { feedback, spent, spend_overflow } => session::Event::Answered {
-                    owner,
-                    text: feedback.text,
-                    error: feedback.error,
-                    spent,
-                    spend_overflow,
-                },
-                Due::Cancelled { spent, spend_overflow } => {
-                    session::Event::AnswerCancelled { owner, spent, spend_overflow }
+                Due::Answered { feedback, spent } => {
+                    session::Event::Answered { owner, text: feedback.text, error: feedback.error, spent }
                 }
+                Due::Cancelled { spent } => session::Event::AnswerCancelled { owner, spent },
                 Due::Waiting => unreachable!("a call is on the ready list once the run has returned it"),
             }
         }
@@ -265,13 +276,9 @@ fn session_step(domain: &mut Domain, env: &Env<Limits>, event: session::Event) {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Request, out: &mut Queue<Request>) {
     let event = match request {
-        session::Request::Priced { opener, spent, overflow, own_spent, own_overflow } => run::Event::Priced {
-            conversation: opener,
-            own_spent,
-            subtree_spent: spent,
-            own_overflow,
-            subtree_overflow: overflow,
-        },
+        session::Request::Priced { opener, spent, own_spent } => {
+            run::Event::Priced { conversation: opener, own_spent, subtree_spent: spent }
+        }
         session::Request::Turn { opener, turn } => {
             let id = peer(domain, opener);
             if !domain.peers.get(id).expect("main binding lives through Turn").is_main() {
@@ -317,17 +324,13 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
             domain.tickets = domain.tickets.saturating_sub(forgotten);
             run::Event::Yielded { conversation: opener, stop: translate::stop(stop), text }
         }
-        session::Request::Used { opener, usage, usage_overflow } => {
-            run::Event::Used { conversation: opener, spend: translate::spend(1, usage, usage_overflow) }
+        session::Request::Used { opener, usage } => {
+            run::Event::Used { conversation: opener, spend: translate::spend(1, usage) }
         }
-        session::Request::Ended { opener, end, turns, usage, usage_overflow } => {
+        session::Request::Ended { opener, end, turns, usage } => {
             let id = peer(domain, opener);
             free(domain, id);
-            run::Event::Ended {
-                conversation: opener,
-                end: translate::end(end),
-                spend: translate::spend(turns, usage, usage_overflow),
-            }
+            run::Event::Ended { conversation: opener, end: translate::end(end), spend: translate::spend(turns, usage) }
         }
         session::Request::Delegate { owner, opener, call, deadline, origin } => {
             delegated(domain, owner, opener, call, deadline, origin)
@@ -421,14 +424,14 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
             }
             return;
         }
-        run::Request::Return { call, result, spent, spend_overflow } => {
+        run::Request::Return { call, result, spent } => {
             let flight = domain.flights.get_mut(&call).expect("the run returns a call in flight");
             if flight.withdrawn && result == run::Returned::Cancelled {
-                flight.answer = Due::Cancelled { spent, spend_overflow };
+                flight.answer = Due::Cancelled { spent };
             } else {
                 let feedback = crate::feedback(result, env.limits.session.delegated_result_bytes)
                     .expect("compatible canonical receiving cap was checked before any effect");
-                flight.answer = Due::Answered { feedback, spent, spend_overflow };
+                flight.answer = Due::Answered { feedback, spent };
             }
             return domain.ready.defer(Handoff::Answer { owner: call });
         }

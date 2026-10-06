@@ -47,8 +47,7 @@ fn last(world: &mut World, result: RunResult, turns: u32, spent: u64) {
             cache_read: u64::from(completions) * 17,
             cache_write: u64::from(completions) * 19,
             spent,
-            spend_overflow: false,
-            usage_overflow: false,
+
             result,
         },
     });
@@ -67,16 +66,7 @@ fn receipts(text: &[u8]) -> Delivered {
     Delivered::new(Box::new([Receipt::new(0, Box::from(text)).expect("valid receipt")])).expect("valid sealed delivery")
 }
 fn turn(world: &mut World, number: u32, spent: u64, read: Option<Token>, bytes: usize) {
-    world.up(Up::Turn {
-        turn: Turn {
-            number,
-            spent,
-            spend_overflow: false,
-            usage_overflow: false,
-            read,
-            body: vec![b't'; bytes].into_boxed_slice(),
-        },
-    });
+    world.up(Up::Turn { turn: Turn { number, spent, read, body: vec![b't'; bytes].into_boxed_slice() } });
 }
 fn message(world: &mut World, name: u64, bytes: usize) {
     world.event(Event::Message {
@@ -340,16 +330,7 @@ fn an_overflow_name_is_fenced_until_its_busy_answer_terminal_then_reusable() {
 fn payloads_beyond_the_limits_break_the_rules() {
     for record in [
         Up::Fact { body: vec![0; 65].into_boxed_slice() },
-        Up::Turn {
-            turn: Turn {
-                number: 1,
-                spent: 0,
-                spend_overflow: false,
-                usage_overflow: false,
-                read: None,
-                body: vec![0; 65].into_boxed_slice(),
-            },
-        },
+        Up::Turn { turn: Turn { number: 1, spent: 0, read: None, body: vec![0; 65].into_boxed_slice() } },
         Up::Call {
             call: Token::new(20),
             name: CallName { activation: 1, completion: 1, position: 1 },
@@ -365,8 +346,7 @@ fn payloads_beyond_the_limits_break_the_rules() {
                 cache_read: 0,
                 cache_write: 0,
                 spent: 0,
-                spend_overflow: false,
-                usage_overflow: false,
+
                 result: RunResult::Accepted { outcome: vec![0; 129].into_boxed_slice() },
             },
         },
@@ -1028,8 +1008,7 @@ fn cancelled_and_draining_paths_keep_work_and_drop_answers_only_after_a_reported
             cache_read: 17,
             cache_write: 19,
             spent: 10,
-            spend_overflow: false,
-            usage_overflow: false,
+
             result: RunResult::Parked,
         },
     });

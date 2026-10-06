@@ -74,22 +74,11 @@ pub struct Turn {
     /// Positive consecutive turn number from one; checked increment (domain/host.md, sections 2–7).
     pub number: u32,
     /// Global activation spend supplied by the agent in the host's unit; must
-    /// not fall. It is the last representable prefix if `spend_overflow` is set;
+    /// not fall;
     /// the opaque body separately retains the session's inclusive child bill.
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.
     pub spent: u64,
 
-    /// Agent attestation that cumulative currency no longer fits. Sticky across
-    /// subsequent Turns and Answer; never treats the prefix as an exact total.
-    /// Inline metadata has no additional payload allocation or ACK right.
-    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
-    pub spend_overflow: bool,
-
-    /// Agent attestation that cumulative raw usage no longer fits. Sticky across
-    /// subsequent Turns and Answer, independently of currency overflow.
-    /// Actual per-completion usage remains in the opaque transcript body.
-    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
-    pub usage_overflow: bool,
     /// Last named message actually sent and read; never a queued or unknown name (domain/host.md, sections 2–7).
     pub read: Option<Token>,
     /// Opaque transcript turn at most `Limits::turn_bytes` (domain/host.md, sections 2–7).
@@ -346,14 +335,13 @@ pub enum TranscriptRefusal {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RunFailure {
-    /// Agent currency arithmetic failed; the reported spend is an attested
-    /// prefix. This hard failure cannot be hidden by an unlanded Finish.
+    /// Agent currency arithmetic failed; the reported spend is what was
+    /// charged before the failing completion.
     /// Actual already-landed delivery remains separate durable evidence.
     /// Contract: domain/run.md, section 9.4; domain/host.md, sections 6 and 9.
     PriceOverflow,
 
-    /// Agent raw-usage arithmetic failed; exact per-completion data remains in
-    /// Turns while cumulative metadata carries its sticky attestation.
+    /// Agent raw-usage arithmetic failed before the completion's turn was told.
     /// Contract: domain/run.md, section 9.4; domain/host.md, sections 6 and 9.
     UsageOverflow,
 
@@ -449,50 +437,38 @@ pub struct Answer {
 
     /// Agent's final global actual completion count across main and every child,
     /// copied from the root's `Spend` without recounting transmitted `Turn`s.
-    /// At least `turns` when raw totals are representable; `usage_overflow`
-    /// retains the last atomic prefix, which may be smaller. Zero for `Refused`.
+    /// At least `turns`. Zero for `Refused`.
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
     pub completions: u32,
 
     /// Agent's final global fresh-input tokens, copied from root `Spend`.
-    /// Exact without `usage_overflow`, otherwise the last atomic raw prefix;
+    /// Exact;
     /// never repriced by the host. Zero for `Refused`.
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
     pub input: u64,
 
     /// Agent's final global output tokens, copied from root `Spend`.
-    /// Exact without `usage_overflow`, otherwise the last atomic raw prefix;
+    /// Exact;
     /// never reconstructed from the last `Turn`. Zero for `Refused`.
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
     pub output: u64,
 
     /// Agent's final global cache-read tokens, copied from root `Spend`.
-    /// Exact without `usage_overflow`, otherwise the last atomic raw prefix;
+    /// Exact;
     /// independent of host-unit pricing. Zero for `Refused`.
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
     pub cache_read: u64,
 
     /// Agent's final global cache-write tokens, copied from root `Spend`.
-    /// Exact without `usage_overflow`, otherwise the last atomic raw prefix;
-    /// frozen with the other raw counters on overflow. Zero for `Refused`.
+    /// Exact;
+    /// Charged before a typed overflow. Zero for `Refused`.
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
     pub cache_write: u64,
 
-    /// Final global host-unit spend, at least the previous Turn's representable
-    /// prefix. Exact only without `spend_overflow`; refused starts have zero.
+    /// Final global host-unit spend, at least the previous Turn's spend;
+    /// refused starts have zero.
     /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
     pub spent: u64,
-
-    /// Sticky agent currency-overflow attestation; cannot clear a Turn flag.
-    /// False for a refused start. Payload and process-terminal rights are unchanged.
-    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
-    pub spend_overflow: bool,
-
-    /// Sticky agent raw-usage-overflow attestation; cannot clear a Turn flag.
-    /// False for a refused start; independent of financial overflow. The five
-    /// raw fields retain one atomic representable prefix once this is set.
-    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
-    pub usage_overflow: bool,
 
     /// Opaque accepted result or typed refusal/parking/failure/actual delivery evidence (domain/host.md, sections 2–7).
     pub result: RunResult,

@@ -423,16 +423,7 @@ impl Partner {
     #[must_use]
     pub fn turn_max(&self) -> Spend {
         let Script { input, output, cache, .. } = self.script;
-        Spend {
-            units: input,
-            units_overflow: false,
-            usage_overflow: false,
-            turns: 1,
-            input,
-            output,
-            cache_read: cache,
-            cache_write: cache,
-        }
+        Spend { units: input, turns: 1, input, output, cache_read: cache, cache_write: cache }
     }
 
     /// Delivers a new typed opening to the scripted peer or real session and retains its pending terminal obligations.
@@ -541,8 +532,6 @@ impl Partner {
             conversation: talk.conversation,
             own_spent: talk.spent.units,
             subtree_spent: talk.subtree_spent,
-            own_overflow: false,
-            subtree_overflow: false,
         }));
         let expires = talk.expires;
         if *result == Returned::TimedOut {
@@ -840,8 +829,6 @@ impl Partner {
         let Script { input, output, cache, .. } = self.script;
         let mut spend = Spend {
             units: 0,
-            units_overflow: false,
-            usage_overflow: false,
             turns: 1,
             input: self.rng.between(1, input),
             output: self.rng.between(1, output),
@@ -850,16 +837,14 @@ impl Partner {
         };
         spend.units = spend.input;
         let talk = self.talks.get_mut(&peer).expect("a live conversation spends");
-        talk.spent = talk.spent.accumulate(spend);
-        self.spent = self.spent.accumulate(spend);
+        talk.spent = talk.spent.accumulate(spend).expect("bounded scripted usage");
+        self.spent = self.spent.accumulate(spend).expect("bounded scripted usage");
         talk.subtree_spent = talk.subtree_spent.checked_add(spend.units).expect("bounded fixture bill");
         self.tally.turns += 1;
         out.push(Out::Event(Event::Priced {
             conversation: talk.conversation,
             own_spent: talk.spent.units,
             subtree_spent: talk.subtree_spent,
-            own_overflow: false,
-            subtree_overflow: false,
         }));
         out.push(Out::Event(Event::Used { conversation: talk.conversation, spend }));
     }

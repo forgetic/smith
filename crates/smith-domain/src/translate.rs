@@ -181,7 +181,7 @@ pub(crate) const fn stop(stop: Yield) -> run::Stop {
 /// What `turns` completions that used `usage` spent.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-pub(crate) const fn spend(turns: u32, usage: llm::Usage, usage_overflow: bool) -> Spend {
+pub(crate) const fn spend(turns: u32, usage: llm::Usage) -> Spend {
     let llm::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens } = usage;
     Spend {
         turns,
@@ -190,8 +190,6 @@ pub(crate) const fn spend(turns: u32, usage: llm::Usage, usage_overflow: bool) -
         cache_read: cache_read_tokens,
         cache_write: cache_write_tokens,
         units: 0,
-        units_overflow: false,
-        usage_overflow,
     }
 }
 

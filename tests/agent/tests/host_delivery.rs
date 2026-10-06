@@ -84,14 +84,7 @@ fn forward(agent: &Agent, host: &mut Host, next: &mut usize) {
                 let body = format!("{turn:?}").into_bytes();
                 assert!(body.len() <= 65_536);
                 host.up(Up::Turn {
-                    turn: host::Turn {
-                        number: *number,
-                        read: *read,
-                        spent: spent.units,
-                        spend_overflow: spent.units_overflow,
-                        usage_overflow: spent.usage_overflow,
-                        body: body.into(),
-                    },
+                    turn: host::Turn { number: *number, read: *read, spent: spent.units, body: body.into() },
                 });
                 if *number == 1 {
                     host.event(Event::Acknowledge { agent: host.agent(), turn: 1 });
@@ -195,8 +188,6 @@ fn final_answer(agent: &Agent) -> host::Answer {
         cache_read: spent.cache_read,
         cache_write: spent.cache_write,
         spent: spent.units,
-        spend_overflow: spent.units_overflow,
-        usage_overflow: spent.usage_overflow,
         result: RunResult::Failed { failure: host::RunFailure::Cancelled },
     }
 }

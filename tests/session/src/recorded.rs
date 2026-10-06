@@ -105,16 +105,16 @@ pub struct World {
     /// Accepted cumulative integer charges and their overflow flags, in request order.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
-    pub spend: Vec<(u64, bool)>,
+    pub spend: Vec<u64>,
     /// Cumulative own-completion charges, excluding every delegated bill.
     /// Contract: domain/session.md, section 6; domain/run.md, section 9.
-    pub own_spend: Vec<(u64, bool)>,
+    pub own_spend: Vec<u64>,
     /// Exact completion usage and its cumulative overflow attestation.
     /// Contract: domain/session.md, section 6; domain/run.md, section 10.
-    pub used: Vec<(llm::Usage, bool)>,
+    pub used: Vec<llm::Usage>,
     /// Settled count, cumulative raw prefix and its overflow attestation.
     /// Contract: domain/session.md, section 6; domain/run.md, section 10.
-    pub terminal_usage: Option<(u32, llm::Usage, bool)>,
+    pub terminal_usage: Option<(u32, llm::Usage)>,
     /// Actual emitted facts, including cumulative overflow attestations.
     /// Contract: domain/session.md, sections 6 and 10; domain/run.md, section 10.
     pub facts: Vec<session::Fact>,
@@ -168,6 +168,7 @@ impl World {
     pub fn step(&mut self, event: session::Event) {
         match &event {
             session::Event::Completed { owner, .. }
+            | session::Event::Overflowed { owner, .. }
             | session::Event::BudgetDenied { owner, .. }
             | session::Event::UnsentClosed { owner }
             | session::Event::Cancelled { owner }
@@ -223,19 +224,19 @@ impl World {
                 assert_eq!(opener, Token::new(31));
                 self.turns.push(turn);
             }
-            session::Request::Priced { opener, spent, overflow, own_spent, own_overflow } => {
+            session::Request::Priced { opener, spent, own_spent } => {
                 assert_eq!(opener, Token::new(31));
-                self.spend.push((spent, overflow));
-                self.own_spend.push((own_spent, own_overflow));
+                self.spend.push(spent);
+                self.own_spend.push(own_spent);
             }
-            session::Request::Ended { opener, end, turns, usage, usage_overflow } => {
+            session::Request::Ended { opener, end, turns, usage } => {
                 assert_eq!(opener, Token::new(31));
                 assert!(self.end.replace(end).is_none());
-                assert!(self.terminal_usage.replace((turns, usage, usage_overflow)).is_none());
+                assert!(self.terminal_usage.replace((turns, usage)).is_none());
             }
-            session::Request::Used { opener, usage, usage_overflow } => {
+            session::Request::Used { opener, usage } => {
                 assert_eq!(opener, Token::new(31));
-                self.used.push((usage, usage_overflow));
+                self.used.push(usage);
             }
             session::Request::Yielded { .. } | session::Request::Cancel { .. } | session::Request::Withdraw { .. } => {}
             session::Request::Io { owner, op, .. } => {
@@ -310,16 +311,10 @@ pub fn scenario(seed: u64, facts: u32) -> World {
     world.complete(called(), llm::Stop::ToolUse, USAGE);
     assert!(world.turns.is_empty(), "the turn waits for its tool results");
     let owner = world.delegated[0];
-    world.step(session::Event::Answered {
-        owner,
-        text: b"child finished".as_slice().into(),
-        error: false,
-        spent: 9,
-        spend_overflow: false,
-    });
+    world.step(session::Event::Answered { owner, text: b"child finished".as_slice().into(), error: false, spent: 9 });
     // Independent referee arithmetic: ceil((14*7 + 5*3 + 4*11)/10)=16,
     // then the child contributes 9. One terminal response charges it once.
-    assert_eq!(world.spend, [(16, false), (25, false)]);
+    assert_eq!(world.spend, [16, 25]);
     assert_eq!(world.turns.len(), 1);
     assert_eq!(world.turns[0].spent, 25);
     assert_eq!(world.turns[0].messages.len(), 3);
@@ -338,7 +333,7 @@ pub fn scenario(seed: u64, facts: u32) -> World {
         llm::Stop::EndTurn,
         llm::Usage { output_tokens: 1, ..llm::Usage::ZERO },
     );
-    assert_eq!(world.own_spend, [(16, false), (16, false), (18, false)]);
+    assert_eq!(world.own_spend, [16, 16, 18]);
     assert_eq!(world.turns[1].spent, 27); // ceil(11/10)=2, per completion.
     world.close();
     world

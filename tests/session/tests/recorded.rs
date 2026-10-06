@@ -110,13 +110,7 @@ fn unit_budget_stops_after_the_crossing_turn_settles_and_child_counts_once() {
     world.open(opening(None, 20));
     world.complete(recorded::called(), llm::Stop::ToolUse, recorded::USAGE);
     let owner = world.delegated[0];
-    world.step(session::Event::Answered {
-        owner,
-        text: b"answer".as_slice().into(),
-        error: false,
-        spent: 9,
-        spend_overflow: false,
-    });
+    world.step(session::Event::Answered { owner, text: b"answer".as_slice().into(), error: false, spent: 9 });
     assert_eq!(world.end, Some(session::End::Budget { spent: session::Dimension::Unit }));
     assert_eq!(world.prompts.len(), 1);
     assert_eq!(world.turns[0].spent, 25);
@@ -129,13 +123,7 @@ fn unit_budget_stops_after_the_crossing_turn_settles_and_child_counts_once() {
         session::step(
             &mut world.domain,
             &world.env,
-            session::Event::Answered {
-                owner,
-                text: b"duplicate".as_slice().into(),
-                error: false,
-                spent: 9,
-                spend_overflow: false,
-            },
+            session::Event::Answered { owner, text: b"duplicate".as_slice().into(), error: false, spent: 9 },
             &mut world.out,
         );
         assert!(world.out.is_empty());
@@ -169,12 +157,9 @@ fn pricing_rounds_the_combined_completion_and_rejects_overflow() {
         llm::Stop::EndTurn,
         llm::Usage { input_tokens: 2, ..llm::Usage::ZERO },
     );
-    assert_eq!(world.spend, [(0, true)]);
-    assert_eq!(world.own_spend, [(0, true)]);
-    assert_eq!(world.turns.len(), 1);
-    assert_eq!(world.turns[0].usage, llm::Usage { input_tokens: 2, ..llm::Usage::ZERO });
-    assert_eq!(world.turns[0].spent, 0);
-    assert!(world.turns[0].spend_overflow);
+    assert_eq!(world.spend, []);
+    assert_eq!(world.own_spend, []);
+    assert!(world.turns.is_empty());
     assert_eq!(world.end, Some(session::End::PriceOverflow));
     world.close();
 }
@@ -193,11 +178,10 @@ fn closing_preserves_withdrawn_and_late_answers_and_provider_completions() {
                 text: b"late child".as_slice().into(),
                 error: false,
                 spent: 9,
-                spend_overflow: false,
             });
             assert_eq!(world.turns[0].spent, 25);
         } else {
-            world.step(session::Event::AnswerCancelled { owner, spent: 9, spend_overflow: false });
+            world.step(session::Event::AnswerCancelled { owner, spent: 9 });
             assert_eq!(world.turns[0].spent, 25, "withdrawn child spend is included");
             assert_eq!(
                 world.turns[0].messages[2].content[0],
@@ -322,9 +306,8 @@ fn cumulative_child_spend_overflow_is_a_typed_failure() {
         text: b"child".as_slice().into(),
         error: false,
         spent: u64::MAX,
-        spend_overflow: false,
     });
-    assert_eq!(world.spend, [(16, false), (16, true)]);
+    assert_eq!(world.spend, [16]);
     assert_eq!(world.end, Some(session::End::PriceOverflow));
     world.close();
 }
@@ -419,22 +402,10 @@ fn repeated_provider_ids_keep_distinct_origins_and_restore_includes_history_pref
     first.open(opening(None, 1000));
     first.complete(recorded::called(), llm::Stop::ToolUse, llm::Usage::ZERO);
     let owner = first.delegated[0];
-    first.step(session::Event::Answered {
-        owner,
-        text: b"first".as_slice().into(),
-        error: false,
-        spent: 0,
-        spend_overflow: false,
-    });
+    first.step(session::Event::Answered { owner, text: b"first".as_slice().into(), error: false, spent: 0 });
     first.complete(recorded::called(), llm::Stop::ToolUse, llm::Usage::ZERO);
     let owner = first.delegated[0];
-    first.step(session::Event::Answered {
-        owner,
-        text: b"second".as_slice().into(),
-        error: false,
-        spent: 0,
-        spend_overflow: false,
-    });
+    first.step(session::Event::Answered { owner, text: b"second".as_slice().into(), error: false, spent: 0 });
     assert_eq!(
         first.origins,
         [record::Origin { sequence: 1, position: 1 }, record::Origin { sequence: 2, position: 1 }]
@@ -445,13 +416,7 @@ fn repeated_provider_ids_keep_distinct_origins_and_restore_includes_history_pref
     resumed.complete(recorded::called(), llm::Stop::ToolUse, llm::Usage::ZERO);
     assert_eq!(resumed.origins, [record::Origin { sequence: 3, position: 1 }]);
     let owner = resumed.delegated[0];
-    resumed.step(session::Event::Answered {
-        owner,
-        text: b"third".as_slice().into(),
-        error: false,
-        spent: 0,
-        spend_overflow: false,
-    });
+    resumed.step(session::Event::Answered { owner, text: b"third".as_slice().into(), error: false, spent: 0 });
     resumed.close();
 }
 
@@ -603,7 +568,6 @@ fn full_history_batch_credit_keeps_maximum_actual_late_results_or_prevents_every
                     text: vec![byte; 2048].into(),
                     error: byte == b'b',
                     spent: 0,
-                    spend_overflow: false,
                 });
             }
             assert_eq!(world.end, Some(session::End::Closed));

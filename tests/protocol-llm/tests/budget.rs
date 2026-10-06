@@ -101,8 +101,6 @@ fn conservation(world: &World, rates: &[Rate]) -> run::Spend {
     assert_eq!(spent(world.answer()), expected, "one own-completion charge per genuine outside callback");
     assert_eq!(world.prompts().len(), world.completions().len());
     assert_eq!(world.turn_metadata().last().expect("actual main Turn").2, expected);
-    assert!(world.turns().iter().all(|turn| !turn.spend_overflow));
-    assert!(!expected.units_overflow && !expected.usage_overflow);
     assert!(expected.input > 0 && expected.output > 0);
     assert!(world.checked().is_empty() && world.pushes().is_empty() && world.host_submissions().is_empty());
     assert!(world.judged().0 > 0 && world.judged().1 == 1);
@@ -552,7 +550,7 @@ fn root_denied_after_actual_tool(world: &World, settings: &Settings) {
         .expect("cheap's original and unsent next requests");
     assert!(
         world.facts().iter().any(|fact| matches!(fact, Fact::Session { fact: session::Fact::Ended {
-        opener, end: session::End::Budget { spent: session::Dimension::Unit }, turns: 1, usage, usage_overflow: false,
+        opener, end: session::End::Budget { spent: session::Dimension::Unit }, turns: 1, usage,
     }} if *opener == denied && *usage == turn_usage(raw))),
         "actual root denial settles cheap with exactly its single accepted completion"
     );
@@ -668,7 +666,6 @@ fn parked_accounting(world: &World, rates: &[Rate], prior_sequence: u32) -> run:
     assert!(world.answered_at() >= world.waiting()[0].0.saturating_add(Duration::from_secs(1)));
     for (index, turn) in world.turns().iter().enumerate() {
         assert_eq!(turn.sequence, prior_sequence + u32::try_from(index).expect("finite main turns") + 1);
-        assert!(!turn.spend_overflow);
     }
     expected
 }

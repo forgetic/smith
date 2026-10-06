@@ -54,10 +54,9 @@ pub struct Prices {
     pub unit: u32,
 }
 
-/// Actual activation accounting, independent of the budget. Raw counts freeze
-/// together at the last representable prefix; units freeze independently.
-/// Overflow attestations are sticky and never claim a prefix is the exact
-/// final total. Contract: domain/run.md, sections 9, 10 and 14.
+/// Exact charged activation accounting, independent of the budget. A failed
+/// addition leaves every field unchanged. Contract: domain/run.md, sections
+/// 9, 10 and 14; domain/session.md, section 6.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Spend {
     /// Actual completion count. Contract: domain/run.md, sections 9 and 10.
@@ -78,14 +77,6 @@ pub struct Spend {
     /// Own completion units summed once across all conversations.
     /// Contract: domain/run.md, sections 9, 10 and 14.
     pub units: u64,
-
-    /// Sticky attestation that the exact scalar total exceeds u64.
-    /// Contract: domain/run.md, sections 9, 10 and 14.
-    pub units_overflow: bool,
-
-    /// Sticky attestation that at least one actual raw counter is unknown.
-    /// Contract: domain/run.md, sections 9, 10 and 14.
-    pub usage_overflow: bool,
 }
 
 /// Scalar or time ceiling that prevents a subsequent completion.
@@ -121,69 +112,32 @@ pub enum ReceivingLimit {
 
 impl Spend {
     /// Empty actual activation accounting. Contract: domain/run.md, section 9.
-    pub const ZERO: Spend = Spend {
-        turns: 0,
-        input: 0,
-        output: 0,
-        cache_read: 0,
-        cache_write: 0,
-        units: 0,
-        units_overflow: false,
-        usage_overflow: false,
-    };
+    pub const ZERO: Spend = Spend { turns: 0, input: 0, output: 0, cache_read: 0, cache_write: 0, units: 0 };
 
-    /// Records actual increments. All raw counters freeze atomically on
-    /// overflow; units update independently. Contract: domain/run.md, section 9.
+    /// Add only a fully representable increment. No part of a failed addition
+    /// is charged. Contract: domain/run.md, section 9; domain/session.md, section 6.
     #[must_use]
-    pub fn accumulate(mut self, increment: Spend) -> Spend {
-        if !self.usage_overflow {
-            let raw = self.raw_sum(increment);
-            match raw {
-                Some((turns, input, output, cache_read, cache_write)) => {
-                    self.turns = turns;
-                    self.input = input;
-                    self.output = output;
-                    self.cache_read = cache_read;
-                    self.cache_write = cache_write;
-                }
-                None => self.usage_overflow = true,
-            }
-        }
-        self.usage_overflow |= increment.usage_overflow;
-        if !self.units_overflow {
-            match self.units.checked_add(increment.units) {
-                Some(units) => self.units = units,
-                None => self.units_overflow = true,
-            }
-        }
-        self.units_overflow |= increment.units_overflow;
-        self
+    pub fn accumulate(self, increment: Spend) -> Option<Spend> {
+        Some(Spend {
+            turns: self.turns.checked_add(increment.turns)?,
+            input: self.input.checked_add(increment.input)?,
+            output: self.output.checked_add(increment.output)?,
+            cache_read: self.cache_read.checked_add(increment.cache_read)?,
+            cache_write: self.cache_write.checked_add(increment.cache_write)?,
+            units: self.units.checked_add(increment.units)?,
+        })
     }
 
-    fn raw_sum(self, increment: Spend) -> Option<(u32, u64, u64, u64, u64)> {
-        Some((
-            self.turns.checked_add(increment.turns)?,
-            self.input.checked_add(increment.input)?,
-            self.output.checked_add(increment.output)?,
-            self.cache_read.checked_add(increment.cache_read)?,
-            self.cache_write.checked_add(increment.cache_write)?,
-        ))
-    }
-
-    /// Known terminal raw residual only. Unknown totals produce no inferred
-    /// residual and attest overflow. Units are delivered separately by Priced.
+    /// Exact terminal raw residual. Units are delivered separately by Priced.
     /// Contract: domain/run.md, sections 9 and 10.
     #[must_use]
     pub fn unreported(self, reported: Spend) -> Spend {
-        if self.usage_overflow || reported.usage_overflow {
-            return Spend { usage_overflow: true, ..Spend::ZERO };
-        }
         Spend {
-            turns: self.turns.saturating_sub(reported.turns),
-            input: self.input.saturating_sub(reported.input),
-            output: self.output.saturating_sub(reported.output),
-            cache_read: self.cache_read.saturating_sub(reported.cache_read),
-            cache_write: self.cache_write.saturating_sub(reported.cache_write),
+            turns: self.turns.checked_sub(reported.turns).expect("reported completions belong to session"),
+            input: self.input.checked_sub(reported.input).expect("reported usage belongs to session"),
+            output: self.output.checked_sub(reported.output).expect("reported usage belongs to session"),
+            cache_read: self.cache_read.checked_sub(reported.cache_read).expect("reported usage belongs to session"),
+            cache_write: self.cache_write.checked_sub(reported.cache_write).expect("reported usage belongs to session"),
             ..Spend::ZERO
         }
     }
@@ -201,7 +155,7 @@ impl Budget {
     pub(crate) fn exhausted(&self, spent: Spend) -> Option<Exhausted> {
         if spent.turns >= self.turns {
             Some(Exhausted::Turns)
-        } else if spent.units >= self.spend || spent.units_overflow {
+        } else if spent.units >= self.spend {
             Some(Exhausted::Spend)
         } else {
             None

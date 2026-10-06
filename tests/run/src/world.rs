@@ -352,8 +352,6 @@ enum Delivery {
         conversation: Token,
         own_spent: u64,
         subtree_spent: u64,
-        own_overflow: bool,
-        subtree_overflow: bool,
         usage: run::Spend,
     },
     /// An unsent completion waits behind its actual Started/Priced notices.
@@ -836,14 +834,13 @@ impl World {
                 self.stats.closes += 1;
                 self.send(Lane::Conversations, Delivery::Close { peer });
             }
-            run::Request::Return { call, result, spent, spend_overflow } => {
+            run::Request::Return { call, result, spent } => {
                 let ledger = self.calls.get_mut(&call).expect("a return is of a call that was made");
                 assert!(!ledger.returned, "a call returns once");
                 ledger.returned = true;
                 if let Some(child) = self.child_of_call.remove(&call) {
                     assert!(self.opens[&child].ended, "a sub-agent has ended before its call returns");
                 }
-                assert!(!spend_overflow, "bounded fixture exact bill");
                 self.send(Lane::Conversations, Delivery::Return { call, result, spent });
             }
             request @ (run::Request::Read { .. } | run::Request::Probe { .. } | run::Request::Abort { .. }) => {
@@ -1011,7 +1008,9 @@ impl World {
                 self.conversation_of_peer.insert(*peer, *conversation);
                 view.started = true;
             }
-            run::Event::Used { spend, .. } => view.spent = view.spent.accumulate(*spend),
+            run::Event::Used { spend, .. } => {
+                view.spent = view.spent.accumulate(*spend).expect("bounded scripted usage");
+            }
             run::Event::Checked { owner, .. } | run::Event::Aborted { owner } | run::Event::Delivered { owner, .. } => {
                 self.landing.remove(owner);
             }
@@ -1313,22 +1312,8 @@ impl World {
                     self.partner_out(out);
                 }
                 Delivery::Permit { peer, conversation } => self.permits.push((peer, conversation)),
-                Delivery::CompletionUsage {
-                    conversation,
-                    own_spent,
-                    subtree_spent,
-                    own_overflow,
-                    subtree_overflow,
-                    usage,
-                } => {
-                    self.completion_usage(
-                        conversation,
-                        own_spent,
-                        subtree_spent,
-                        own_overflow,
-                        subtree_overflow,
-                        usage,
-                    );
+                Delivery::CompletionUsage { conversation, own_spent, subtree_spent, usage } => {
+                    self.completion_usage(conversation, own_spent, subtree_spent, usage);
                 }
                 Delivery::Event(event) => {
                     self.check_conversation(&event);
@@ -1405,16 +1390,8 @@ impl World {
     /// Reconstruct one accepted completion's exact accounting notices in order.
     /// Both share the original callback's one cancellation-injection draw.
     /// Scripted-world contract: domain/run.md, sections 9 and 13.
-    fn completion_usage(
-        &mut self,
-        conversation: Token,
-        own_spent: u64,
-        subtree_spent: u64,
-        own_overflow: bool,
-        subtree_overflow: bool,
-        usage: run::Spend,
-    ) {
-        let price = run::Event::Priced { conversation, own_spent, subtree_spent, own_overflow, subtree_overflow };
+    fn completion_usage(&mut self, conversation: Token, own_spent: u64, subtree_spent: u64, usage: run::Spend) {
+        let price = run::Event::Priced { conversation, own_spent, subtree_spent };
         self.check_conversation(&price);
         let used = run::Event::Used { conversation, spend: usage };
         self.check_conversation(&used);
@@ -1489,28 +1466,14 @@ impl World {
         let mut items = out.into_iter().peekable();
         while let Some(item) = items.next() {
             match item {
-                Out::Event(run::Event::Priced {
-                    conversation,
-                    own_spent,
-                    subtree_spent,
-                    own_overflow,
-                    subtree_overflow,
-                }) if matches!(items.peek(), Some(Out::Event(run::Event::Used { .. }))) => {
+                Out::Event(run::Event::Priced { conversation, own_spent, subtree_spent })
+                    if matches!(items.peek(), Some(Out::Event(run::Event::Used { .. }))) =>
+                {
                     let Some(Out::Event(run::Event::Used { conversation: used, spend: usage })) = items.next() else {
                         panic!("checked adjacent raw usage from the same actual callback")
                     };
                     assert_eq!(conversation, used, "one genuine completion callback owns both notices");
-                    self.send(
-                        Lane::Run,
-                        Delivery::CompletionUsage {
-                            conversation,
-                            own_spent,
-                            subtree_spent,
-                            own_overflow,
-                            subtree_overflow,
-                            usage,
-                        },
-                    );
+                    self.send(Lane::Run, Delivery::CompletionUsage { conversation, own_spent, subtree_spent, usage });
                 }
                 Out::Permit { peer, conversation } => {
                     // Preserve the Run lane's order without inventing another
@@ -1618,7 +1581,7 @@ impl World {
                 run::Answer::Parked { spent, .. }
                 | run::Answer::Failed { spent, .. }
                 | run::Answer::Accepted { spent, .. } => {
-                    answered = answered.accumulate(*spent);
+                    answered = answered.accumulate(*spent).expect("bounded scripted usage");
                 }
                 run::Answer::Refused(_) => {}
             }

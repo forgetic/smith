@@ -18,10 +18,9 @@
 //! or closes it; the message goes back after a result for each call the
 //! yielded answer made but did not wait for.
 //!
-//! The session retains own and inclusive activation price prefixes separately,
-//! and atomically retains all four raw usage counters until their first
-//! overflow. Exact accepted completions still become Used and Turn before a
-//! typed overflow terminal. An unsent root `BudgetDenied` releases the current
+//! The session retains exact own and inclusive activation spend separately.
+//! A charge that cannot fit ends the session before the completion's calls or
+//! turn. An unsent root `BudgetDenied` releases the current
 //! Calling reservation without inventing a provider lease or cancellation
 //! (domain/session.md, section 6; domain/run.md, section 9).
 //!
@@ -188,9 +187,6 @@ struct Conversation {
     budget: Budget,
     turns: u32,
     usage: Usage,
-    /// Sticky raw cumulative overflow, retaining an atomic exact prefix after overflow.
-    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
-    usage_overflow: bool,
     /// When the time budget runs out.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
@@ -210,9 +206,7 @@ struct Recording {
     prices: crate::record::Prices,
     budget: u64,
     spent: u64,
-    overflow: bool,
     own_spent: u64,
-    own_overflow: bool,
     sequence: u32,
     told: u32,
     pending: Option<Usage>,
@@ -460,7 +454,7 @@ fn open_admitted(
                 tools::Refusal::Busy => End::Busy,
                 tools::Refusal::Invalid => End::Invalid,
             };
-            out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO, usage_overflow: false });
+            out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO });
         }
         Some(News::Closed { .. }) | None => unreachable!("the tools answer an open with its kit, opened or refused"),
     }
@@ -543,6 +537,56 @@ pub(crate) fn completed(
         | State::Yielded
         | State::Closing { waiting: Waiting { call: false, .. }, .. }
         | State::Closed => unreachable!("a completion ends a call in flight"),
+    };
+    conclude(domain, env, id, out, mark);
+}
+
+/// Check one completion before the parent decodes any of its calls. The same
+/// arithmetic is repeated when the session commits the completion.
+/// Contract: domain/session.md, section 6; domain/run.md, section 9.
+pub fn preview_completion(domain: &Domain, owner: Token, usage: Usage) -> Result<u64, End> {
+    let session = domain.sessions.get(Id::from_token(owner)).expect("completion retains its session");
+    let conversation = &session.conversation;
+    let price = conversation.recording.prices.price(usage).ok_or(End::PriceOverflow)?;
+    conversation.recording.own_spent.checked_add(price).ok_or(End::PriceOverflow)?;
+    conversation.recording.spent.checked_add(price).ok_or(End::PriceOverflow)?;
+    checked_usage(conversation.usage, usage).ok_or(End::UsageOverflow)?;
+    conversation.turns.checked_add(1).ok_or(End::UsageOverflow)?;
+    Ok(price)
+}
+
+/// Settle a provider completion rejected by the parent's run-wide arithmetic
+/// check. Its calls and turn never enter the session.
+/// Contract: domain/session.md, section 6; domain/run.md, section 9.
+pub(crate) fn overflowed(domain: &mut Domain, env: &Env<Limits>, owner: Token, end: End, out: &mut Queue<Request>) {
+    match end {
+        End::PriceOverflow | End::UsageOverflow => {}
+        End::Busy
+        | End::Invalid
+        | End::Closed
+        | End::TranscriptFull
+        | End::TranscriptRefused { .. }
+        | End::Failed { .. }
+        | End::Budget { .. } => unreachable!("run-wide arithmetic rejects only overflow"),
+    }
+    let mark = out.len();
+    let id = Id::from_token(owner);
+    let session = domain.sessions.get_mut(id).expect("provider terminal retains its session");
+    release_provider(&mut session.conversation);
+    let state = mem::replace(&mut session.state, State::Closed);
+    session.state = match state {
+        State::Calling { .. } => finish(end),
+        State::Closing { waiting: Waiting { call: true, runs, kit }, .. } => {
+            State::Closing { end, waiting: Waiting { call: false, runs, kit } }
+        }
+        State::Backoff { .. }
+        | State::Tooling { .. }
+        | State::Resting { .. }
+        | State::Yielded
+        | State::Closing { waiting: Waiting { call: false, .. }, .. }
+        | State::Closed => {
+            unreachable!("only an in-flight provider completion can overflow")
+        }
     };
     conclude(domain, env, id, out, mark);
 }
@@ -998,8 +1042,8 @@ fn settle(domain: &mut Domain, env: &Env<Limits>, id: Id<Session>, out: &mut Que
     let waiting = Waiting { kit, ..waiting };
     let session = domain.sessions.get_mut(id).expect("looked up above");
     if waiting == SETTLED {
-        let Conversation { opener, turns, usage, usage_overflow, .. } = session.conversation;
-        out.push(Request::Ended { opener, end, turns, usage, usage_overflow });
+        let Conversation { opener, turns, usage, .. } = session.conversation;
+        out.push(Request::Ended { opener, end, turns, usage });
         session.state = State::Closed;
     } else {
         session.state = State::Closing { end, waiting };
@@ -1017,16 +1061,10 @@ fn tell(facts: &mut Facts, runs: &Slab<Run>, session: &Session, out: &Queue<Requ
         let fact = match request {
             Request::Opened { opener, session: _ } => Fact::Opened { opener: *opener },
             Request::Yielded { opener, stop, text: _ } => Fact::Yielded { opener: *opener, stop: *stop },
-            Request::Used { opener, usage, usage_overflow } => {
-                Fact::Used { opener: *opener, usage: *usage, usage_overflow: *usage_overflow }
+            Request::Used { opener, usage } => Fact::Used { opener: *opener, usage: *usage },
+            Request::Ended { opener, end, turns, usage } => {
+                Fact::Ended { opener: *opener, end: *end, turns: *turns, usage: *usage }
             }
-            Request::Ended { opener, end, turns, usage, usage_overflow } => Fact::Ended {
-                opener: *opener,
-                end: *end,
-                turns: *turns,
-                usage: *usage,
-                usage_overflow: *usage_overflow,
-            },
             Request::Complete {
                 owner: _,
                 prompt,
@@ -1118,7 +1156,10 @@ fn answered(
         let Recording { sequence, .. } = conversation.recording;
         sequence.checked_add(1).is_some()
     } && u32::try_from(completion.content.len()).is_ok();
-    used(conversation, completion.usage, out);
+    if let Err(end) = used(conversation, completion.usage, out) {
+        release_provider(conversation);
+        return finish(end);
+    }
     if !origin_fits {
         release_provider(conversation);
         clear_pending(conversation);
@@ -1162,7 +1203,10 @@ fn answered_late(
     limits: &Limits,
     out: &mut Queue<Request>,
 ) -> State {
-    used(conversation, completion.usage, out);
+    if let Err(overflow) = used(conversation, completion.usage, out) {
+        release_provider(conversation);
+        return State::Closing { end: overflow, waiting: Waiting { call: false, ..waiting } };
+    }
     if conversation.transcript.room() == 0
         || !receive_completion(conversation, &completion.content, tally(&completion.content).0, limits)
     {
@@ -1587,48 +1631,20 @@ fn abandon(
 /// Counts a completion that came back, and tells the opener.
 ///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-fn used(conversation: &mut Conversation, usage: Usage, out: &mut Queue<Request>) {
-    // Every real provider right is fenced by the checked concrete sequence.
-    conversation.turns = conversation.turns.checked_add(1).expect("bounded accepted completion sequence");
-    let cumulative = checked_usage(conversation.usage, usage);
-    {
-        let Recording { prices, spent, overflow, own_spent, own_overflow, pending, .. } = &mut conversation.recording;
-
-        if !conversation.usage_overflow {
-            match cumulative {
-                Some(total) => conversation.usage = total,
-                None => conversation.usage_overflow = true,
-            }
-        }
-        *pending = Some(usage);
-        let price = prices.price(usage);
-        add_price(own_spent, own_overflow, price);
-        add_price(spent, overflow, price);
-        out.push(Request::Priced {
-            opener: conversation.opener,
-            spent: *spent,
-            overflow: *overflow,
-            own_spent: *own_spent,
-            own_overflow: *own_overflow,
-        });
-    }
-    out.push(Request::Used { opener: conversation.opener, usage, usage_overflow: conversation.usage_overflow });
-}
-
-/// Price counters retain their last representable prefix after the first failure.
-/// Contract: domain/session.md, section 6; domain/run.md, section 9.
-fn add_price(total: &mut u64, overflow: &mut bool, price: Option<u64>) {
-    if *overflow {
-        return;
-    }
-    let added = match price {
-        Some(price) => total.checked_add(price),
-        None => None,
-    };
-    match added {
-        Some(added) => *total = added,
-        None => *overflow = true,
-    }
+fn used(conversation: &mut Conversation, usage: Usage, out: &mut Queue<Request>) -> Result<(), End> {
+    let price = conversation.recording.prices.price(usage).ok_or(End::PriceOverflow)?;
+    let own = conversation.recording.own_spent.checked_add(price).ok_or(End::PriceOverflow)?;
+    let inclusive = conversation.recording.spent.checked_add(price).ok_or(End::PriceOverflow)?;
+    let cumulative = checked_usage(conversation.usage, usage).ok_or(End::UsageOverflow)?;
+    let next_turn = conversation.turns.checked_add(1).ok_or(End::UsageOverflow)?;
+    conversation.turns = next_turn;
+    conversation.usage = cumulative;
+    conversation.recording.own_spent = own;
+    conversation.recording.spent = inclusive;
+    conversation.recording.pending = Some(usage);
+    out.push(Request::Priced { opener: conversation.opener, spent: inclusive, own_spent: own });
+    out.push(Request::Used { opener: conversation.opener, usage });
+    Ok(())
 }
 
 /// All four raw counters commit together, or preserve the previous exact prefix.
@@ -1661,8 +1677,8 @@ const OUT_OF_TIME: End = End::Budget { spent: Dimension::Time };
 ///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn refuse(facts: &mut Facts, opener: Token, end: End, out: &mut Queue<Request>) {
-    facts.push(Fact::Ended { opener, end, turns: 0, usage: Usage::ZERO, usage_overflow: false });
-    out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO, usage_overflow: false });
+    facts.push(Fact::Ended { opener, end, turns: 0, usage: Usage::ZERO });
+    out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO });
 }
 
 /// The conversation for `spec`, and the authority its kit opens with; or
@@ -1701,7 +1717,6 @@ fn admit(
         budget: spec.budget,
         turns: 0,
         usage: Usage::ZERO,
-        usage_overflow: false,
         expires: now.saturating_add(spec.budget.time),
         // Named as the kit opens: until then, the session is Closed, which
         // holds nothing.
@@ -1732,9 +1747,9 @@ fn affordable(budget: &Budget, most: &Budget) -> bool {
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn spent(conversation: &Conversation, now: Time) -> Option<Dimension> {
     {
-        let Recording { budget, spent, overflow, .. } = conversation.recording;
+        let Recording { budget, spent, .. } = conversation.recording;
 
-        if overflow || spent >= budget {
+        if spent >= budget {
             return Some(Dimension::Unit);
         }
     }
@@ -2227,18 +2242,7 @@ pub(crate) fn open(
         refuse(&mut domain.facts, opener, End::Invalid, out);
         return;
     }
-    let recording = Recording {
-        dialect,
-        prices,
-        budget,
-        spent: 0,
-        overflow: false,
-        own_spent: 0,
-        own_overflow: false,
-        sequence: 0,
-        told: 0,
-        pending: None,
-    };
+    let recording = Recording { dialect, prices, budget, spent: 0, own_spent: 0, sequence: 0, told: 0, pending: None };
     let Some((mut conversation, authority)) = admit(opener, spec, recording, &env.limits, env.now) else {
         refuse(&mut domain.facts, opener, End::Invalid, out);
         return;
@@ -2472,11 +2476,11 @@ fn validate_recorded(message: &Message) -> Result<(), crate::record::Refusal> {
 }
 
 fn tell_turn(conversation: &mut Conversation, out: &mut Queue<Request>) -> Option<End> {
-    let (dialect, sequence, told, usage, spent, overflow) = {
-        let Recording { dialect, sequence, told, pending, spent, overflow, .. } = &mut conversation.recording;
+    let (dialect, sequence, told, usage, spent) = {
+        let Recording { dialect, sequence, told, pending, spent, .. } = &mut conversation.recording;
 
         let usage = pending.take()?;
-        (*dialect, sequence, told, usage, *spent, *overflow)
+        (*dialect, sequence, told, usage, *spent)
     };
     let Some(next) = sequence.checked_add(1) else {
         return Some(End::TranscriptFull);
@@ -2512,30 +2516,20 @@ fn tell_turn(conversation: &mut Conversation, out: &mut Queue<Request>) -> Optio
         sequence: next,
         usage,
         spent,
-        spend_overflow: overflow,
         messages: messages.into_boxed(),
     };
     out.push(Request::Turn { opener: conversation.opener, turn });
-    if overflow {
-        Some(End::PriceOverflow)
-    } else if conversation.usage_overflow {
-        Some(End::UsageOverflow)
-    } else {
-        None
-    }
+    None
 }
 
-/// A child's cumulative inclusive bill and its exactness attestation. This
-/// fixed handoff carries no payload and never changes the receiver's own price.
+/// A child's exact cumulative inclusive bill. This fixed handoff carries no
+/// payload and never changes the receiver's own price.
 /// Contract: domain/session.md, section 6; domain/run.md, section 9.
 #[derive(Debug)]
 pub(crate) struct Bill {
-    /// Last representable child prefix, added once after the identity guard.
+    /// Exact child bill, added once after the identity guard.
     /// Contract: domain/session.md, section 6; domain/run.md, section 9.
     pub(crate) spent: u64,
-    /// Unknown remainder, propagated to the receiver's sticky inclusive flag.
-    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
-    pub(crate) overflow: bool,
 }
 
 /// An addressed delegated terminal charges its inclusive bill once before
@@ -2564,17 +2558,13 @@ pub(crate) fn delegate_ended(
     assert!(by == By::Opener, "the opener answers its delegated call once");
     let session = domain.sessions.get_mut(id).expect("a call keeps its session alive");
     let conversation = &mut session.conversation;
-    {
-        let Recording { spent: total, overflow, own_spent, own_overflow, .. } = &mut conversation.recording;
-
-        add_price(total, overflow, Some(bill.spent));
-        *overflow |= bill.overflow;
+    let added = conversation.recording.spent.checked_add(bill.spent);
+    if let Some(total) = added {
+        conversation.recording.spent = total;
         out.push(Request::Priced {
             opener: conversation.opener,
-            spent: *total,
-            overflow: *overflow,
-            own_spent: *own_spent,
-            own_overflow: *own_overflow,
+            spent: total,
+            own_spent: conversation.recording.own_spent,
         });
     }
     let fact = match &result {
@@ -2589,11 +2579,26 @@ pub(crate) fn delegate_ended(
     domain.facts.push(fact);
     let state = mem::replace(&mut session.state, State::Closed);
     session.state = match state {
-        State::Tooling { tools } => {
-            tool_ran(conversation, id, &mut domain.calls, tools, slot, block, credit, result, env, out)
-        }
+        State::Tooling { mut tools } => match added {
+            Some(_) => tool_ran(conversation, id, &mut domain.calls, tools, slot, block, credit, result, env, out),
+            None => {
+                tools.running = tools.running.checked_sub(1).expect("settled delegated call");
+                let _: bool = receive_result(conversation, credit, &result, &env.limits);
+                let result = Block::ToolResult { id: call_id(conversation, block), result };
+                *tools.slots.get_mut(slot).expect("settled slot") = Slot::Done { result };
+                clear_pending(conversation);
+                abandon(conversation, &domain.calls.runs, tools, End::PriceOverflow, out)
+            }
+        },
         State::Closing { end, waiting } => {
-            let end = keep_closing(conversation, slot, block, credit, result, &env.limits).unwrap_or(end);
+            let end = match added {
+                Some(_) => keep_closing(conversation, slot, block, credit, result, &env.limits).unwrap_or(end),
+                None => {
+                    let _: Option<End> = keep_closing(conversation, slot, block, credit, result, &env.limits);
+                    clear_pending(conversation);
+                    End::PriceOverflow
+                }
+            };
             settled(end, waiting)
         }
         State::Calling { .. } | State::Backoff { .. } | State::Resting { .. } | State::Yielded | State::Closed => {

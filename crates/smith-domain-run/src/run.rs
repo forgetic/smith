@@ -9,8 +9,8 @@
 //! landing wins shutdown; a mid-run delivery settles before the pending
 //! ending answers. Sessions alone price actual own usage;
 //! global scalar admission sums monotonic own deltas, while inclusive subtree
-//! totals transfer only as child bills. Raw and unit overflow retain independently
-//! attested representable prefixes (domain/run.md, sections 9, 10 and 14).
+//! totals transfer only as child bills. A charge that cannot fit ends the
+//! session before it is added (domain/run.md, sections 9, 10 and 14).
 
 use alloc::boxed::Box;
 use core::mem;
@@ -150,7 +150,6 @@ pub(crate) struct Conversation {
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     spent: Spend,
     subtree_spent: u64,
-    subtree_overflow: bool,
     /// Its calls to the run in flight.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -284,7 +283,6 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         depth: 0,
         spent: Spend::ZERO,
         subtree_spent: 0,
-        subtree_overflow: false,
         calls: 0,
         phase: Phase::Pending,
     };
@@ -550,15 +548,28 @@ pub(crate) fn yielded(
 
 /// Session own prices are monotonic activation totals. Stale names are inert;
 /// subtree updates do not add global spend (domain/run.md, sections 9 and 14).
-pub(crate) fn priced(
-    domain: &mut Domain,
-    conversation: Token,
-    own: u64,
-    subtree: u64,
-    own_overflow: bool,
-    subtree_overflow: bool,
-    out: &mut Queue<Request>,
-) {
+#[must_use]
+pub fn completion_overflow(domain: &Domain, conversation: Token, price: u64, usage: Spend) -> Option<Failure> {
+    let conversation =
+        domain.conversations.get(Id::from_token(conversation)).expect("provider owner has a live run conversation");
+    let run = domain.runs.get(conversation.run).expect("conversation retains its run");
+    if run.spent.units.checked_add(price).is_none() {
+        return Some(Failure::PriceOverflow);
+    }
+    if run.spent.turns.checked_add(usage.turns).is_none()
+        || run.spent.input.checked_add(usage.input).is_none()
+        || run.spent.output.checked_add(usage.output).is_none()
+        || run.spent.cache_read.checked_add(usage.cache_read).is_none()
+        || run.spent.cache_write.checked_add(usage.cache_write).is_none()
+    {
+        return Some(Failure::UsageOverflow);
+    }
+    None
+}
+
+/// Session own prices are monotonic activation totals. Stale names are inert;
+/// subtree updates do not add global spend (domain/run.md, sections 9 and 14).
+pub(crate) fn priced(domain: &mut Domain, conversation: Token, own: u64, subtree: u64, out: &mut Queue<Request>) {
     let id = Id::<Conversation>::from_token(conversation);
     let Some(conversation) = domain.conversations.get_mut(id) else {
         return;
@@ -572,16 +583,17 @@ pub(crate) fn priced(
         return;
     }
     let delta = own.checked_sub(conversation.spent.units).expect("checked monotonic own total");
-    conversation.spent.units = own;
-    conversation.spent.units_overflow |= own_overflow;
-    conversation.subtree_spent = subtree;
-    conversation.subtree_overflow |= subtree_overflow;
     let run = domain.runs.get_mut(run_id).expect("conversation retains run");
-    run.spent = run.spent.accumulate(Spend { units: delta, units_overflow: own_overflow, ..Spend::ZERO });
-    // An inclusive overflow also proves that the global exact total cannot fit,
-    // but must not discard the independently accepted own increment above.
-    run.spent.units_overflow |= subtree_overflow;
-    account_state(run, &mut domain.conversations, out);
+    let Some(total) = run.spent.accumulate(Spend { units: delta, ..Spend::ZERO }) else {
+        let state = mem::replace(&mut run.state, State::Closed);
+        run.state = hard_stop(state, &mut domain.conversations, Failure::PriceOverflow, out);
+        follow(&mut domain.runs, &mut domain.alarms, run_id);
+        return;
+    };
+    conversation.spent.units = own;
+    conversation.subtree_spent = subtree;
+    run.spent = total;
+    account_state(run);
     follow(&mut domain.runs, &mut domain.alarms, run_id);
 }
 
@@ -595,37 +607,37 @@ pub(crate) fn used(domain: &mut Domain, conversation: Token, spend: Spend, out: 
         Phase::Pending | Phase::Opening | Phase::Unwanted | Phase::Closed => return,
     }
     let run_id = conversation.run;
-    let raw = Spend { units: 0, units_overflow: false, ..spend };
-    conversation.spent = conversation.spent.accumulate(raw);
+    let raw = Spend { units: 0, ..spend };
     let run = domain.runs.get_mut(run_id).expect("conversation retains run");
-    run.spent = run.spent.accumulate(raw);
-    account_state(run, &mut domain.conversations, out);
+    let added = match (conversation.spent.accumulate(raw), run.spent.accumulate(raw)) {
+        (Some(conversation_total), Some(run_total)) => Some((conversation_total, run_total)),
+        (Some(_) | None, Some(_) | None) => None,
+    };
+    let Some((conversation_total, run_total)) = added else {
+        let state = mem::replace(&mut run.state, State::Closed);
+        run.state = hard_stop(state, &mut domain.conversations, Failure::UsageOverflow, out);
+        follow(&mut domain.runs, &mut domain.alarms, run_id);
+        return;
+    };
+    conversation.spent = conversation_total;
+    run.spent = run_total;
+    account_state(run);
     follow(&mut domain.runs, &mut domain.alarms, run_id);
 }
 
-fn account_state(run: &mut Run, conversations: &mut Slab<Conversation>, out: &mut Queue<Request>) {
-    let failure = if run.spent.units_overflow {
-        Some(Failure::PriceOverflow)
-    } else if run.spent.usage_overflow {
-        Some(Failure::UsageOverflow)
-    } else {
-        None
-    };
+fn account_state(run: &mut Run) {
     let state = mem::replace(&mut run.state, State::Closed);
-    run.state = match failure {
-        Some(failure) => hard_stop(state, conversations, failure, out),
-        None => match state {
-            State::Working { reply_to, main } => match run.charter.budget.exhausted(run.spent) {
-                Some(exhausted) => State::Over { reply_to, main, exhausted },
-                None => State::Working { reply_to, main },
-            },
-            state @ (State::Preparing { .. }
-            | State::Stopping { .. }
-            | State::Waiting { .. }
-            | State::Over { .. }
-            | State::Winding { .. }
-            | State::Closed) => state,
+    run.state = match state {
+        State::Working { reply_to, main } => match run.charter.budget.exhausted(run.spent) {
+            Some(exhausted) => State::Over { reply_to, main, exhausted },
+            None => State::Working { reply_to, main },
         },
+        state @ (State::Preparing { .. }
+        | State::Stopping { .. }
+        | State::Waiting { .. }
+        | State::Over { .. }
+        | State::Winding { .. }
+        | State::Closed) => state,
     };
 }
 
@@ -652,9 +664,18 @@ fn hard_stop(
 }
 
 fn hard_ending(ending: Ending, failure: Failure) -> Ending {
-    match ending {
-        ending @ Ending::Accepted(Declared::Change(_)) => ending,
-        Ending::Accepted(_) | Ending::Parked | Ending::Failed(_) => Ending::Failed(failure),
+    match failure {
+        Failure::PriceOverflow | Failure::UsageOverflow => Ending::Failed(failure),
+        Failure::Receiving(_)
+        | Failure::Transcript(_)
+        | Failure::Model(_)
+        | Failure::Budget(_)
+        | Failure::Policy(_)
+        | Failure::Cancelled
+        | Failure::Stale => match ending {
+            ending @ Ending::Accepted(Declared::Change(_)) => ending,
+            Ending::Accepted(_) | Ending::Parked | Ending::Failed(_) => Ending::Failed(failure),
+        },
     }
 }
 
@@ -722,7 +743,7 @@ pub(crate) fn delegated(
     facts.push(Fact::Called { run: run_id.token(), conversation: id.token(), call, ask: asked });
     // The call crossed its conversation's close: it would be withdrawn at once.
     if closing {
-        out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Cancelled });
+        out.push(Request::Return { spent: 0, call, result: Returned::Cancelled });
         return;
     }
     let run = runs.get_mut(run_id).expect("a run lives until its conversations have ended");
@@ -730,7 +751,7 @@ pub(crate) fn delegated(
     let made = Asking { name, call, deadline };
     let next = match state {
         State::Winding { reply_to, ending } => {
-            out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Cancelled });
+            out.push(Request::Return { spent: 0, call, result: Returned::Cancelled });
             State::Winding { reply_to, ending }
         }
         State::Working { reply_to, main } => {
@@ -778,7 +799,7 @@ fn serve(
             } else {
                 Returned::Refused { refusal: AskRefusal::NotGranted }
             };
-            out.push(Request::Return { spent: 0, spend_overflow: false, call: made.call, result });
+            out.push(Request::Return { spent: 0, call: made.call, result });
         }
         Ask::Host { tool, effect, input } => {
             host_call(run, run_id, conversations, calls, alarms, conversation, made, tool, effect, input, env, out);
@@ -795,7 +816,6 @@ fn serve(
             Some(_) => {
                 out.push(Request::Return {
                     spent: 0,
-                    spend_overflow: false,
                     call: made.call,
                     result: Returned::Refused { refusal: AskRefusal::Over },
                 });
@@ -894,38 +914,26 @@ pub(crate) fn ended(domain: &mut Domain, conversation: Token, end: End, spend: S
     // them is counted now.
     let unaccounted = spend.unreported(conversation.spent);
     let (run_id, asker) = (conversation.run, conversation.asker);
-    let (bill, bill_overflow) = (
-        conversation.subtree_spent,
-        match end {
-            End::PriceOverflow => true,
-            End::UsageOverflow
-            | End::Receiving(_)
-            | End::TranscriptRefused { .. }
-            | End::Closed
-            | End::Busy
-            | End::Invalid
-            | End::Fault(_)
-            | End::Budget(_) => conversation.subtree_overflow,
-        },
-    );
+    let bill = conversation.subtree_spent;
     facts.about(run_id.token());
     facts.push(Fact::Ended { run: run_id.token(), conversation: id.token(), end });
     conversations.retire(id);
     let run = runs.get_mut(run_id).expect("a run lives until its conversations have ended");
-    run.spent = run.spent.accumulate(unaccounted);
-    match end {
-        End::PriceOverflow => run.spent.units_overflow = true,
-        End::UsageOverflow => run.spent.usage_overflow = true,
+    run.spent = run.spent.accumulate(unaccounted).expect("terminal usage was checked before it was reported");
+    let failure = match end {
+        End::PriceOverflow => Some(Failure::PriceOverflow),
+        End::UsageOverflow => Some(Failure::UsageOverflow),
         End::Receiving(_)
         | End::TranscriptRefused { .. }
         | End::Closed
         | End::Busy
         | End::Invalid
         | End::Fault(_)
-        | End::Budget(_) => {}
-    }
-    if (run.spent.units_overflow || run.spent.usage_overflow) && asker.is_some() {
-        account_state(run, conversations, out);
+        | End::Budget(_) => None,
+    };
+    if let (Some(failure), Some(_)) = (failure, asker) {
+        let state = mem::replace(&mut run.state, State::Closed);
+        run.state = hard_stop(state, conversations, failure, out);
     }
     run.conversations = run.conversations.checked_sub(1).expect("a run counts its conversations");
     // A sub-agent's end is its call's return.
@@ -935,7 +943,7 @@ pub(crate) fn ended(domain: &mut Domain, conversation: Token, end: End, spend: S
             Work::Child(child) => agent::ended(child, end),
             Work::Landing(_) | Work::Host(_) => unreachable!("a sub-agent serves a sub-agent's call"),
         };
-        out.push(Request::Return { spent: bill, spend_overflow: bill_overflow, call: call.owner, result });
+        out.push(Request::Return { spent: bill, call: call.owner, result });
         retire_call(calls, alarms, conversations, asker);
         return;
     }
@@ -948,12 +956,9 @@ pub(crate) fn ended(domain: &mut Domain, conversation: Token, end: End, spend: S
             answer(reply_to, ending(end, run.spent, run.turns), out)
         }
         State::Winding { reply_to, ending } => {
-            let ending = if run.spent.units_overflow {
-                hard_ending(ending, Failure::PriceOverflow)
-            } else if run.spent.usage_overflow {
-                hard_ending(ending, Failure::UsageOverflow)
-            } else {
-                ending
+            let ending = match failure {
+                Some(failure) => Ending::Failed(failure),
+                None => ending,
             };
             answer(reply_to, finished(ending, run.spent, run.turns), out)
         }
@@ -1243,7 +1248,7 @@ fn finish(
         Some(_) | None => Err(outcome::too_large(max)),
     };
     if let Err(problems) = judged {
-        out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Rejected { problems } });
+        out.push(Request::Return { spent: 0, call, result: Returned::Rejected { problems } });
         run.rejected = run.rejected.saturating_add(1);
         return match over {
             None => State::Working { reply_to, main },
@@ -1254,31 +1259,26 @@ fn finish(
     }
     match declared {
         completed @ (Declared::Verdict(_) | Declared::Report(_) | Declared::Failure(_)) => {
-            out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Accepted });
+            out.push(Request::Return { spent: 0, call, result: Returned::Accepted });
             wind_down(conversations, reply_to, main, Ending::Accepted(completed), out)
         }
         Declared::Change(change) => {
             if name.activation != run.activation || name.completion == 0 {
-                out.push(Request::Return {
-                    spent: 0,
-                    spend_overflow: false,
-                    call,
-                    result: Returned::Refused { refusal: AskRefusal::Name },
-                });
+                out.push(Request::Return { spent: 0, call, result: Returned::Refused { refusal: AskRefusal::Name } });
                 return match over {
                     None => State::Working { reply_to, main },
                     Some(exhausted) => State::Over { reply_to, main, exhausted },
                 };
             }
             if deadline <= env.now {
-                out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::TimedOut });
+                out.push(Request::Return { spent: 0, call, result: Returned::TimedOut });
                 return match over {
                     None => State::Working { reply_to, main },
                     Some(exhausted) => State::Over { reply_to, main, exhausted },
                 };
             }
             if calls.is_full() {
-                out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Busy });
+                out.push(Request::Return { spent: 0, call, result: Returned::Busy });
                 return match over {
                     None => State::Working { reply_to, main },
                     Some(exhausted) => State::Over { reply_to, main, exhausted },
@@ -1316,12 +1316,7 @@ fn deliver(
     let Asking { name, call, deadline } = made;
     assert!(conversations.get(main).expect("main lives").calls == 0, "delivery is an exclusive write");
     let Some(spec) = &run.charter.grants.deliver else {
-        out.push(Request::Return {
-            spent: 0,
-            spend_overflow: false,
-            call,
-            result: Returned::Refused { refusal: AskRefusal::NotGranted },
-        });
+        out.push(Request::Return { spent: 0, call, result: Returned::Refused { refusal: AskRefusal::NotGranted } });
         return;
     };
     let judged = match outcome::change_bytes(&change) {
@@ -1330,24 +1325,19 @@ fn deliver(
     };
     if let Err(problems) = judged {
         run.rejected = run.rejected.saturating_add(1);
-        out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Rejected { problems } });
+        out.push(Request::Return { spent: 0, call, result: Returned::Rejected { problems } });
         return;
     }
     if name.activation != run.activation || name.completion == 0 {
-        out.push(Request::Return {
-            spent: 0,
-            spend_overflow: false,
-            call,
-            result: Returned::Refused { refusal: AskRefusal::Name },
-        });
+        out.push(Request::Return { spent: 0, call, result: Returned::Refused { refusal: AskRefusal::Name } });
         return;
     }
     if deadline <= env.now {
-        out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::TimedOut });
+        out.push(Request::Return { spent: 0, call, result: Returned::TimedOut });
         return;
     }
     if calls.is_full() {
-        out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Busy });
+        out.push(Request::Return { spent: 0, call, result: Returned::Busy });
         return;
     }
     let work = Work::Landing(land::landing(change, name, deadline, false));
@@ -1413,12 +1403,12 @@ fn sub_agent(
     let plan = match planned {
         Ok(plan) => plan,
         Err(refusal) => {
-            out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Refused { refusal } });
+            out.push(Request::Return { spent: 0, call, result: Returned::Refused { refusal } });
             return;
         }
     };
     if conversations.is_full() || calls.is_full() {
-        out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Busy });
+        out.push(Request::Return { spent: 0, call, result: Returned::Busy });
         return;
     }
     // A call is stored before its child, which names it, and holds the child
@@ -1432,7 +1422,6 @@ fn sub_agent(
         depth: plan.depth,
         spent: Spend::ZERO,
         subtree_spent: 0,
-        subtree_overflow: false,
         calls: 0,
         phase: Phase::Opening,
     };
@@ -1604,12 +1593,6 @@ fn opening(
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn ending(end: End, spent: Spend, turns: u32) -> Answer {
-    if spent.units_overflow {
-        return Answer::Failed { failure: Failure::PriceOverflow, spent, turns };
-    }
-    if spent.usage_overflow {
-        return Answer::Failed { failure: Failure::UsageOverflow, spent, turns };
-    }
     match end {
         End::PriceOverflow => Answer::Failed { failure: Failure::PriceOverflow, spent, turns },
         End::UsageOverflow => Answer::Failed { failure: Failure::UsageOverflow, spent, turns },
@@ -1691,12 +1674,7 @@ fn host_call(
 ) {
     let Asking { name, call, deadline } = made;
     if conversations.get(conversation).expect("caller lives").asker.is_some() {
-        out.push(Request::Return {
-            spent: 0,
-            spend_overflow: false,
-            call,
-            result: Returned::HostRejected(crate::HostProblem::Undeclared),
-        });
+        out.push(Request::Return { spent: 0, call, result: Returned::HostRejected(crate::HostProblem::Undeclared) });
         return;
     }
     let mut timeout = None;
@@ -1705,7 +1683,6 @@ fn host_call(
             if declaration.effect != effect {
                 out.push(Request::Return {
                     spent: 0,
-                    spend_overflow: false,
                     call,
                     result: Returned::HostRejected(crate::HostProblem::Effect),
                 });
@@ -1715,38 +1692,23 @@ fn host_call(
         }
     }
     let Some(timeout) = timeout else {
-        out.push(Request::Return {
-            spent: 0,
-            spend_overflow: false,
-            call,
-            result: Returned::HostRejected(crate::HostProblem::Undeclared),
-        });
+        out.push(Request::Return { spent: 0, call, result: Returned::HostRejected(crate::HostProblem::Undeclared) });
         return;
     };
     if input.bytes().len() > usize::try_from(env.limits.host_input_bytes).expect("byte cap fits") {
-        out.push(Request::Return {
-            spent: 0,
-            spend_overflow: false,
-            call,
-            result: Returned::HostRejected(crate::HostProblem::TooLarge),
-        });
+        out.push(Request::Return { spent: 0, call, result: Returned::HostRejected(crate::HostProblem::TooLarge) });
         return;
     }
     if name.activation != run.activation || name.completion == 0 {
-        out.push(Request::Return {
-            spent: 0,
-            spend_overflow: false,
-            call,
-            result: Returned::Refused { refusal: AskRefusal::Name },
-        });
+        out.push(Request::Return { spent: 0, call, result: Returned::Refused { refusal: AskRefusal::Name } });
         return;
     }
     if env.now >= deadline || env.now >= run.deadline {
-        out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::TimedOut });
+        out.push(Request::Return { spent: 0, call, result: Returned::TimedOut });
         return;
     }
     if calls.is_full() {
-        out.push(Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Busy });
+        out.push(Request::Return { spent: 0, call, result: Returned::Busy });
         return;
     }
     let relay = crate::host::Relay {
@@ -1814,7 +1776,7 @@ fn host_return(domain: &mut Domain, id: Id<Call>, result: Returned, out: &mut Qu
     let call = domain.calls.get(id).expect("host call lives");
     domain.facts.about(call.run.token());
     let owner = call.owner;
-    out.push(Request::Return { spent: 0, spend_overflow: false, call: owner, result });
+    out.push(Request::Return { spent: 0, call: owner, result });
     retire_call(&mut domain.calls, &mut domain.alarms, &mut domain.conversations, id);
 }
 

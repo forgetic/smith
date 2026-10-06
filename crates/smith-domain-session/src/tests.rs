@@ -82,7 +82,6 @@ struct Harness {
     out: Queue<Request>,
     turns: u32,
     usage: Usage,
-    usage_overflow: bool,
     turn_records: List<crate::record::Turn>,
     prices_reported: u32,
 }
@@ -95,7 +94,7 @@ impl Harness {
             out: Queue::with_capacity(max_out(&limits)),
             turns: 0,
             usage: Usage::ZERO,
-            usage_overflow: false,
+
             turn_records: List::with_capacity(
                 limits.sessions.checked_mul(limits.messages).expect("all fixture turns fit"),
             ),
@@ -135,12 +134,7 @@ impl Harness {
                 Request::Used { opener: _, usage, .. } => {
                     assert!(one.is_none(), "a completion's usage comes first");
                     self.turns = self.turns.checked_add(1).expect("bounded completions");
-                    if !self.usage_overflow {
-                        match usage_sum(self.usage, usage) {
-                            Some(total) => self.usage = total,
-                            None => self.usage_overflow = true,
-                        }
-                    }
+                    self.usage = usage_sum(self.usage, usage).expect("only accepted usage is reported");
                 }
                 request @ (Request::Opened { .. }
                 | Request::Yielded { .. }
@@ -163,14 +157,14 @@ impl Harness {
     fn next(&mut self) -> Option<Request> {
         while let Some(request) = self.out.pop() {
             match request {
-                Request::Priced { spent, overflow, own_spent, own_overflow, .. } => {
-                    assert_eq!((spent, overflow, own_spent, own_overflow), (0, false, 0, false));
+                Request::Priced { spent, own_spent, .. } => {
+                    assert_eq!((spent, own_spent), (0, 0));
                     self.prices_reported = self.prices_reported.checked_add(1).expect("bounded fixture prices");
                 }
                 Request::Turn { turn, .. } => {
                     assert_eq!(turn.version, crate::record::VERSION);
                     assert_eq!((turn.endpoint, turn.dialect), (spec().endpoint, 1));
-                    assert_eq!((turn.spent, turn.spend_overflow), (0, false));
+                    assert_eq!(turn.spent, 0);
                     assert!(!turn.messages.is_empty());
                     for message in &turn.messages {
                         for block in &message.content {
@@ -399,11 +393,11 @@ fn answer(ticket: u64, length: u64) -> Box<[u8]> {
 }
 
 fn answered(owner: Token, ticket: u64, length: u64, error: bool) -> Event {
-    Event::Answered { owner, text: answer(ticket, length), error, spent: 0, spend_overflow: false }
+    Event::Answered { owner, text: answer(ticket, length), error, spent: 0 }
 }
 
 fn answer_cancelled(owner: Token) -> Event {
-    Event::AnswerCancelled { owner, spent: 0, spend_overflow: false }
+    Event::AnswerCancelled { owner, spent: 0 }
 }
 
 fn opening(spec: Spec) -> Box<crate::record::Opening> {
@@ -523,7 +517,7 @@ fn ended(end: End, turns: u32) -> Request {
     for _ in 0..turns {
         usage = usage_sum(usage, USAGE).expect("bounded fixture usage");
     }
-    Request::Ended { opener: Token::new(1), end, turns, usage, usage_overflow: false }
+    Request::Ended { opener: Token::new(1), end, turns, usage }
 }
 
 #[test]
@@ -852,7 +846,7 @@ fn the_tools_tell_of_each_call_and_the_session_passes_it_on() {
         Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 },
         by_tools(opener, tools::Fact::Opened { session: owner }),
         Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 3, calls: 2, invalid: 0 },
-        Fact::Used { opener, usage: USAGE, usage_overflow: false },
+        Fact::Used { opener, usage: USAGE },
         by_tools(opener, tools::Fact::Started { session: owner, tool: read }),
         by_tools(opener, tools::Fact::Started { session: owner, tool: read }),
         by_tools(opener, tools::Fact::Answered { session: owner, tool: read, verdict: tools::Verdict::Read, bytes: 1 }),
@@ -1001,14 +995,14 @@ fn delegated_calls_are_told_as_they_start_and_end() {
         Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 },
         Fact::Tools { opener, fact: tools::Fact::Opened { session: owner } },
         Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 2, calls: 2, invalid: 0 },
-        Fact::Used { opener, usage: USAGE, usage_overflow: false },
+        Fact::Used { opener, usage: USAGE },
         Fact::DelegateStarted { opener, block: 0 },
         Fact::DelegateStarted { opener, block: 1 },
         Fact::DelegateAnswered { opener, bytes: 3, error: true },
         // The kit closes as the session does, with nothing of its own to settle.
         Fact::Tools { opener, fact: tools::Fact::Closed { session: owner } },
         Fact::DelegateCancelled { opener },
-        Fact::Ended { opener, end: End::Closed, turns: 1, usage: USAGE, usage_overflow: false },
+        Fact::Ended { opener, end: End::Closed, turns: 1, usage: USAGE },
     ]);
 }
 
@@ -1027,16 +1021,7 @@ fn opens_beyond_the_session_slots_are_refused_as_busy() {
     let mut h = Harness::new(Limits { sessions: 1, ..LIMITS });
     drop(h.open(1));
     let refused = h.step(Event::Open { opener: Token::new(2), opening: opening(spec()) });
-    assert_eq!(
-        refused,
-        Some(Request::Ended {
-            opener: Token::new(2),
-            end: End::Busy,
-            turns: 0,
-            usage: Usage::ZERO,
-            usage_overflow: false
-        })
-    );
+    assert_eq!(refused, Some(Request::Ended { opener: Token::new(2), end: End::Busy, turns: 0, usage: Usage::ZERO }));
 }
 
 #[test]
@@ -1263,7 +1248,7 @@ fn every_completion_is_reported_before_what_follows_it() {
     let mut h = Harness::new(LIMITS);
     let (owner, _) = h.open(1);
     step(&mut h.domain, &h.env, Event::Completed { owner, completion: reading() }, &mut h.out);
-    assert_eq!(h.next(), Some(Request::Used { opener: Token::new(1), usage: USAGE, usage_overflow: false }));
+    assert_eq!(h.next(), Some(Request::Used { opener: Token::new(1), usage: USAGE }));
     let (run, _) = running(h.one());
     drop(calling(h.step(ran(run, b"main.rs"))));
     drop(yielded(h.step(Event::Completed { owner, completion: done() })));
@@ -1404,7 +1389,7 @@ fn each_answer_may_take_no_more_than_the_output_budget_left() {
     let end = h.step(Event::Continue { session: owner, content: bytes(b"go on") });
     let spent = End::Budget { spent: Dimension::Output };
     let usage = usage_sum(USAGE, usage).expect("bounded fixture usage");
-    assert_eq!(end, Some(Request::Ended { opener: Token::new(1), end: spent, turns: 2, usage, usage_overflow: false }));
+    assert_eq!(end, Some(Request::Ended { opener: Token::new(1), end: spent, turns: 2, usage }));
 
     // A spec's own max_tokens stays the cap while more is left.
     let mut h = Harness::new(LIMITS);
@@ -1504,7 +1489,7 @@ fn a_session_tells_what_happens_as_facts() {
     let (run, _) = running(h.step(Event::Completed { owner, completion: reading() }));
     h.told(&[
         Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 1, calls: 1, invalid: 0 },
-        Fact::Used { opener, usage: USAGE, usage_overflow: false },
+        Fact::Used { opener, usage: USAGE },
         by_tools(opener, tools::Fact::Started { session: owner, tool: tools::Tool::Read }),
     ]);
     drop(calling(h.step(ran(run, b"main.rs"))));
@@ -1516,17 +1501,14 @@ fn a_session_tells_what_happens_as_facts() {
     drop(yielded(h.step(Event::Completed { owner, completion: done() })));
     h.told(&[
         Fact::CompletionAnswered { opener, stop: Stop::EndTurn, blocks: 1, calls: 0, invalid: 0 },
-        Fact::Used { opener, usage: USAGE, usage_overflow: false },
+        Fact::Used { opener, usage: USAGE },
         Fact::Yielded { opener, stop: Yield::Done },
     ]);
     let end = h.step(Event::Close { session: owner });
     let Some(Request::Ended { opener: _, end, turns, usage, .. }) = end else {
         panic!("expected the end, not {end:?}");
     };
-    h.told(&[
-        Fact::Ended { opener, end, turns, usage, usage_overflow: false },
-        by_tools(opener, tools::Fact::Closed { session: owner }),
-    ]);
+    h.told(&[Fact::Ended { opener, end, turns, usage }, by_tools(opener, tools::Fact::Closed { session: owner })]);
 }
 
 #[test]
@@ -1559,12 +1541,12 @@ fn retries_cancels_and_refusals_are_told_too() {
 
     let refused = Token::new(2);
     drop(h.step(Event::Open { opener: refused, opening: opening(spec()) }));
-    h.told(&[Fact::Ended { opener: refused, end: End::Busy, turns: 0, usage: Usage::ZERO, usage_overflow: false }]);
+    h.told(&[Fact::Ended { opener: refused, end: End::Busy, turns: 0, usage: Usage::ZERO }]);
 
     assert_eq!(h.step(Event::Close { session: owner }), Some(Request::Cancel { owner }));
     h.told(&[Fact::Tools { opener, fact: tools::Fact::Closed { session: owner } }]);
     drop(h.step(Event::Cancelled { owner }));
-    let end = Fact::Ended { opener, end: End::Closed, turns: 0, usage: Usage::ZERO, usage_overflow: false };
+    let end = Fact::Ended { opener, end: End::Closed, turns: 0, usage: Usage::ZERO };
     h.told(&[Fact::CompletionCancelled { opener }, end]);
 }
 
@@ -1602,7 +1584,7 @@ fn facts_beyond_their_room_are_dropped_and_counted_and_change_nothing() {
     let (owner, ..) = requests;
     drop(yielded(full.step(Event::Completed { owner, completion: done() })));
     let answered = Fact::CompletionAnswered { opener, stop: Stop::EndTurn, blocks: 1, calls: 0, invalid: 0 };
-    full.told(&[answered, Fact::Used { opener, usage: USAGE, usage_overflow: false }]);
+    full.told(&[answered, Fact::Used { opener, usage: USAGE }]);
     assert_eq!(full.domain.facts_lost(), 7);
 }
 
@@ -1643,8 +1625,8 @@ fn completion_name_exhaustion_ends_before_any_owned_or_delegated_effect() {
                     assert_eq!(usage, USAGE);
                     used = true;
                 }
-                Request::Priced { spent, overflow, own_spent, own_overflow, .. } => {
-                    assert_eq!((spent, overflow, own_spent, own_overflow), (0, false, 0, false));
+                Request::Priced { spent, own_spent, .. } => {
+                    assert_eq!((spent, own_spent), (0, 0));
                 }
                 Request::Ended { end, .. } => {
                     assert_eq!(end, End::TranscriptFull);
@@ -1717,7 +1699,7 @@ fn unsent_denial_releases_actual_reserved_provider_credit_before_kit_settlement(
 }
 
 #[test]
-fn raw_overflow_freezes_the_whole_exact_prefix_and_emits_the_actual_turn() {
+fn raw_overflow_ends_before_the_completion_is_charged_or_told() {
     let budget = Budget { input: u64::MAX, output: u64::MAX, cache_read: u64::MAX, cache_write: u64::MAX, ..BUDGET };
     let mut harness = Harness::new(Limits { budget, ..LIMITS });
     let (owner, _) = harness.open_with(1, Spec { budget, ..spec() });
@@ -1727,48 +1709,16 @@ fn raw_overflow_freezes_the_whole_exact_prefix_and_emits_the_actual_turn() {
     let second = Usage { input_tokens: 2, output_tokens: 2, cache_read_tokens: 5, cache_write_tokens: 6 };
     let terminal = harness.step(Event::Completed { owner, completion: Completion { usage: second, ..done() } });
     assert_eq!(harness.usage, first);
-    assert!(harness.usage_overflow);
-    assert_eq!(harness.turn_records.len(), 2);
-    assert_eq!(harness.turn_records.get(1).expect("actual observed turn").usage, second);
-    assert_eq!(harness.turn_records.get(1).expect("actual observed turn").sequence, 2);
+    assert_eq!(harness.turn_records.len(), 1);
     assert_eq!(
         terminal,
-        Some(Request::Ended {
-            opener: Token::new(1),
-            end: End::UsageOverflow,
-            turns: 2,
-            usage: first,
-            usage_overflow: true
-        }),
+        Some(Request::Ended { opener: Token::new(1), end: End::UsageOverflow, turns: 1, usage: first })
     );
-    let mut overflow_used = false;
-    let mut overflow_ended = false;
     while let Some(fact) = harness.domain.pop_fact() {
-        match fact {
-            Fact::Used { usage, usage_overflow: true, .. } => {
-                assert_eq!(usage, second);
-                overflow_used = true;
-            }
-            Fact::Ended { usage, usage_overflow: true, .. } => {
-                assert_eq!(usage, first);
-                overflow_ended = true;
-            }
-            Fact::Used { usage_overflow: false, .. }
-            | Fact::Ended { usage_overflow: false, .. }
-            | Fact::Opened { .. }
-            | Fact::CompletionStarted { .. }
-            | Fact::CompletionAnswered { .. }
-            | Fact::CompletionFailed { .. }
-            | Fact::CompletionCancelled { .. }
-            | Fact::CompletionRetried { .. }
-            | Fact::Yielded { .. }
-            | Fact::DelegateStarted { .. }
-            | Fact::DelegateAnswered { .. }
-            | Fact::DelegateCancelled { .. }
-            | Fact::Tools { .. } => {}
+        if let Fact::Used { usage, .. } = fact {
+            assert_ne!(usage, second);
         }
     }
-    assert!(overflow_used && overflow_ended);
 }
 
 #[test]

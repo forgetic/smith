@@ -194,7 +194,7 @@ fn next(landing: &Landing, id: Id<Call>, run: &Run, check: u32, env: &Env<Limits
 }
 
 fn back(owner: Token, result: Returned, settled: Settled, out: &mut Queue<Request>) -> Settled {
-    out.push(Request::Return { spent: 0, spend_overflow: false, call: owner, result });
+    out.push(Request::Return { spent: 0, call: owner, result });
     settled
 }
 

@@ -112,8 +112,6 @@ pub(crate) struct Agent {
     read: Option<Token>,
     number: u32,
     spent: u64,
-    spend_overflow: bool,
-    usage_overflow: bool,
     turn_bytes: u64,
     cancel_queued: bool,
     cancel_sent: bool,
@@ -457,8 +455,6 @@ fn spawn(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<R
         read: None,
         number: 0,
         spent: 0,
-        spend_overflow: false,
-        usage_overflow: false,
         turn_bytes: 0,
         cancel_queued: false,
         cancel_sent: false,
@@ -830,8 +826,6 @@ fn receive(agent: &mut Agent, owner: Token, message: Up, env: &Env<Limits>, out:
             mark_read(agent, turn.read);
             agent.number = turn.number;
             agent.spent = turn.spent;
-            agent.spend_overflow = turn.spend_overflow;
-            agent.usage_overflow = turn.usage_overflow;
             let bytes = u64::try_from(turn.body.len()).expect("bounded turn length");
             agent.turn_bytes = agent.turn_bytes.checked_add(bytes).expect("validated byte credit");
             agent
@@ -891,8 +885,6 @@ fn discarded_work(agent: &Agent, message: &Up) -> bool {
 fn heard_answer(agent: &mut Agent, answer: crate::Answer, env: &Env<Limits>, out: &mut Queue<Request>) {
     agent.last_word = true;
     agent.spent = answer.spent;
-    agent.spend_overflow = answer.spend_overflow;
-    agent.usage_overflow = answer.usage_overflow;
     let wall_cancel = match &answer.result {
         RunResult::Failed { failure: RunFailure::Cancelled } => agent.owed == Some(Fault::WallTime),
         RunResult::Refused { .. } | RunResult::Accepted { .. } | RunResult::Parked | RunResult::Failed { .. } => false,
@@ -1008,7 +1000,7 @@ fn valid_record(agent: &Agent, message: &Up, env: &Env<Limits>) -> bool {
         Up::Turn { turn } => {
             agent.admitted
                 && agent.number.checked_add(1) == Some(turn.number)
-                && valid_spend(agent, turn.spent, turn.spend_overflow, turn.usage_overflow)
+                && valid_spend(agent, turn.spent)
                 && known_read(agent, turn.read)
                 && within(&turn.body, limits.turn_bytes)
                 && agent.turns.len() < limits.turns
@@ -1029,10 +1021,9 @@ fn valid_record(agent: &Agent, message: &Up, env: &Env<Limits>) -> bool {
     }
 }
 
-// Agent metadata never clears an unknown-total attestation or decreases its
-// last representable prefix (domain/host.md, section 6). The kit never reprices.
-fn valid_spend(agent: &Agent, spent: u64, spend_overflow: bool, usage_overflow: bool) -> bool {
-    spent >= agent.spent && (!agent.spend_overflow || spend_overflow) && (!agent.usage_overflow || usage_overflow)
+// Agent spend never decreases (domain/host.md, section 6). The kit never reprices.
+fn valid_spend(agent: &Agent, spent: u64) -> bool {
+    spent >= agent.spent
 }
 
 fn valid_answer(agent: &Agent, answer: &crate::Answer, limits: &Limits) -> bool {
@@ -1044,10 +1035,7 @@ fn valid_answer(agent: &Agent, answer: &crate::Answer, limits: &Limits) -> bool 
             }
         }
     }
-    if answer.turns != agent.number
-        || (!answer.usage_overflow && answer.completions < answer.turns)
-        || !valid_spend(agent, answer.spent, answer.spend_overflow, answer.usage_overflow)
-    {
+    if answer.turns != agent.number || answer.completions < answer.turns || !valid_spend(agent, answer.spent) {
         return false;
     }
     match &answer.result {
@@ -1060,8 +1048,6 @@ fn valid_answer(agent: &Agent, answer: &crate::Answer, limits: &Limits) -> bool 
                 && answer.cache_read == 0
                 && answer.cache_write == 0
                 && answer.spent == 0
-                && !answer.spend_overflow
-                && !answer.usage_overflow
                 && within(detail, limits.outcome_bytes)
         }
         RunResult::Accepted { outcome } => agent.admitted && within(outcome, limits.outcome_bytes),

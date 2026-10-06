@@ -1336,16 +1336,11 @@ impl World {
                 let index = flight.completion_index.expect("actual completion observation");
                 let prices = self.model_prices[&self.completions[index].model];
                 let usage = completion.usage;
-                let (units, units_overflow) = match observed_price(prices, usage) {
-                    Some(units) => (units, false),
-                    None => (0, true),
-                };
+                let units = observed_price(prices, usage).unwrap_or(0);
                 self.observe(Seen::Completed {
                     owner,
                     spent: run::Spend {
                         units,
-                        units_overflow,
-                        usage_overflow: false,
                         turns: 1,
                         input: completion.usage.input_tokens,
                         output: completion.usage.output_tokens,
@@ -1449,16 +1444,16 @@ impl World {
         for fact in &self.facts {
             match fact {
                 Fact::Session { fact: sf::Used { usage, .. } } => {
-                    used = used.accumulate(run::Spend {
-                        units: 0,
-                        units_overflow: false,
-                        usage_overflow: false,
-                        turns: 1,
-                        input: usage.input_tokens,
-                        output: usage.output_tokens,
-                        cache_read: usage.cache_read_tokens,
-                        cache_write: usage.cache_write_tokens,
-                    });
+                    used = used
+                        .accumulate(run::Spend {
+                            units: 0,
+                            turns: 1,
+                            input: usage.input_tokens,
+                            output: usage.output_tokens,
+                            cache_read: usage.cache_read_tokens,
+                            cache_write: usage.cache_write_tokens,
+                        })
+                        .expect("bounded observed usage");
                 }
                 Fact::Run { fact: rf::Fact::Opened { .. } } => opened += 1,
                 Fact::Run { fact: rf::Fact::Ended { .. } } => ended += 1,
@@ -1474,7 +1469,7 @@ impl World {
         };
         assert_eq!(
             used,
-            run::Spend { units: 0, units_overflow: false, ..spent },
+            run::Spend { units: 0, ..spent },
             "facts match independently accepted provider raw usage and the host answer"
         );
         assert_eq!(opened, ended, "every conversation fact has one terminal");

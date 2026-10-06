@@ -23,8 +23,6 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
                     number: *number,
                     read: *read,
                     spent: spent.units,
-                    spend_overflow: spent.units_overflow,
-                    usage_overflow: spent.usage_overflow,
                     body: format!("{turn:?}").into_bytes().into(),
                 },
             });
@@ -151,8 +149,6 @@ fn assert_accounting(answer: &host::Answer, turns: u32, spent: run::Spend) {
     assert_eq!(answer.cache_read, spent.cache_read);
     assert_eq!(answer.cache_write, spent.cache_write);
     assert_eq!(answer.spent, spent.units);
-    assert_eq!(answer.spend_overflow, spent.units_overflow);
-    assert_eq!(answer.usage_overflow, spent.usage_overflow);
 }
 
 /// Translate the actual root final `Spend` without session usage or `Turn` metadata.
@@ -166,8 +162,6 @@ fn final_accounting(turns: u32, spent: run::Spend, result: RunResult) -> host::A
         cache_read: spent.cache_read,
         cache_write: spent.cache_write,
         spent: spent.units,
-        spend_overflow: spent.units_overflow,
-        usage_overflow: spent.usage_overflow,
         result,
     }
 }
@@ -183,7 +177,6 @@ fn actual_child_completions_and_raw_usage_cross_the_host_final_answer_once() {
     };
     let spent = *spent;
     let turns = *turns;
-    assert!(!spent.usage_overflow && !spent.units_overflow);
     assert!(spent.turns > turns, "actual child completions exceed transmitted main Turns");
     assert_raw_terminals(&agent, spent);
     let main = agent.turns().last().expect("actual settled main Turn");
@@ -215,8 +208,6 @@ fn actual_child_completions_and_raw_usage_cross_the_host_final_answer_once() {
                         number: *number,
                         read: *read,
                         spent: spent.units,
-                        spend_overflow: spent.units_overflow,
-                        usage_overflow: spent.usage_overflow,
                         body: format!("{turn:?}").into_bytes().into(),
                     },
                 });

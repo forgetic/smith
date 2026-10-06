@@ -95,8 +95,7 @@ fn last(world: &mut World, result: RunResult, spent: u64) {
             cache_read: spent * 17,
             cache_write: spent * 19,
             spent,
-            spend_overflow: false,
-            usage_overflow: false,
+
             result,
         },
     });

@@ -60,7 +60,7 @@ pub struct Seen {
     /// Actual parent Turn metadata: sequence, scalar prefix and independent
     /// currency/raw overflow attestations. ACK never erases these observations.
     /// Contract: domain/host.md, section 6; testing-strategy.md, sections 6 and 7.
-    pub turn_metadata: Vec<(u32, u64, bool, bool)>,
+    pub turn_metadata: Vec<(u32, u64)>,
     /// Parent notifications after withdrawal, which never consume a call right.
     pub withdrawals: BTreeSet<Token>,
     /// Downlink words handed to the agent by the scripted transport.
@@ -341,7 +341,7 @@ impl World {
                     assert!(self.seen.withdrawals.insert(call));
                 }
                 Request::Turn { turn, .. } => {
-                    self.seen.turn_metadata.push((turn.number, turn.spent, turn.spend_overflow, turn.usage_overflow));
+                    self.seen.turn_metadata.push((turn.number, turn.spent));
                     assert!(self.seen.turns.insert(turn.number, turn.body).is_none());
                 }
                 Request::Answered { answer, .. } => {

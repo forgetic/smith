@@ -172,18 +172,10 @@ pub enum Event {
 
         /// Inclusive subtree units. Contract: domain/run.md, section 14.
         subtree_spent: u64,
-
-        /// Sticky unknown own-total attestation. Contract: domain/run.md, section 9.
-        own_overflow: bool,
-
-        /// Sticky unknown subtree-total attestation. Contract: domain/run.md, section 14.
-        subtree_overflow: bool,
     },
 
     /// The Session completed a turn with exact actual raw counters in `spend`.
     /// Units are supplied separately by Priced; this event cannot reprice them.
-    /// Its cumulative receiver attestation propagates even though this usage
-    /// remains the exact single-completion value.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Used {
@@ -192,8 +184,7 @@ pub enum Event {
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         conversation: Token,
         /// Session's exact single-completion raw counters and one turn increment.
-        /// Units are ignored: `Priced` alone charges them. `usage_overflow`
-        /// attests that Session's cumulative raw prefix became unknown.
+        /// Units are ignored: `Priced` alone charges them.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         spend: Spend,
@@ -211,9 +202,8 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         end: End,
-        /// Session's cumulative raw prefix after all actual terminals settled,
-        /// with its sticky `usage_overflow` attestation. Only known residual
-        /// raw usage is counted; units remain supplied separately by `Priced`.
+        /// Session's exact cumulative raw usage after all actual terminals settled.
+        /// Units remain supplied separately by `Priced`.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         spend: Spend,
@@ -593,10 +583,6 @@ pub enum Request {
         /// Inclusive child bill; zero for every non-child call terminal.
         /// Contract: domain/run.md, sections 9 and 14.
         spent: u64,
-
-        /// Child bill is the last representable prefix when true.
-        /// Contract: domain/run.md, sections 9 and 14.
-        spend_overflow: bool,
     },
 }
 
@@ -1036,11 +1022,11 @@ pub enum Stop {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum End {
-    /// Actual priced total cannot be represented; a prefix remains attested.
+    /// Session price cannot be added; prior charges remain exact.
     /// Contract: domain/run.md, sections 9, 10 and 14.
     PriceOverflow,
 
-    /// Actual cumulative raw usage cannot be represented; a prefix remains attested.
+    /// Session usage cannot be added; prior charges remain exact.
     /// Contract: domain/run.md, sections 9, 10 and 14.
     UsageOverflow,
 

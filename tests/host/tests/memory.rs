@@ -213,14 +213,7 @@ fn maximum_v2_starts_and_full_queued_replies_fit_every_slot() {
                 measured.up(
                     owner,
                     Up::Turn {
-                        turn: Turn {
-                            number,
-                            spent: u64::from(number),
-                            spend_overflow: false,
-                            usage_overflow: false,
-                            read: None,
-                            body: bytes(limits.turn_bytes),
-                        },
+                        turn: Turn { number, spent: u64::from(number), read: None, body: bytes(limits.turn_bytes) },
                     },
                 );
                 measured.step(Event::Acknowledge { agent: owner, turn: number }, false);
@@ -239,8 +232,7 @@ fn maximum_v2_starts_and_full_queued_replies_fit_every_slot() {
                         cache_read: u64::MAX,
                         cache_write: u64::MAX,
                         spent: u64::from(limits.turns),
-                        spend_overflow: false,
-                        usage_overflow: false,
+
                         result: RunResult::Parked,
                     },
                 },
@@ -290,8 +282,7 @@ fn maximum_start_io_ownership_coexists_with_full_pre_read_message_queue() {
                 cache_read: 0,
                 cache_write: 0,
                 spent: 0,
-                spend_overflow: false,
-                usage_overflow: false,
+
                 result: RunResult::Parked,
             },
         },

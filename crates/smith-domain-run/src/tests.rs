@@ -83,13 +83,7 @@ impl Harness {
             let previous = self.prices.get(conversation).copied().unwrap_or(0);
             let own_spent = previous.checked_add(spend.units).expect("fixture own units");
             self.prices.insert(*conversation, own_spent);
-            let priced = Event::Priced {
-                conversation: *conversation,
-                own_spent,
-                subtree_spent: own_spent,
-                own_overflow: spend.units_overflow,
-                subtree_overflow: false,
-            };
+            let priced = Event::Priced { conversation: *conversation, own_spent, subtree_spent: own_spent };
             step(&mut self.domain, &self.env, priced, &mut self.out);
         }
         if let Event::Priced { conversation, own_spent, .. } = &event {
@@ -270,16 +264,7 @@ pub(crate) fn charter() -> Charter {
 }
 
 fn spend(input: u64) -> Spend {
-    Spend {
-        units: input,
-        units_overflow: false,
-        usage_overflow: false,
-        turns: 1,
-        input,
-        output: 10,
-        cache_read: 0,
-        cache_write: 0,
-    }
+    Spend { units: input, turns: 1, input, output: 10, cache_read: 0, cache_write: 0 }
 }
 
 /// What a run answered, and to which call.
@@ -575,16 +560,7 @@ fn an_llm_that_stops_without_finishing_is_nudged_until_its_nudges_run_out() {
     assert_eq!(h.domain.next_deadline(), None);
     // A turn that won the race with the close is spent all the same.
     assert!(h.step(Event::Used { conversation, spend: spend(5) }).is_empty(), "winding down");
-    let total = Spend {
-        units: 20,
-        units_overflow: false,
-        usage_overflow: false,
-        turns: 4,
-        input: 20,
-        output: 40,
-        cache_read: 0,
-        cache_write: 0,
-    };
+    let total = Spend { units: 20, turns: 4, input: 20, output: 40, cache_read: 0, cache_write: 0 };
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: total });
     let unfinished = Failure::Policy(Policy::Unfinished { nudges: LIMITS.nudges, rejected: 0 });
     assert_eq!(answered(emitted), (1, failed(unfinished, total)));
@@ -637,16 +613,8 @@ fn spending_past_the_budget_keeps_admitted_turns_stable_until_yield() {
     assert!(h.step(Event::Used { conversation, spend: spend(1) }).is_empty(), "past it: main keeps its turn");
     assert!(h.step(Event::Used { conversation, spend: spend(1) }).is_empty());
     assert_eq!(&*h.step(end_turn(conversation)), &[Request::Close { peer: Token::new(100) }]);
-    let total = Spend {
-        units: BUDGET.spend + 2,
-        units_overflow: false,
-        usage_overflow: false,
-        turns: 3,
-        input: BUDGET.spend + 2,
-        output: 30,
-        cache_read: 0,
-        cache_write: 0,
-    };
+    let total =
+        Spend { units: BUDGET.spend + 2, turns: 3, input: BUDGET.spend + 2, output: 30, cache_read: 0, cache_write: 0 };
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: total });
     assert_eq!(answered(emitted), (1, failed(Failure::Budget(Exhausted::Spend), total)));
 
@@ -706,7 +674,7 @@ fn finish_by(conversation: Token, call: u64, outcome: Declared, deadline: Time) 
 }
 
 fn returned(call: u64, result: Returned) -> Request {
-    Request::Return { spent: 0, spend_overflow: false, call: Token::new(call), result }
+    Request::Return { spent: 0, call: Token::new(call), result }
 }
 
 fn verdict(name: &[u8], children: Box<[Item]>) -> Declared {
@@ -1391,7 +1359,7 @@ fn a_sub_agent_answers_with_its_last_message_once_it_has_ended() {
     let answer = Returned::Answered { text: bytes(b"The parser is in"), cut: 14, stop: Stop::EndTurn };
     assert_eq!(
         &*emitted,
-        &[Request::Return { call: Token::new(7), result: answer, spent: 50, spend_overflow: false }],
+        &[Request::Return { call: Token::new(7), result: answer, spent: 50 }],
         "its answer is cut at the limit and carries the exact priced subtree bill"
     );
     h.domain.reclaim();
@@ -1722,14 +1690,7 @@ fn reports_and_declared_failures_settle_once_without_checks_or_push() {
         assert_eq!(&*emitted, &[returned(7, Returned::Accepted), Request::Close { peer: Token::new(100) }]);
         assert!(h.step(Event::Cancel { run: Token::new(999) }).is_empty());
         assert!(
-            h.step(Event::Priced {
-                conversation,
-                own_spent: 5,
-                subtree_spent: 5,
-                own_overflow: false,
-                subtree_overflow: false,
-            })
-            .is_empty(),
+            h.step(Event::Priced { conversation, own_spent: 5, subtree_spent: 5 }).is_empty(),
             "a genuine own price notice charges the terminal's usage independently"
         );
         let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: spend(5) });
@@ -2125,12 +2086,7 @@ fn host_busy_and_lost_recover_only_after_actual_terminal_with_same_name_and_byte
     let actual = crate::HostAnswer::new(bytes(b"recorded first decision"), true).expect("bounded exact error");
     assert_eq!(
         &*h.step(Event::HostReturned { relay: third, reply: crate::HostReply::Answered(actual.clone()) }),
-        &[Request::Return {
-            spent: 0,
-            spend_overflow: false,
-            call: Token::new(41),
-            result: Returned::HostAnswered(actual)
-        }]
+        &[Request::Return { spent: 0, call: Token::new(41), result: Returned::HostAnswered(actual) }]
     );
     assert!(
         h.step(Event::HostReturned { relay: third, reply: crate::HostReply::Busy }).is_empty(),
@@ -2163,10 +2119,7 @@ fn host_uncertainty_survives_busy_until_cap_withdrawal_and_caller_expiry() {
             h.env.now = deadline;
             h.fire()
         };
-        assert_eq!(
-            &*emitted,
-            &[Request::Return { spent: 0, spend_overflow: false, call: Token::new(41), result: Returned::HostUnknown }]
-        );
+        assert_eq!(&*emitted, &[Request::Return { spent: 0, call: Token::new(41), result: Returned::HostUnknown }]);
         assert_eq!((h.domain.runs(), h.domain.conversations()), (1, 1), "call-only stop retains ordinary run");
     }
 }
@@ -2198,12 +2151,7 @@ fn host_withdrawal_and_timeout_retain_relay_until_terminal_answer_wins() {
         let actual = crate::HostAnswer::new(bytes(b"already recorded"), false).expect("small answer");
         assert_eq!(
             &*h.step(Event::HostReturned { relay, reply: crate::HostReply::Answered(actual.clone()) }),
-            &[Request::Return {
-                spent: 0,
-                spend_overflow: false,
-                call: Token::new(41),
-                result: Returned::HostAnswered(actual)
-            }]
+            &[Request::Return { spent: 0, call: Token::new(41), result: Returned::HostAnswered(actual) }]
         );
         if stop == 2 {
             let (_, answer) = answered(h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO }));
@@ -2221,7 +2169,7 @@ fn host_unknown_is_conveyed_after_actual_withdrawn_terminal_when_shutdown_disall
     assert_eq!(&*h.step(Event::Withdraw { conversation, call: Token::new(41) }), &[Request::WithdrawHost { relay }]);
     assert_eq!(
         &*h.step(Event::HostReturned { relay, reply: crate::HostReply::Unanswered(crate::Unanswered::Withdrawn) }),
-        &[Request::Return { spent: 0, spend_overflow: false, call: Token::new(41), result: Returned::HostUnknown }]
+        &[Request::Return { spent: 0, call: Token::new(41), result: Returned::HostUnknown }]
     );
 }
 
@@ -2273,12 +2221,7 @@ fn undeclared_host_and_effect_mismatch_are_refused_before_relay() {
         };
         assert_eq!(
             &*h.step(event),
-            &[Request::Return {
-                spent: 0,
-                spend_overflow: false,
-                call: Token::new(101),
-                result: Returned::HostRejected(problem)
-            }]
+            &[Request::Return { spent: 0, call: Token::new(101), result: Returned::HostRejected(problem) }]
         );
     }
     assert_eq!(h.domain.calls(), 0);
@@ -2298,7 +2241,7 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
             ask: Ask::Wait,
             deadline: Time::from_nanos(u64::MAX)
         }),
-        &[Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Waiting }]
+        &[Request::Return { spent: 0, call, result: Returned::Waiting }]
     );
     assert_eq!(
         &*h.step(Event::Turn { conversation, record: Token::new(50), sequence: 1 }),
@@ -2342,7 +2285,7 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_actual_main_turn() {
         ask: Ask::Wait,
         deadline: Time::from_nanos(u64::MAX),
     };
-    assert_eq!(&*h.step(wait), &[Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Waiting }]);
+    assert_eq!(&*h.step(wait), &[Request::Return { spent: 0, call, result: Returned::Waiting }]);
     assert_eq!(
         &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }),
         &[Request::Waiting { worker: Token::new(1), read: Some(Token::new(7)) }]
@@ -2381,7 +2324,7 @@ fn zero_waiting_time_parks_when_main_yields() {
                 deadline: Time::from_nanos(u64::MAX),
             })
             .as_ref(),
-        [Request::Return { spent: 0, spend_overflow: false, call, result: Returned::Waiting }]
+        [Request::Return { spent: 0, call, result: Returned::Waiting }]
     );
     assert_eq!(
         harness.step(Event::Turn { conversation, record: Token::new(73), sequence: 1 }).as_ref(),
@@ -2425,7 +2368,7 @@ fn bounded_message_and_input_at_idle_deadline_preserve_existing_fifo() {
             ask: Ask::Wait,
             deadline: Time::from_nanos(u64::MAX),
         }),
-        &[Request::Return { spent: 0, spend_overflow: false, call: Token::new(20), result: Returned::Waiting }]
+        &[Request::Return { spent: 0, call: Token::new(20), result: Returned::Waiting }]
     );
     assert_eq!(
         &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }),
@@ -2603,12 +2546,7 @@ fn a_run_with_only_finish_does_not_offer_or_accept_wait() {
                 deadline: Time::from_nanos(u64::MAX),
             })
             .as_ref(),
-        [Request::Return {
-            spent: 0,
-            spend_overflow: false,
-            call,
-            result: Returned::Refused { refusal: AskRefusal::NotGranted }
-        }]
+        [Request::Return { spent: 0, call, result: Returned::Refused { refusal: AskRefusal::NotGranted } }]
     );
 }
 
@@ -2796,7 +2734,7 @@ fn empty_main_instructions_and_brief_are_valid_even_with_zero_section_limit() {
 }
 
 fn priced(conversation: Token, own_spent: u64, subtree_spent: u64) -> Event {
-    Event::Priced { conversation, own_spent, subtree_spent, own_overflow: false, subtree_overflow: false }
+    Event::Priced { conversation, own_spent, subtree_spent }
 }
 
 #[test]
@@ -2811,24 +2749,14 @@ fn own_units_are_conserved_once_while_nested_terminal_bills_roll_up() {
     let end = End::Fault(Fault::ContextFull);
     assert_eq!(
         harness.step(Event::Ended { conversation: grandchild, end, spend: Spend::ZERO }).as_ref(),
-        &[Request::Return {
-            call: Token::new(8),
-            result: Returned::Unanswered { end },
-            spent: 11,
-            spend_overflow: false
-        }]
+        &[Request::Return { call: Token::new(8), result: Returned::Unanswered { end }, spent: 11 }]
     );
     assert!(harness.step(priced(child, 7, 18)).is_empty(), "inclusive child rollup adds no own charge");
     assert!(harness.step(priced(grandchild, 99, 99)).is_empty(), "retired child price is stale");
     assert!(harness.step(Event::Ended { conversation: grandchild, end, spend: Spend::ZERO }).is_empty());
     assert_eq!(
         harness.step(Event::Ended { conversation: child, end, spend: Spend::ZERO }).as_ref(),
-        &[Request::Return {
-            call: Token::new(7),
-            result: Returned::Unanswered { end },
-            spent: 18,
-            spend_overflow: false
-        }]
+        &[Request::Return { call: Token::new(7), result: Returned::Unanswered { end }, spent: 18 }]
     );
     assert!(harness.step(priced(main, 4, 22)).is_empty());
     assert!(harness.step(priced(main, 4, 22)).is_empty(), "duplicate cumulative price has zero delta");
@@ -2857,71 +2785,12 @@ fn reaching_the_scalar_cap_settles_wait_and_fails_only_after_yield() {
 }
 
 #[test]
-fn crossing_scalar_cap_keeps_same_turn_finish_but_hard_overflow_overrides_it() {
-    for overflow in [false, true] {
-        let mut harness = Harness::new(LIMITS);
-        let (_, main) = harness.running(1, 100);
-        drop(harness.step(priced(main, BUDGET.spend + 1, BUDGET.spend + 1)));
-        let outcome = verdict(b"approve", Box::new([]));
-        assert_eq!(
-            harness.step(finish(main, 7, verdict(b"approve", Box::new([])))).as_ref(),
-            &[returned(7, Returned::Accepted), Request::Close { peer: Token::new(100) }]
-        );
-        if overflow {
-            assert!(
-                harness
-                    .step(Event::Priced {
-                        conversation: main,
-                        own_spent: BUDGET.spend + 1,
-                        subtree_spent: BUDGET.spend + 1,
-                        own_overflow: true,
-                        subtree_overflow: true
-                    })
-                    .is_empty()
-            );
-        }
-        let spent = Spend { units: BUDGET.spend + 1, units_overflow: overflow, ..Spend::ZERO };
-        let actual =
-            answered(harness.step(Event::Ended { conversation: main, end: End::Closed, spend: Spend::ZERO })).1;
-        let expected = if overflow {
-            failed(Failure::PriceOverflow, spent)
-        } else {
-            Answer::Accepted { outcome, spent, turns: 0 }
-        };
-        assert_eq!(actual, expected);
-    }
-}
-
-#[test]
-fn terminal_unknown_raw_prefix_is_not_reconstructed_or_allowed_to_finish() {
-    let mut harness = Harness::new(LIMITS);
-    let (_, main) = harness.running(1, 100);
-    let raw = Spend { input: u64::MAX, output: 9, cache_read: 3, cache_write: 5, ..Spend::ZERO };
-    assert!(harness.step(Event::Used { conversation: main, spend: raw }).is_empty());
-    let outcome = verdict(b"approve", Box::new([]));
-    drop(harness.step(finish(main, 7, outcome)));
-    let unknown = Spend { input: 17, output: 18, usage_overflow: true, ..Spend::ZERO };
-    let expected = Spend { usage_overflow: true, ..raw };
-    let answer = answered(harness.step(Event::Ended { conversation: main, end: End::Closed, spend: unknown })).1;
-    assert_eq!(answer, failed(Failure::UsageOverflow, expected));
-    let mut harness = Harness::new(LIMITS);
-    let (_, main) = harness.running(1, 100);
-    let answer = answered(harness.step(Event::Ended {
-        conversation: main,
-        end: End::Fault(Fault::ContextFull),
-        spend: unknown,
-    }))
-    .1;
-    assert_eq!(answer, failed(Failure::UsageOverflow, Spend { usage_overflow: true, ..Spend::ZERO }));
-}
-
-#[test]
-fn independent_scalar_and_atomic_raw_prefixes_freeze_with_attestations() {
-    let known = Spend { turns: 2, input: 4, output: u64::MAX, cache_read: 6, cache_write: 8, units: 10, ..Spend::ZERO };
-    let next = Spend { turns: 1, input: 3, output: 1, cache_read: 5, cache_write: 7, units: 11, ..Spend::ZERO };
-    assert_eq!(known.accumulate(next), Spend { units: 21, usage_overflow: true, ..known });
+fn checked_spend_addition_rejects_the_whole_increment() {
+    let known = Spend { turns: 2, input: 4, output: u64::MAX, units: 10, ..Spend::ZERO };
+    let next = Spend { turns: 1, input: 3, output: 1, units: 11, ..Spend::ZERO };
+    assert_eq!(known.accumulate(next), None);
     let known = Spend { units: u64::MAX, ..Spend::ZERO };
-    assert_eq!(known.accumulate(next), Spend { units: u64::MAX, units_overflow: true, ..next });
+    assert_eq!(known.accumulate(next), None);
 }
 
 #[test]
@@ -2943,51 +2812,13 @@ fn completion_gate_distinguishes_child_withdrawal_from_budget_denial() {
 }
 
 #[test]
-fn hard_overflow_keeps_a_final_change_and_a_mid_delivery_separate() {
-    let actual = Spend { turns: 1, input: 1, cache_write: 1, ..Spend::ZERO };
+fn run_wide_overflow_preflight_preserves_charged_prefix() {
     let mut harness = Harness::new(LIMITS);
-    let (_, main) = harness.coding(1, 100);
-    let owner = harness.land(main, 7);
-    drop(harness.step(Event::Checked { owner, ran: ran(0, b"ok") }));
-    drop(harness.step(Event::Checked { owner, ran: ran(0, b"ok") }));
-    drop(harness.step(Event::Delivered { owner, push: delivered() }));
-    assert!(harness.step(Event::Used { conversation: main, spend: actual }).is_empty());
-    let unknown = Event::Priced {
-        conversation: main,
-        own_spent: 0,
-        subtree_spent: 0,
-        own_overflow: true,
-        subtree_overflow: true,
-    };
-    assert!(harness.step(unknown).is_empty());
-    let spent = Spend { units_overflow: true, ..actual };
-    assert_eq!(
-        answered(harness.step(Event::Ended { conversation: main, end: End::PriceOverflow, spend: actual })).1,
-        Answer::Accepted { outcome: Declared::Change(change()), spent, turns: 0 }
-    );
-
-    let mut harness = Harness::new(LIMITS);
-    let (_, main) = mid_running(&mut harness);
-    let owner = submit_mid(&mut harness, main);
-    assert!(harness.step(Event::Used { conversation: main, spend: actual }).is_empty());
-    assert_eq!(
-        harness
-            .step(Event::Priced {
-                conversation: main,
-                own_spent: 0,
-                subtree_spent: 0,
-                own_overflow: true,
-                subtree_overflow: true
-            })
-            .as_ref(),
-        &[Request::Close { peer: Token::new(100) }]
-    );
-    assert_eq!(
-        harness.step(Event::Delivered { owner, push: delivered() }).as_ref(),
-        &[returned(50, Returned::Delivered(receipts()))]
-    );
-    assert_eq!(
-        answered(harness.step(Event::Ended { conversation: main, end: End::PriceOverflow, spend: actual })).1,
-        Answer::Failed { failure: Failure::PriceOverflow, spent, turns: 0 }
-    );
+    let (_, main) = harness.running(1, 100);
+    assert!(harness.step(priced(main, u64::MAX, u64::MAX)).is_empty());
+    assert_eq!(crate::completion_overflow(&harness.domain, main, 1, Spend::ZERO), Some(Failure::PriceOverflow));
+    assert_eq!(crate::completion_overflow(&harness.domain, main, 0, Spend { turns: 1, ..Spend::ZERO }), None);
+    let answer =
+        answered(harness.step(Event::Ended { conversation: main, end: End::PriceOverflow, spend: Spend::ZERO })).1;
+    assert_eq!(answer, failed(Failure::PriceOverflow, Spend { units: u64::MAX, ..Spend::ZERO }));
 }

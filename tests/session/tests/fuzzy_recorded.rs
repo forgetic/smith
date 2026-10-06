@@ -43,10 +43,9 @@ fn randomized_priced_turns_and_terminal_races() {
                 text: vec![b'v'; usize::try_from(rng.below(64)).expect("the scenario supplied a value")].into(),
                 error: false,
                 spent: child,
-                spend_overflow: false,
             });
         } else {
-            world.step(session::Event::AnswerCancelled { owner, spent: child, spend_overflow: false });
+            world.step(session::Event::AnswerCancelled { owner, spent: child });
         }
         assert_eq!(world.turns.len(), 1, "seed {seed}");
         let expected = parent + child;

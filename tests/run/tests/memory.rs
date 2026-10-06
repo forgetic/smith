@@ -297,16 +297,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
         meter.check(measured, bound, &limits);
         asked
     };
-    let spend = Spend {
-        units: 0,
-        units_overflow: false,
-        usage_overflow: false,
-        turns: 1,
-        input: 1,
-        output: 1,
-        cache_read: 1,
-        cache_write: 1,
-    };
+    let spend = Spend { units: 0, turns: 1, input: 1, output: 1, cache_read: 1, cache_write: 1 };
     let expiry = Time::ZERO.saturating_add(limits.budget.time);
     for run in 0..limits.runs {
         let worker = Token::new(u64::from(run));

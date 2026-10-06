@@ -141,8 +141,8 @@ fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Re
         Event::Cancel { run } => run::cancel(domain, run, out),
         Event::Started { conversation, peer } => run::started(domain, conversation, peer, out),
         Event::Yielded { conversation, stop, text } => run::yielded(domain, env, conversation, stop, &text, out),
-        Event::Priced { conversation, own_spent, subtree_spent, own_overflow, subtree_overflow } => {
-            run::priced(domain, conversation, own_spent, subtree_spent, own_overflow, subtree_overflow, out);
+        Event::Priced { conversation, own_spent, subtree_spent } => {
+            run::priced(domain, conversation, own_spent, subtree_spent, out);
         }
         Event::Used { conversation, spend } => run::used(domain, conversation, spend, out),
         Event::Ended { conversation, end, spend } => run::ended(domain, conversation, end, spend, out),
@@ -185,4 +185,16 @@ pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
 #[must_use]
 pub fn completion_permit(domain: &Domain, conversation: Token) -> crate::CompletionPermit {
     run::completion_permit(domain, conversation)
+}
+
+/// Check one provider completion against exact run-wide arithmetic before its
+/// calls enter the session. Contract: domain/run.md, section 9.
+#[must_use]
+pub fn completion_overflow(
+    domain: &Domain,
+    conversation: Token,
+    price: u64,
+    usage: crate::Spend,
+) -> Option<crate::Failure> {
+    run::completion_overflow(domain, conversation, price, usage)
 }
