@@ -237,7 +237,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
     // A charter that can never fit is invalid, room or not: busy invites a
     // retry.
     if activation == 0 {
-        out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(Invalid::Conversation)) });
+        out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(Invalid::Activation)) });
         return;
     }
     if let Err(invalid) = charter::check(&charter, workspace.as_ref(), &env.limits) {

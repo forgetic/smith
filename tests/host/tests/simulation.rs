@@ -122,7 +122,7 @@ fn process_started_precedes_agent_admitted_and_start_is_first() {
 
 #[test]
 fn admission_refusals_preserve_separate_process_rights() {
-    for field in 0..5 {
+    for field in 0..6 {
         let mut world = World::new(field, limits());
         let mut request = start();
         let invalid = match field {
@@ -150,6 +150,10 @@ fn admission_refusals_preserve_separate_process_rights() {
                     conflicts: Box::new([Box::from(&b"file"[..])]),
                 }]);
                 Invalid::Directories
+            }
+            5 => {
+                request.activation = 0;
+                Invalid::Activation
             }
             _ => unreachable!(),
         };

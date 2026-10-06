@@ -475,7 +475,7 @@ fn spawn(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<R
 
 fn valid_start(start: &Start, limits: &Limits) -> Option<Invalid> {
     if start.activation == 0 {
-        return Some(Invalid::Limits);
+        return Some(Invalid::Activation);
     }
     if !within(&start.charter, limits.charter_bytes) {
         return Some(Invalid::Charter);

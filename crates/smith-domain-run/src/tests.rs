@@ -546,6 +546,21 @@ fn a_main_conversation_refused_at_its_entrance_refuses_the_run() {
 }
 
 #[test]
+fn zero_activation_has_its_own_refusal_before_admission() {
+    let mut harness = Harness::new(LIMITS);
+    let emitted = harness.step(Event::Start {
+        reply_to: ReplyTo::new(Token::new(81)),
+        worker: Token::new(81),
+        activation: 0,
+        charter: charter(),
+        workspace: Some(workspace()),
+        transcript: None,
+    });
+    assert_eq!(answered(emitted), (81, Answer::Refused(Refusal::Invalid(Invalid::Activation))));
+    assert_eq!((harness.domain.runs(), harness.domain.conversations()), (0, 0));
+}
+
+#[test]
 fn an_llm_that_stops_without_finishing_is_nudged_until_its_nudges_run_out() {
     let mut h = Harness::new(LIMITS);
     let (_, conversation) = h.running(1, 100);

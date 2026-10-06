@@ -319,6 +319,10 @@ pub enum Bounce {
 /// Start refused before process resources or payload copying (domain/host.md, sections 2–7).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Invalid {
+    /// A parent Start with activation zero is refused before process work.
+    /// Contract: domain/host.md, section 2.
+    Activation,
+
     /// Opaque charter too large (domain/host.md, sections 2–7).
     Charter,
     /// Opaque transcript too large (domain/host.md, sections 2–7).

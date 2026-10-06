@@ -1270,6 +1270,10 @@ pub enum Refusal {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Invalid {
+    /// A host Start with activation zero is refused before the run opens.
+    /// Contract: domain/run.md, sections 3.2 and 5.2.
+    Activation,
+
     /// A host convention path is empty, oversized, absolute or has unsafe
     /// components/bytes. The Start is refused before admission or any effects.
     /// Contract: domain/run.md, sections 3.1, 8.1, 12 and 14.
