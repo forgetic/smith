@@ -150,7 +150,7 @@ fn premature_waiting_wrong_wake_text_and_wrong_final_count_or_park_time_are_reje
 
 fn turn_fields(seen: &mut Seen) -> (&mut u32, &mut Option<Token>, &mut smith_domain::session::record::Turn) {
     match seen {
-        Seen::Turn { number, read, turn } => (number, read, turn),
+        Seen::Turn { number, read, turn, .. } => (number, read, turn),
         Seen::Admitted
         | Seen::Input { .. }
         | Seen::Bounced { .. }

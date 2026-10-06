@@ -64,7 +64,7 @@ pub(crate) struct Offered {
 /// asked for may write, which the widest the asker may give them do.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-pub(crate) fn spec(opening: Opening) -> Option<(Spec, Offered)> {
+pub(crate) fn spec(opening: Opening, receiving: Budget) -> Option<(Spec, Offered)> {
     let Opening {
         host_tools,
         llm,
@@ -102,7 +102,7 @@ pub(crate) fn spec(opening: Opening) -> Option<(Spec, Offered)> {
     if families.agents {
         delegated.push(llm::Descriptor { ticket: SUB_AGENT, effect: writes(families) }).expect("room for both");
     }
-    let run::Budget { turns, input, output, cache_read, cache_write, time } = budget;
+    let run::Budget { turns, spend: _, time } = budget;
     let spec = Spec {
         endpoint: llm::Endpoint(llm.endpoint.0),
         model: llm.model,
@@ -111,7 +111,7 @@ pub(crate) fn spec(opening: Opening) -> Option<(Spec, Offered)> {
         delegated: delegated.into_boxed(),
         prompt,
         max_tokens: llm.max_tokens,
-        budget: Budget { turns, input, output, cache_read, cache_write, time },
+        budget: Budget { turns, time, ..receiving },
     };
     Some((spec, offered))
 }
@@ -180,7 +180,7 @@ pub(crate) const fn stop(stop: Yield) -> run::Stop {
 /// What `turns` completions that used `usage` spent.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-pub(crate) const fn spend(turns: u32, usage: llm::Usage) -> Spend {
+pub(crate) const fn spend(turns: u32, usage: llm::Usage, usage_overflow: bool) -> Spend {
     let llm::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens } = usage;
     Spend {
         turns,
@@ -188,6 +188,9 @@ pub(crate) const fn spend(turns: u32, usage: llm::Usage) -> Spend {
         output: output_tokens,
         cache_read: cache_read_tokens,
         cache_write: cache_write_tokens,
+        units: 0,
+        units_overflow: false,
+        usage_overflow,
     }
 }
 
@@ -201,7 +204,8 @@ pub(crate) fn end(end: session::End) -> run::End {
         session::End::TranscriptRefused { reason } => {
             run::End::TranscriptRefused { reason: transcript_refusal(reason) }
         }
-        session::End::PriceOverflow => unreachable!("transitional zero prices cannot overflow"),
+        session::End::PriceOverflow => run::End::PriceOverflow,
+        session::End::UsageOverflow => run::End::UsageOverflow,
         session::End::Busy => run::End::Busy,
         session::End::Invalid => run::End::Invalid,
         session::End::Closed => run::End::Closed,
@@ -209,20 +213,20 @@ pub(crate) fn end(end: session::End) -> run::End {
             failure: completion_failure(failure),
             evidence: completion_evidence(evidence),
         }),
-        session::End::Budget { spent } => run::End::Budget(exhausted(spent)),
+        session::End::Budget { spent } => exhausted(spent),
         session::End::TranscriptFull => run::End::Fault(run::Fault::ContextFull),
     }
 }
 
-fn exhausted(spent: Dimension) -> run::Exhausted {
+fn exhausted(spent: Dimension) -> run::End {
     match spent {
-        Dimension::Unit => unreachable!("the legacy run opens only version-one sessions"),
-        Dimension::Turns => run::Exhausted::Turns,
-        Dimension::Input => run::Exhausted::Input,
-        Dimension::Output => run::Exhausted::Output,
-        Dimension::CacheRead => run::Exhausted::CacheRead,
-        Dimension::CacheWrite => run::Exhausted::CacheWrite,
-        Dimension::Time => run::Exhausted::Time,
+        Dimension::Unit => run::End::Budget(run::Exhausted::Spend),
+        Dimension::Turns => run::End::Budget(run::Exhausted::Turns),
+        Dimension::Input => run::End::Receiving(run::ReceivingLimit::Input),
+        Dimension::Output => run::End::Receiving(run::ReceivingLimit::Output),
+        Dimension::CacheRead => run::End::Receiving(run::ReceivingLimit::CacheRead),
+        Dimension::CacheWrite => run::End::Receiving(run::ReceivingLimit::CacheWrite),
+        Dimension::Time => run::End::Budget(run::Exhausted::Time),
     }
 }
 

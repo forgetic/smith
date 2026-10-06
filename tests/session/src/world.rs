@@ -998,8 +998,12 @@ impl World {
             agent::Request::Turn { .. } | agent::Request::Priced { .. } => unreachable!("v1 scenarios"),
             agent::Request::Opened { opener, session } => self.opened(opener.raw(), session),
             agent::Request::Yielded { opener, stop, text } => self.yielded(opener.raw(), stop, text),
-            agent::Request::Used { opener, usage } => self.used(opener.raw(), usage),
-            agent::Request::Ended { opener, end, turns, usage } => {
+            agent::Request::Used { opener, usage, usage_overflow } => {
+                assert!(!usage_overflow, "the original V1 peer stays within representable raw usage");
+                self.used(opener.raw(), usage);
+            }
+            agent::Request::Ended { opener, end, turns, usage, usage_overflow } => {
+                assert!(!usage_overflow, "the original V1 terminal attests its exact accumulated usage");
                 self.ended(opener.raw(), Ended { end, turns, usage });
             }
             agent::Request::Complete { owner, prompt, timeout, .. } => {
@@ -1139,7 +1143,9 @@ impl World {
         let session = self.sessions.get(&opener).expect("a session ends for an open that was sent");
         assert!(session.ended.is_none(), "a session ends once");
         match ended.end {
-            agent::End::TranscriptRefused { .. } | agent::End::PriceOverflow => unreachable!("v1 scenarios"),
+            agent::End::TranscriptRefused { .. } | agent::End::PriceOverflow | agent::End::UsageOverflow => {
+                unreachable!("v1 scenarios")
+            }
             agent::End::Busy | agent::End::Invalid => {
                 assert!(session.session.is_none(), "a session refused at the entrance never opened");
             }
@@ -1708,6 +1714,8 @@ fn ended_run(event: &agent::Event) -> Option<Token> {
         | agent::Event::Continue { .. }
         | agent::Event::Close { .. }
         | agent::Event::Completed { .. }
+        | agent::Event::BudgetDenied { .. }
+        | agent::Event::UnsentClosed { .. }
         | agent::Event::Failed { .. }
         | agent::Event::Cancelled { .. }
         | agent::Event::Done { .. } => None,
@@ -1716,9 +1724,9 @@ fn ended_run(event: &agent::Event) -> Option<Token> {
 
 fn describe_agent_event(event: &agent::Event) -> String {
     match event {
-        agent::Event::AnswerCancelledV2 { owner, spent } => format!("cancelled v2 {} {spent}", owner.raw()),
+        agent::Event::AnswerCancelledV2 { owner, spent, .. } => format!("cancelled v2 {} {spent}", owner.raw()),
         agent::Event::OpenV2 { opener, spec } => format!("open v2 {} {spec:?}", opener.raw()),
-        agent::Event::AnsweredV2 { owner, text, error, spent } => {
+        agent::Event::AnsweredV2 { owner, text, error, spent, .. } => {
             format!("answered v2 {} {text:?} {error} {spent}", owner.raw())
         }
         agent::Event::Open { opener, spec } => {
@@ -1731,6 +1739,8 @@ fn describe_agent_event(event: &agent::Event) -> String {
         agent::Event::Completed { owner, completion } => {
             format!("completed {} {:?} with {} blocks", owner.raw(), completion.stop, completion.content.len())
         }
+        agent::Event::UnsentClosed { owner } => format!("unsent closed {}", owner.raw()),
+        agent::Event::BudgetDenied { owner, reason } => format!("budget denied {} {reason:?}", owner.raw()),
         agent::Event::Failed { owner, failure, .. } => format!("failed {} {failure:?}", owner.raw()),
         agent::Event::Cancelled { owner } => format!("cancelled {}", owner.raw()),
         agent::Event::Done { owner, done } => format!("done {} {done:?}", owner.raw()),
@@ -1742,13 +1752,15 @@ fn describe_agent_event(event: &agent::Event) -> String {
 fn describe_agent_request(request: &agent::Request) -> String {
     match request {
         agent::Request::Turn { opener, turn } => format!("turn {} {turn:?}", opener.raw()),
-        agent::Request::Priced { opener, spent, overflow } => format!("priced {} {spent} {overflow}", opener.raw()),
+        agent::Request::Priced { opener, spent, overflow, own_spent, own_overflow } => {
+            format!("priced {} {spent} {overflow} own {own_spent} {own_overflow}", opener.raw())
+        }
         agent::Request::Opened { opener, session } => format!("opened {} as {}", opener.raw(), session.raw()),
         agent::Request::Yielded { opener, stop, text } => {
             format!("yielded {} {stop:?} {:?}", opener.raw(), String::from_utf8_lossy(text))
         }
-        agent::Request::Used { opener, usage } => format!("used {} {usage:?}", opener.raw()),
-        agent::Request::Ended { opener, end, turns, usage } => {
+        agent::Request::Used { opener, usage, .. } => format!("used {} {usage:?}", opener.raw()),
+        agent::Request::Ended { opener, end, turns, usage, .. } => {
             format!("ended {} {end:?} after {turns} turns, {usage:?}", opener.raw())
         }
         agent::Request::Complete { owner, prompt, timeout, .. } => {

@@ -24,7 +24,7 @@ fn reply(world: &mut World, callback: u64, response: Reply) {
     world.event(Event::Answer { agent: world.agent(), call: Token::new(callback), reply: response });
 }
 fn last(world: &mut World, result: RunResult, turns: u32, spent: u64) {
-    world.up(Up::Answer { answer: Answer { turns, spent, result } });
+    world.up(Up::Answer { answer: Answer { turns, spent, spend_overflow: false, usage_overflow: false, result } });
 }
 fn finish(world: &mut World) {
     last(world, RunResult::Parked, 0, 0);
@@ -62,7 +62,16 @@ fn receipts(text: &[u8]) -> Delivered {
     Delivered::new(Box::new([Receipt::new(0, Box::from(text)).expect("valid receipt")])).expect("valid sealed delivery")
 }
 fn turn(world: &mut World, number: u32, spent: u64, read: Option<Token>, bytes: usize) {
-    world.up(Up::Turn { turn: Turn { number, spent, read, body: vec![b't'; bytes].into_boxed_slice() } });
+    world.up(Up::Turn {
+        turn: Turn {
+            number,
+            spent,
+            spend_overflow: false,
+            usage_overflow: false,
+            read,
+            body: vec![b't'; bytes].into_boxed_slice(),
+        },
+    });
 }
 fn message(world: &mut World, name: u64, bytes: usize) {
     world.event(Event::Message {
@@ -229,6 +238,12 @@ fn a_run_may_fail_as_it_reports_it() {
     for failure in [
         RunFailure::Model(ModelFault::Provider),
         RunFailure::Budget(smith_host_domain::Exhausted::Time),
+        RunFailure::Budget(smith_host_domain::Exhausted::Turns),
+        RunFailure::Budget(smith_host_domain::Exhausted::Spend),
+        RunFailure::Receiving(smith_host_domain::ReceivingLimit::Input),
+        RunFailure::Receiving(smith_host_domain::ReceivingLimit::Output),
+        RunFailure::Receiving(smith_host_domain::ReceivingLimit::CacheRead),
+        RunFailure::Receiving(smith_host_domain::ReceivingLimit::CacheWrite),
         RunFailure::Policy(smith_host_domain::Policy::Unfinished { nudges: 2, rejected: 3 }),
         RunFailure::Stale,
     ] {
@@ -320,7 +335,16 @@ fn an_overflow_name_is_fenced_until_its_busy_answer_terminal_then_reusable() {
 fn payloads_beyond_the_limits_break_the_rules() {
     for record in [
         Up::Fact { body: vec![0; 65].into_boxed_slice() },
-        Up::Turn { turn: Turn { number: 1, spent: 0, read: None, body: vec![0; 65].into_boxed_slice() } },
+        Up::Turn {
+            turn: Turn {
+                number: 1,
+                spent: 0,
+                spend_overflow: false,
+                usage_overflow: false,
+                read: None,
+                body: vec![0; 65].into_boxed_slice(),
+            },
+        },
         Up::Call {
             call: Token::new(20),
             name: CallName { completion: 1, position: 1 },
@@ -331,6 +355,8 @@ fn payloads_beyond_the_limits_break_the_rules() {
             answer: Answer {
                 turns: 0,
                 spent: 0,
+                spend_overflow: false,
+                usage_overflow: false,
                 result: RunResult::Accepted { outcome: vec![0; 129].into_boxed_slice() },
             },
         },
@@ -1024,7 +1050,9 @@ fn cancelled_and_draining_paths_keep_work_and_drop_answers_only_after_a_reported
     world.live();
     world.at(10);
     assert_eq!(world.seen.fault, Some(Fault::NoProgress));
-    world.up(Up::Answer { answer: Answer { turns: 0, spent: 10, result: RunResult::Parked } });
+    world.up(Up::Answer {
+        answer: Answer { turns: 0, spent: 10, spend_overflow: false, usage_overflow: false, result: RunResult::Parked },
+    });
     assert!(world.seen.answer.is_none());
     world.at(12);
     world.up(Up::Fact { body: Box::new([]) });

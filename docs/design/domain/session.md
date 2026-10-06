@@ -165,26 +165,70 @@ independently. No logical reservation allocates bytes or abandons a terminal.
 
 ## 6. Budgets and prices
 
-- **Budgets:** turns, tokens (input, output, cache reads and writes, as
-  the provider counts them), spend in the host's unit, and time, given by
-  the opener at open; bytes held, against the agent's limits. Crossing a
-  budget stops the next completion, not the turn in flight: the calls of
-  the completion that crossed it still run and settle. Time is the
-  exception: when it runs out, the session closes at once.
-- **Prices** are integer input, cached and output amounts per positive
-  `unit` tokens. New input and cache writes use the input rate; cache
-  reads use the cached rate. The combined rational charge of **each
-  completion** is rounded upwards once, using checked arithmetic; the
-  result and the cumulative spend must fit `u64`. Overflow is a typed
-  failure ending the session with a report of it, never a saturated
-  charge.
-- **Spend is cumulative** within an activation, sub-agents included. A
-  delegated terminal, answered or withdrawn, carries the sub-agent's
-  cumulative spend once under its call's identity; a duplicate or stale
-  delivery cannot charge it again. Restoring history does not charge old
-  activations again. A run counts each child once, through the parent's
-  terminal answer, never adding both. Enforcing one aggregate budget
-  across concurrently open sessions is the run's (run.md, section 9).
+The opener supplies turns, per-kind receiving token allowances, scalar spend
+and wall time, all within the session's receiving limits; bytes held obey the
+agent's ownership bounds. A finite turn, token or scalar crossing stops the next
+completion, preserving the calls of the completion in flight until their real
+terminals. Time expiry closes at once. Run-wide scalar spend and turn policy
+also gates the next actual provider request across concurrently open sessions
+(domain/run.md, section 9).
+
+Prices are integer input, cached and output amounts per positive `unit` tokens.
+Fresh input and cache writes use the input rate; cache reads use the cached rate.
+Output uses the output rate. The combined rational charge of each completion is
+rounded upwards once with checked arithmetic and must fit `u64`. Zero rates are
+valid; a zero divisor is refused before work. Session is the sole owner of this
+pricing calculation. Skein's provider-neutral fresh-input usage excludes both
+cached counters, so no cached input is charged twice.
+
+Recording keeps two independently checked cumulative currency sums:
+`own_spent` for this session's completions and inclusive `spent` for those plus
+its descendants. Each actual completion updates both; an answered, failed or
+withdrawn child terminal updates only inclusive spend. The existing call-identity
+and terminal guard runs before charging: duplicates, retired identities and
+stale generations change neither sum. Priced reports precede actual Usage and
+Turn routing. The run adds only monotonic own deltas to its global financial
+total; the parent uses a child's inclusive bill for its local share and Turn.
+Neither route adds a child's cost twice. Both sums start at zero for each
+activation; restored historical Turn charges remain data and are not spent
+again.
+
+Own and inclusive currency overflow are separate sticky attestations. A failed
+addition keeps the last representable prefix; a valid own charge still advances
+when the inclusive sum is already unknown. Unknown delegated bills carry their
+prefix and spend-overflow attestation through answered and withdrawn terminals.
+Raw cumulative usage similarly checks all four additions atomically, retaining
+the complete prior prefix with a sticky usage-overflow attestation. Per-completion
+Used and Turn usage remain actual and exact. Used carries that exact completion
+alongside an attestation about its cumulative receiver; Ended and directly
+derived cumulative facts retain the prefix and attestation instead of claiming
+a saturated sum is exact.
+
+A structurally valid accepted completion is told and its sequence advanced once
+before returning PriceOverflow or UsageOverflow; the Turn carries its inclusive
+spend-overflow attestation. If both fail, PriceOverflow takes precedence. These
+hard failures differ from ordinary finite budget exhaustion. Malformed origin,
+transcript or receiving records still follow their separate refusal paths and
+are not invented Turns.
+
+Root may deny an unsent next completion because another session exhausted the
+run-wide scalar or turn allowance. The typed denial applies only to the matching
+live Calling owner, before any Client or external effect. Session releases its
+reserved provider credit, closes the kit and emits Ended after the actual
+KitClosed terminal. It emits no Usage, price, Turn, retry or provider Cancel;
+a repeated or stale owner and a closed session are inert. This is distinct from
+a provider failure and from time or cancellation. If a run or conversation is
+already closing before root publishes its queued completion, root sends the
+separate `UnsentClosed` companion through the same live Calling-owner and credit
+release path. It ends as Closed without changing the run's authoritative stop.
+It applies before the deferred session Close; a Close already applied still owes
+its actual admitted provider terminal and is inert to the unsent companion. The denied child's real terminal bill still travels through deferred Return.
+The parent emits its Turn after all its admitted calls settle; denial itself
+creates no Turn.
+
+The typed 05s4 budget increment is tracked in
+`docs/development/migration-05s4-budget.md`. First-version contraction remains a
+separate increment; this contract describes the second recording entrance.
 
 ## 7. Sub-agents
 

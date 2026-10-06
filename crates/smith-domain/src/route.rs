@@ -7,7 +7,7 @@
 
 use alloc::boxed::Box;
 
-use skein_lib::{Env, Id, Queue, ReplyTo, Token};
+use skein_lib::{Duration, Env, Id, Queue, ReplyTo, Token};
 use smith_domain_run::{self as run, Spend};
 use smith_domain_session as session;
 
@@ -124,10 +124,16 @@ pub(crate) fn deliver(domain: &mut Domain, env: &Env<Limits>, handoff: Handoff) 
         Handoff::Answer { owner } => {
             let flight = domain.flights.remove(&owner).expect("a call is in flight until it is answered");
             match flight.answer {
-                Due::Answered { feedback } => {
-                    session::Event::AnsweredV2 { owner, text: feedback.text, error: feedback.error, spent: 0 }
+                Due::Answered { feedback, spent, spend_overflow } => session::Event::AnsweredV2 {
+                    owner,
+                    text: feedback.text,
+                    error: feedback.error,
+                    spent,
+                    spend_overflow,
+                },
+                Due::Cancelled { spent, spend_overflow } => {
+                    session::Event::AnswerCancelledV2 { owner, spent, spend_overflow }
                 }
-                Due::Cancelled => session::Event::AnswerCancelledV2 { owner, spent: 0 },
                 Due::Waiting => unreachable!("a call is on the ready list once the run has returned it"),
             }
         }
@@ -253,10 +259,13 @@ fn session_step(domain: &mut Domain, env: &Env<Limits>, event: session::Event) {
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Request, out: &mut Queue<Request>) {
     let event = match request {
-        session::Request::Priced { spent, overflow, .. } => {
-            assert!(spent == 0 && !overflow, "transitional zero prices preserve token budgets separately");
-            return;
-        }
+        session::Request::Priced { opener, spent, overflow, own_spent, own_overflow } => run::Event::Priced {
+            conversation: opener,
+            own_spent,
+            subtree_spent: spent,
+            own_overflow,
+            subtree_overflow: overflow,
+        },
         session::Request::Turn { opener, turn } => {
             let id = peer(domain, opener);
             if !domain.peers.get(id).expect("main binding lives through Turn").is_main() {
@@ -275,41 +284,15 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
             max_completion_blocks,
             max_failure_bytes,
         } => {
-            let id = *domain.sessions.get(&owner).expect("a session asks for completions once it has opened");
-            let peer = domain.peers.get_mut(id).expect("a peer lives as its session");
-            // What the last completion asked and the session did not dispatch,
-            // it never will.
-            let forgotten = peer.forget_asks(&env.limits.session);
-            domain.tickets = domain.tickets.saturating_sub(forgotten);
-            let account = peer.account;
-            let grant = match domain.grants.get(&account) {
-                Some(held) if held.expires > env.now => held.name,
-                Some(_) | None => {
-                    return session_step(
-                        domain,
-                        env,
-                        session::Event::Failed {
-                            owner,
-                            failure: crate::llm::Failure::Unauthorized,
-                            evidence: crate::llm::Evidence::Unsent,
-                            detail: Box::default(),
-                        },
-                    );
-                }
-            };
-            let prompt = peer.prompt(prompt);
-            let inserted = domain.completions.insert(owner, grant).expect("one completion per session");
-            assert!(inserted.is_none(), "the previous completion ended");
-            return out.push(Request::Complete {
+            let pending = PendingCompletion {
                 owner,
-                grant,
                 prompt,
                 timeout,
                 max_completion_bytes,
                 max_completion_blocks,
                 max_failure_bytes,
-                decoded_call_bytes: env.limits.decoded_call_bytes,
-            });
+            };
+            return complete(domain, env, pending, out);
         }
         session::Request::Cancel { owner } => return out.push(Request::Cancel { owner }),
         session::Request::Io { owner, op, deadline } => return out.push(Request::Io { owner, op, deadline }),
@@ -328,13 +311,17 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
             domain.tickets = domain.tickets.saturating_sub(forgotten);
             run::Event::Yielded { conversation: opener, stop: translate::stop(stop), text }
         }
-        session::Request::Used { opener, usage } => {
-            run::Event::Used { conversation: opener, spend: translate::spend(1, usage) }
+        session::Request::Used { opener, usage, usage_overflow } => {
+            run::Event::Used { conversation: opener, spend: translate::spend(1, usage, usage_overflow) }
         }
-        session::Request::Ended { opener, end, turns, usage } => {
+        session::Request::Ended { opener, end, turns, usage, usage_overflow } => {
             let id = peer(domain, opener);
             free(domain, id);
-            run::Event::Ended { conversation: opener, end: translate::end(end), spend: translate::spend(turns, usage) }
+            run::Event::Ended {
+                conversation: opener,
+                end: translate::end(end),
+                spend: translate::spend(turns, usage, usage_overflow),
+            }
         }
         session::Request::Delegate { owner, opener, call, deadline, origin } => {
             delegated(domain, owner, opener, call, deadline, origin)
@@ -345,7 +332,7 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
             match &flight.answer {
                 Due::Waiting => {}
                 // The answer won the race: the run has returned it.
-                Due::Answered { .. } | Due::Cancelled => return,
+                Due::Answered { .. } | Due::Cancelled { .. } => return,
             }
             let conversation = domain.peers.get(flight.peer).expect("a peer outlives its calls").conversation;
             run::Event::Withdraw { conversation, call: owner }
@@ -420,48 +407,7 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
         }
         run::Request::Abort { owner } => return out.push(Request::Abort { owner }),
         run::Request::Open { conversation, opening } => {
-            let account = opening.llm.account;
-            let dialect = opening.llm.dialect;
-            let transcript = match opening.transcript {
-                Some(binding) => {
-                    let context =
-                        domain.starts.get_mut(Id::from_token(binding)).expect("root issued the restore binding");
-                    match context.refused.take() {
-                        Some(reason) => {
-                            return run_step(
-                                domain,
-                                env,
-                                run::Event::Ended {
-                                    conversation,
-                                    end: run::End::TranscriptRefused { reason },
-                                    spend: Spend::ZERO,
-                                },
-                            );
-                        }
-                        None => context.transcript.take(),
-                    }
-                }
-                None => None,
-            };
-            let Some((spec, offered)) = translate::spec(opening) else {
-                // Refused at the conversations' entrance, in the run's terms.
-                let ended = run::Event::Ended { conversation, end: run::End::Invalid, spend: Spend::ZERO };
-                return run_step(domain, env, ended);
-            };
-            let peer = Peer::new(conversation, account, offered, &env.limits.session);
-            let id = domain.peers.insert(peer).expect("a peer for every conversation the run has");
-            let fresh = domain.conversations.insert(conversation, id).expect("a peer for every conversation");
-            assert!(fresh.is_none(), "the run names its conversations apart");
-            session::Event::OpenV2 {
-                opener: conversation,
-                spec: session::record::Opening {
-                    spec,
-                    dialect,
-                    prices: session::record::Prices { input: 0, cached: 0, output: 0, unit: 1 },
-                    budget: env.limits.session.spend,
-                    transcript,
-                },
-            }
+            return open(domain, env, conversation, opening);
         }
         run::Request::Say { peer, text } => session::Event::Continue { session: peer, content: text },
         run::Request::Close { peer } => {
@@ -471,17 +417,141 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
             }
             return;
         }
-        run::Request::Return { call, result } => {
+        run::Request::Return { call, result, spent, spend_overflow } => {
             let flight = domain.flights.get_mut(&call).expect("the run returns a call in flight");
             if flight.withdrawn && result == run::Returned::Cancelled {
-                flight.answer = Due::Cancelled;
+                flight.answer = Due::Cancelled { spent, spend_overflow };
             } else {
                 let feedback = crate::feedback(result, env.limits.session.delegated_result_bytes)
                     .expect("compatible canonical receiving cap was checked before any effect");
-                flight.answer = Due::Answered { feedback };
+                flight.answer = Due::Answered { feedback, spent, spend_overflow };
             }
             return domain.ready.defer(Handoff::Answer { owner: call });
         }
+    };
+    session_step(domain, env, event);
+}
+
+/// Unsent session request moved into one concrete root admission cell. Its
+/// source prompt already owns the receiving reservation; no extra copy is made
+/// until the pure run gate accepts (domain/run.md, sections 9, 10 and 14).
+struct PendingCompletion {
+    owner: Token,
+    prompt: session::llm::Prompt,
+    timeout: Duration,
+    max_completion_bytes: u64,
+    max_completion_blocks: u32,
+    max_failure_bytes: u32,
+}
+
+fn complete(domain: &mut Domain, env: &Env<Limits>, pending: PendingCompletion, out: &mut Queue<Request>) {
+    let PendingCompletion { owner, prompt, timeout, max_completion_bytes, max_completion_blocks, max_failure_bytes } =
+        pending;
+    let id = *domain.sessions.get(&owner).expect("a session asks for completions once it has opened");
+    let conversation = domain.peers.get(id).expect("a peer lives as its session").conversation;
+    // Admission precedes grant lookup, prompt cloning, lease retention
+    // and every actual Client effect. This completion is still unsent.
+    match run::completion_permit(&domain.run, conversation) {
+        run::CompletionPermit::Allowed => {}
+        run::CompletionPermit::Denied(exhausted) => {
+            let reason = match exhausted {
+                run::Exhausted::Turns => session::BudgetDenial::Turns,
+                run::Exhausted::Spend => session::BudgetDenial::Spend,
+                run::Exhausted::Time => unreachable!("time closes the run through its alarm"),
+            };
+            return session_step(domain, env, session::Event::BudgetDenied { owner, reason });
+        }
+        run::CompletionPermit::Closing => {
+            return session_step(domain, env, session::Event::UnsentClosed { owner });
+        }
+    }
+    let peer = domain.peers.get_mut(id).expect("a peer lives as its session");
+    // What the last completion asked and the session did not dispatch,
+    // it never will.
+    let forgotten = peer.forget_asks(&env.limits.session);
+    domain.tickets = domain.tickets.saturating_sub(forgotten);
+    let account = peer.account;
+    let grant = match domain.grants.get(&account) {
+        Some(held) if held.expires > env.now => held.name,
+        Some(_) | None => {
+            return session_step(
+                domain,
+                env,
+                session::Event::Failed {
+                    owner,
+                    failure: crate::llm::Failure::Unauthorized,
+                    evidence: crate::llm::Evidence::Unsent,
+                    detail: Box::default(),
+                },
+            );
+        }
+    };
+    let prompt = peer.prompt(prompt);
+    let inserted = domain.completions.insert(owner, grant).expect("one completion per session");
+    assert!(inserted.is_none(), "the previous completion ended");
+    out.push(Request::Complete {
+        owner,
+        grant,
+        prompt,
+        timeout,
+        max_completion_bytes,
+        max_completion_blocks,
+        max_failure_bytes,
+        decoded_call_bytes: env.limits.decoded_call_bytes,
+    });
+}
+
+/// Host rate/share translation and concrete restore admission precede effects.
+/// Session alone prices, while token ceilings remain receiving limits.
+/// Contract: domain/run.md, sections 3, 9, 13 and 14; domain/session.md, section 6.
+fn open(domain: &mut Domain, env: &Env<Limits>, conversation: Token, opening: run::Opening) {
+    let account = opening.llm.account;
+    let dialect = opening.llm.dialect;
+    let prices = opening.llm.prices;
+    let budget = opening.budget.spend;
+    let transcript = match opening.transcript {
+        Some(binding) => {
+            let context = domain.starts.get_mut(Id::from_token(binding)).expect("root issued the restore binding");
+            match context.refused.take() {
+                Some(reason) => {
+                    return run_step(
+                        domain,
+                        env,
+                        run::Event::Ended {
+                            conversation,
+                            end: run::End::TranscriptRefused { reason },
+                            spend: Spend::ZERO,
+                        },
+                    );
+                }
+                None => context.transcript.take(),
+            }
+        }
+        None => None,
+    };
+    let Some((spec, offered)) = translate::spec(opening, env.limits.session.budget) else {
+        // Refused at the conversations' entrance, in the run's terms.
+        let ended = run::Event::Ended { conversation, end: run::End::Invalid, spend: Spend::ZERO };
+        return run_step(domain, env, ended);
+    };
+    let peer = Peer::new(conversation, account, offered, &env.limits.session);
+    let id = domain.peers.insert(peer).expect("a peer for every conversation the run has");
+    let fresh = domain.conversations.insert(conversation, id).expect("a peer for every conversation");
+    assert!(fresh.is_none(), "the run names its conversations apart");
+    let event = session::Event::OpenV2 {
+        opener: conversation,
+        spec: session::record::Opening {
+            spec,
+            dialect,
+            prices: session::record::Prices {
+                input: prices.input,
+                cached: prices.cached,
+                output: prices.output,
+                unit: prices.unit,
+            },
+            budget,
+            transcript,
+        },
     };
     session_step(domain, env, event);
 }
@@ -520,11 +590,7 @@ fn granted(domain: &mut Domain, env: &Env<Limits>, grant: crate::Grant) {
         Some(old) => old.rejected,
         None => None,
     };
-    let entry = Credential {
-        name: grant.name,
-        expires: env.now.saturating_add(skein_lib::Duration::from_nanos(valid)),
-        rejected,
-    };
+    let entry = Credential { name: grant.name, expires: env.now.saturating_add(Duration::from_nanos(valid)), rejected };
     if domain.grants.contains_key(&grant.name.account) || domain.grants.len() < env.limits.accounts {
         let inserted = domain.grants.insert(grant.name.account, entry);
         assert!(inserted.is_ok(), "known account or checked room");

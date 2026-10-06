@@ -72,12 +72,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let Limits { run: run_limits, session: session_limits, accounts: _, skew: _, decoded_call_bytes: _ } = limits;
     let budget = run_limits.budget;
     let ceiling = session_limits.budget;
-    let fits = budget.turns <= ceiling.turns
-        && budget.input <= ceiling.input
-        && budget.output <= ceiling.output
-        && budget.cache_read <= ceiling.cache_read
-        && budget.cache_write <= ceiling.cache_write
-        && budget.time <= ceiling.time;
+    let fits = budget.turns <= ceiling.turns && budget.spend <= session_limits.spend && budget.time <= ceiling.time;
     if !fits
         || run_limits.conversations > session_limits.sessions
         || run_limits.max_tokens > session_limits.max_tokens
@@ -235,20 +230,26 @@ pub(crate) const fn session_out(limits: &Limits) -> u32 {
 /// it is for the sessions, and one for each hand-off the run makes at once in
 /// answer to what that step sent it (an `Open` or a `Say`: as many as the run
 /// emits requests in each of its steps). An entry point for the run takes no
-/// more: one hand-off for each request its step emits.
+/// more: one hand-off for each request its step emits. Each such step may
+/// request one completion denied before publication, adding one synchronous
+/// unsent settlement. Doubling covers that extra step; its Return/Close stays
+/// on Ready and cannot recurse through the subtree.
 ///
 /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
 pub(crate) const fn session_steps(limits: &Limits) -> u32 {
     let sent = session::max_to_opener(&limits.session);
-    1_u32.saturating_add(sent.saturating_mul(run::MAX_OUT))
+    1_u32.saturating_add(sent.saturating_mul(run::MAX_OUT)).saturating_mul(2)
 }
 
 /// The most steps an entry point takes of the run: one for each request the
 /// session's first step sends it, and, for each hand-off the run makes at once
 /// in answer, one for each request the session it hands off to sends it, or a
 /// single one if the hand-off is refused in the run's terms without a
-/// session. Hand-offs end there: a session just opened or continued calls
-/// nothing and does not yield. An entry point for the run takes fewer: its
+/// session. An unsent completion denial adds one synchronous session terminal
+/// and its run notice. Child Return and Close stay deferred on Ready, so this
+/// adds at most one extra pair, rather than recursing through the subtree.
+/// Doubling accounts for that bounded pair. A session just opened or continued
+/// calls nothing and does not yield. An entry point for the run takes fewer: its
 /// own step, and those for what the sessions it hands off to send it.
 ///
 /// It counts what a session step sends its opener, never what it sends its
@@ -259,7 +260,7 @@ pub(crate) const fn session_steps(limits: &Limits) -> u32 {
 pub(crate) const fn run_steps(limits: &Limits) -> u32 {
     let sent = session::max_to_opener(&limits.session);
     let at_once = sent.saturating_mul(run::MAX_OUT);
-    sent.saturating_add(at_once.saturating_mul(sent))
+    sent.saturating_add(at_once.saturating_mul(sent)).saturating_mul(2)
 }
 
 /// History payload and separate allocated record/message envelopes. The source

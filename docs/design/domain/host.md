@@ -191,8 +191,9 @@ Parent-stage call's reserved reply ownership; this and the separate withdrawal
 snapshot are priced in `worst_case`.
 
 A final `Delivered` must match real proof whose response was issued, preserving
-the complete `Model(Fault)`, `Budget(Exhausted)`, `Policy(Unfinished)`,
-`Cancelled` or `Stale` stop payload and cumulative spend. For Cancelled, the kit
+the complete `Model(Fault)`, `Budget(Exhausted)`, `Receiving(ReceivingLimit)`,
+`PriceOverflow`, `UsageOverflow`, `Policy(Unfinished)`, `Cancelled` or `Stale`
+stop payload and attested cumulative spend. For Cancelled, the kit
 also checks that its Cancel was issued before that response. It does not infer a
 private agent stop decision or actual Cancel receipt from a parent's Stop.
 Therefore it cannot require Delivered for every call pending at parent Stop.
@@ -253,8 +254,10 @@ observations; dropped facts saturate a counter and change no decision.
   drained, and further out-of-credit or malformed traffic is a rules failure.
   The independent wall clock never pauses.
 - **Fenced metadata.** Turns begin at one, are consecutive and carry
-  nondecreasing cumulative spend. Final count matches exactly, and final spend
-  cannot fall. A read watermark advances only through the known sent-message
+  nondecreasing cumulative scalar spend. Currency and raw-usage overflow
+  attestations are sticky: an unknown total is a representable prefix, never an
+  exact charge. Neither Turn nor Answer may clear an observed attestation. Final
+  count matches exactly, and final representable spend cannot fall. A read watermark advances only through the known sent-message
   prefix; queued, unknown and regressing names fail the channel rules.
 
 ## 7. Credentials
@@ -326,11 +329,15 @@ of root Answer, process exit, tree emptiness and channel EOF. Committing turn 2
 cannot commit turn 1. The composition world carries complete typed bodies via a
 test-only full-record encoding; it does not claim a production transcript codec.
 
-Current root record prices are zero under the explicit transitional contract in
-domain/run.md, section 9. Channel scalar spend uses that actual record value;
-typed run token spend is observed separately. The composition does not invent a
-token-to-price conversion. Waiting follows the real settled run notice; the kit
-may pause no-progress monitoring then, while its independent wall clock runs.
+Root Turn metadata uses the actual global run scalar units and both overflow
+attestations from domain/run.md, section 9. The complete typed Turn body keeps
+its own inclusive session charge, exact per-completion usage and transcript
+sequence. Those are distinct views when parallel children have outstanding
+bills; neither the protocol face nor the host kit reprices tokens or adds a
+child bill. Waiting follows the real settled run notice; the kit may pause
+no-progress monitoring then, while its independent wall clock runs. Budget
+implementation and gate status are recorded in
+`docs/development/migration-05s4-budget.md`.
 
 ## 10. The world
 

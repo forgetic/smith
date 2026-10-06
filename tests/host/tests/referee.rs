@@ -115,6 +115,8 @@ fn actual_agent_interruption_plus_successful_landing_requires_full_final_evidenc
     let answer = Answer {
         turns: 0,
         spent: 10,
+        spend_overflow: false,
+        usage_overflow: false,
         result: RunResult::Delivered { name: name(), receipts: receipts(), stopped: RunFailure::Cancelled },
     };
     world.up(Up::Answer { answer });
@@ -125,6 +127,8 @@ fn actual_agent_interruption_plus_successful_landing_requires_full_final_evidenc
         Answer {
             turns: 0,
             spent: 10,
+            spend_overflow: false,
+            usage_overflow: false,
             result: RunResult::Delivered { name: name(), receipts: receipts(), stopped: RunFailure::Cancelled }
         },
         "real last-word payload survives unchanged"
@@ -146,6 +150,8 @@ fn actual_landing_before_later_agent_stop_has_no_interrupted_requirement() {
         Observation::Final(Answer {
             turns: 0,
             spent: 10,
+            spend_overflow: false,
+            usage_overflow: false,
             result: RunResult::Failed { failure: RunFailure::Cancelled },
         }),
     );
@@ -186,7 +192,10 @@ fn oracle_rejects_omitted_invented_mismatched_and_later_stop_landing_evidence() 
                 },
             }
         };
-        observe(&mut oracle, Observation::Final(Answer { turns: 0, spent: 10, result }));
+        observe(
+            &mut oracle,
+            Observation::Final(Answer { turns: 0, spent: 10, spend_overflow: false, usage_overflow: false, result }),
+        );
         assert!(failed(&oracle), "negative mutation {mutation}");
     }
 }

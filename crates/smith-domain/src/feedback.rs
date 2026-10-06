@@ -324,6 +324,17 @@ fn render_end(text: &mut Text, end: run::End) {
                 run::TranscriptRefusal::TooLarge => b"too-large",
             });
         }
+        run::End::PriceOverflow => text.put(b"price-overflow"),
+        run::End::UsageOverflow => text.put(b"usage-overflow"),
+        run::End::Receiving(receiving) => {
+            text.put(b"receiving:");
+            text.put(match receiving {
+                run::ReceivingLimit::Input => b"input",
+                run::ReceivingLimit::Output => b"output",
+                run::ReceivingLimit::CacheRead => b"cache-read",
+                run::ReceivingLimit::CacheWrite => b"cache-write",
+            });
+        }
         run::End::Closed => text.put(b"closed"),
         run::End::Busy => text.put(b"busy"),
         run::End::Invalid => text.put(b"invalid"),
@@ -335,10 +346,7 @@ fn render_end(text: &mut Text, end: run::End) {
             text.put(b"budget:");
             text.put(match exhausted {
                 run::Exhausted::Turns => b"turns",
-                run::Exhausted::Input => b"input",
-                run::Exhausted::Output => b"output",
-                run::Exhausted::CacheRead => b"cache-read",
-                run::Exhausted::CacheWrite => b"cache-write",
+                run::Exhausted::Spend => b"spend",
                 run::Exhausted::Time => b"time",
             });
         }

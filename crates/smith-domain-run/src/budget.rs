@@ -1,200 +1,235 @@
-//! One budget per run (domain/run.md, section 14): turns, tokens and time, across
-//! every conversation the run opens.
+//! Scalar host-unit ceilings and exact actual accounting (domain/run.md,
+//! sections 9, 10 and 14). Sessions price usage; the run never reprices it.
 
 use skein_lib::Duration;
 
-/// What a run may spend across all its conversations: completions, tokens of
-/// each kind as providers count them, and time from its admission.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+/// Host-supplied activation ceiling shared by every conversation. Zero turns,
+/// spend or time refuses admission before effects. Contract: domain/run.md,
+/// sections 3, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Budget {
-    /// Completion count, bounded across the enclosing run or session.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Maximum actual completions; already admitted work may cross once.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
     pub turns: u32,
-    /// Fresh input-token allowance or accepted count, as the provider reports it.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub input: u64,
-    /// Output-token allowance or accepted count, as the provider reports it.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub output: u64,
-    /// Cache-read token allowance supplied by the host.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub cache_read: u64,
-    /// Cache-write token allowance supplied by the host.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub cache_write: u64,
-    /// Monotonic wall-time allowance from admission.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+
+    /// Host-unit ceiling; sessions alone price actual usage against it.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
+    pub spend: u64,
+
+    /// Monotonic activation time; expiry immediately settles cancellation.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
     pub time: Duration,
 }
 
-/// What was spent: completions, and tokens of each kind as the provider counts
-/// them.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+/// Caller-selected scalar share, clamped to the enclosing run's remainder.
+/// Zero in either dimension refuses before opening. Contract: domain/run.md,
+/// sections 9 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Spend {
-    /// Completion count, bounded across the enclosing run or session.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+pub struct Share {
+    /// Child own Session completion allowance; delegated bills carry no turns.
+    /// Contract: domain/run.md, section 14.
     pub turns: u32,
-    /// Fresh input-token allowance or accepted count, as the provider reports it.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub input: u64,
-    /// Output-token allowance or accepted count, as the provider reports it.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub output: u64,
-    /// Cache-read token usage reported by the provider.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub cache_read: u64,
-    /// Cache-write token usage reported by the provider.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub cache_write: u64,
+
+    /// Inclusive subtree host-unit allowance. Contract: domain/run.md, section 14.
+    pub spend: u64,
 }
 
-/// The part of a budget that ran out.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+/// Host-supplied model rates, interpreted only by Session. The price is the
+/// ceiling of ((fresh input + cache writes)*input + cache reads*cached +
+/// output*output)/unit, checked before conversion to u64. Zero rates are valid;
+/// unit zero refuses the model before discovery. Contract: domain/run.md,
+/// sections 3, 9 and 14; domain/session.md, section 6.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Prices {
+    /// Fresh input and cache-write rate. Contract: domain/run.md, section 9.
+    pub input: u64,
+
+    /// Cache-read rate. Contract: domain/run.md, section 9.
+    pub cached: u64,
+
+    /// Output rate. Contract: domain/run.md, section 9.
+    pub output: u64,
+
+    /// Positive rate denominator. Contract: domain/run.md, section 9.
+    pub unit: u32,
+}
+
+/// Actual activation accounting, independent of the budget. Raw counts freeze
+/// together at the last representable prefix; units freeze independently.
+/// Overflow attestations are sticky and never claim a prefix is the exact
+/// final total. Contract: domain/run.md, sections 9, 10 and 14.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Spend {
+    /// Actual completion count. Contract: domain/run.md, sections 9 and 10.
+    pub turns: u32,
+
+    /// Actual fresh input tokens. Contract: domain/run.md, section 9.
+    pub input: u64,
+
+    /// Actual output tokens. Contract: domain/run.md, section 9.
+    pub output: u64,
+
+    /// Actual cache-read tokens. Contract: domain/run.md, section 9.
+    pub cache_read: u64,
+
+    /// Actual cache-write tokens. Contract: domain/run.md, section 9.
+    pub cache_write: u64,
+
+    /// Own completion units summed once across all conversations.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
+    pub units: u64,
+
+    /// Sticky attestation that the exact scalar total exceeds u64.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
+    pub units_overflow: bool,
+
+    /// Sticky attestation that at least one actual raw counter is unknown.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
+    pub usage_overflow: bool,
+}
+
+/// Scalar or time ceiling that prevents a subsequent completion.
+/// Contract: domain/run.md, sections 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Exhausted {
-    /// The completion-count allowance is exhausted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Completion ceiling reached. Contract: domain/run.md, section 9.
     Turns,
-    /// The fresh input-token allowance is exhausted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Input,
-    /// The output-token allowance is exhausted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Output,
-    /// The cache-read token allowance is exhausted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    CacheRead,
-    /// The cache-write token allowance is exhausted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    CacheWrite,
-    /// The injected monotonic deadline is reached.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+
+    /// Host-unit ceiling reached. Contract: domain/run.md, section 9.
+    Spend,
+
+    /// Monotonic deadline reached. Contract: domain/run.md, section 10.
     Time,
 }
 
-impl Spend {
-    /// No accepted completions or token usage yet.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub const ZERO: Spend = Spend { turns: 0, input: 0, output: 0, cache_read: 0, cache_write: 0 };
+/// Session receiving token cap, distinct from the run's scalar ceiling.
+/// Contract: domain/run.md, sections 9 and 14; domain/session.md, section 6.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ReceivingLimit {
+    /// Fresh input cap. Contract: domain/session.md, section 6.
+    Input,
 
-    /// Adds accepted cumulative usage by dimension, saturating rather than wrapping on overflow.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Output cap. Contract: domain/session.md, section 6.
+    Output,
+
+    /// Cache-read cap. Contract: domain/session.md, section 6.
+    CacheRead,
+
+    /// Cache-write cap. Contract: domain/session.md, section 6.
+    CacheWrite,
+}
+
+impl Spend {
+    /// Empty actual activation accounting. Contract: domain/run.md, section 9.
+    pub const ZERO: Spend = Spend {
+        turns: 0,
+        input: 0,
+        output: 0,
+        cache_read: 0,
+        cache_write: 0,
+        units: 0,
+        units_overflow: false,
+        usage_overflow: false,
+    };
+
+    /// Records actual increments. All raw counters freeze atomically on
+    /// overflow; units update independently. Contract: domain/run.md, section 9.
     #[must_use]
-    pub const fn saturating_add(self, other: Spend) -> Spend {
-        Spend {
-            turns: self.turns.saturating_add(other.turns),
-            input: self.input.saturating_add(other.input),
-            output: self.output.saturating_add(other.output),
-            cache_read: self.cache_read.saturating_add(other.cache_read),
-            cache_write: self.cache_write.saturating_add(other.cache_write),
+    pub fn accumulate(mut self, increment: Spend) -> Spend {
+        if !self.usage_overflow {
+            let raw = self.raw_sum(increment);
+            match raw {
+                Some((turns, input, output, cache_read, cache_write)) => {
+                    self.turns = turns;
+                    self.input = input;
+                    self.output = output;
+                    self.cache_read = cache_read;
+                    self.cache_write = cache_write;
+                }
+                None => self.usage_overflow = true,
+            }
         }
+        self.usage_overflow |= increment.usage_overflow;
+        if !self.units_overflow {
+            match self.units.checked_add(increment.units) {
+                Some(units) => self.units = units,
+                None => self.units_overflow = true,
+            }
+        }
+        self.units_overflow |= increment.units_overflow;
+        self
     }
 
-    /// What this spends beyond `other`, kind by kind, or nothing of a kind it
-    /// spends no more of.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    fn raw_sum(self, increment: Spend) -> Option<(u32, u64, u64, u64, u64)> {
+        Some((
+            self.turns.checked_add(increment.turns)?,
+            self.input.checked_add(increment.input)?,
+            self.output.checked_add(increment.output)?,
+            self.cache_read.checked_add(increment.cache_read)?,
+            self.cache_write.checked_add(increment.cache_write)?,
+        ))
+    }
+
+    /// Known terminal raw residual only. Unknown totals produce no inferred
+    /// residual and attest overflow. Units are delivered separately by Priced.
+    /// Contract: domain/run.md, sections 9 and 10.
     #[must_use]
-    pub const fn saturating_sub(self, other: Spend) -> Spend {
+    pub fn unreported(self, reported: Spend) -> Spend {
+        if self.usage_overflow || reported.usage_overflow {
+            return Spend { usage_overflow: true, ..Spend::ZERO };
+        }
         Spend {
-            turns: self.turns.saturating_sub(other.turns),
-            input: self.input.saturating_sub(other.input),
-            output: self.output.saturating_sub(other.output),
-            cache_read: self.cache_read.saturating_sub(other.cache_read),
-            cache_write: self.cache_write.saturating_sub(other.cache_write),
+            turns: self.turns.saturating_sub(reported.turns),
+            input: self.input.saturating_sub(reported.input),
+            output: self.output.saturating_sub(reported.output),
+            cache_read: self.cache_read.saturating_sub(reported.cache_read),
+            cache_write: self.cache_write.saturating_sub(reported.cache_write),
+            ..Spend::ZERO
         }
     }
 }
 
 impl Budget {
-    /// The engine's token allowance, allocated by the agent: half input,
-    /// quarter output, eighth cache reads, and the remainder cache writes.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    #[must_use]
-    pub const fn from_tokens(turns: u32, tokens: u64, time: Duration) -> Budget {
-        let input = tokens / 2;
-        let output = tokens / 4;
-        let cache_read = tokens / 8;
-        let cache_write = tokens.saturating_sub(input).saturating_sub(output).saturating_sub(cache_read);
-        Budget { turns, input, output, cache_read, cache_write, time }
-    }
-
-    /// Whether this budget asks for no more than `limit`, part by part.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn within(&self, limit: &Budget) -> bool {
-        self.turns <= limit.turns
-            && self.input <= limit.input
-            && self.output <= limit.output
-            && self.cache_read <= limit.cache_read
-            && self.cache_write <= limit.cache_write
-            && self.time <= limit.time
+        self.turns <= limit.turns && self.spend <= limit.spend && self.time <= limit.time
     }
 
-    /// Whether this budget leaves room for any work: a turn, its input and
-    /// output, and time. Caching may be given no budget.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn is_workable(&self) -> bool {
-        self.turns > 0 && self.input > 0 && self.output > 0 && self.time > Duration::ZERO
+        self.turns > 0 && self.spend > 0 && self.time > Duration::ZERO
     }
 
-    /// The first part of this budget that `spent` has gone past, if any. Time
-    /// is the run's alarm, not a part that is spent.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    pub(crate) fn overspent(&self, spent: Spend) -> Option<Exhausted> {
-        if spent.turns > self.turns {
+    pub(crate) fn exhausted(&self, spent: Spend) -> Option<Exhausted> {
+        if spent.turns >= self.turns {
             Some(Exhausted::Turns)
-        } else if spent.input > self.input {
-            Some(Exhausted::Input)
-        } else if spent.output > self.output {
-            Some(Exhausted::Output)
-        } else if spent.cache_read > self.cache_read {
-            Some(Exhausted::CacheRead)
-        } else if spent.cache_write > self.cache_write {
-            Some(Exhausted::CacheWrite)
+        } else if spent.units >= self.spend || spent.units_overflow {
+            Some(Exhausted::Spend)
         } else {
             None
         }
     }
 
-    /// What is left of this budget once `spent` is spent, with `time` to go.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     pub(crate) fn remainder(&self, spent: Spend, time: Duration) -> Budget {
-        Budget {
-            turns: self.turns.saturating_sub(spent.turns),
-            input: self.input.saturating_sub(spent.input),
-            output: self.output.saturating_sub(spent.output),
-            cache_read: self.cache_read.saturating_sub(spent.cache_read),
-            cache_write: self.cache_write.saturating_sub(spent.cache_write),
-            time,
-        }
+        Budget { turns: self.turns.saturating_sub(spent.turns), spend: self.spend.saturating_sub(spent.units), time }
     }
+}
+
+/// Pure root admission decision before any Client effect. Closing has its
+/// existing terminal right and must never be reported as scalar exhaustion.
+/// Contract: domain/run.md, sections 9, 10 and 14.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum CompletionPermit {
+    /// Live conversation with remaining global allowance.
+    /// Contract: domain/run.md, sections 9 and 14.
+    Allowed,
+
+    /// Live conversation prevented by a scalar ceiling.
+    /// Contract: domain/run.md, sections 9 and 14.
+    Denied(
+        /// Exact scalar dimension. Contract: domain/run.md, section 9.
+        Exhausted,
+    ),
+
+    /// Stale or closing conversation; settle its unsent completion as Closed.
+    /// Contract: domain/run.md, sections 10 and 14.
+    Closing,
 }

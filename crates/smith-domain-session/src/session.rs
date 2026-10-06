@@ -18,6 +18,13 @@
 //! or closes it; the message goes back after a result for each call the
 //! yielded answer made but did not wait for.
 //!
+//! Version two retains own and inclusive activation price prefixes separately,
+//! and atomically retains all four raw usage counters until their first
+//! overflow. Exact accepted completions still become Used and Turn before a
+//! typed overflow terminal. An unsent root `BudgetDenied` releases the current
+//! Calling reservation without inventing a provider lease or cancellation
+//! (domain/session.md, section 6; domain/run.md, section 9).
+//!
 //! A session ends once, and only once nothing it asked for is in flight and
 //! its kit has closed: closing cancels its call to the LLM, withdraws its
 //! delegated calls and closes its kit, which cancels the tools' calls, and
@@ -131,7 +138,7 @@ use core::mem::{self, size_of};
 use skein_lib::{Deadlines, Duration, Env, Id, List, Queue, ReplyTo, Rng, Set, Slab, Time, Token, Writer};
 use smith_domain_tools::{self as tools, Call, Effect, Entry, Grants, Outcome};
 
-use crate::boundary::{Budget, Dimension, End, Request, Spec, Yield};
+use crate::boundary::{Budget, BudgetDenial, Dimension, End, Request, Spec, Yield};
 use crate::domain::Domain;
 use crate::facts::{Fact, Facts};
 use crate::limits::Limits;
@@ -182,6 +189,10 @@ struct Conversation {
     budget: Budget,
     turns: u32,
     usage: Usage,
+    /// Sticky raw cumulative overflow, retaining an atomic exact prefix for V2.
+    /// V1 keeps its legacy saturation and reports the same diagnostic flag.
+    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+    usage_overflow: bool,
     /// When the time budget runs out.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
@@ -204,6 +215,8 @@ enum Recording {
         budget: u64,
         spent: u64,
         overflow: bool,
+        own_spent: u64,
+        own_overflow: bool,
         sequence: u32,
         told: u32,
         pending: Option<Usage>,
@@ -465,7 +478,7 @@ fn open_admitted(
                 tools::Refusal::Busy => End::Busy,
                 tools::Refusal::Invalid => End::Invalid,
             };
-            out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO });
+            out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO, usage_overflow: false });
         }
         Some(News::Closed { .. }) | None => unreachable!("the tools answer an open with its kit, opened or refused"),
     }
@@ -552,6 +565,56 @@ pub(crate) fn completed(
         | State::Closing { waiting: Waiting { call: false, .. }, .. }
         | State::Closed => unreachable!("a completion ends a call in flight"),
     };
+    conclude(domain, env, id, out, mark);
+}
+
+/// The root refused the current requested completion before any provider start.
+/// Its reservation is released and only the kit closes. No accepted completion,
+/// retry or external cancellation is invented; stale/duplicate denials are inert.
+/// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
+pub(crate) fn budget_denied(
+    domain: &mut Domain,
+    env: &Env<Limits>,
+    owner: Token,
+    reason: BudgetDenial,
+    out: &mut Queue<Request>,
+) {
+    let spent = match reason {
+        BudgetDenial::Turns => Dimension::Turns,
+        BudgetDenial::Spend => Dimension::Unit,
+    };
+    unsent_finished(domain, env, owner, End::Budget { spent }, out);
+}
+
+/// The enclosing run closed before publishing this requested completion.
+/// Only its current Calling reservation settles Closed; no provider lease,
+/// cancel or completion evidence is fabricated. Closing actual calls still
+/// require their actual terminal.
+/// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
+pub(crate) fn unsent_closed(domain: &mut Domain, env: &Env<Limits>, owner: Token, out: &mut Queue<Request>) {
+    unsent_finished(domain, env, owner, End::Closed, out);
+}
+
+/// Settles a current reserved but unpublished provider request. Other states
+/// retain their actual terminal obligations and all stale identities are inert.
+/// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
+fn unsent_finished(domain: &mut Domain, env: &Env<Limits>, owner: Token, end: End, out: &mut Queue<Request>) {
+    let Some(id) = addressed(&domain.sessions, owner) else {
+        return;
+    };
+    let session = domain.sessions.get_mut(id).expect("addressed above");
+    match &session.state {
+        State::Calling { .. } => {}
+        State::Backoff { .. }
+        | State::Tooling { .. }
+        | State::Resting { .. }
+        | State::Yielded
+        | State::Closing { .. }
+        | State::Closed => return,
+    }
+    let mark = out.len();
+    release_provider(&mut session.conversation);
+    session.state = finish(end);
     conclude(domain, env, id, out, mark);
 }
 
@@ -1016,8 +1079,8 @@ fn settle(domain: &mut Domain, env: &Env<Limits>, id: Id<Session>, out: &mut Que
     let waiting = Waiting { kit, ..waiting };
     let session = domain.sessions.get_mut(id).expect("looked up above");
     if waiting == SETTLED {
-        let Conversation { opener, turns, usage, .. } = session.conversation;
-        out.push(Request::Ended { opener, end, turns, usage });
+        let Conversation { opener, turns, usage, usage_overflow, .. } = session.conversation;
+        out.push(Request::Ended { opener, end, turns, usage, usage_overflow });
         session.state = State::Closed;
     } else {
         session.state = State::Closing { end, waiting };
@@ -1035,10 +1098,16 @@ fn tell(facts: &mut Facts, runs: &Slab<Run>, session: &Session, out: &Queue<Requ
         let fact = match request {
             Request::Opened { opener, session: _ } => Fact::Opened { opener: *opener },
             Request::Yielded { opener, stop, text: _ } => Fact::Yielded { opener: *opener, stop: *stop },
-            Request::Used { opener, usage } => Fact::Used { opener: *opener, usage: *usage },
-            Request::Ended { opener, end, turns, usage } => {
-                Fact::Ended { opener: *opener, end: *end, turns: *turns, usage: *usage }
+            Request::Used { opener, usage, usage_overflow } => {
+                Fact::Used { opener: *opener, usage: *usage, usage_overflow: *usage_overflow }
             }
+            Request::Ended { opener, end, turns, usage, usage_overflow } => Fact::Ended {
+                opener: *opener,
+                end: *end,
+                turns: *turns,
+                usage: *usage,
+                usage_overflow: *usage_overflow,
+            },
             Request::Complete {
                 owner: _,
                 prompt,
@@ -1627,23 +1696,60 @@ fn abandon(
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn used(conversation: &mut Conversation, usage: Usage, out: &mut Queue<Request>) {
     conversation.turns = conversation.turns.saturating_add(1);
-    conversation.usage = conversation.usage.saturating_add(usage);
+    let cumulative = checked_usage(conversation.usage, usage);
     match &mut conversation.recording {
-        Recording::V1 => {}
-        Recording::V2 { prices, spent, overflow, pending, .. } => {
-            *pending = Some(usage);
-            let total = match prices.price(usage) {
-                Some(price) => spent.checked_add(price),
-                None => None,
-            };
-            match total {
-                Some(total) => *spent = total,
-                None => *overflow = true,
+        Recording::V1 => {
+            conversation.usage_overflow |= cumulative.is_none();
+            conversation.usage = conversation.usage.saturating_add(usage);
+        }
+        Recording::V2 { prices, spent, overflow, own_spent, own_overflow, pending, .. } => {
+            if !conversation.usage_overflow {
+                match cumulative {
+                    Some(total) => conversation.usage = total,
+                    None => conversation.usage_overflow = true,
+                }
             }
-            out.push(Request::Priced { opener: conversation.opener, spent: *spent, overflow: *overflow });
+            *pending = Some(usage);
+            let price = prices.price(usage);
+            add_price(own_spent, own_overflow, price);
+            add_price(spent, overflow, price);
+            out.push(Request::Priced {
+                opener: conversation.opener,
+                spent: *spent,
+                overflow: *overflow,
+                own_spent: *own_spent,
+                own_overflow: *own_overflow,
+            });
         }
     }
-    out.push(Request::Used { opener: conversation.opener, usage });
+    out.push(Request::Used { opener: conversation.opener, usage, usage_overflow: conversation.usage_overflow });
+}
+
+/// Price counters retain their last representable prefix after the first failure.
+/// Contract: domain/session.md, section 6; domain/run.md, section 9.
+fn add_price(total: &mut u64, overflow: &mut bool, price: Option<u64>) {
+    if *overflow {
+        return;
+    }
+    let added = match price {
+        Some(price) => total.checked_add(price),
+        None => None,
+    };
+    match added {
+        Some(added) => *total = added,
+        None => *overflow = true,
+    }
+}
+
+/// All four raw counters commit together, or preserve the previous exact prefix.
+/// Contract: domain/session.md, section 6; domain/run.md, section 9.
+fn checked_usage(previous: Usage, received: Usage) -> Option<Usage> {
+    Some(Usage {
+        input_tokens: previous.input_tokens.checked_add(received.input_tokens)?,
+        output_tokens: previous.output_tokens.checked_add(received.output_tokens)?,
+        cache_read_tokens: previous.cache_read_tokens.checked_add(received.cache_read_tokens)?,
+        cache_write_tokens: previous.cache_write_tokens.checked_add(received.cache_write_tokens)?,
+    })
 }
 
 /// Ends the session with `end`, which has nothing in flight but its kit: the
@@ -1665,8 +1771,8 @@ const OUT_OF_TIME: End = End::Budget { spent: Dimension::Time };
 ///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 fn refuse(facts: &mut Facts, opener: Token, end: End, out: &mut Queue<Request>) {
-    facts.push(Fact::Ended { opener, end, turns: 0, usage: Usage::ZERO });
-    out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO });
+    facts.push(Fact::Ended { opener, end, turns: 0, usage: Usage::ZERO, usage_overflow: false });
+    out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO, usage_overflow: false });
 }
 
 /// The conversation for `spec`, and the authority its kit opens with; or
@@ -1699,6 +1805,7 @@ fn admit(opener: Token, spec: Spec, limits: &Limits, now: Time) -> Option<(Conve
         budget: spec.budget,
         turns: 0,
         usage: Usage::ZERO,
+        usage_overflow: false,
         expires: now.saturating_add(spec.budget.time),
         // Named as the kit opens: until then, the session is Closed, which
         // holds nothing.
@@ -2266,8 +2373,18 @@ pub(crate) fn open_v2(
             }
         },
     }
-    conversation.recording =
-        Recording::V2 { dialect, prices, budget, spent: 0, overflow: false, sequence, told, pending: None };
+    conversation.recording = Recording::V2 {
+        dialect,
+        prices,
+        budget,
+        spent: 0,
+        overflow: false,
+        own_spent: 0,
+        own_overflow: false,
+        sequence,
+        told,
+        pending: None,
+    };
     if !provider_room(&conversation, &env.limits) {
         refuse(&mut domain.facts, opener, End::TranscriptRefused { reason: crate::record::Refusal::TooLarge }, out);
         return;
@@ -2495,9 +2612,6 @@ fn tell_turn(conversation: &mut Conversation, out: &mut Queue<Request>) -> Optio
             (*dialect, sequence, told, usage, *spent, *overflow)
         }
     };
-    if overflow {
-        return Some(End::PriceOverflow);
-    }
     let Some(next) = sequence.checked_add(1) else {
         return Some(End::TranscriptFull);
     };
@@ -2535,18 +2649,42 @@ fn tell_turn(conversation: &mut Conversation, out: &mut Queue<Request>) -> Optio
         sequence: next,
         usage,
         spent,
+        spend_overflow: overflow,
         messages: messages.into_boxed(),
     };
     out.push(Request::Turn { opener: conversation.opener, turn });
-    None
+    if overflow {
+        Some(End::PriceOverflow)
+    } else if conversation.usage_overflow {
+        Some(End::UsageOverflow)
+    } else {
+        None
+    }
 }
 
+/// A child's cumulative inclusive bill and its exactness attestation. This
+/// fixed handoff carries no payload and never changes the receiver's own price.
+/// Contract: domain/session.md, section 6; domain/run.md, section 9.
+#[derive(Debug)]
+pub(crate) struct Bill {
+    /// Last representable child prefix, added once after the identity guard.
+    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+    pub(crate) spent: u64,
+    /// Unknown remainder, propagated to the receiver's sticky inclusive flag.
+    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+    pub(crate) overflow: bool,
+}
+
+/// An addressed delegated terminal charges its inclusive bill once before
+/// settling its actual result. Retired, stale, wrong-owner and duplicate bills
+/// change neither price prefix; the own prefix never includes a child bill.
+/// Contract: domain/session.md, sections 5 and 6; domain/run.md, section 9.
 pub(crate) fn delegate_ended_v2(
     domain: &mut Domain,
     env: &Env<Limits>,
     owner: Token,
     result: Returned,
-    spent: u64,
+    bill: Bill,
     out: &mut Queue<Request>,
 ) {
     // This value may be redelivered by a v2 parent. A retired or stale
@@ -2565,12 +2703,16 @@ pub(crate) fn delegate_ended_v2(
     let conversation = &mut session.conversation;
     match &mut conversation.recording {
         Recording::V1 => unreachable!("version one uses ticketed answers"),
-        Recording::V2 { spent: total, overflow, .. } => {
-            match total.checked_add(spent) {
-                Some(sum) => *total = sum,
-                None => *overflow = true,
-            }
-            out.push(Request::Priced { opener: conversation.opener, spent: *total, overflow: *overflow });
+        Recording::V2 { spent: total, overflow, own_spent, own_overflow, .. } => {
+            add_price(total, overflow, Some(bill.spent));
+            *overflow |= bill.overflow;
+            out.push(Request::Priced {
+                opener: conversation.opener,
+                spent: *total,
+                overflow: *overflow,
+                own_spent: *own_spent,
+                own_overflow: *own_overflow,
+            });
         }
     }
     let fact = match &result {
@@ -2779,6 +2921,8 @@ pub(crate) fn exhaust_origin_for_test(domain: &mut Domain, owner: Token, recorde
             budget: u64::MAX,
             spent: 0,
             overflow: false,
+            own_spent: 0,
+            own_overflow: false,
             sequence: u32::MAX,
             told: u32::MAX,
             pending: None,
@@ -2786,4 +2930,13 @@ pub(crate) fn exhaust_origin_for_test(domain: &mut Domain, owner: Token, recorde
     } else {
         session.conversation.turns = u32::MAX;
     }
+}
+
+/// Actual reserved provider rights for focused settlement controls. This
+/// observes bounded retained state, never supplies a completion or price.
+/// Contract: domain/session.md, sections 3, 5 and 6; testing-strategy.md, section 2.2.
+#[cfg(test)]
+pub(crate) fn provider_credit_for_test(domain: &Domain, owner: Token) -> (u64, Option<u64>) {
+    let session = domain.sessions.get(Id::from_token(owner)).expect("admitted test session before reclaim");
+    (session.conversation.reserved, session.conversation.provider_credit)
 }

@@ -194,6 +194,10 @@ pub struct Tools {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Llm {
+    /// Host model rates; unit zero refuses before discovery.
+    /// Contract: domain/run.md, sections 3, 9 and 14.
+    pub prices: crate::Prices,
+
     /// Opaque configured replay dialect; history requires an exact match.
     /// Contract: domain/run.md, sections 3 and 13.
     pub dialect: u32,
@@ -331,7 +335,7 @@ pub(crate) fn cost(charter: &Charter) -> Option<u64> {
         cost = cost.checked_add(len(&conventions.guide)?)?.checked_add(len(&conventions.checks)?)?;
     }
     let llm = u64::try_from(size_of::<Llm>()).ok()?;
-    for Llm { account: _, endpoint: _, model, max_tokens: _, dialect: _ } in &charter.models {
+    for Llm { account: _, endpoint: _, model, max_tokens: _, dialect: _, prices: _ } in &charter.models {
         cost = cost.checked_add(llm)?.checked_add(len(model)?)?;
     }
     let host_tool = u64::try_from(size_of::<HostTool>()).ok()?;
@@ -352,6 +356,9 @@ pub(crate) fn cost(charter: &Charter) -> Option<u64> {
 ///
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 fn fits(llm: &Llm, limits: &Limits) -> bool {
+    if llm.prices.unit == 0 {
+        return false;
+    }
     llm.max_tokens > 0 && llm.max_tokens <= limits.max_tokens
 }
 

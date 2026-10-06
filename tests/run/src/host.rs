@@ -549,14 +549,12 @@ impl Host {
         let budget = Budget {
             turns: u32::try_from(self.rng.between(u64::from(script.turns_min), u64::from(script.turns_max)))
                 .expect("drawn between two u32s"),
-            input: tokens(&mut self.rng),
-            output: tokens(&mut self.rng),
-            cache_read: tokens(&mut self.rng),
-            cache_write: tokens(&mut self.rng),
+            spend: tokens(&mut self.rng),
             time: script.time.draw(&mut self.rng),
         };
         let agents = self.rng.chance(script.agents);
         let llm = |model: &[u8]| Llm {
+            prices: smith_domain_run::Prices { input: 1, cached: 0, output: 0, unit: 1 },
             account: 0,
             endpoint: Endpoint(0),
             model: Box::from(model),

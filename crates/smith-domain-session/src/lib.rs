@@ -39,6 +39,11 @@
 //! delivers or discards owned records before reclaiming at iteration end
 //! (domain/session.md, sections 3, 4, 5, 6 and 12; programming-model.md, sections
 //! 4.5 and 7).
+//! Own and inclusive activation prices and raw-usage overflow attestations are
+//! retained separately. The root's `BudgetDenied` and `UnsentClosed` entrances release only
+//! the current provider reservation; this domain never knows global prices or
+//! whether another session may start (domain/session.md, section 6;
+//! domain/run.md, section 9).
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
@@ -55,7 +60,7 @@ mod session;
 #[cfg(test)]
 mod tests;
 
-pub use boundary::{Budget, Dimension, End, Event, Request, Spec, Yield};
+pub use boundary::{Budget, BudgetDenial, Dimension, End, Event, Request, Spec, Yield};
 pub use domain::{Domain, fire, max_out, max_to_opener, resume, step};
 pub use facts::Fact;
 pub use limits::{Limits, MAX_PARALLEL, completion_reserve, worst_case};

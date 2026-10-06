@@ -6,8 +6,9 @@
 //!
 //! - An opening is refused (`Ended` as busy or invalid, with no `Started`) or
 //!   started at once.
-//! - A started conversation takes turns, each a `Used` once its latency has
-//!   passed. After each, the script draws what the LLM does next: fail
+//! - A started conversation requests a pure run completion permit before each
+//!   actual turn. After its latency, the turn emits its cumulative own/subtree
+//!   `Priced` and exact single-completion `Used`. After each, the script draws what the LLM does next: fail
 //!   (`Ended` with a fault), call `finish` (`Delegated`, then wait for its
 //!   `Return`), ask for sub-agents (the same, for each), yield (`Yielded`,
 //!   then wait for `Say` or `Close`), or carry on. A finish declares an
@@ -20,7 +21,9 @@
 //!   only look are read-only, and a turn may make several, which the session
 //!   runs side by side: the LLM carries on once they have all returned.
 //! - It keeps to its share of the budget as a session keeps to its ceilings:
-//!   it starts a turn only while turns, input and output each have some left; after a turn that went past any part of its share, it
+//!   it requests a turn only while its own turns and inclusive spend have
+//!   room; the run additionally denies starts at its shared scalar ceiling.
+//!   After a turn that went past any part of its share, it
 //!   settles that turn's call, if it made one, and ends out of budget. It
 //!   expires, out of time, when its time runs out.
 //! - A call carries the conversation's expiry as its deadline, and the run
@@ -147,6 +150,15 @@ pub struct Script {
     reason = "fixed diagnostic tails keep boundary records bounded without allocation"
 )]
 pub enum Out {
+    /// Simulated session requests the real pure run admission gate before
+    /// starting a completion. Contract: domain/run.md, sections 9 and 14.
+    Permit {
+        /// Concrete conversation. Contract: domain/run.md, section 14.
+        conversation: Token,
+        /// Simulated session owner. Contract: domain/run.md, section 14.
+        peer: Token,
+    },
+
     /// An event for the run.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -323,6 +335,7 @@ struct Talk {
     budget: Budget,
     expires: Time,
     spent: Spend,
+    subtree_spent: u64,
     phase: Phase,
     /// The wake that counts; earlier ones are stale.
     ///
@@ -332,6 +345,10 @@ struct Talk {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Phase {
+    /// Current completion requested but unsent; no wake or lower right exists.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
+    Requesting,
+
     /// A turn is in flight: its wake ends it.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -406,7 +423,16 @@ impl Partner {
     #[must_use]
     pub fn turn_max(&self) -> Spend {
         let Script { input, output, cache, .. } = self.script;
-        Spend { turns: 1, input, output, cache_read: cache, cache_write: cache }
+        Spend {
+            units: input,
+            units_overflow: false,
+            usage_overflow: false,
+            turns: 1,
+            input,
+            output,
+            cache_read: cache,
+            cache_write: cache,
+        }
     }
 
     /// Delivers a new typed opening to the scripted peer or real session and retains its pending terminal obligations.
@@ -429,19 +455,20 @@ impl Partner {
             budget: opening.budget,
             expires,
             spent: Spend::ZERO,
-            phase: Phase::Turning,
+            subtree_spent: 0,
+            phase: Phase::Requesting,
             wake: 0,
         };
         self.talks.insert(peer, talk);
         out.push(Out::Event(Event::Started { conversation, peer }));
         self.tally.opened += 1;
-        self.carry_on(now, peer, out);
+        self.carry_on(peer, out);
     }
 
     /// Schedules another seeded turn for a live conversation.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    pub fn say(&mut self, now: Time, peer: Token, out: &mut Vec<Out>) {
+    pub fn say(&mut self, peer: Token, out: &mut Vec<Out>) {
         let Some(talk) = self.talks.get(&peer) else {
             assert!(self.ended.contains(&peer), "a stale say names a conversation that ended");
             self.tally.stale += 1;
@@ -449,7 +476,7 @@ impl Partner {
         };
         assert_eq!(talk.phase, Phase::Yielded, "the run says something only to a yielded conversation");
         self.tally.nudged += 1;
-        self.carry_on(now, peer, out);
+        self.carry_on(peer, out);
     }
 
     /// Requests session closure; lower terminals must still be delivered before settlement.
@@ -465,7 +492,7 @@ impl Partner {
         let conversation = talk.conversation;
         let in_flight = match talk.phase {
             Phase::Turning => true,
-            Phase::Yielded => false,
+            Phase::Yielded | Phase::Requesting => false,
             // It withdraws its calls in flight and waits for them to return,
             // with no wake.
             Phase::Calling { pending, over: _ } => {
@@ -487,7 +514,7 @@ impl Partner {
     /// The run's answer to the call `call`.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    pub fn returned(&mut self, now: Time, call: Token, result: &Returned, out: &mut Vec<Out>) {
+    pub fn returned(&mut self, now: Time, call: Token, result: &Returned, bill: u64, out: &mut Vec<Out>) {
         let peer = self.calls.remove(&call).expect("a return names a call in flight");
         match result {
             Returned::HostAnswered(_) | Returned::HostUnknown | Returned::HostRejected(_) => {
@@ -509,6 +536,14 @@ impl Partner {
             Returned::Refused { .. } => self.tally.ask_refused += 1,
         }
         let talk = self.talks.get_mut(&peer).expect("a conversation outlives its calls");
+        talk.subtree_spent = talk.subtree_spent.checked_add(bill).expect("bounded child bill");
+        out.push(Out::Event(Event::Priced {
+            conversation: talk.conversation,
+            own_spent: talk.spent.units,
+            subtree_spent: talk.subtree_spent,
+            own_overflow: false,
+            subtree_overflow: false,
+        }));
         let expires = talk.expires;
         if *result == Returned::TimedOut {
             assert!(now >= expires, "a call times out only once its deadline has passed");
@@ -522,7 +557,7 @@ impl Partner {
             Phase::Calling { pending: _, over } => match over {
                 Some(exhausted) => self.end(peer, End::Budget(exhausted), out),
                 None if now >= expires => self.end(peer, End::Budget(Exhausted::Time), out),
-                None => self.carry_on(now, peer, out),
+                None => self.carry_on(peer, out),
             },
             Phase::Withdrawn { pending: _ } => {
                 let settle = self.draw(self.script.settle);
@@ -530,7 +565,7 @@ impl Partner {
                 talk.phase = Phase::Closing { in_flight: false };
                 self.wake(now.saturating_add(settle), peer, out);
             }
-            Phase::Turning | Phase::Yielded | Phase::Closing { .. } => {
+            Phase::Requesting | Phase::Turning | Phase::Yielded | Phase::Closing { .. } => {
                 panic!("a return comes while its call is in flight")
             }
         }
@@ -547,18 +582,19 @@ impl Partner {
         let (phase, expires) = (talk.phase, talk.expires);
         match phase {
             Phase::Turning if now >= expires => self.end(peer, End::Budget(Exhausted::Time), out),
-            Phase::Turning => self.turn(now, peer, out),
+            Phase::Turning => self.turn(peer, out),
             Phase::Yielded => {
                 assert!(now >= expires, "a yielded conversation wakes only when it expires");
                 self.end(peer, End::Budget(Exhausted::Time), out);
             }
-            Phase::Calling { .. } | Phase::Withdrawn { .. } => unreachable!("a call in flight waits without a wake"),
+            Phase::Requesting | Phase::Calling { .. } | Phase::Withdrawn { .. } => {
+                unreachable!("a call in flight waits without a wake")
+            }
             Phase::Closing { in_flight } => {
                 if in_flight && self.rng.chance(self.script.races) {
                     self.spend(peer, out);
                     self.tally.races += 1;
                 }
-                self.tally.closed += 1;
                 self.end(peer, End::Closed, out);
             }
         }
@@ -567,7 +603,7 @@ impl Partner {
     /// A turn in flight completes; the script draws what comes next.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    fn turn(&mut self, now: Time, peer: Token, out: &mut Vec<Out>) {
+    fn turn(&mut self, peer: Token, out: &mut Vec<Out>) {
         self.spend(peer, out);
         let talk = self.talks.get(&peer).expect("a turn is of a live conversation");
         let over = overspent(&talk.budget, talk.spent);
@@ -605,7 +641,7 @@ impl Partner {
             self.tally.yields += 1;
             self.wake(expires, peer, out);
         } else {
-            self.carry_on(now, peer, out);
+            self.carry_on(peer, out);
         }
     }
 
@@ -654,12 +690,9 @@ impl Partner {
             }
         }
         let share = if self.rng.chance(self.script.shares) {
-            Some(Spend {
+            Some(smith_domain_run::Share {
                 turns: u32::try_from(self.rng.between(1, 3)).expect("small"),
-                input: self.rng.between(100, 4_000),
-                output: self.rng.between(100, 2_000),
-                cache_read: self.rng.between(0, 2_000),
-                cache_write: self.rng.between(0, 2_000),
+                spend: self.rng.between(100, 4_000),
             })
         } else {
             None
@@ -757,40 +790,86 @@ impl Partner {
     /// The LLM goes on: another turn, unless the share leaves no room for one.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-    fn carry_on(&mut self, now: Time, peer: Token, out: &mut Vec<Out>) {
-        let latency = self.draw(self.script.turn);
+    fn carry_on(&mut self, peer: Token, out: &mut Vec<Out>) {
         let talk = self.talks.get_mut(&peer).expect("a live conversation");
         if let Some(exhausted) = ceiling(&talk.budget, talk.spent) {
             self.tally.ceilings += 1;
             self.end(peer, End::Budget(exhausted), out);
             return;
         }
+        talk.phase = Phase::Requesting;
+        out.push(Out::Permit { conversation: talk.conversation, peer });
+    }
+
+    /// Start only after the actual pure gate accepts; denial invents no usage.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
+    pub fn permitted(
+        &mut self,
+        now: Time,
+        peer: Token,
+        permit: smith_domain_run::CompletionPermit,
+        out: &mut Vec<Out>,
+    ) {
+        // A real prior Close owns its delayed settlement; an old queued
+        // permission cannot revive it or invent a second terminal.
+        let Some(talk) = self.talks.get(&peer) else {
+            return;
+        };
+        if talk.phase != Phase::Requesting {
+            return;
+        }
+        match permit {
+            smith_domain_run::CompletionPermit::Denied(exhausted) => {
+                self.end(peer, End::Budget(exhausted), out);
+                return;
+            }
+            smith_domain_run::CompletionPermit::Closing => {
+                self.end(peer, End::Closed, out);
+                return;
+            }
+            smith_domain_run::CompletionPermit::Allowed => {}
+        }
+        let latency = self.draw(self.script.turn);
+        let talk = self.talks.get_mut(&peer).expect("a live admitted conversation");
         talk.phase = Phase::Turning;
-        // A turn that would outlast the conversation's time is cut off when it
-        // expires.
         let at = now.saturating_add(latency).min(talk.expires);
         self.wake(at, peer, out);
     }
 
     fn spend(&mut self, peer: Token, out: &mut Vec<Out>) {
         let Script { input, output, cache, .. } = self.script;
-        let spend = Spend {
+        let mut spend = Spend {
+            units: 0,
+            units_overflow: false,
+            usage_overflow: false,
             turns: 1,
             input: self.rng.between(1, input),
             output: self.rng.between(1, output),
             cache_read: self.rng.below(cache.saturating_add(1)),
             cache_write: self.rng.below(cache.saturating_add(1)),
         };
+        spend.units = spend.input;
         let talk = self.talks.get_mut(&peer).expect("a live conversation spends");
-        talk.spent = talk.spent.saturating_add(spend);
-        self.spent = self.spent.saturating_add(spend);
+        talk.spent = talk.spent.accumulate(spend);
+        self.spent = self.spent.accumulate(spend);
+        talk.subtree_spent = talk.subtree_spent.checked_add(spend.units).expect("bounded fixture bill");
         self.tally.turns += 1;
+        out.push(Out::Event(Event::Priced {
+            conversation: talk.conversation,
+            own_spent: talk.spent.units,
+            subtree_spent: talk.subtree_spent,
+            own_overflow: false,
+            subtree_overflow: false,
+        }));
         out.push(Out::Event(Event::Used { conversation: talk.conversation, spend }));
     }
 
     fn end(&mut self, peer: Token, end: End, out: &mut Vec<Out>) {
         let talk = self.talks.remove(&peer).expect("a conversation ends once");
         self.ended.insert(peer);
+        if end == End::Closed {
+            self.tally.closed += 1;
+        }
         if end == End::Budget(Exhausted::Time) {
             self.tally.expired += 1;
         }
@@ -823,10 +902,8 @@ impl Partner {
 fn ceiling(budget: &Budget, spent: Spend) -> Option<Exhausted> {
     if spent.turns >= budget.turns {
         Some(Exhausted::Turns)
-    } else if spent.input >= budget.input {
-        Some(Exhausted::Input)
-    } else if spent.output >= budget.output {
-        Some(Exhausted::Output)
+    } else if spent.units >= budget.spend {
+        Some(Exhausted::Spend)
     } else {
         None
     }
@@ -838,14 +915,8 @@ fn ceiling(budget: &Budget, spent: Spend) -> Option<Exhausted> {
 fn overspent(budget: &Budget, spent: Spend) -> Option<Exhausted> {
     if spent.turns > budget.turns {
         Some(Exhausted::Turns)
-    } else if spent.input > budget.input {
-        Some(Exhausted::Input)
-    } else if spent.output > budget.output {
-        Some(Exhausted::Output)
-    } else if spent.cache_read > budget.cache_read {
-        Some(Exhausted::CacheRead)
-    } else if spent.cache_write > budget.cache_write {
-        Some(Exhausted::CacheWrite)
+    } else if spent.units > budget.spend {
+        Some(Exhausted::Spend)
     } else {
         None
     }

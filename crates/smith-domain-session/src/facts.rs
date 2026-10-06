@@ -200,6 +200,9 @@ pub enum Fact {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         usage: Usage,
+        /// Cumulative raw usage overflow attestation; this completion stays exact.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+        usage_overflow: bool,
     },
     /// The session ended, or was refused at the entrance.
     ///
@@ -221,6 +224,10 @@ pub enum Fact {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         usage: Usage,
+        /// True when the cumulative usage is an overflowed prefix (V2) or the
+        /// legacy saturated diagnostic counters (V1), copied from actual Ended.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 10.
+        usage_overflow: bool,
     },
 }
 

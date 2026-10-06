@@ -8,21 +8,14 @@ use smith_domain::{Limits, run, session, tools};
 /// take.
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
-pub const BUDGET: run::Budget = run::Budget {
-    turns: 64,
+pub const BUDGET: run::Budget = run::Budget { turns: 64, spend: 1, time: Duration::from_secs(3600) };
+
+const CEILING: session::Budget = session::Budget {
+    turns: BUDGET.turns,
     input: 1 << 24,
     output: 1 << 24,
     cache_read: 1 << 26,
     cache_write: 1 << 24,
-    time: Duration::from_secs(3600),
-};
-
-const CEILING: session::Budget = session::Budget {
-    turns: BUDGET.turns,
-    input: BUDGET.input,
-    output: BUDGET.output,
-    cache_read: BUDGET.cache_read,
-    cache_write: BUDGET.cache_write,
     time: BUDGET.time,
 };
 

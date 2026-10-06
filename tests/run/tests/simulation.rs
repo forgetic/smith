@@ -83,8 +83,7 @@ fn an_llm_that_spends_past_the_tokens_fails_its_run_for_budget() {
     let calm = Settings::calm(5);
     let host = host::Script { tokens_min: 5_000, tokens_max: 20_000, ..calm.host };
     let world = settled(&Settings { host, partner: Script { yields: 0, ..calm.partner }, ..calm });
-    let tokens =
-        [Exhausted::Input, Exhausted::Output, Exhausted::CacheRead, Exhausted::CacheWrite].map(Failure::Budget);
+    let tokens = [Exhausted::Spend, Exhausted::Spend, Exhausted::Spend, Exhausted::Spend].map(Failure::Budget);
     for answer in answers(&world) {
         assert!(tokens.contains(&failure(answer)), "{answer:?}");
     }
@@ -262,6 +261,10 @@ fn a_check_deadline_terminal_returns_feedback_without_submitting_to_host() {
             ..settings.checkout
         },
         races: 0,
+        // Actual Root Opened/Started is synchronous. This focused story
+        // adds no artificial session hop, so the IO deadline really ties
+        // the run alarm; noisy worlds retain their independent hop races.
+        hop: Span::millis(0, 0),
         ..settings
     });
     let stats = world.stats();

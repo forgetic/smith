@@ -16,11 +16,14 @@
 //! sub-agent tree one level an iteration. A session takes either in any state
 //! it can be in when it comes (it waits for each delegated call's answer, and
 //! takes a close in any state, dropping it once it has ended). The run's `Open`
-//! and `Say` go at once: neither leads back (a session just opened or continued
-//! makes no call and does not yield in that step), and a `Say` must reach the
-//! session while it is still yielded, before its time can run out.
+//! and `Say` go at once: they emit no delegated call or yield. Their unsent
+//! completion may be denied by the root gate, adding one synchronous session
+//! terminal and its run notice. `Return` and `Close` remain deferred, so this
+//! cannot recurse through ancestors. A `Say` must reach the session while it
+//! is still yielded, before its time can run out.
 //!
-//! So an entry point's hand-offs are at most three deep: the child domain it is
+//! An entry point's initial hand-offs have a finite bounded unsent settlement
+//! pair in addition to the child domain it is
 //! for (a session's step, say), the run's steps for what that emitted, the
 //! sessions' steps for what the run opened or said at once, and the run's for
 //! what those emitted; [`max_out`] follows from the child domains' along that
@@ -143,11 +146,11 @@ pub(crate) enum Due {
     /// The run's answer, kept under a ticket, waiting on the ready list.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-    Answered { feedback: crate::Feedback },
+    Answered { feedback: crate::Feedback, spent: u64, spend_overflow: bool },
     /// The run returned it cancelled, after the session withdrew it.
     ///
     /// Copy baseline: domain/run.md, sections 2, 3, 10 and 14; domain/host.md, sections 2 and 7.
-    Cancelled,
+    Cancelled { spent: u64, spend_overflow: bool },
 }
 
 /// A hand-off from the run to a session, held by what it is about.

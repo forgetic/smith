@@ -198,14 +198,7 @@ const fn calm_run_limits() -> run::Limits {
         host_attempts: 3,
         verdicts: 4,
         calls: 16,
-        budget: run::Budget {
-            turns: 1000,
-            input: 1 << 32,
-            output: 1 << 32,
-            cache_read: 1 << 32,
-            cache_write: 1 << 32,
-            time: Duration::from_secs(24 * 3600),
-        },
+        budget: run::Budget { turns: 1000, spend: 1 << 32, time: Duration::from_secs(24 * 3600) },
         max_tokens: 8192,
         models: 4,
         depth: 2,
@@ -345,12 +338,30 @@ enum Delivery {
     },
     Return {
         call: Token,
+        spent: u64,
         result: run::Returned,
     },
     /// A conversation's event reaches the run.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     Event(run::Event),
+    /// Price and raw usage share their one actual completion callback hop.
+    /// Price steps first; no extra random transport latency is invented.
+    /// Scripted-world contract: domain/run.md, sections 9 and 13.
+    CompletionUsage {
+        conversation: Token,
+        own_spent: u64,
+        subtree_spent: u64,
+        own_overflow: bool,
+        subtree_overflow: bool,
+        usage: run::Spend,
+    },
+    /// An unsent completion waits behind its actual Started/Priced notices.
+    /// Scripted-world contract: domain/run.md, sections 9 and 13.
+    Permit {
+        peer: Token,
+        conversation: Token,
+    },
     /// io's answer reaches the run.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
@@ -480,6 +491,7 @@ pub struct World {
 
     host: Host,
     partner: Partner,
+    permits: Vec<(Token, Token)>,
 
     /// Deliveries in flight.
     ///
@@ -577,6 +589,7 @@ impl World {
             run_stage: Stage::new(settings.run, run::MAX_OUT, OUT),
             host,
             partner,
+            permits: Vec::new(),
             wire: Schedule::new(),
             lanes: [Time::ZERO; 4],
             starts: BTreeMap::new(),
@@ -737,6 +750,18 @@ impl World {
                 *self.cancel_cells.entry(cell).or_insert(0) += 1;
             }
         }
+        // The provider gate runs after all earlier Started/Priced notices.
+        for (peer, conversation) in std::mem::take(&mut self.permits) {
+            if self.run_stage.has_events() {
+                self.permits.push((peer, conversation));
+                continue;
+            }
+            assert_eq!(self.conversation_of_peer.get(&peer), Some(&conversation), "Started really stepped first");
+            let permit = run::completion_permit(&self.run, conversation);
+            let mut out = Vec::new();
+            self.partner.permitted(self.now, peer, permit, &mut out);
+            self.partner_out(out);
+        }
         // The host's alarms.
         if self.host.is_due(self.now) {
             let mut out = Vec::new();
@@ -791,23 +816,7 @@ impl World {
                 panic!("legacy run scripts do not invoke generic host tools")
             }
             run::Request::Admitted { worker, run } => {
-                let Start { budget, checks, .. } = &self.starts[&worker];
-                let view = RunView {
-                    budget: *budget,
-                    checks: checks.clone(),
-                    deadline: self.now.saturating_add(budget.time),
-                    main: None,
-                    started: false,
-                    decided: false,
-                    spent: run::Spend::ZERO,
-                    turns: 0,
-                    read: None,
-                    live: 0,
-                    peak: 0,
-                    answered: None,
-                };
-                self.views.insert(run, view);
-                self.run_of_owner.insert(worker, run);
+                self.admitted(worker, run);
                 current = Some(run);
                 self.send(Lane::Host, Delivery::Admitted { worker, run });
             }
@@ -832,14 +841,15 @@ impl World {
                 self.stats.closes += 1;
                 self.send(Lane::Conversations, Delivery::Close { peer });
             }
-            run::Request::Return { call, result } => {
+            run::Request::Return { call, result, spent, spend_overflow } => {
                 let ledger = self.calls.get_mut(&call).expect("a return is of a call that was made");
                 assert!(!ledger.returned, "a call returns once");
                 ledger.returned = true;
                 if let Some(child) = self.child_of_call.remove(&call) {
                     assert!(self.opens[&child].ended, "a sub-agent has ended before its call returns");
                 }
-                self.send(Lane::Conversations, Delivery::Return { call, result });
+                assert!(!spend_overflow, "bounded fixture exact bill");
+                self.send(Lane::Conversations, Delivery::Return { call, result, spent });
             }
             request @ (run::Request::Read { .. } | run::Request::Probe { .. } | run::Request::Abort { .. }) => {
                 self.io_request(request);
@@ -868,6 +878,28 @@ impl World {
             }
         }
         current
+    }
+
+    /// Retain the independent start budget and checks at actual admission.
+    /// Contract: domain/run.md, sections 3, 9 and 13.
+    fn admitted(&mut self, worker: Token, run: Token) {
+        let Start { budget, checks, .. } = &self.starts[&worker];
+        let view = RunView {
+            budget: *budget,
+            checks: checks.clone(),
+            deadline: self.now.saturating_add(budget.time),
+            main: None,
+            started: false,
+            decided: false,
+            spent: run::Spend::ZERO,
+            turns: 0,
+            read: None,
+            live: 0,
+            peak: 0,
+            answered: None,
+        };
+        self.views.insert(run, view);
+        self.run_of_owner.insert(worker, run);
     }
 
     /// Count only actual main output; this component neighbour owns opaque records.
@@ -963,6 +995,7 @@ impl World {
             run::Event::Started { conversation, .. }
             | run::Event::Turn { conversation, .. }
             | run::Event::Yielded { conversation, .. }
+            | run::Event::Priced { conversation, .. }
             | run::Event::Used { conversation, .. }
             | run::Event::Ended { conversation, .. }
             | run::Event::Delegated { conversation, .. }
@@ -984,7 +1017,7 @@ impl World {
                 self.conversation_of_peer.insert(*peer, *conversation);
                 view.started = true;
             }
-            run::Event::Used { spend, .. } => view.spent = view.spent.saturating_add(*spend),
+            run::Event::Used { spend, .. } => view.spent = view.spent.accumulate(*spend),
             run::Event::Checked { owner, .. } | run::Event::Aborted { owner } | run::Event::Delivered { owner, .. } => {
                 self.landing.remove(owner);
             }
@@ -996,7 +1029,8 @@ impl World {
                 }
                 return Some((*run, cell));
             }
-            run::Event::HostReturned { .. }
+            run::Event::Priced { .. }
+            | run::Event::HostReturned { .. }
             | run::Event::Start { .. }
             | run::Event::Message { .. }
             | run::Event::Turn { .. }
@@ -1079,12 +1113,7 @@ impl World {
                 // took the ask.
                 let share = opening.budget;
                 assert!(
-                    share.turns <= left.turns
-                        && share.input <= left.input
-                        && share.output <= left.output
-                        && share.cache_read <= left.cache_read
-                        && share.cache_write <= left.cache_write
-                        && share.time <= left.time,
+                    share.turns <= left.turns && share.spend <= left.spend && share.time <= left.time,
                     "a sub-agent's share {share:?} is within what its run has left, {left:?}"
                 );
                 assert!(!opening.finish, "a sub-agent may not finish");
@@ -1237,6 +1266,7 @@ impl World {
                 | run::Event::Turn { .. }
                 | run::Event::Started { .. }
                 | run::Event::Yielded { .. }
+                | run::Event::Priced { .. }
                 | run::Event::Used { .. }
                 | run::Event::Ended { .. }
                 | run::Event::Read { .. }
@@ -1256,17 +1286,7 @@ impl World {
         while let Some(delivery) = self.wire.next(self.now) {
             match delivery {
                 Delivery::Start { reply_to, worker, charter, workspace } => {
-                    self.checkout(workspace.as_ref().map_or(&[][..], |workspace| &workspace.directories));
-                    let wants = charter.outcome.change.is_some() || charter.grants.deliver.is_some();
-                    let mut checks = BTreeSet::new();
-                    for repository in workspace.as_ref().map_or(&[][..], |workspace| workspace.directories.as_ref()) {
-                        let executable = (repository.root, b".temper/pre-pr".to_vec());
-                        if wants && repository.writable && self.executables.contains(&executable) {
-                            checks.insert(repository.root);
-                        }
-                    }
-                    self.starts.get_mut(&worker).expect("a start is tracked").checks = checks;
-                    self.run_stage.push(run::Event::Start { reply_to, worker, charter, workspace, transcript: None });
+                    self.start_delivery(reply_to, worker, charter, workspace);
                 }
                 Delivery::Cancel { run } => self.run_stage.push(run::Event::Cancel { run }),
                 Delivery::Host(event) => self.hand(event),
@@ -1281,7 +1301,7 @@ impl World {
                 }
                 Delivery::Say { peer } => {
                     let mut out = Vec::new();
-                    self.partner.say(self.now, peer, &mut out);
+                    self.partner.say(peer, &mut out);
                     self.partner_out(out);
                 }
                 Delivery::Close { peer } => {
@@ -1289,15 +1309,33 @@ impl World {
                     self.partner.close(self.now, peer, &mut out);
                     self.partner_out(out);
                 }
-                Delivery::Return { call, result } => {
+                Delivery::Return { call, result, spent } => {
                     let mut out = Vec::new();
-                    self.partner.returned(self.now, call, &result, &mut out);
+                    self.partner.returned(self.now, call, &result, spent, &mut out);
                     self.partner_out(out);
                 }
                 Delivery::Wake { peer, wake } => {
                     let mut out = Vec::new();
                     self.partner.woken(self.now, peer, wake, &mut out);
                     self.partner_out(out);
+                }
+                Delivery::Permit { peer, conversation } => self.permits.push((peer, conversation)),
+                Delivery::CompletionUsage {
+                    conversation,
+                    own_spent,
+                    subtree_spent,
+                    own_overflow,
+                    subtree_overflow,
+                    usage,
+                } => {
+                    self.completion_usage(
+                        conversation,
+                        own_spent,
+                        subtree_spent,
+                        own_overflow,
+                        subtree_overflow,
+                        usage,
+                    );
                 }
                 Delivery::Event(event) => {
                     self.check_conversation(&event);
@@ -1327,6 +1365,7 @@ impl World {
                         | run::Event::Cancel { .. }
                         | run::Event::Started { .. }
                         | run::Event::Yielded { .. }
+                        | run::Event::Priced { .. }
                         | run::Event::Used { .. }
                         | run::Event::Ended { .. }
                         | run::Event::Delegated { .. }
@@ -1338,6 +1377,48 @@ impl World {
                 }
             }
         }
+    }
+
+    /// Discover actual checkout checks before delivering the original host Start.
+    /// Caller-selected Charter and Workspace remain owning boundary values.
+    /// Scripted-world contract: domain/run.md, sections 3 and 13.
+    fn start_delivery(
+        &mut self,
+        reply_to: ReplyTo,
+        worker: Token,
+        charter: run::Charter,
+        workspace: Option<run::Workspace>,
+    ) {
+        self.checkout(workspace.as_ref().map_or(&[][..], |workspace| &workspace.directories));
+        let wants = charter.outcome.change.is_some() || charter.grants.deliver.is_some();
+        let mut checks = BTreeSet::new();
+        for repository in workspace.as_ref().map_or(&[][..], |workspace| workspace.directories.as_ref()) {
+            let executable = (repository.root, b".temper/pre-pr".to_vec());
+            if wants && repository.writable && self.executables.contains(&executable) {
+                checks.insert(repository.root);
+            }
+        }
+        self.starts.get_mut(&worker).expect("a start is tracked").checks = checks;
+        self.run_stage.push(run::Event::Start { reply_to, worker, charter, workspace, transcript: None });
+    }
+
+    /// Reconstruct one accepted completion's exact accounting notices in order.
+    /// Both share the original callback's one cancellation-injection draw.
+    /// Scripted-world contract: domain/run.md, sections 9 and 13.
+    fn completion_usage(
+        &mut self,
+        conversation: Token,
+        own_spent: u64,
+        subtree_spent: u64,
+        own_overflow: bool,
+        subtree_overflow: bool,
+        usage: run::Spend,
+    ) {
+        let price = run::Event::Priced { conversation, own_spent, subtree_spent, own_overflow, subtree_overflow };
+        self.check_conversation(&price);
+        let used = run::Event::Used { conversation, spend: usage };
+        self.check_conversation(&used);
+        self.hand_callback(Some(price), used);
     }
 
     /// A fact the run told: of a run it admitted, and a conversation it
@@ -1376,6 +1457,13 @@ impl World {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn hand(&mut self, event: run::Event) {
+        self.hand_callback(None, event);
+    }
+
+    /// One physical callback owns one before/after cancellation injection.
+    /// A completion's price precedes its raw usage without an invented race.
+    /// Scripted-world contract: domain/run.md, sections 9 and 13.
+    fn hand_callback(&mut self, price: Option<run::Event>, event: run::Event) {
         let run = self.run_of(&event);
         let inject = match run {
             Some(_) => self.rng.chance(self.settings.inject),
@@ -1384,6 +1472,9 @@ impl World {
         let before = inject && self.rng.chance(500);
         if let Some(run) = run.filter(|_| before) {
             self.run_stage.push(run::Event::Cancel { run });
+        }
+        if let Some(price) = price {
+            self.run_stage.push(price);
         }
         self.run_stage.push(event);
         if let Some(run) = run.filter(|_| inject && !before) {
@@ -1395,8 +1486,38 @@ impl World {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn partner_out(&mut self, out: Vec<Out>) {
-        for item in out {
+        let mut items = out.into_iter().peekable();
+        while let Some(item) = items.next() {
             match item {
+                Out::Event(run::Event::Priced {
+                    conversation,
+                    own_spent,
+                    subtree_spent,
+                    own_overflow,
+                    subtree_overflow,
+                }) if matches!(items.peek(), Some(Out::Event(run::Event::Used { .. }))) => {
+                    let Some(Out::Event(run::Event::Used { conversation: used, spend: usage })) = items.next() else {
+                        panic!("checked adjacent raw usage from the same actual callback")
+                    };
+                    assert_eq!(conversation, used, "one genuine completion callback owns both notices");
+                    self.send(
+                        Lane::Run,
+                        Delivery::CompletionUsage {
+                            conversation,
+                            own_spent,
+                            subtree_spent,
+                            own_overflow,
+                            subtree_overflow,
+                            usage,
+                        },
+                    );
+                }
+                Out::Permit { peer, conversation } => {
+                    // Preserve the Run lane's order without inventing another
+                    // randomized protocol hop for this local gate query.
+                    let at = self.now.max(self.lanes[Lane::Run as usize]);
+                    self.schedule(at, Delivery::Permit { peer, conversation });
+                }
                 Out::Event(event) => self.send(Lane::Run, Delivery::Event(event)),
                 Out::Wake { at, peer, wake } => {
                     self.schedule(at, Delivery::Wake { peer, wake });
@@ -1416,6 +1537,7 @@ impl World {
             run::Event::Ended { conversation, .. } => (conversation, false, true),
             run::Event::Yielded { conversation, .. }
             | run::Event::Turn { conversation, .. }
+            | run::Event::Priced { conversation, .. }
             | run::Event::Used { conversation, .. } => (conversation, false, false),
             run::Event::Delegated { conversation, call, .. } => {
                 let fresh = self.calls.insert(*call, Call { conversation: *conversation, returned: false }).is_none();
@@ -1460,7 +1582,8 @@ impl World {
     }
 
     fn has_work_now(&self) -> bool {
-        self.run_stage.has_events()
+        !self.permits.is_empty()
+            || self.run_stage.has_events()
             || self.run.is_due(self.now)
             || self.host.is_due(self.now)
             || self.wire.is_due(self.now)
@@ -1496,7 +1619,7 @@ impl World {
                 | run::Answer::Delivered { spent, .. }
                 | run::Answer::Failed { spent, .. }
                 | run::Answer::Accepted { spent, .. } => {
-                    answered = answered.saturating_add(*spent);
+                    answered = answered.accumulate(*spent);
                 }
                 run::Answer::Refused(_) => {}
             }
@@ -1566,10 +1689,7 @@ impl RunView {
         let (spent, budget) = (self.spent, self.budget);
         run::Budget {
             turns: budget.turns.saturating_sub(spent.turns),
-            input: budget.input.saturating_sub(spent.input),
-            output: budget.output.saturating_sub(spent.output),
-            cache_read: budget.cache_read.saturating_sub(spent.cache_read),
-            cache_write: budget.cache_write.saturating_sub(spent.cache_write),
+            spend: budget.spend.saturating_sub(spent.units),
             time: self.deadline.saturating_since(now),
         }
     }
@@ -1579,26 +1699,16 @@ impl RunView {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn budget_spent(&self) -> bool {
         let (spent, budget) = (self.spent, self.budget);
-        spent.turns > budget.turns
-            || spent.input > budget.input
-            || spent.output > budget.output
-            || spent.cache_read > budget.cache_read
-            || spent.cache_write > budget.cache_write
+        spent.turns > budget.turns || spent.units > budget.spend
     }
 }
 
-/// A run spends within its budget, give or take a turn per conversation it
-/// had live at once, and two. The run sums `Used` and closes main once the
-/// total crosses its budget: at main's next turn when main crossed it, at
-/// once when a sub-agent did, the close cascading down the tree. A
-/// conversation keeps to its own share, but a share is carved from what the
-/// run had left when it opened, and the others spend from the same budget,
-/// so none may have reached its own ceiling by then. After the crossing turn,
-/// the conversation whose `Used` crossed may finish one more completion
-/// before it is closed, and each conversation may finish the completion it
-/// has in flight when its close comes, one that wins the race with it: the
-/// partner starts a turn the moment one ends, so a close always finds one in
-/// flight, where a session would run its completion's calls first.
+/// A run spends within its budget plus the existing conservative completion
+/// slack: one turn per conversation live at the peak, and two. The pure run
+/// gate denies every next unsent completion once global turns or scalar units
+/// reach the ceiling. Already-admitted completions still report exact usage,
+/// settle their calls and may win a race with time or cancellation. The bound
+/// retains its original slack independently of those scheduling choices.
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 fn assert_within(budget: &run::Budget, answer: &run::Answer, turn: run::Spend, peak: u32) {
@@ -1613,10 +1723,7 @@ fn assert_within(budget: &run::Budget, answer: &run::Answer, turn: run::Spend, p
     let over = |spent: u64, budget: u64, turn: u64| spent <= budget.saturating_add(turn.saturating_mul(turns));
     assert!(
         over(u64::from(spent.turns), u64::from(budget.turns), u64::from(turn.turns))
-            && over(spent.input, budget.input, turn.input)
-            && over(spent.output, budget.output, turn.output)
-            && over(spent.cache_read, budget.cache_read, turn.cache_read)
-            && over(spent.cache_write, budget.cache_write, turn.cache_write),
+            && over(spent.units, budget.spend, turn.units),
         "{spent:?} is within {budget:?} and {turns} turns of at most {turn:?} between them"
     );
 }

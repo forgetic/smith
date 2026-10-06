@@ -16,12 +16,14 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
     host.stage.tick(*at);
     match seen {
         Seen::Admitted => host.up(Up::Admitted),
-        Seen::Turn { number, read, turn } => {
+        Seen::Turn { number, read, spent, turn } => {
             host.up(Up::Turn {
                 turn: host::Turn {
                     number: *number,
                     read: *read,
-                    spent: turn.spent,
+                    spent: spent.units,
+                    spend_overflow: spent.units_overflow,
+                    usage_overflow: spent.usage_overflow,
                     body: format!("{turn:?}").into_bytes().into(),
                 },
             });
@@ -52,9 +54,17 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
                 host.sent();
             }
         }
-        Seen::Answer { turns, parked } => {
+        Seen::Answer { turns, parked, spent } => {
             assert!(*parked, "this actual agent finishes by idle parking");
-            host.up(Up::Answer { answer: host::Answer { turns: *turns, spent: 0, result: RunResult::Parked } });
+            host.up(Up::Answer {
+                answer: host::Answer {
+                    turns: *turns,
+                    spent: spent.units,
+                    spend_overflow: spent.units_overflow,
+                    usage_overflow: spent.usage_overflow,
+                    result: RunResult::Parked,
+                },
+            });
         }
         Seen::Input { .. }
         | Seen::Bounced { .. }

@@ -125,7 +125,7 @@ impl Harness {
         while let Some(request) = self.out.pop() {
             match request {
                 Request::Turn { .. } | Request::Priced { .. } => unreachable!("v1 scenarios"),
-                Request::Used { opener: _, usage } => {
+                Request::Used { opener: _, usage, .. } => {
                     assert!(one.is_none(), "a completion's usage comes first");
                     self.turns = self.turns.saturating_add(1);
                     self.usage = self.usage.saturating_add(usage);
@@ -411,7 +411,7 @@ fn ended(end: End, turns: u32) -> Request {
     for _ in 0..turns {
         usage = usage.saturating_add(USAGE);
     }
-    Request::Ended { opener: Token::new(1), end, turns, usage }
+    Request::Ended { opener: Token::new(1), end, turns, usage, usage_overflow: false }
 }
 
 #[test]
@@ -719,7 +719,7 @@ fn the_tools_tell_of_each_call_and_the_session_passes_it_on() {
         Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 },
         by_tools(opener, tools::Fact::Opened { session: owner }),
         Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 3, calls: 2, invalid: 0 },
-        Fact::Used { opener, usage: USAGE },
+        Fact::Used { opener, usage: USAGE, usage_overflow: false },
         by_tools(opener, tools::Fact::Started { session: owner, tool: read }),
         by_tools(opener, tools::Fact::Started { session: owner, tool: read }),
         by_tools(opener, tools::Fact::Answered { session: owner, tool: read, verdict: tools::Verdict::Read, bytes: 1 }),
@@ -840,14 +840,14 @@ fn delegated_calls_are_told_as_they_start_and_end() {
         Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 },
         Fact::Tools { opener, fact: tools::Fact::Opened { session: owner } },
         Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 2, calls: 2, invalid: 0 },
-        Fact::Used { opener, usage: USAGE },
+        Fact::Used { opener, usage: USAGE, usage_overflow: false },
         Fact::DelegateStarted { opener, block: 0 },
         Fact::DelegateStarted { opener, block: 1 },
         Fact::DelegateAnswered { opener, bytes: 3, error: true },
         // The kit closes as the session does, with nothing of its own to settle.
         Fact::Tools { opener, fact: tools::Fact::Closed { session: owner } },
         Fact::DelegateCancelled { opener },
-        Fact::Ended { opener, end: End::Closed, turns: 1, usage: USAGE },
+        Fact::Ended { opener, end: End::Closed, turns: 1, usage: USAGE, usage_overflow: false },
     ]);
 }
 
@@ -866,7 +866,16 @@ fn opens_beyond_the_session_slots_are_refused_as_busy() {
     let mut h = Harness::new(Limits { sessions: 1, spend: 0, ..LIMITS });
     drop(h.open(1));
     let refused = h.step(Event::Open { opener: Token::new(2), spec: spec() });
-    assert_eq!(refused, Some(Request::Ended { opener: Token::new(2), end: End::Busy, turns: 0, usage: Usage::ZERO }));
+    assert_eq!(
+        refused,
+        Some(Request::Ended {
+            opener: Token::new(2),
+            end: End::Busy,
+            turns: 0,
+            usage: Usage::ZERO,
+            usage_overflow: false
+        })
+    );
 }
 
 #[test]
@@ -1092,7 +1101,7 @@ fn every_completion_is_reported_before_what_follows_it() {
     let mut h = Harness::new(LIMITS);
     let (owner, _) = h.open(1);
     step(&mut h.domain, &h.env, Event::Completed { owner, completion: reading() }, &mut h.out);
-    assert_eq!(h.out.pop(), Some(Request::Used { opener: Token::new(1), usage: USAGE }));
+    assert_eq!(h.out.pop(), Some(Request::Used { opener: Token::new(1), usage: USAGE, usage_overflow: false }));
     let (run, _) = running(h.one());
     drop(calling(h.step(ran(run, b"main.rs"))));
     drop(yielded(h.step(Event::Completed { owner, completion: done() })));
@@ -1233,7 +1242,7 @@ fn each_answer_may_take_no_more_than_the_output_budget_left() {
     let end = h.step(Event::Continue { session: owner, content: bytes(b"go on") });
     let spent = End::Budget { spent: Dimension::Output };
     let usage = USAGE.saturating_add(usage);
-    assert_eq!(end, Some(Request::Ended { opener: Token::new(1), end: spent, turns: 2, usage }));
+    assert_eq!(end, Some(Request::Ended { opener: Token::new(1), end: spent, turns: 2, usage, usage_overflow: false }));
 
     // A spec's own max_tokens stays the cap while more is left.
     let mut h = Harness::new(LIMITS);
@@ -1319,7 +1328,7 @@ fn a_session_tells_what_happens_as_facts() {
     let (run, _) = running(h.step(Event::Completed { owner, completion: reading() }));
     h.told(&[
         Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 1, calls: 1, invalid: 0 },
-        Fact::Used { opener, usage: USAGE },
+        Fact::Used { opener, usage: USAGE, usage_overflow: false },
         by_tools(opener, tools::Fact::Started { session: owner, tool: tools::Tool::Read }),
     ]);
     drop(calling(h.step(ran(run, b"main.rs"))));
@@ -1331,14 +1340,17 @@ fn a_session_tells_what_happens_as_facts() {
     drop(yielded(h.step(Event::Completed { owner, completion: done() })));
     h.told(&[
         Fact::CompletionAnswered { opener, stop: Stop::EndTurn, blocks: 1, calls: 0, invalid: 0 },
-        Fact::Used { opener, usage: USAGE },
+        Fact::Used { opener, usage: USAGE, usage_overflow: false },
         Fact::Yielded { opener, stop: Yield::Done },
     ]);
     let end = h.step(Event::Close { session: owner });
-    let Some(Request::Ended { opener: _, end, turns, usage }) = end else {
+    let Some(Request::Ended { opener: _, end, turns, usage, .. }) = end else {
         panic!("expected the end, not {end:?}");
     };
-    h.told(&[Fact::Ended { opener, end, turns, usage }, by_tools(opener, tools::Fact::Closed { session: owner })]);
+    h.told(&[
+        Fact::Ended { opener, end, turns, usage, usage_overflow: false },
+        by_tools(opener, tools::Fact::Closed { session: owner }),
+    ]);
 }
 
 #[test]
@@ -1371,12 +1383,12 @@ fn retries_cancels_and_refusals_are_told_too() {
 
     let refused = Token::new(2);
     drop(h.step(Event::Open { opener: refused, spec: spec() }));
-    h.told(&[Fact::Ended { opener: refused, end: End::Busy, turns: 0, usage: Usage::ZERO }]);
+    h.told(&[Fact::Ended { opener: refused, end: End::Busy, turns: 0, usage: Usage::ZERO, usage_overflow: false }]);
 
     assert_eq!(h.step(Event::Close { session: owner }), Some(Request::Cancel { owner }));
     h.told(&[Fact::Tools { opener, fact: tools::Fact::Closed { session: owner } }]);
     drop(h.step(Event::Cancelled { owner }));
-    let end = Fact::Ended { opener, end: End::Closed, turns: 0, usage: Usage::ZERO };
+    let end = Fact::Ended { opener, end: End::Closed, turns: 0, usage: Usage::ZERO, usage_overflow: false };
     h.told(&[Fact::CompletionCancelled { opener }, end]);
 }
 
@@ -1414,7 +1426,7 @@ fn facts_beyond_their_room_are_dropped_and_counted_and_change_nothing() {
     let (owner, ..) = requests;
     drop(yielded(full.step(Event::Completed { owner, completion: done() })));
     let answered = Fact::CompletionAnswered { opener, stop: Stop::EndTurn, blocks: 1, calls: 0, invalid: 0 };
-    full.told(&[answered, Fact::Used { opener, usage: USAGE }]);
+    full.told(&[answered, Fact::Used { opener, usage: USAGE, usage_overflow: false }]);
     assert_eq!(full.domain.facts_lost(), 7);
 }
 
@@ -1473,4 +1485,121 @@ fn completion_name_exhaustion_ends_before_any_owned_or_delegated_effect() {
         }
         assert!(used && ended);
     }
+}
+
+/// A concrete recording entrance owns a provider reservation, unlike V1.
+/// This fixture retains the original raw receiving caps and tools authority.
+fn reserved_recorded_call(harness: &mut Harness) -> Token {
+    step(
+        &mut harness.domain,
+        &harness.env,
+        Event::OpenV2 {
+            opener: Token::new(1),
+            spec: crate::record::Opening {
+                spec: spec(),
+                dialect: 1,
+                prices: crate::record::Prices { input: 0, cached: 0, output: 0, unit: 1 },
+                budget: 100,
+                transcript: None,
+            },
+        },
+        &mut harness.out,
+    );
+    let Some(Request::Opened { opener, session }) = harness.out.pop() else {
+        panic!("the concrete recording session is admitted");
+    };
+    assert_eq!(opener, Token::new(1));
+    let (owner, _) = calling(harness.one());
+    assert_eq!(owner, session);
+    owner
+}
+
+#[test]
+fn unsent_denial_releases_actual_reserved_provider_credit_before_kit_settlement() {
+    for (reason, dimension) in
+        [(crate::BudgetDenial::Turns, Dimension::Turns), (crate::BudgetDenial::Spend, Dimension::Unit)]
+    {
+        let mut harness = Harness::new(Limits { spend: 100, ..LIMITS });
+        let owner = reserved_recorded_call(&mut harness);
+        let (reserved, credit) = crate::session::provider_credit_for_test(&harness.domain, owner);
+        assert!(reserved > 0);
+        assert_eq!(credit, Some(reserved), "the pending provider owns the entire actual reservation");
+        assert_eq!(
+            harness.step(Event::BudgetDenied { owner, reason }),
+            Some(ended(End::Budget { spent: dimension }, 0)),
+        );
+        assert_eq!(crate::session::provider_credit_for_test(&harness.domain, owner), (0, None));
+        assert_eq!((harness.turns, harness.usage), (0, Usage::ZERO));
+        assert_eq!(harness.domain.next_deadline(), None);
+        assert_eq!(harness.step(Event::BudgetDenied { owner, reason }), None);
+        harness.domain.reclaim();
+        assert_eq!((harness.domain.sessions(), harness.domain.kits()), (0, 0));
+        assert_eq!(harness.step(Event::BudgetDenied { owner, reason }), None);
+    }
+}
+
+#[test]
+fn legacy_raw_overflow_still_yields_and_saturates_each_counter_with_a_diagnostic_flag() {
+    let budget = Budget { input: u64::MAX, output: u64::MAX, cache_read: u64::MAX, cache_write: u64::MAX, ..BUDGET };
+    let mut harness = Harness::new(Limits { budget, ..LIMITS });
+    let (owner, _) = harness.open_with(1, Spec { budget, ..spec() });
+    let first = Usage { input_tokens: u64::MAX - 1, output_tokens: 1, cache_read_tokens: 3, cache_write_tokens: 4 };
+    drop(yielded(harness.step(Event::Completed { owner, completion: Completion { usage: first, ..done() } })));
+    drop(calling(harness.step(Event::Continue { session: owner, content: bytes(b"go on") })));
+    let second = Usage { input_tokens: 2, output_tokens: 2, cache_read_tokens: 5, cache_write_tokens: 6 };
+    drop(yielded(harness.step(Event::Completed { owner, completion: Completion { usage: second, ..done() } })));
+    let saturated = Usage { input_tokens: u64::MAX, output_tokens: 3, cache_read_tokens: 8, cache_write_tokens: 10 };
+    assert_eq!(harness.usage, saturated);
+    assert_eq!(
+        harness.step(Event::Close { session: owner }),
+        Some(Request::Ended {
+            opener: Token::new(1),
+            end: End::Closed,
+            turns: 2,
+            usage: saturated,
+            usage_overflow: true
+        }),
+    );
+    let mut overflow_used = false;
+    let mut overflow_ended = false;
+    while let Some(fact) = harness.domain.pop_fact() {
+        match fact {
+            Fact::Used { usage, usage_overflow: true, .. } => {
+                assert_eq!(usage, second);
+                overflow_used = true;
+            }
+            Fact::Ended { usage, usage_overflow: true, .. } => {
+                assert_eq!(usage, saturated);
+                overflow_ended = true;
+            }
+            Fact::Used { usage_overflow: false, .. }
+            | Fact::Ended { usage_overflow: false, .. }
+            | Fact::Opened { .. }
+            | Fact::CompletionStarted { .. }
+            | Fact::CompletionAnswered { .. }
+            | Fact::CompletionFailed { .. }
+            | Fact::CompletionCancelled { .. }
+            | Fact::CompletionRetried { .. }
+            | Fact::Yielded { .. }
+            | Fact::DelegateStarted { .. }
+            | Fact::DelegateAnswered { .. }
+            | Fact::DelegateCancelled { .. }
+            | Fact::Tools { .. } => {}
+        }
+    }
+    assert!(overflow_used && overflow_ended);
+}
+
+#[test]
+fn unsent_close_releases_actual_provider_credit_without_requesting_a_cancel() {
+    let mut harness = Harness::new(Limits { spend: 100, ..LIMITS });
+    let owner = reserved_recorded_call(&mut harness);
+    let (reserved, credit) = crate::session::provider_credit_for_test(&harness.domain, owner);
+    assert!(reserved > 0 && credit == Some(reserved));
+    assert_eq!(harness.step(Event::UnsentClosed { owner }), Some(ended(End::Closed, 0)));
+    assert_eq!(crate::session::provider_credit_for_test(&harness.domain, owner), (0, None));
+    assert_eq!(harness.domain.next_deadline(), None);
+    assert_eq!(harness.step(Event::UnsentClosed { owner }), None);
+    harness.domain.reclaim();
+    assert_eq!((harness.domain.sessions(), harness.domain.kits()), (0, 0));
 }

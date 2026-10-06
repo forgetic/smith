@@ -62,8 +62,14 @@ you, and you are done.\n";
 fn charter(settings: &Settings, instructions: &str) -> run::Charter {
     use run::charter::{Brief, Endpoint, Grants, Llm, Section, Tools};
     use run::outcome::{FieldRule, OutcomeSpec, TextSpec};
-    let llm =
-        Llm { dialect: 1, account: 0, endpoint: Endpoint(0), model: b"fake-1".as_slice().into(), max_tokens: 4096 };
+    let llm = Llm {
+        prices: run::Prices { input: 0, cached: 0, output: 0, unit: 1 },
+        dialect: 1,
+        account: 0,
+        endpoint: Endpoint(0),
+        model: b"fake-1".as_slice().into(),
+        max_tokens: 4096,
+    };
     run::Charter {
         instructions: instructions.as_bytes().into(),
         brief: Brief {

@@ -262,6 +262,7 @@ struct Flight {
     key: Option<Key>,
     cancelled: bool,
     completion_message: Option<u32>,
+    completion_index: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -337,6 +338,46 @@ pub enum Boundary {
     },
 }
 
+/// One actual provider admission and terminal, observed outside accounting.
+/// A finite turn/conversation/block/retry bound caps this fixture activation; model bytes are
+/// copied from the original Complete, never inferred from a Turn.
+/// Contract: domain/run.md, sections 9 and 14; testing-strategy.md, section 7.
+#[derive(Clone, Debug)]
+pub struct CompletionObservation {
+    /// Actual callback owner. Contract: domain/run.md, section 14.
+    pub owner: Token,
+
+    /// Caller-selected model from actual Complete. Contract: domain/run.md, section 9.
+    pub model: Box<[u8]>,
+
+    /// Actual completion start clock. Contract: domain/run.md, section 10.
+    pub started: Time,
+
+    /// Actual terminal clock and SDK-shaped usage, or failure/cancellation.
+    /// Pending is None; failure/cancellation has no invented usage.
+    /// Contract: domain/run.md, sections 9 and 10.
+    pub terminal: Option<(Time, CompletionTerminal)>,
+}
+
+/// Actual completion terminal class, independent of Session's price calculation.
+/// Contract: domain/run.md, sections 9 and 10; testing-strategy.md, section 7.
+#[derive(Clone, Copy, Debug)]
+pub enum CompletionTerminal {
+    /// All four exact accepted provider counters.
+    /// Contract: domain/run.md, section 9; domain/client.md, section 4.
+    Completed(
+        /// SDK usage shape copied at the genuine terminal.
+        /// Contract: domain/client.md, section 4.
+        skein_llm::Usage,
+    ),
+
+    /// Genuine provider failure. Contract: domain/client.md, section 4.
+    Failed,
+
+    /// Genuine settled cancellation. Contract: domain/client.md, section 5.
+    Cancelled,
+}
+
 /// The real agent on a typed scripted host or actual wire backend. [`World::run`]
 /// drives every boundary to settlement, then checks its ledgers, referee and facts.
 /// The selected backend owns only its corresponding provider state and queues.
@@ -372,6 +413,8 @@ pub struct World {
     snapshots: BTreeMap<Token, Vec<u8>>,
     landed: Vec<u8>,
     prompts: Vec<provider::api::Query>,
+    completions: Vec<CompletionObservation>,
+    model_prices: BTreeMap<Box<[u8]>, run::Prices>,
     turns: Vec<agent::Turn>,
     messages_seen: Vec<(Time, crate::messages_referee::Seen)>,
     turn_metadata: Vec<(u32, Option<Token>, run::Spend)>,
@@ -433,6 +476,11 @@ impl World {
         let mut stage = Stage::new(settings.limits, max_out, max_out + 3);
         let charter = selected_charter.unwrap_or_else(|| charter(settings));
         let observed_contract = charter.outcome.clone();
+        let mut model_prices = BTreeMap::new();
+        model_prices.insert(charter.llm.model.clone(), charter.llm.prices);
+        for model in &charter.models {
+            model_prices.insert(model.model.clone(), model.prices);
+        }
         stage.push(Event::Start {
             reply_to: ReplyTo::new(Token::new(1)),
             worker: Token::new(1),
@@ -493,6 +541,8 @@ impl World {
             snapshots: BTreeMap::new(),
             landed: Vec::new(),
             prompts: Vec::new(),
+            completions: Vec::new(),
+            model_prices,
             turns: Vec::new(),
             messages_seen: Vec::new(),
             turn_metadata: Vec::new(),
@@ -930,7 +980,7 @@ impl World {
                 assert_eq!(usize::try_from(number).expect("bounded output number"), self.turns.len() + 1);
                 self.observe(Seen::Turn { number });
                 self.messages_seen
-                    .push((self.now, crate::messages_referee::Seen::Turn { number, read, turn: turn.clone() }));
+                    .push((self.now, crate::messages_referee::Seen::Turn { number, read, spent, turn: turn.clone() }));
                 self.turn_metadata.push((number, read, spent));
                 self.turns.push(turn);
             }
@@ -965,8 +1015,15 @@ impl World {
                     | run::Answer::Failed { turns, .. } => (*turns, false),
                     run::Answer::Refused(_) => (0, false),
                 };
+                let spent = match &answer {
+                    run::Answer::Refused(_) => run::Spend::ZERO,
+                    run::Answer::Parked { spent, .. }
+                    | run::Answer::Accepted { spent, .. }
+                    | run::Answer::Delivered { spent, .. }
+                    | run::Answer::Failed { spent, .. } => *spent,
+                };
                 assert!(self.answer.replace(answer).is_none(), "one answer per host start");
-                self.messages_seen.push((self.now, crate::messages_referee::Seen::Answer { turns, parked }));
+                self.messages_seen.push((self.now, crate::messages_referee::Seen::Answer { turns, parked, spent }));
                 self.answered = Some(self.now);
             }
             Request::Checking { worker, .. } => {
@@ -983,11 +1040,36 @@ impl World {
             } => {
                 self.host_history.prompt(&prompt).expect("exact feedback for observed provider host call");
                 self.observe(Seen::Completing { owner });
+                let starts = u64::from(self.settings.limits.run.budget.turns)
+                    .checked_add(u64::from(self.settings.limits.run.conversations))
+                    .expect("fixture concurrent turns")
+                    .checked_mul(u64::from(self.settings.limits.session.completion_blocks) + 1)
+                    .expect("fixture child openings across all delegate batches")
+                    .checked_add(1)
+                    .expect("fixture initial main completion")
+                    .checked_mul(u64::from(self.settings.limits.session.retries) + 1)
+                    .expect("fixture retry attempts");
+                assert!(
+                    u64::try_from(self.completions.len()).expect("fixture observation count") < starts,
+                    "bounded actual provider chronology from receiving turn/concurrency/retry limits"
+                );
+                let completion_index = self.completions.len();
+                self.completions.push(CompletionObservation {
+                    owner,
+                    model: prompt.model.clone(),
+                    started: self.now,
+                    terminal: None,
+                });
                 let completion_message =
                     u32::try_from(prompt.messages.len()).expect("bounded actual prompt message count");
                 self.flights.open(
                     (Family::Completion, owner),
-                    Flight { key: None, cancelled: false, completion_message: Some(completion_message) },
+                    Flight {
+                        key: None,
+                        cancelled: false,
+                        completion_message: Some(completion_message),
+                        completion_index: Some(completion_index),
+                    },
                 );
                 match &mut self.backend {
                     Backend::Wire(wire) => {
@@ -1015,8 +1097,10 @@ impl World {
             },
             Request::Io { owner, op, deadline } => {
                 self.boundaries.push((self.now, Boundary::Io { op: op.clone() }));
-                self.flights
-                    .open((Family::Io, owner), Flight { key: None, cancelled: false, completion_message: None });
+                self.flights.open(
+                    (Family::Io, owner),
+                    Flight { key: None, cancelled: false, completion_message: None, completion_index: None },
+                );
                 let delivery = match op {
                     tools::Op::Spawn { cwd, command, env, roots, head, tail } => {
                         match io::spawn(&self.disk, &cwd, &command, &env, &roots, (head, tail)) {
@@ -1070,8 +1154,10 @@ impl World {
                     complete.min(deadline),
                     Delivery::Terminal { family: Family::Read, owner, event: Event::Read { owner, read } },
                 );
-                self.flights
-                    .open((Family::Read, owner), Flight { key: Some(key), cancelled: false, completion_message: None });
+                self.flights.open(
+                    (Family::Read, owner),
+                    Flight { key: Some(key), cancelled: false, completion_message: None, completion_index: None },
+                );
             }
             Request::Probe { owner, at, deadline } => {
                 self.boundaries.push((self.now, Boundary::Probe { at: at.clone() }));
@@ -1087,7 +1173,7 @@ impl World {
                 );
                 self.flights.open(
                     (Family::Probe, owner),
-                    Flight { key: Some(key), cancelled: false, completion_message: None },
+                    Flight { key: Some(key), cancelled: false, completion_message: None, completion_index: None },
                 );
             }
             Request::Check { owner, program, deadline, tail } => {
@@ -1095,8 +1181,10 @@ impl World {
                 self.observe(Seen::Checking { owner, tree: self.code() });
                 assert_eq!(&*program.path, fixture::CHECKS, "the host explicitly selected its Temper fixture checks");
                 let (passed, output) = fixture::check(&self.disk, program.root.raw());
-                self.flights
-                    .open((Family::Check, owner), Flight { key: None, cancelled: false, completion_message: None });
+                self.flights.open(
+                    (Family::Check, owner),
+                    Flight { key: None, cancelled: false, completion_message: None, completion_index: None },
+                );
                 let duration = self.settings.check.draw(&mut self.rng);
                 let complete = self.now.saturating_add(duration);
                 let key = self.schedule.send(
@@ -1128,8 +1216,10 @@ impl World {
                 let finishing = !change.fields.iter().any(|field| field.name.as_ref() == b"ticket");
                 self.observe(Seen::Pushing { owner, name, tree: tree.clone(), finishing });
                 self.snapshots.insert(owner, tree);
-                self.flights
-                    .open((Family::Delivery, owner), Flight { key: None, cancelled: false, completion_message: None });
+                self.flights.open(
+                    (Family::Delivery, owner),
+                    Flight { key: None, cancelled: false, completion_message: None, completion_index: None },
+                );
                 if self.parent_deliveries {
                     assert!(self.delivery_submissions.len() < 256, "finite actual parent delivery story ceiling");
                     self.delivery_submissions.push(DeliverySubmission {
@@ -1352,15 +1442,70 @@ impl World {
         }
     }
 
+    /// Observe the original owner's real terminal before forwarding its event.
+    /// Native usage comes directly from the matching SDK binding; typed usage
+    /// is the exact callback value. No event or completion body is cloned.
+    /// Contract: domain/client.md, section 4; domain/run.md, sections 9 and 13.
+    fn observe_completion_terminal(&mut self, owner: Token, index: usize, event: &Event) {
+        let outcome = match event {
+            Event::Completed { completion, .. } => {
+                let usage = match &self.backend {
+                    Backend::Wire(wire) => wire
+                        .bindings()
+                        .iter()
+                        .rev()
+                        .find(|binding| binding.owner == owner)
+                        .expect("genuine physical binding")
+                        .accepted_usage
+                        .expect("actual SDK completed usage"),
+                    Backend::Typed { .. } => skein_llm::Usage {
+                        input_tokens: completion.usage.input_tokens,
+                        output_tokens: completion.usage.output_tokens,
+                        cache_read_tokens: completion.usage.cache_read_tokens,
+                        cache_write_tokens: completion.usage.cache_write_tokens,
+                    },
+                };
+                CompletionTerminal::Completed(usage)
+            }
+            Event::Failed { .. } => CompletionTerminal::Failed,
+            Event::Cancelled { .. } => CompletionTerminal::Cancelled,
+            Event::HostReturned { .. }
+            | Event::Start { .. }
+            | Event::Message { .. }
+            | Event::Grant { .. }
+            | Event::Cancel { .. }
+            | Event::Delivered { .. }
+            | Event::Done { .. }
+            | Event::Read { .. }
+            | Event::Probed { .. }
+            | Event::Checked { .. }
+            | Event::Aborted { .. } => panic!("completion flight receives only actual provider terminals"),
+        };
+        assert!(self.completions[index].terminal.replace((self.now, outcome)).is_none());
+    }
+
     fn terminal(&mut self, family: Family, owner: Token, event: Event) {
         let flight = self.flights.end((family, owner));
         self.terminals += 1;
+        if let Some(index) = flight.completion_index {
+            self.observe_completion_terminal(owner, index, &event);
+        }
         match &event {
             Event::Completed { completion, .. } => {
                 self.observe_host_call(completion, flight.completion_message);
+                let index = flight.completion_index.expect("actual completion observation");
+                let prices = self.model_prices[&self.completions[index].model];
+                let usage = completion.usage;
+                let (units, units_overflow) = match observed_price(prices, usage) {
+                    Some(units) => (units, false),
+                    None => (0, true),
+                };
                 self.observe(Seen::Completed {
                     owner,
                     spent: run::Spend {
+                        units,
+                        units_overflow,
+                        usage_overflow: false,
                         turns: 1,
                         input: completion.usage.input_tokens,
                         output: completion.usage.output_tokens,
@@ -1465,7 +1610,10 @@ impl World {
         for fact in &self.facts {
             match fact {
                 Fact::Session { fact: sf::Used { usage, .. } } => {
-                    used = used.saturating_add(run::Spend {
+                    used = used.accumulate(run::Spend {
+                        units: 0,
+                        units_overflow: false,
+                        usage_overflow: false,
                         turns: 1,
                         input: usage.input_tokens,
                         output: usage.output_tokens,
@@ -1486,7 +1634,11 @@ impl World {
             | run::Answer::Accepted { spent, .. }
             | run::Answer::Failed { spent, .. } => *spent,
         };
-        assert_eq!(used, spent, "facts match independently accepted provider usage and the host answer");
+        assert_eq!(
+            used,
+            run::Spend { units: 0, units_overflow: false, ..spent },
+            "facts match independently accepted provider raw usage and the host answer"
+        );
         assert_eq!(opened, ended, "every conversation fact has one terminal");
         assert_eq!(answered, u32::from(self.admitted.is_some()), "every admitted run answers once in its facts");
     }
@@ -1668,8 +1820,14 @@ fn charter(settings: &Settings) -> run::Charter {
             }]),
         },
     };
-    let llm =
-        Llm { account: 0, endpoint: Endpoint(0), model: b"fake-1".as_slice().into(), max_tokens: 4096, dialect: 1 };
+    let llm = Llm {
+        prices: run::Prices { input: 0, cached: 0, output: 0, unit: 1 },
+        account: 0,
+        endpoint: Endpoint(0),
+        model: b"fake-1".as_slice().into(),
+        max_tokens: 4096,
+        dialect: 1,
+    };
     run::Charter {
         instructions: Box::new([]),
         brief: run::Brief {
@@ -1768,4 +1926,26 @@ fn copy_answer(answer: &run::Answer) -> run::Answer {
             run::Answer::Accepted { outcome, spent: *spent, turns: *turns }
         }
     }
+}
+
+impl World {
+    /// Bounded actual start/terminal chronology from real Complete and callbacks.
+    /// Native exact SDK usage is also retained on each physical wire Binding.
+    /// Contract: domain/run.md, sections 9 and 14; domain/client.md, section 4.
+    #[must_use]
+    pub fn completions(&self) -> &[CompletionObservation] {
+        &self.completions
+    }
+}
+
+// Independent outside scalar oracle from caller data and actual provider counts.
+fn observed_price(prices: run::Prices, usage: llm::Usage) -> Option<u64> {
+    let denominator = u128::from(prices.unit);
+    let fresh = u128::from(usage.input_tokens).checked_add(u128::from(usage.cache_write_tokens))?;
+    let numerator = fresh
+        .checked_mul(u128::from(prices.input))?
+        .checked_add(u128::from(usage.cache_read_tokens).checked_mul(u128::from(prices.cached))?)?
+        .checked_add(u128::from(usage.output_tokens).checked_mul(u128::from(prices.output))?)?;
+    let rounded = (numerator / denominator).checked_add(u128::from(numerator % denominator != 0))?;
+    u64::try_from(rounded).ok()
 }

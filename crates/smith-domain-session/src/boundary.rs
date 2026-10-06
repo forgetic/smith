@@ -9,7 +9,9 @@
 //! addresses the session by that name, and every record back carries the
 //! opener's token (programming-model.md, section 4.2). And requests out with exactly one terminal event in
 //! (a [`Request::Complete`] is ended by one of [`Event::Completed`],
-//! [`Event::Failed`] or [`Event::Cancelled`]; a [`Request::Delegate`], to the
+//! [`Event::Failed`] or [`Event::Cancelled`], or by [`Event::BudgetDenied`]
+//! when the root withholds it before any provider lease, or [`Event::UnsentClosed`]
+//! when the run closes before publication; a [`Request::Delegate`], to the
 //! opener, by [`Event::Answered`] or [`Event::AnswerCancelled`]; a
 //! [`Request::Io`], the tools' file and process operations passed on as they
 //! are, by [`Event::Done`]). A request's `owner` is echoed on its terminal
@@ -76,6 +78,10 @@ pub enum Event {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         spent: u64,
+        /// The child's cumulative bill overflowed; its unknown remainder is
+        /// never treated as zero. Sets inclusive overflow after identity checks.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+        spend_overflow: bool,
     },
     /// A withdrawn child terminal still reports what it spent before stopping.
     ///
@@ -89,6 +95,10 @@ pub enum Event {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         spent: u64,
+        /// A withdrawn child still attests an unknown overflowed remainder.
+        /// Sets inclusive overflow once; stale terminals remain inert.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+        spend_overflow: bool,
     },
     /// A new user message for a yielded session, which calls the LLM again.
     /// Sent only while the session is yielded; a `session` that has ended
@@ -127,6 +137,30 @@ pub enum Event {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         completion: Completion,
+    },
+    /// The root denied this requested completion before publishing it to a
+    /// provider. Only its current Calling owner releases credit and ends the
+    /// session, after kit settlement. Stale or duplicate denials are inert;
+    /// no cancellation, retry, usage or Turn is produced.
+    /// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
+    BudgetDenied {
+        /// Session-issued pending completion owner, echoed without a provider lease.
+        /// Contract: domain/session.md, sections 3 and 5; domain/run.md, section 9.
+        owner: Token,
+        /// Exact exhausted root allowance, mapped to the settled Budget terminal.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+        reason: BudgetDenial,
+    },
+    /// The root closed the run before publishing this requested completion.
+    /// Only the current Calling owner releases its reservation and settles
+    /// Closed after the kit closes. Stale, duplicate and already-closing
+    /// events are inert; an actual provider terminal remains owed once started.
+    /// No cancellation, retry, usage or Turn is invented.
+    /// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
+    UnsentClosed {
+        /// Session-issued pending completion owner, without a provider lease.
+        /// Contract: domain/session.md, sections 3 and 5; domain/run.md, section 9.
+        owner: Token,
     },
     /// Terminal for `Complete`: the call produced no message.
     ///
@@ -236,14 +270,24 @@ pub enum Request {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         opener: Token,
-        /// Accepted cumulative usage across the enclosing run or session.
-        ///
-        /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
+        /// This activation's inclusive subtree charge, or its last
+        /// representable prefix when overflow is set. Historical turns do
+        /// not seed it; own completions and delegated terminal bills do.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
         spent: u64,
-        /// Whether checked integer pricing overflowed rather than producing a charge.
+        /// Inclusive price, sum or child bill overflowed. Sticky and
+        /// independent of the own-completion overflow flag.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         overflow: bool,
+        /// Cumulative price of this activation's own completions only. The
+        /// root counts its checked deltas; delegated bills never change it.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+        own_spent: u64,
+        /// Own price or sum overflowed. Sticky; `own_spent` remains its last
+        /// representable prefix, independently of inclusive overflow.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+        own_overflow: bool,
     },
     /// The LLM stopped calling tools, saying `text` (its message's text blocks,
     /// one after another). The session waits for `Continue` or `Close`, and
@@ -278,10 +322,14 @@ pub enum Request {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         usage: Usage,
+        /// Cumulative raw usage overflowed. This completion's usage remains
+        /// exact; V2 freezes the whole last representable cumulative prefix.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+        usage_overflow: bool,
     },
     /// The session for `opener` has ended, after `turns` completions that used
-    /// `usage` (what its `Used` add up to): exactly one per `Open`, once
-    /// nothing the session asked for is in flight.
+    /// `usage`, their exact sum when `usage_overflow` is false: exactly one
+    /// per `Open`, once nothing the session asked for is in flight.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Ended {
@@ -297,10 +345,14 @@ pub enum Request {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         turns: u32,
-        /// Provider-reported token usage, charged exactly once when its completion ends.
-        ///
-        /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
+        /// Cumulative raw usage, exact when `usage_overflow` is false. V2
+        /// otherwise preserves the whole last representable prefix.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 10.
         usage: Usage,
+        /// The cumulative raw counters overflowed; usage is V2's last exact
+        /// whole prefix, or V1's legacy saturated diagnostic counters.
+        /// Contract: domain/session.md, section 6; domain/run.md, section 10.
+        usage_overflow: bool,
     },
     /// Ask an LLM for the next assistant message, giving up after `timeout`.
     ///
@@ -615,4 +667,22 @@ pub enum End {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     PriceOverflow,
+    /// V2's cumulative raw usage did not fit all four counters. Its accepted
+    /// completion and exact usage were told before this settled failure.
+    /// `PriceOverflow` takes precedence if both attestations fail.
+    /// Contract: domain/session.md, section 6; domain/run.md, sections 9 and 10.
+    UsageOverflow,
+}
+
+/// A root allowance exhausted before publishing a requested completion.
+/// This carries no provider policy and allocates no payload.
+/// Contract: domain/session.md, section 6; domain/run.md, section 9.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum BudgetDenial {
+    /// No global completion remains; ends as `Dimension::Turns` after kit close.
+    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+    Turns,
+    /// No global deployment-unit allowance remains; ends as `Dimension::Unit`.
+    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+    Spend,
 }

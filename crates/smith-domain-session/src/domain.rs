@@ -176,22 +176,31 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
     match event {
         Event::Open { opener, spec } => session::open(domain, env, opener, spec, out),
         Event::OpenV2 { opener, spec } => session::open_v2(domain, env, opener, spec, out),
-        Event::AnsweredV2 { owner, text, error, spent } => {
+        Event::AnsweredV2 { owner, text, error, spent, spend_overflow } => {
             session::delegate_ended_v2(
                 domain,
                 env,
                 owner,
                 crate::llm::Returned::Text { text, error, replay: None },
-                spent,
+                session::Bill { spent, overflow: spend_overflow },
                 out,
             );
         }
-        Event::AnswerCancelledV2 { owner, spent } => {
-            session::delegate_ended_v2(domain, env, owner, crate::llm::Returned::Withdrawn, spent, out);
+        Event::AnswerCancelledV2 { owner, spent, spend_overflow } => {
+            session::delegate_ended_v2(
+                domain,
+                env,
+                owner,
+                crate::llm::Returned::Withdrawn,
+                session::Bill { spent, overflow: spend_overflow },
+                out,
+            );
         }
         Event::Continue { session, content } => session::continued(domain, env, session, content, out),
         Event::Close { session } => session::close(domain, env, session, out),
         Event::Completed { owner, completion } => session::completed(domain, env, owner, completion, out),
+        Event::BudgetDenied { owner, reason } => session::budget_denied(domain, env, owner, reason, out),
+        Event::UnsentClosed { owner } => session::unsent_closed(domain, env, owner, out),
         Event::Failed { owner, failure, evidence, detail } => {
             session::failed(domain, env, owner, failure, evidence, detail, out);
         }

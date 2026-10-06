@@ -188,6 +188,7 @@ fn charter(restoring: bool) -> run::Charter {
         },
         budget: LIMITS.run.budget,
         llm: run::charter::Llm {
+            prices: run::Prices { input: 0, cached: 0, output: 0, unit: 1 },
             account: 0,
             endpoint: run::charter::Endpoint(0),
             model: b"fixture-model".as_slice().into(),

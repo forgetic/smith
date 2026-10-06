@@ -93,11 +93,18 @@ fn forward(agent: &Agent, host: &mut Host, next: &mut usize) {
         host.stage.tick(*at);
         match seen {
             Seen::Admitted => host.up(Up::Admitted),
-            Seen::Turn { number, read, turn } => {
+            Seen::Turn { number, read, spent, turn } => {
                 let body = format!("{turn:?}").into_bytes();
                 assert!(body.len() <= 65_536);
                 host.up(Up::Turn {
-                    turn: host::Turn { number: *number, read: *read, spent: turn.spent, body: body.into() },
+                    turn: host::Turn {
+                        number: *number,
+                        read: *read,
+                        spent: spent.units,
+                        spend_overflow: spent.units_overflow,
+                        usage_overflow: spent.usage_overflow,
+                        body: body.into(),
+                    },
                 });
                 if *number == 1 {
                     host.event(Event::Acknowledge { agent: host.agent(), turn: 1 });
@@ -196,7 +203,9 @@ fn final_answer(agent: &Agent) -> host::Answer {
     }), "actual concrete Turn keeps exact paired opaque receipt feedback");
     host::Answer {
         turns: *turns,
-        spent: agent.turns().last().expect("actual final Turn").spent,
+        spent: agent.turn_metadata().last().expect("actual global final metadata").2.units,
+        spend_overflow: agent.turn_metadata().last().expect("actual global final metadata").2.units_overflow,
+        usage_overflow: agent.turn_metadata().last().expect("actual global final metadata").2.usage_overflow,
         result: RunResult::Delivered {
             name: host::CallName { completion: name.completion, position: name.position },
             receipts: host_receipt(receipts),

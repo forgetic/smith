@@ -157,7 +157,30 @@ pub enum Event {
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         text: Box<[u8]>,
     },
-    /// The conversation's LLM completed a turn, spending `spend`.
+    /// Session-priced cumulative own and inclusive subtree units. Own deltas
+    /// are counted globally once; subtree totals are only terminal child bills.
+    /// Unknown/stale conversations are inert. Contract: domain/run.md, sections 9, 10 and 14.
+    Priced {
+        /// Live run conversation. Contract: domain/run.md, sections 9 and 14.
+        conversation: Token,
+
+        /// Cumulative own completion units. Contract: domain/run.md, section 9.
+        own_spent: u64,
+
+        /// Inclusive subtree units. Contract: domain/run.md, section 14.
+        subtree_spent: u64,
+
+        /// Sticky unknown own-total attestation. Contract: domain/run.md, section 9.
+        own_overflow: bool,
+
+        /// Sticky unknown subtree-total attestation. Contract: domain/run.md, section 14.
+        subtree_overflow: bool,
+    },
+
+    /// The Session completed a turn with exact actual raw counters in `spend`.
+    /// Units are supplied separately by Priced; this event cannot reprice them.
+    /// Its cumulative receiver attestation propagates even though this usage
+    /// remains the exact single-completion value.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
     Used {
@@ -165,7 +188,9 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         conversation: Token,
-        /// Cumulative or incremental accepted usage, as specified by the enclosing terminal.
+        /// Session's exact single-completion raw counters and one turn increment.
+        /// Units are ignored: `Priced` alone charges them. `usage_overflow`
+        /// attests that Session's cumulative raw prefix became unknown.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         spend: Spend,
@@ -183,7 +208,9 @@ pub enum Event {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         end: End,
-        /// Cumulative or incremental accepted usage, as specified by the enclosing terminal.
+        /// Session's cumulative raw prefix after all actual terminals settled,
+        /// with its sticky `usage_overflow` attestation. Only known residual
+        /// raw usage is counted; units remain supplied separately by `Priced`.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         spend: Spend,
@@ -572,6 +599,14 @@ pub enum Request {
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
         result: Returned,
+
+        /// Inclusive child bill; zero for every non-child call terminal.
+        /// Contract: domain/run.md, sections 9 and 14.
+        spent: u64,
+
+        /// Child bill is the last representable prefix when true.
+        /// Contract: domain/run.md, sections 9 and 14.
+        spend_overflow: bool,
     },
 }
 
@@ -639,7 +674,7 @@ pub enum Ask {
         /// Optional sub-agent usage ceiling, no larger than what the run has left.
         ///
         /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-        share: Option<Spend>,
+        share: Option<crate::Share>,
     },
 }
 
@@ -1007,6 +1042,21 @@ pub enum Stop {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum End {
+    /// Actual priced total cannot be represented; a prefix remains attested.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
+    PriceOverflow,
+
+    /// Actual cumulative raw usage cannot be represented; a prefix remains attested.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
+    UsageOverflow,
+
+    /// Session per-kind receiving cap, independent of scalar run exhaustion.
+    /// Contract: domain/run.md, section 9; domain/session.md, section 6.
+    Receiving(
+        /// Exact receiving dimension. Contract: domain/session.md, section 6.
+        crate::ReceivingLimit,
+    ),
+
     /// Exact V2 history refusal before provider or tool effects.
     /// Contract: domain/run.md, section 13.
     TranscriptRefused {
@@ -1312,6 +1362,21 @@ pub enum Invalid {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Failure {
+    /// Actual priced total cannot be represented; a prefix remains attested.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
+    PriceOverflow,
+
+    /// Actual cumulative raw usage cannot be represented; a prefix remains attested.
+    /// Contract: domain/run.md, sections 9, 10 and 14.
+    UsageOverflow,
+
+    /// Session per-kind receiving cap, independent of scalar run exhaustion.
+    /// Contract: domain/run.md, section 9; domain/session.md, section 6.
+    Receiving(
+        /// Exact receiving dimension. Contract: domain/session.md, section 6.
+        crate::ReceivingLimit,
+    ),
+
     /// Exact transient history refusal; never silently starts fresh.
     /// Contract: domain/run.md, section 13.
     Transcript(

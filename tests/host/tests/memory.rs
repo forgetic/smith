@@ -203,7 +203,14 @@ fn maximum_v2_starts_and_full_queued_replies_fit_every_slot() {
                 measured.up(
                     owner,
                     Up::Turn {
-                        turn: Turn { number, spent: u64::from(number), read: None, body: bytes(limits.turn_bytes) },
+                        turn: Turn {
+                            number,
+                            spent: u64::from(number),
+                            spend_overflow: false,
+                            usage_overflow: false,
+                            read: None,
+                            body: bytes(limits.turn_bytes),
+                        },
                     },
                 );
                 measured.step(Event::Acknowledge { agent: owner, turn: number }, false);
@@ -214,7 +221,13 @@ fn maximum_v2_starts_and_full_queued_replies_fit_every_slot() {
             measured.up(
                 owner,
                 Up::Answer {
-                    answer: Answer { turns: limits.turns, spent: u64::from(limits.turns), result: RunResult::Parked },
+                    answer: Answer {
+                        turns: limits.turns,
+                        spent: u64::from(limits.turns),
+                        spend_overflow: false,
+                        usage_overflow: false,
+                        result: RunResult::Parked,
+                    },
                 },
             );
             measured.cleanup(owner, 0, false);
@@ -251,7 +264,18 @@ fn maximum_start_io_ownership_coexists_with_full_pre_read_message_queue() {
     // dropping the caller's Start is a real send terminal ownership boundary.
     measured.held_start = None;
     measured.up(owner, Up::Admitted);
-    measured.up(owner, Up::Answer { answer: Answer { turns: 0, spent: 0, result: RunResult::Parked } });
+    measured.up(
+        owner,
+        Up::Answer {
+            answer: Answer {
+                turns: 0,
+                spent: 0,
+                spend_overflow: false,
+                usage_overflow: false,
+                result: RunResult::Parked,
+            },
+        },
+    );
     measured.cleanup(owner, 0, true);
 }
 

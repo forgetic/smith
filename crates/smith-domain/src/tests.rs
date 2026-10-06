@@ -17,14 +17,7 @@ use crate::llm::{Block, Completion, Decoded, Message, Problem, Prompt, Returned,
 use crate::tools::{self, Call, Name, Op, Part, Path, Place};
 use crate::{Domain, Event, Fact, Limits, Request, fire, max_out, resume, step, worst_case};
 
-const BUDGET: run::Budget = run::Budget {
-    turns: 10,
-    input: 100_000,
-    output: 10_000,
-    cache_read: 100_000,
-    cache_write: 100_000,
-    time: Duration::from_secs(600),
-};
+const BUDGET: run::Budget = run::Budget { turns: 10, spend: 1, time: Duration::from_secs(600) };
 
 const CEILING: session::Budget = session::Budget {
     turns: 100,
@@ -56,14 +49,7 @@ const LIMITS: Limits = Limits {
         host_attempts: 3,
         verdicts: 2,
         calls: 4,
-        budget: run::Budget {
-            turns: CEILING.turns,
-            input: CEILING.input,
-            output: CEILING.output,
-            cache_read: CEILING.cache_read,
-            cache_write: CEILING.cache_write,
-            time: CEILING.time,
-        },
+        budget: run::Budget { turns: CEILING.turns, spend: 1, time: CEILING.time },
         max_tokens: 1024,
         models: 1,
         depth: 2,
@@ -370,7 +356,14 @@ fn charter() -> Charter {
         grants: Grants { deliver: None, tools: TOOLS, agents: true, host_tools: Box::new([]) },
         outcome: OutcomeSpec { change: None, verdicts: Box::new([rule(b"approve")]), report: None, failure: None },
         budget: BUDGET,
-        llm: Llm { account: 0, endpoint: Endpoint(1), model: bytes(b"model-a"), max_tokens: 512, dialect: 1 },
+        llm: Llm {
+            prices: run::Prices { input: 0, cached: 0, output: 0, unit: 1 },
+            account: 0,
+            endpoint: Endpoint(1),
+            model: bytes(b"model-a"),
+            max_tokens: 512,
+            dialect: 1,
+        },
         models: Box::new([]),
         conventions: Some(smith_domain_run::Conventions {
             guide: b"AGENTS.md".as_slice().into(),
@@ -599,7 +592,7 @@ fn the_limits_fit_and_a_session_must_take_what_the_run_asks() {
 
 #[test]
 fn what_an_entry_point_may_emit_grows_with_the_tools_cancels_only_once() {
-    assert_eq!(max_out(&LIMITS), 287);
+    assert_eq!(max_out(&LIMITS), 573);
     // A kit's close cancels as many operations as the tools run, which go out
     // to io and lead nowhere else: what the run is sent does not grow with
     // them.
@@ -607,12 +600,12 @@ fn what_an_entry_point_may_emit_grows_with_the_tools_cancels_only_once() {
     let wide = Limits { session: session::Limits { parallel_tools: 8, tools, ..LIMITS.session }, ..LIMITS };
     // Four session records plus eight delegated calls may reach the run;
     // each can open/say at most MAX_OUT sessions. The kit's io cancels do not.
-    assert_eq!(limits::session_steps(&wide), 25);
-    assert_eq!(max_out(&wide), 7301);
+    assert_eq!(limits::session_steps(&wide), 50);
+    assert_eq!(max_out(&wide), 14601);
     let wider =
         Limits { session: session::Limits { tools: tools::Limits { calls: 512, ..tools }, ..wide.session }, ..wide };
     assert_eq!(limits::run_out(&wider), limits::run_out(&wide), "io cancels never multiply run hand-offs");
-    assert_eq!(max_out(&wider) - max_out(&wide), 25 * 256, "one additional kit cancel per session step");
+    assert_eq!(max_out(&wider) - max_out(&wide), 50 * 256, "one additional kit cancel per session step");
 }
 
 #[test]
@@ -1537,4 +1530,61 @@ fn maximum_custom_guide_headings_obey_the_actual_session_receiving_limit_after_d
             (0, 0, 0, 0)
         );
     }
+}
+
+fn scalar_limits() -> Limits {
+    Limits {
+        run: run::Limits { budget: run::Budget { spend: 1000, ..LIMITS.run.budget }, ..LIMITS.run },
+        session: session::Limits { spend: 1000, ..LIMITS.session },
+        ..LIMITS
+    }
+}
+
+fn scalar_charter() -> Charter {
+    let selected = charter();
+    Charter {
+        budget: run::Budget { spend: 100, ..selected.budget },
+        llm: Llm { prices: run::Prices { input: 1, cached: 2, output: 3, unit: 1 }, ..selected.llm },
+        ..selected
+    }
+}
+
+#[test]
+fn scalar_crossing_yields_a_genuine_turn_and_ends_without_consulting_credentials() {
+    let mut harness = Harness::with(&scalar_limits());
+    let (_, main, _) = harness.admit(1, scalar_charter());
+    // Exact-cap completion owns its real Turn. Closing needs no credential
+    // lookup or subsequent provider request.
+    assert!(harness.domain.grants.remove(&0).is_some());
+    let usage = Usage { input_tokens: 100, ..Usage::ZERO };
+    let completion = Completion {
+        content: Box::new([Said::Text { text: bytes(b"unfinished"), replay: None }]),
+        stop: Stop::EndTurn,
+        usage,
+    };
+    assert!(harness.step(Event::Completed { owner: main, completion }).is_empty());
+    let emitted = harness.next();
+    let [Request::Answer { answer: run::Answer::Failed { failure, spent, turns }, .. }] = emitted.as_ref() else {
+        panic!("scalar exhaustion must settle locally: {emitted:?}")
+    };
+    assert_eq!(*failure, run::Failure::Budget(run::Exhausted::Spend));
+    assert_eq!((spent.units, spent.turns, *turns), (100, 1, 1));
+    assert_eq!(harness.turns.len(), 1);
+    harness.domain.reclaim();
+    assert_eq!((harness.domain.completions.len(), harness.domain.peers(), harness.domain.flights()), (0, 0, 0));
+}
+
+#[test]
+fn a_priced_crossing_finish_settles_without_publishing_another_completion() {
+    let mut harness = Harness::with(&scalar_limits());
+    let (_, main, _) = harness.admit(1, scalar_charter());
+    assert!(harness.answer(main, Box::new([served(b"finish", verdict(b"approve"))])).is_empty());
+    let emitted = harness.next();
+    let [Request::Answer { answer: run::Answer::Accepted { spent, turns, .. }, .. }] = emitted.as_ref() else {
+        panic!("same-turn accepted finish wins scalar crossing: {emitted:?}")
+    };
+    assert_eq!((spent.units, spent.turns, *turns), (130, 1, 1));
+    assert_eq!(harness.turns.len(), 1);
+    assert_eq!(harness.turns.iter().next().expect("genuine final record").spent, 130);
+    assert!(!harness.turns.iter().next().expect("genuine final record").spend_overflow);
 }

@@ -50,14 +50,7 @@ fn context_bytes(charter: &Charter) -> u64 {
         + charter.brief.sections.iter().map(|section| size(section.title.len() + section.text.len())).sum::<u64>()
 }
 
-const BUDGET: Budget = Budget {
-    turns: 10,
-    input: 1000,
-    output: 1000,
-    cache_read: 1000,
-    cache_write: 1000,
-    time: Duration::from_secs(3600),
-};
+const BUDGET: Budget = Budget { turns: 10, spend: 1000, time: Duration::from_secs(3600) };
 
 const LIMITS: Limits = Limits {
     runs: 1,
@@ -175,8 +168,22 @@ fn charter(held: u64) -> Charter {
             failure: None,
         },
         budget: BUDGET,
-        llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 },
-        models: Box::new([Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 }]),
+        llm: Llm {
+            prices: smith_domain_run::Prices { input: 1, cached: 0, output: 0, unit: 1 },
+            account: 0,
+            endpoint: Endpoint(0),
+            model: bytes(1),
+            max_tokens: 1,
+            dialect: 1,
+        },
+        models: Box::new([Llm {
+            prices: smith_domain_run::Prices { input: 1, cached: 0, output: 0, unit: 1 },
+            account: 0,
+            endpoint: Endpoint(0),
+            model: bytes(1),
+            max_tokens: 1,
+            dialect: 1,
+        }]),
         conventions: Some(smith_domain_run::Conventions {
             guide: b"AGENTS.md".as_slice().into(),
             checks: b".temper/pre-pr".as_slice().into(),
@@ -252,6 +259,23 @@ fn fill(limits: Limits) {
     fill_selected(limits, None);
 }
 
+/// Preserve the exact aggregate payload while selecting maximum owning paths.
+fn selected_charter(run_bytes: u64, selected: Option<&smith_domain_run::Conventions>) -> Charter {
+    let mut charter = charter(run_bytes);
+    if let Some(selected) = selected {
+        let previous = charter.conventions.as_ref().expect("explicit legacy fixture policy");
+        let previous_paths = size(previous.guide.len() + previous.checks.len());
+        let selected_paths = size(selected.guide.len() + selected.checks.len());
+        // The same exact aggregate cap is attained: move byte room
+        // from the brief into the two maximum owning paths.
+        let (instructions, brief) = context(context_bytes(&charter) + previous_paths - selected_paths);
+        charter.instructions = instructions;
+        charter.brief = brief;
+        charter.conventions = Some(selected.clone());
+    }
+    charter
+}
+
 fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions>) {
     let bound = worst_case(&limits).expect("the test limits fit");
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
@@ -272,7 +296,16 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
         meter.check(measured, bound, &limits);
         asked
     };
-    let spend = Spend { turns: 1, input: 1, output: 1, cache_read: 1, cache_write: 1 };
+    let spend = Spend {
+        units: 0,
+        units_overflow: false,
+        usage_overflow: false,
+        turns: 1,
+        input: 1,
+        output: 1,
+        cache_read: 1,
+        cache_write: 1,
+    };
     let expiry = Time::ZERO.saturating_add(limits.budget.time);
     for run in 0..limits.runs {
         let worker = Token::new(u64::from(run));
@@ -280,21 +313,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
             workspace: Some(workspace()),
             reply_to: ReplyTo::new(worker),
             worker,
-            charter: {
-                let mut charter = charter(limits.run_bytes);
-                if let Some(selected) = selected {
-                    let previous = charter.conventions.as_ref().expect("explicit legacy fixture policy");
-                    let previous_paths = size(previous.guide.len() + previous.checks.len());
-                    let selected_paths = size(selected.guide.len() + selected.checks.len());
-                    // The same exact aggregate cap is attained: move byte room
-                    // from the brief into the two maximum owning paths.
-                    let (instructions, brief) = context(context_bytes(&charter) + previous_paths - selected_paths);
-                    charter.instructions = instructions;
-                    charter.brief = brief;
-                    charter.conventions = Some(selected.clone());
-                }
-                charter
-            },
+            charter: selected_charter(limits.run_bytes, selected),
             transcript: None,
         };
         let [Asked::Other, Asked::Read { owner }] = step(start)[..] else {
@@ -616,7 +635,14 @@ fn full_delivery_charter(limits: Limits) -> Charter {
             failure: None,
         },
         budget: BUDGET,
-        llm: Llm { account: 0, endpoint: Endpoint(0), model: bytes(1), max_tokens: 1, dialect: 1 },
+        llm: Llm {
+            prices: smith_domain_run::Prices { input: 1, cached: 0, output: 0, unit: 1 },
+            account: 0,
+            endpoint: Endpoint(0),
+            model: bytes(1),
+            max_tokens: 1,
+            dialect: 1,
+        },
         models: Box::new([]),
         conventions: Some(smith_domain_run::Conventions {
             guide: b"AGENTS.md".as_slice().into(),

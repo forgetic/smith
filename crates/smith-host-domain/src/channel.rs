@@ -68,8 +68,23 @@ pub struct CallName {
 pub struct Turn {
     /// Positive consecutive turn number from one; checked increment (domain/host.md, sections 2–7).
     pub number: u32,
-    /// Cumulative priced host-unit spend; must not fall (domain/host.md, sections 2–7).
+    /// Global activation spend supplied by the agent in the host's unit; must
+    /// not fall. It is the last representable prefix if `spend_overflow` is set;
+    /// the opaque body separately retains the session's inclusive child bill.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.
     pub spent: u64,
+
+    /// Agent attestation that cumulative currency no longer fits. Sticky across
+    /// subsequent Turns and Answer; never treats the prefix as an exact total.
+    /// Inline metadata has no additional payload allocation or ACK right.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+    pub spend_overflow: bool,
+
+    /// Agent attestation that cumulative raw usage no longer fits. Sticky across
+    /// subsequent Turns and Answer, independently of currency overflow.
+    /// Actual per-completion usage remains in the opaque transcript body.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+    pub usage_overflow: bool,
     /// Last named message actually sent and read; never a queued or unknown name (domain/host.md, sections 2–7).
     pub read: Option<Token>,
     /// Opaque transcript turn at most `Limits::turn_bytes` (domain/host.md, sections 2–7).
@@ -255,35 +270,45 @@ pub enum ModelFault {
     Malformed,
 }
 
-/// The part of a budget that ran out.
-///
-/// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+/// Run-wide allowance exhausted, reported by the agent as a typed failure.
+/// The host decides whether another activation receives a new allowance;
+/// per-kind receiving token ceilings remain separate classifications.
+/// Contract: domain/host.md, sections 2 and 6; domain/run.md, section 9.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Exhausted {
-    /// The completion-count allowance is exhausted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+    /// Global completion count reached its cap; admitted current calls settle.
+    /// Contract: domain/run.md, section 9.3; domain/host.md, section 6.
     Turns,
-    /// The fresh input-token allowance is exhausted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Input,
-    /// The output-token allowance is exhausted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    Output,
-    /// The cache-read token allowance is exhausted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    CacheRead,
-    /// The cache-write token allowance is exhausted.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
-    CacheWrite,
-    /// The injected monotonic deadline is reached.
-    ///
-    /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
+
+    /// Global host-unit charge reached its cap; admitted current calls settle.
+    /// Contract: domain/run.md, section 9.3; domain/host.md, section 6.
+    Spend,
+
+    /// Monotonic run deadline expired; immediate close remains independent.
+    /// Contract: domain/run.md, section 9.3; domain/host.md, sections 4 and 6.
     Time,
+}
+
+/// Session receiving token ceiling reported by the agent, separate from the
+/// run's scalar financial allowance. Host policy decides the next activation.
+/// Contract: domain/host.md, sections 2 and 6; domain/session.md, section 6.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ReceivingLimit {
+    /// Fresh input-token receiving allowance exhausted.
+    /// Contract: domain/session.md, section 6; domain/host.md, section 6.
+    Input,
+
+    /// Output-token receiving allowance exhausted.
+    /// Contract: domain/session.md, section 6; domain/host.md, section 6.
+    Output,
+
+    /// Cache-read-token receiving allowance exhausted.
+    /// Contract: domain/session.md, section 6; domain/host.md, section 6.
+    CacheRead,
+
+    /// Cache-write-token receiving allowance exhausted.
+    /// Contract: domain/session.md, section 6; domain/host.md, section 6.
+    CacheWrite,
 }
 
 /// Exact transient V2 history admission refusal, without provider effects or
@@ -316,6 +341,26 @@ pub enum TranscriptRefusal {
 /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RunFailure {
+    /// Agent currency arithmetic failed; the reported spend is an attested
+    /// prefix. This hard failure cannot be hidden by an unlanded Finish.
+    /// Actual already-landed delivery remains separate durable evidence.
+    /// Contract: domain/run.md, section 9.4; domain/host.md, sections 6 and 9.
+    PriceOverflow,
+
+    /// Agent raw-usage arithmetic failed; exact per-completion data remains in
+    /// Turns while cumulative metadata carries its sticky attestation.
+    /// Contract: domain/run.md, section 9.4; domain/host.md, sections 6 and 9.
+    UsageOverflow,
+
+    /// A session receiving token cap stopped another completion; this does not
+    /// reinterpret that cap as a run-wide scalar financial budget.
+    /// Contract: domain/session.md, section 6; domain/host.md, section 6.
+    Receiving(
+        /// Exact per-kind ceiling reported by the agent; no host repricing.
+        /// Contract: domain/session.md, section 6; domain/host.md, section 6.
+        ReceivingLimit,
+    ),
+
     /// Exact transient history refusal before unsupported work starts.
     /// Contract: domain/host.md, sections 2 and 9; domain/run.md, section 6.
     Transcript(
@@ -405,8 +450,20 @@ pub enum RunResult {
 pub struct Answer {
     /// Exactly the observed numbered turn count (domain/host.md, sections 2–7).
     pub turns: u32,
-    /// Final cumulative priced spend, at least previous turn spend (domain/host.md, sections 2–7).
+    /// Final global host-unit spend, at least the previous Turn's representable
+    /// prefix. Exact only without `spend_overflow`; refused starts have zero.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
     pub spent: u64,
+
+    /// Sticky agent currency-overflow attestation; cannot clear a Turn flag.
+    /// False for a refused start. Payload and process-terminal rights are unchanged.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+    pub spend_overflow: bool,
+
+    /// Sticky agent raw-usage-overflow attestation; cannot clear a Turn flag.
+    /// False for a refused start; independent of financial overflow.
+    /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.4.
+    pub usage_overflow: bool,
     /// Opaque accepted result or typed refusal/parking/failure/actual delivery evidence (domain/host.md, sections 2–7).
     pub result: RunResult,
 }

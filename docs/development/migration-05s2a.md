@@ -86,6 +86,7 @@ until required shared and consumer acceptance permits their coherent removal.
 | Overlapping physical component ownership | Smith f9c9981 | Source reviewed; fmt/clippy pass; 505 focused / 2.170 s; 11 fuzzy / 4.462 s. |
 | Caller conventions | Smith 48dba1d | fmt/clippy pass; 512 focused / 2.233 s; 11 fuzzy / 3.993 s; [scope](migration-05s4-conventions.md). |
 | Optional workspace and initial merge conflicts | Smith 37599ef | Reviewed; fmt/clippy pass; 522 focused / 2.114 s; 11 fuzzy / 4.021 s; [scope](migration-05s4-workspace.md). |
+| Main instructions and ordered titled brief | Smith 440e87d | Reviewed; fmt/clippy pass; 529 focused / 2.145 s; 11 fuzzy / 3.910 s; [scope](migration-05s4-brief.md). |
 | Genuine native root restore | Smith 5b4bc94 | Source reviewed; fmt/clippy pass; 505 focused / 2.285 s; 11 fuzzy / 4.958 s. |
 | Exclusive World backend ownership and session LLM documentation | Smith c645669 | Exact source reviewed; fmt/clippy pass; 504 focused / 2.094 s; 11 fuzzy / 4.410 s. |
 

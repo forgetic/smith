@@ -35,14 +35,39 @@ pub enum Seen {
 
     /// Exact root output, including concrete result body and read metadata.
     /// Contract: domain/run.md, section 13.
-    Turn { number: u32, read: Option<Token>, turn: Turn },
+    Turn {
+        /// Actual one-based main output. Contract: domain/run.md, section 13.
+        number: u32,
+
+        /// Actual read fence. Contract: domain/run.md, section 6.
+        read: Option<Token>,
+
+        /// Actual global units/raw prefixes and independent attestations, copied
+        /// from root metadata. Bounded by its numeric types, independent of the
+        /// inclusive record body. Contract: domain/run.md, sections 9 and 13.
+        spent: smith_domain::run::Spend,
+
+        /// Actual settled record body. Contract: domain/run.md, section 13.
+        turn: Turn,
+    },
 
     /// Actual settled waiting notice. Contract: domain/run.md, section 6.
     Waiting { read: Option<Token> },
 
     /// Observed final root count and parking classification, never an input answer.
     /// Contract: domain/run.md, sections 6 and 13.
-    Answer { turns: u32, parked: bool },
+    Answer {
+        /// Actual settled main record count. Contract: domain/run.md, section 13.
+        turns: u32,
+
+        /// Actual idle terminal class. Contract: domain/run.md, section 6.
+        parked: bool,
+
+        /// Final actual global prefixes and independent overflow attestations;
+        /// never reconstructed from historical records or subtree prices.
+        /// Contract: domain/run.md, sections 9, 10 and 13.
+        spent: smith_domain::run::Spend,
+    },
 }
 
 /// Retained observations for one fresh main chat. It owns no application right.
@@ -210,7 +235,7 @@ impl Expectations for Meeting {
                 judge.check(self.calling, "provider settlement consumes an actual request");
                 self.calling = false;
             }
-            Seen::Turn { number, read, turn } => self.turn(number, read, &turn, judge),
+            Seen::Turn { number, read, turn, .. } => self.turn(number, read, &turn, judge),
             Seen::Waiting { read } => {
                 judge.check(
                     !self.calling
@@ -224,7 +249,7 @@ impl Expectations for Meeting {
                 self.waiting = Some(judge.now());
                 judge.rearm("idle park", self.idle.saturating_add(Duration::from_secs(1)));
             }
-            Seen::Answer { turns, parked } => {
+            Seen::Answer { turns, parked, .. } => {
                 judge.check(
                     turns == self.count && !self.calling && self.expected.is_none(),
                     "final answer follows every actual turn and provider terminal",

@@ -23,9 +23,7 @@ fn random_worlds_settle_and_reach_every_ending() {
             world.spawned();
             world.sent();
             if fate == 1 {
-                world.up(Up::Answer {
-                    answer: Answer { turns: 0, spent: 0, result: RunResult::Refused { detail: Box::new([]) } },
-                });
+                last(&mut world, RunResult::Refused { detail: Box::new([]) }, 0);
             } else {
                 world.up(Up::Admitted);
                 // Stable names, generic effects and actual late terminals all
@@ -47,17 +45,9 @@ fn random_worlds_settle_and_reach_every_ending() {
                     });
                 }
                 match fate {
-                    2 => world.up(Up::Answer {
-                        answer: Answer { turns: 0, spent: 2, result: RunResult::Accepted { outcome: Box::new([]) } },
-                    }),
-                    3 => world.up(Up::Answer { answer: Answer { turns: 0, spent: 3, result: RunResult::Parked } }),
-                    4 => world.up(Up::Answer {
-                        answer: Answer {
-                            turns: 0,
-                            spent: 4,
-                            result: RunResult::Failed { failure: RunFailure::Model(ModelFault::Provider) },
-                        },
-                    }),
+                    2 => last(&mut world, RunResult::Accepted { outcome: Box::new([]) }, 2),
+                    3 => last(&mut world, RunResult::Parked, 3),
+                    4 => last(&mut world, RunResult::Failed { failure: RunFailure::Model(ModelFault::Provider) }, 4),
                     5 => world.event(Event::Malformed { owner: world.owner() }),
                     6 => {
                         world.at(5);
@@ -68,30 +58,18 @@ fn random_worlds_settle_and_reach_every_ending() {
                         world.up(Up::Waiting { read: None });
                         world.at(20);
                         world.sent();
-                        world.up(Up::Answer {
-                            answer: Answer {
-                                turns: 0,
-                                spent: 7,
-                                result: RunResult::Failed { failure: RunFailure::Cancelled },
-                            },
-                        });
+                        last(&mut world, RunResult::Failed { failure: RunFailure::Cancelled }, 7);
                         assert_eq!(world.seen.fault, Some(Fault::WallTime));
                     }
                     8 => {
                         world.event(Event::Stop { agent: world.agent() });
                         world.sent();
-                        world.up(Up::Answer {
-                            answer: Answer {
-                                turns: 0,
-                                spent: 8,
-                                result: RunResult::Failed { failure: RunFailure::Cancelled },
-                            },
-                        });
+                        last(&mut world, RunResult::Failed { failure: RunFailure::Cancelled }, 8);
                     }
                     9 => world.event(Event::Hangup { owner: world.owner() }),
                     10 => {
                         world.event(Event::Exited { owner: world.owner() });
-                        world.up(Up::Answer { answer: Answer { turns: 0, spent: 10, result: RunResult::Parked } });
+                        last(&mut world, RunResult::Parked, 10);
                     }
                     0 | 1 => unreachable!("handled pre-admission"),
                     _ => unreachable!("bounded fate"),
@@ -105,6 +83,10 @@ fn random_worlds_settle_and_reach_every_ending() {
         reached.insert(fate);
     }
     assert_eq!(reached, (0..=10).collect());
+}
+
+fn last(world: &mut World, result: RunResult, spent: u64) {
+    world.up(Up::Answer { answer: Answer { turns: 0, spent, spend_overflow: false, usage_overflow: false, result } });
 }
 
 fn assert_ending(world: &World, fate: u64, seed: u64) {

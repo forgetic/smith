@@ -367,7 +367,7 @@ pub(crate) fn tell(
                 }
                 Fact::Opened { run, conversation: *conversation, depth }
             }
-            Request::Return { call, result } => Fact::Returned { run, call: *call, result: result_of(result) },
+            Request::Return { call, result, .. } => Fact::Returned { run, call: *call, result: result_of(result) },
             Request::Check { owner: _, program: _, deadline, tail: _ } => {
                 Fact::CheckStarted { run, deadline: *deadline }
             }

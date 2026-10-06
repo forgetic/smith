@@ -267,7 +267,7 @@ impl Expectations for Meeting {
             Seen::Completed { owner, spent } => {
                 judge.check(self.phase == Phase::Running, "usage belongs to a live host request");
                 judge.check(self.completing.remove(&owner), "one completion terminal per pending owner");
-                self.spent = self.spent.saturating_add(spent);
+                self.spent = self.spent.accumulate(spent);
             }
             Seen::CompletionEnded { owner } => {
                 judge.check(self.completing.remove(&owner), "one completion terminal per pending owner");

@@ -320,8 +320,9 @@ session: the same workspace; its own tools, from the run's workspace
 families (often read-only), never the run's served tools or the host's;
 a budget carved from the run's; and one of the LLMs the charter lists,
 which the asking LLM may name, or else main's. When the child ends, its
-final message is the parent's tool result; its spend is counted once,
-through that result (session.md, section 6).
+final message is the parent's tool result. Its inclusive subtree bill travels
+through that result for the parent's share and Turn; run-wide own-completion
+charges were already counted once (domain/session.md, section 6; section 9).
 
 Within a run, sub-agents: cheap, sharing its workspace and budget, ended
 with the call that asked for them. Work that should outlive the run, run
@@ -331,7 +332,9 @@ host tool for it, as temper's `delegate` does.
 A child receives the asking session's raw task text as its prompt prefix,
 followed by the shared workspace guides and the run's child mechanics.
 It does not inherit the main charter's instructions or titled Brief.
-The SubAgent call and its input/receiving contracts remain unchanged.
+The SubAgent task and tool authority contracts remain unchanged. Its explicit
+scalar share follows section 9.1: child-own completion count and inclusive
+subtree spend, both clamped to the global remainder.
 
 Each main/child opening owns its optional workspace copy until authority
 translation moves its names into the tools' existing mount vocabulary. Prompt
@@ -642,27 +645,105 @@ Change delivers the state at that finish.
 
 ## 9. Budget and spend
 
-- **One budget per run,** in the host's unit: what the run may spend
-  across all its sessions, sub-agents' included; with turns and wall
-  time. It is checked at the entrance against the agent's `Limits`; a run
-  that asks for more is refused.
-- **Prices are the charter's,** per model: integer amounts for input,
-  cached input and output per a number of tokens. Each completion is
-  priced as it is made (session.md, section 6). The unit means nothing to
-  smith: it is temper's deployment unit, or what the local host's
-  configuration says.
-- **Shares.** Each session the run opens gets a share of what is left,
-  and per-kind token caps as its limits. A run winds down when its budget
-  runs out: no session starts another completion, and the run answers
-  with what it has.
-- **Spend is told:** cumulative in each turn, and whole in the answer.
+### 9.1 Admission and model prices
 
-The current root increment retains the copied per-kind token/turn/wall budget
-and child accounting. Its Charter has no model-price fields, so root OpenV2 uses
-zero input/cached/output prices with unit one and a positive receiving spend cap.
-Record scalar spend is therefore zero; typed run token spend is still exact and
-enforced. No charter prices are ignored. Scalar run pricing and aggregate scalar
-budget policy remain a subsequent increment, not an implemented promise here.
+The host gives one `Budget { turns, spend, time }` for the whole activation,
+across main and every child. `spend` is an integer in the host's unit; smith
+assigns it no currency or deployment meaning. All three allowances must be
+positive and fit the corresponding receiving `Limits.budget`. An unworkable or
+oversized budget is refused before discovery, session opening or provider IO.
+Per-kind input, output, cache-read and cache-write token caps remain session
+receiving limits; they are not four run financial budgets.
+
+Every main or listed child `Llm` carries `Prices { input, cached, output, unit }`.
+The divisor `unit` must be positive; a zero divisor refuses that model before
+effects, including a listed model not selected yet. Rates may be zero. Session
+alone prices each actual completed call: fresh input and cache writes use the
+input rate, cache reads use the cached rate, and output uses the output rate.
+The sum of the three rational terms is rounded upwards once per completion
+using checked arithmetic (domain/session.md, section 6). Provider-neutral usage
+already separates fresh input from both cached counters; no cached token is
+charged again as fresh input. Skein supplies usage and wire mechanics, never
+these host prices or financial policy.
+
+A child `Share { turns, spend }` is clamped to the run's remaining allowances.
+Its turns cap counts that child session's own completions; every descendant
+completion also counts against the global tree-wide turn cap. Its spend cap is
+inclusive of descendants. Its wall deadline inherits the remaining run time. An absent share gets that
+remainder. Zero turns, zero spend or no remaining time refuses the call before
+opening the child, even for a zero-rate model. No token split or implicit price
+conversion remains in the run contract.
+
+### 9.2 Own charges and inclusive child bills
+
+Every session reports cumulative `own_spent` from its own actual completions
+and inclusive `spent` from those completions plus its descendants. Both start
+at zero for each activation. A child's terminal, whether answered, failed or
+withdrawn, carries its inclusive bill under the original call identity. The
+parent's existing once-only terminal guard precedes charging; duplicates and
+stale generations are inert. The parent adds that bill only to its inclusive
+sum and local share. Its Turn then tells the inclusive sum after its real calls
+settle. Restored Turns keep their original recorded spend but are never charged
+again to the new activation.
+
+The run charges each monotonic own-completion delta immediately, once, across
+all sessions. A parent child-bill update has an own delta of zero. The run never
+adds a child's inclusive bill a second time and never waits for a parent's
+terminal to discover a crossing charge. Raw provider counters and completion
+counts are observed separately from currency. Child Turns remain child records;
+only main Turns form the host transcript.
+
+### 9.3 The next-completion gate
+
+Before root publishes any actual completion request, it checks that the
+conversation is live and Running, then the run's current scalar spend and turn
+count. Reaching either cap prevents the next request:
+there is no credential lease, retained provider context, Client, retry or
+external cancellation for the denied request. Root returns a typed unsent
+budget denial directly to the calling session. That session releases its
+reserved provider credit, closes its kit and emits its one real Ended terminal
+after KitClosed. It creates no Usage, price, Turn or provider cancellation.
+A queued but unpublished request whose conversation or run is already closing
+uses a separate unsent-close terminal; it cannot acquire a financial denial or
+replace the run's actual cancel, deadline or hard-fault reason.
+
+A completion already admitted before another session crosses may finish and is
+charged once. Ordinary finite scalar or turn exhaustion preserves every call
+of the crossing completion, including reads, writes, host calls, deliveries and
+waiting, until its real terminal. Already-running children also settle. A valid
+Finish in that same turn may still succeed; without Finish, the run fails as
+budget exhaustion after its genuine Turn. No later completion starts. Overshoot
+is therefore at most one already-admitted completion per open session. Time
+expiry and explicit cancellation retain their immediate close behavior.
+
+### 9.4 Overflow and reporting
+
+Financial and raw-usage arithmetic is checked independently. A failed cumulative
+addition retains the last representable prefix and sets a sticky attestation;
+that prefix is never described as the exact total. Raw usage checks all four
+additions before changing any cumulative field. Actual per-completion usage
+remains exact. Own and inclusive currency sums have independent overflow flags:
+an unknown child bill cannot suppress a still-representable own charge.
+
+A structurally valid accepted completion still produces its actual Turn once,
+with the spend-overflow attestation, before the typed PriceOverflow or
+UsageOverflow terminal. An unknown delegated bill carries its representable
+prefix and attestation, never an invented zero charge. Run, root, derived facts
+and host metadata preserve the corresponding currency and usage attestations;
+terminal accounting never subtracts an unknown cumulative usage total to
+reconstruct a remainder.
+
+Hard arithmetic failure takes precedence over an unlanded Finish, unlike normal
+finite-cap exhaustion. A final Change that already landed remains Accepted with
+its durable outcome and attested spend, following section 8.2; that answer has no
+separate typed stop
+field. An interrupted mid-run landing remains Delivered with its actual receipts,
+typed stop and attested spend. Neither form loses landed evidence to a later
+accounting fault. Late actual completions during closing still update
+representable charges and overflow attestations. Every admitted answer reports
+its activation-only raw counters, turns and scalar units, including both
+attestations. Source and gate status for this contract are tracked in
+`docs/development/migration-05s4-budget.md`; a draft is not an acceptance claim.
 
 ## 10. The answer
 
@@ -760,8 +841,8 @@ exact source and full-suite evidence.
 
 The first 05s4 RESULTS and DELIVERY increments implement generic final forms,
 separately granted main delivery, all discovered writable checks, sealed actual
-host terminals and stable transcript-derived naming. The copied token-split
-budget remains until its subsequent increment. The Instructions/Brief increment
+host terminals and stable transcript-derived naming. The host-unit budget contract replaces the copied token split as described
+in section 9; its current source and gate status are tracked separately. The Instructions/Brief increment
 separates the main role from ordered titled sections (3.1 and 3.3), preserving
 the child's own raw task scope (5.3); its reviewed temporary source and gates
 are recorded in
@@ -778,9 +859,11 @@ Provider-neutral canonical feedback lives in the root; shared Client/peer and
 replay codecs belong to Skein. The WORKSPACE increment separates optional workspace
 from the charter, carries git kind and initial conflict paths into main/child
 openings, and admits its aggregate ownership before effects (section 3.2).
-Its source and world evidence are tracked separately. Scalar run pricing,
-system rendering extraction, live channel/transcript codecs and the executable
-remain open. Source and validation status are recorded in
+Its source and world evidence are tracked separately. The BUDGET increment
+tracks scalar prices, own/global conservation, inclusive child bills and the
+next-completion gate in `docs/development/migration-05s4-budget.md`. System
+rendering extraction, live channel/transcript codecs and the executable remain
+open. Source and validation status are recorded in
 `docs/development/migration-05s4-messages.md` and
 `docs/development/migration-05s4-conventions.md`, and
 `docs/development/migration-05s4-workspace.md`; a source draft alone is not a

@@ -49,7 +49,11 @@ fn random_worlds_settle_with_every_start_answered_once() {
                     Failure::Model(Fault::Truncated | Fault::Refused | Fault::Malformed) => "stopped",
                     Failure::Budget(Exhausted::Turns) => "turns",
                     Failure::Budget(Exhausted::Time) => "time",
-                    Failure::Budget(_) => "tokens",
+                    Failure::Budget(Exhausted::Spend) => "spend",
+                    Failure::PriceOverflow | Failure::UsageOverflow => {
+                        panic!("bounded random partner usage and prices remain representable")
+                    }
+                    Failure::Receiving(_) => panic!("source random partner has no receiving refusal"),
                     Failure::Policy(Policy::Unfinished { .. }) => "unfinished",
                     Failure::Cancelled => "cancelled",
                     Failure::Stale => "stale",
@@ -69,7 +73,7 @@ fn random_worlds_settle_with_every_start_answered_once() {
         "stale",
         "stopped",
         "time",
-        "tokens",
+        "spend",
         "turns",
         "unfinished",
     ];

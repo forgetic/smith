@@ -157,7 +157,14 @@ fn charter(context_bytes: u64) -> Charter {
             failure: Some(TextSpec { min: 1, max: 512, fields: Box::new([]) }),
         },
         budget: run::Budget { turns: 12, ..TIGHT.run.budget },
-        llm: Llm { account: 0, endpoint: Endpoint(0), model: (*b"m").into(), max_tokens: 256, dialect: 1 },
+        llm: Llm {
+            prices: run::Prices { input: 0, cached: 0, output: 0, unit: 1 },
+            account: 0,
+            endpoint: Endpoint(0),
+            model: (*b"m").into(),
+            max_tokens: 256,
+            dialect: 1,
+        },
         models: Box::new([]),
         conventions: Some(smith_domain::run::Conventions {
             guide: b"AGENTS.md".as_slice().into(),

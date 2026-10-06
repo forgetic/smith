@@ -103,3 +103,26 @@ fn exact_text_cap_accepts_whole_result_and_one_byte_less_refuses() {
     assert_eq!(feedback(run::Returned::Accepted, 7), Err(FeedbackRefusal::TooLarge));
     assert_eq!(feedback(run::Returned::Accepted, 8), Ok(Feedback { text: bytes(b"accepted"), error: false }));
 }
+
+#[test]
+fn child_scalar_receiving_and_unknown_prefix_ends_remain_distinct_literal_feedback() {
+    for (end, expected) in [
+        (run::End::Budget(run::Exhausted::Turns), "unanswered end=budget:turns"),
+        (run::End::Budget(run::Exhausted::Spend), "unanswered end=budget:spend"),
+        (run::End::Budget(run::Exhausted::Time), "unanswered end=budget:time"),
+        (run::End::PriceOverflow, "unanswered end=price-overflow"),
+        (run::End::UsageOverflow, "unanswered end=usage-overflow"),
+        (run::End::Receiving(run::ReceivingLimit::Input), "unanswered end=receiving:input"),
+        (run::End::Receiving(run::ReceivingLimit::Output), "unanswered end=receiving:output"),
+        (run::End::Receiving(run::ReceivingLimit::CacheRead), "unanswered end=receiving:cache-read"),
+        (run::End::Receiving(run::ReceivingLimit::CacheWrite), "unanswered end=receiving:cache-write"),
+    ] {
+        let received = feedback(run::Returned::Unanswered { end }, 64).expect("literal terminal fits unchanged cap");
+        assert_eq!(received.text.as_ref(), expected.as_bytes());
+        assert!(received.error);
+        assert!(
+            feedback(run::Returned::Unanswered { end }, u64::try_from(expected.len() - 1).expect("short label"))
+                .is_err()
+        );
+    }
+}

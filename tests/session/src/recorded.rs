@@ -106,6 +106,18 @@ pub struct World {
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub spend: Vec<(u64, bool)>,
+    /// Cumulative own-completion charges, excluding every delegated bill.
+    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
+    pub own_spend: Vec<(u64, bool)>,
+    /// Exact completion usage and its cumulative overflow attestation.
+    /// Contract: domain/session.md, section 6; domain/run.md, section 10.
+    pub used: Vec<(llm::Usage, bool)>,
+    /// Settled count, cumulative raw prefix and its overflow attestation.
+    /// Contract: domain/session.md, section 6; domain/run.md, section 10.
+    pub terminal_usage: Option<(u32, llm::Usage, bool)>,
+    /// Actual emitted facts, including cumulative overflow attestations.
+    /// Contract: domain/session.md, sections 6 and 10; domain/run.md, section 10.
+    pub facts: Vec<session::Fact>,
     /// The single settled session terminal, or none while work remains.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
@@ -141,6 +153,10 @@ impl World {
             prompts: vec![],
             turns: vec![],
             spend: vec![],
+            own_spend: vec![],
+            used: vec![],
+            terminal_usage: None,
+            facts: vec![],
             end: None,
             trace: vec![],
         }
@@ -152,6 +168,8 @@ impl World {
     pub fn step(&mut self, event: session::Event) {
         match &event {
             session::Event::Completed { owner, .. }
+            | session::Event::BudgetDenied { owner, .. }
+            | session::Event::UnsentClosed { owner }
             | session::Event::Cancelled { owner }
             | session::Event::Failed { owner, .. } => {
                 assert_eq!(self.completing.take(), Some(*owner), "one terminal per completion");
@@ -182,48 +200,59 @@ impl World {
         assert!(self.out.len() <= session::max_out(&self.env.limits));
         while let Some(request) = self.out.pop() {
             self.trace.push(format!("{request:?}"));
-            match request {
-                session::Request::Opened { opener, session } => {
-                    assert_eq!(opener, Token::new(31));
-                    assert!(self.session.replace(session).is_none());
-                }
-                session::Request::Complete { owner, prompt, .. } => {
-                    assert!(self.completing.replace(owner).is_none());
-                    self.prompts.push(prompt);
-                }
-                session::Request::Delegate { owner, origin, .. } => {
-                    assert!(!self.delegated.contains(&owner));
-                    self.delegated.push(owner);
-                    self.origins.push(origin);
-                }
-                session::Request::Turn { opener, turn } => {
-                    assert_eq!(opener, Token::new(31));
-                    self.turns.push(turn);
-                }
-                session::Request::Priced { opener, spent, overflow } => {
-                    assert_eq!(opener, Token::new(31));
-                    self.spend.push((spent, overflow));
-                }
-                session::Request::Ended { opener, end, .. } => {
-                    assert_eq!(opener, Token::new(31));
-                    assert!(self.end.replace(end).is_none());
-                }
-                session::Request::Yielded { .. }
-                | session::Request::Used { .. }
-                | session::Request::Cancel { .. }
-                | session::Request::Withdraw { .. } => {}
-                session::Request::Io { owner, op, .. } => {
-                    assert!(!self.operations.iter().any(|(pending, _)| pending == &owner));
-                    self.operations.push((owner, op));
-                }
-                session::Request::CancelIo { owner } => {
-                    assert!(self.operations.iter().any(|(pending, _)| pending == &owner));
-                    self.cancelled_operations.push(owner);
-                }
+            self.observe(request);
+        }
+        while let Some(fact) = self.domain.pop_fact() {
+            self.facts.push(fact);
+        }
+        self.snapshots.push(format!("{:?}", self.domain));
+    }
+
+    /// Records actual boundary outputs and checks their single-owner obligations.
+    /// Contract: domain/session.md, sections 3, 6 and 12; testing-strategy.md, section 2.2.
+    fn observe(&mut self, request: session::Request) {
+        match request {
+            session::Request::Opened { opener, session } => {
+                assert_eq!(opener, Token::new(31));
+                assert!(self.session.replace(session).is_none());
+            }
+            session::Request::Complete { owner, prompt, .. } => {
+                assert!(self.completing.replace(owner).is_none());
+                self.prompts.push(prompt);
+            }
+            session::Request::Delegate { owner, origin, .. } => {
+                assert!(!self.delegated.contains(&owner));
+                self.delegated.push(owner);
+                self.origins.push(origin);
+            }
+            session::Request::Turn { opener, turn } => {
+                assert_eq!(opener, Token::new(31));
+                self.turns.push(turn);
+            }
+            session::Request::Priced { opener, spent, overflow, own_spent, own_overflow } => {
+                assert_eq!(opener, Token::new(31));
+                self.spend.push((spent, overflow));
+                self.own_spend.push((own_spent, own_overflow));
+            }
+            session::Request::Ended { opener, end, turns, usage, usage_overflow } => {
+                assert_eq!(opener, Token::new(31));
+                assert!(self.end.replace(end).is_none());
+                assert!(self.terminal_usage.replace((turns, usage, usage_overflow)).is_none());
+            }
+            session::Request::Used { opener, usage, usage_overflow } => {
+                assert_eq!(opener, Token::new(31));
+                self.used.push((usage, usage_overflow));
+            }
+            session::Request::Yielded { .. } | session::Request::Cancel { .. } | session::Request::Withdraw { .. } => {}
+            session::Request::Io { owner, op, .. } => {
+                assert!(!self.operations.iter().any(|(pending, _)| pending == &owner));
+                self.operations.push((owner, op));
+            }
+            session::Request::CancelIo { owner } => {
+                assert!(self.operations.iter().any(|(pending, _)| pending == &owner));
+                self.cancelled_operations.push(owner);
             }
         }
-        while self.domain.pop_fact().is_some() {}
-        self.snapshots.push(format!("{:?}", self.domain));
     }
 
     /// Delivers a new typed opening to the scripted peer or real session and retains its pending terminal obligations.
@@ -287,7 +316,13 @@ pub fn scenario(seed: u64, facts: u32) -> World {
     world.complete(called(), llm::Stop::ToolUse, USAGE);
     assert!(world.turns.is_empty(), "the turn waits for its tool results");
     let owner = world.delegated[0];
-    world.step(session::Event::AnsweredV2 { owner, text: b"child finished".as_slice().into(), error: false, spent: 9 });
+    world.step(session::Event::AnsweredV2 {
+        owner,
+        text: b"child finished".as_slice().into(),
+        error: false,
+        spent: 9,
+        spend_overflow: false,
+    });
     // Independent referee arithmetic: ceil((14*7 + 5*3 + 4*11)/10)=16,
     // then the child contributes 9. One terminal response charges it once.
     assert_eq!(world.spend, [(16, false), (25, false)]);
@@ -309,6 +344,7 @@ pub fn scenario(seed: u64, facts: u32) -> World {
         llm::Stop::EndTurn,
         llm::Usage { output_tokens: 1, ..llm::Usage::ZERO },
     );
+    assert_eq!(world.own_spend, [(16, false), (16, false), (18, false)]);
     assert_eq!(world.turns[1].spent, 27); // ceil(11/10)=2, per completion.
     world.close();
     world

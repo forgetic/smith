@@ -115,6 +115,9 @@ pub struct Binding {
     /// Exact advertised root receiving contract used before actual preparation.
     /// Contract: domain/client.md, sections 1 and 6.
     pub receiving: Receiving,
+    /// Actual SDK terminal usage, before application translation.
+    /// Contract: domain/client.md, section 4; domain/run.md, section 9.
+    pub accepted_usage: Option<shared::Usage>,
 
     /// Shared root/Client/peer iteration clock when this physical call started.
     /// Contract: domain/client.md, section 1; programming-model.md, section 9.
@@ -199,6 +202,7 @@ impl Composition {
         self.bindings.push(Binding {
             owner,
             receiving,
+            accepted_usage: None,
             started: (now, wall),
             retained_at_start,
             observed: Vec::new(),
@@ -245,6 +249,7 @@ impl Composition {
                 }
                 returned
             };
+            binding.accepted_usage = wire.accepted_usage;
             progress.queries.append(&mut wire.peer.queries);
             for event in returned {
                 assert_eq!(
@@ -290,6 +295,9 @@ pub struct Wire {
     /// At most one terminal plus Reusable/Close/Closed, without diagnostic bodies.
     /// Contract: domain/client.md, sections 4 and 5.
     pub observed: Vec<Observed>,
+    /// Exact SDK usage copied before adapter translation; no duplicate body.
+    /// Contract: domain/client.md, section 4; domain/run.md, section 9.
+    pub accepted_usage: Option<shared::Usage>,
     context: Option<Context>,
 }
 
@@ -299,6 +307,7 @@ impl core::fmt::Debug for Wire {
             .debug_struct("Wire")
             .field("waiting", &self.peer.machine.waiting())
             .field("observed", &self.observed)
+            .field("accepted_usage", &self.accepted_usage)
             .field("live_context", &self.context.is_some())
             .finish()
     }
@@ -347,7 +356,7 @@ impl Wire {
             limits,
         )?;
         let peer = Exchange::prepared(client, peer_endpoint, peer_credential, limits.client, scripts);
-        Ok(Self { peer, context: Some(context), observed: Vec::new() })
+        Ok(Self { peer, context: Some(context), observed: Vec::new(), accepted_usage: None })
     }
 
     /// Caller starts the admitted actual Client once under its installed clocks.
@@ -395,6 +404,7 @@ impl Wire {
             match event {
                 client::Event::Completed { owner, completion } => {
                     self.observed.push(Observed::Completed(owner));
+                    self.accepted_usage = Some(completion.usage);
                     let context = self.context.take().expect("one actual Client terminal owns the context");
                     let decoded = resolutions(&context, &completion);
                     returned.push(

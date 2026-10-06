@@ -14,8 +14,12 @@ tool/result admission and bounded prompt translation before calling Client
 preparation once. It returns that actual Client and an immutable owned Context.
 The caller drives shared Client entrances with injected time and lower stream
 events. Preparation refusal produces no wire effect. Optional workspace,
-conventions, protocol application schema definitions and scalar charter policy
-remain their separately named increments.
+conventions and protocol application schema definitions retain their separately
+named contracts. Charter prices and run-wide budget policy belong to the run
+and session domains (domain/run.md, section 9; domain/session.md, section 6).
+Root checks its completion permit before it publishes a request to this adapter;
+an unsent budget denial therefore constructs neither Context nor Client and
+leases no credential. The adapter never prices usage or enforces host currency.
 
 ## 2. Tool inventory
 

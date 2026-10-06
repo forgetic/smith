@@ -106,7 +106,7 @@ pub(crate) fn plan(
     depth: u32,
     wanted: Families,
     llm: Option<&[u8]>,
-    share: Option<Spend>,
+    share: Option<crate::Share>,
     limits: &Limits,
 ) -> Result<Plan, AskRefusal> {
     if !families.agents || !wanted.within(families) {
@@ -126,14 +126,9 @@ pub(crate) fn plan(
     let left = charter.budget.remainder(means.spent, means.left);
     let budget = match share {
         None => left,
-        Some(share) => Budget {
-            turns: share.turns.min(left.turns),
-            input: share.input.min(left.input),
-            output: share.output.min(left.output),
-            cache_read: share.cache_read.min(left.cache_read),
-            cache_write: share.cache_write.min(left.cache_write),
-            time: left.time,
-        },
+        Some(share) => {
+            Budget { turns: share.turns.min(left.turns), spend: share.spend.min(left.spend), time: left.time }
+        }
     };
     if !budget.is_workable() {
         return Err(AskRefusal::Unworkable);

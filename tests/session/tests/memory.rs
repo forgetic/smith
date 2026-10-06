@@ -436,6 +436,7 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
         text: bytes(output),
         error: false,
         spent: 0,
+        spend_overflow: false,
     });
     assert!(owner.is_none(), "full actual result is retained; next provider reserve fails before work");
     assert_eq!(ended, Some(smith_domain_session::End::TranscriptFull));
@@ -498,6 +499,7 @@ fn restoring_a_maximum_recorded_history_stays_within_the_counted_bound() {
                     content: Box::new([Block::Opaque { bytes: bytes(opaque) }]),
                 },
             ]),
+            spend_overflow: false,
         }]),
         after: Box::default(),
     };
@@ -574,6 +576,7 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
                 Message { role: Role::User, content: Box::new([Block::Text { text: bytes(1), replay: None }]) },
                 Message { role: Role::Assistant, content: tail.into() },
             ]),
+            spend_overflow: false,
         }]),
         after: Box::default(),
     };
@@ -610,7 +613,8 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
             opener: Token::new(1),
             end: smith_domain_session::End::TranscriptRefused { reason: record::Refusal::TooLarge },
             turns: 0,
-            usage: Usage::ZERO
+            usage: Usage::ZERO,
+            usage_overflow: false
         })
     );
     assert!(out.is_empty());

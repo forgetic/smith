@@ -1,6 +1,6 @@
 //! The run child domain's state and its entry points (programming-model.md, sections 4.5 and 6.3).
 
-use skein_lib::{Deadlines, Env, Queue, Slab, Time};
+use skein_lib::{Deadlines, Env, Queue, Slab, Time, Token};
 
 use crate::boundary::{Event, Request};
 use crate::call::Calls;
@@ -141,6 +141,9 @@ fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Re
         Event::Cancel { run } => run::cancel(domain, run, out),
         Event::Started { conversation, peer } => run::started(domain, conversation, peer, out),
         Event::Yielded { conversation, stop, text } => run::yielded(domain, env, conversation, stop, &text, out),
+        Event::Priced { conversation, own_spent, subtree_spent, own_overflow, subtree_overflow } => {
+            run::priced(domain, conversation, own_spent, subtree_spent, own_overflow, subtree_overflow, out);
+        }
         Event::Used { conversation, spend } => run::used(domain, conversation, spend, out),
         Event::Ended { conversation, end, spend } => run::ended(domain, conversation, end, spend, out),
         Event::Read { owner, read } => run::read(domain, env, owner, read, out),
@@ -174,4 +177,12 @@ pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
         Alarm::Host { call } => run::host_alarm(domain, env, call, out),
     }
     facts::tell(&mut domain.facts, &domain.runs, &domain.conversations, out, mark);
+}
+
+/// Root asks before publishing a completion. A denial has no effects and names
+/// the exhausted global scalar dimension. Stale/closing conversations deny.
+/// Contract: domain/run.md, sections 9, 10 and 14.
+#[must_use]
+pub fn completion_permit(domain: &Domain, conversation: Token) -> crate::CompletionPermit {
+    run::completion_permit(domain, conversation)
 }
