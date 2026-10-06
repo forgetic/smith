@@ -92,8 +92,9 @@ modify (`write`, `edit`), shell.
 
 io's operations: file loads and atomic stores, directory scans, `rg`
 searches, contained process trees with deadlines and proof that a tree
-is empty once stopped. The protocol layer: each tool's schema, decoding
-and rendering (`smith-protocol`).
+is empty once stopped, reached through `smith-protocol-machine`. The
+protocol layer: each tool's schema, decoding and rendering
+(`smith-protocol-llm`).
 
 ## 7. The world
 

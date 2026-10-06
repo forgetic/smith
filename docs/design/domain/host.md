@@ -14,8 +14,8 @@ supervise agent processes, and `smith-local-domain`, the host the
   the answer. temper's worker is a host; so is smith's local host, and so
   is a test's world.
 - **One contract, three forms.** The same vocabulary crosses as domain
-  entities (section 2), as frames over an agent process's pipes
-  (section 3), or as calls between domains in one process (section 9).
+  entities (section 2), as frames over a channel (section 3), or as
+  calls between domains in one process (section 9).
 - **One process per run.** An agent process runs one run; its process
   tree is the run's containment, and stopping a run means that tree is
   gone (section 4).
@@ -78,12 +78,15 @@ payload beyond the limits, or a message that does not decode.
 
 ## 3. The channel
 
-- **Framed over the agent process's pipes,** one channel per run, its
-  frames and payloads in `smith-channel`, which both halves use. The
-  agent's half is in `smith-protocol`; a host's half is in its own
-  protocol layer, on `smith-channel`.
-- **Versioned.** A hello on each side says the version it speaks; a
-  mismatch ends the run before its start is read.
+- **Framed,** one channel per run, over the streams its host makes: a
+  spawned agent's standard input and output, or a connection. Both halves
+  are smith's (`smith-protocol-channel`, `smith-host-protocol`), and a host
+  owns its half as a component of its protocol layer
+  (`protocol/README.md`).
+- **Versioned.** Each side's opening says the versions it speaks, and the
+  highest both speak is chosen; with none in common, the run ends before
+  its start is read. The charter and transcripts carry versions of their
+  own.
 - **Payloads are smith's vocabulary:** a charter, a workspace, a
   transcript and turns (`smith-transcript`), calls and their answers,
   results. A host may keep any of them as bytes, reading only what the
@@ -160,8 +163,9 @@ policy.
 ## 7. Credentials
 
 - **Lent by the host:** an agent under a host gets each credential its
-  endpoints need as a grant on the channel, named by account and
-  generation, refreshed before it lapses; the agent's protocol layer
+  endpoints need as a grant on the channel, or from the host's protocol
+  layer in one process (section 9), named by account and generation,
+  refreshed before it lapses; the agent's protocol layer
   holds it, and the domain names only the grant. A notice of a rejected
   credential or an exhausted account goes up for the host to act on.
 - **Or the agent's own:** the local host signs in to a provider with
@@ -245,3 +249,5 @@ the terminal.
   per-run cgroup, so cancelling a run in one process stops all it
   started.
 - **Several runs per agent process,** for a host with many short runs.
+- **A connected agent:** a daemon a host connects to instead of spawning
+  (`protocol/README.md`, section 4), supervised without its process.

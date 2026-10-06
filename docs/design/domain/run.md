@@ -124,9 +124,9 @@ not text counts as no guide.
 ## 4. What a run does
 
 1. **Admits** a start, or refuses it at the entrance: busy, or invalid
-   (beyond the agent's `Limits`, an endpoint it is not configured with, a
-   host tool whose name is smith's or appears twice, a contract that
-   cannot be met).
+   (a charter in a version it does not read, beyond the agent's `Limits`,
+   an endpoint it is not configured with, a host tool whose name is
+   smith's or appears twice, a contract that cannot be met).
 2. **Prepares:** reads each workspace directory's guide and looks for its
    checks (8.1).
 3. **Equips** its main session: prompt, tools, workspace authority, LLM, a

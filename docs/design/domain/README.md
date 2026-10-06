@@ -25,7 +25,8 @@ How smith is built from temper's code is temper's migration plan
   repositories or a workspace at all.
 - **One process, one protocol.** An agent is one process running one run
   at a time, and talks to its host over one channel whose vocabulary is
-  defined here (host.md). A host (temper's worker, smith's local host, a
+  defined here (host.md) and whose bytes are the protocol design's
+  (`docs/design/protocol/`), or as a domain in its host's process. A host (temper's worker, smith's local host, a
   test's world) starts runs, serves what they ask of it and hears how
   each ends.
 - **skein's layering** (`programming-model.md`): every part is a domain,
@@ -133,27 +134,32 @@ the `smith` binary runs.
 |---|---|---|
 | domain | `smith-domain` and its children | the agent in its worlds, or in its own process (host.md, section 9) |
 | domain | `smith-host-domain` | supervising agent processes, as its host's child |
-| protocol | `smith-protocol` | the agent process's protocol layer: the channel's agent half, calls through skein's LLM client, tools' schemas and decoding |
-| protocol | `smith-channel` | the channel's frames and payloads, both halves, versioned |
-| protocol | `smith-transcript` | encoding and decoding turns, for a host that keeps or shows them |
+| protocol | `smith-protocol-channel`, `smith-protocol-llm`, `smith-protocol-machine` | the agent's protocol layer: its half of the channel; calls through skein's LLM client, with tools' schemas and decoding; files and processes. The last two also serve an agent in its host's process |
+| protocol | `smith-host-protocol` | the host's half of the channel, on the streams its host makes |
+| protocol | `smith-channel`, `smith-charter`, `smith-transcript` | codecs: the channel's records; the charter and the result; turns, for a host that keeps or shows them |
 | skein | `skein-llm` | providers' APIs, behind one shared client |
 | protocol | `smith-mcp`, later | MCP servers as a tool source |
 | testing | skein's fake LLM, a scripted agent, a scripted host | fakes for its own worlds |
 | binary | `smith` | the agent process a host spawns, and the local host with an agent |
 
-io is skein's: contained process trees, files, HTTP, pipes.
+io is skein's: contained process trees, files, HTTP, pipes. The
+protocol layer's design is in `docs/design/protocol/`.
 
 **What goes to skein.** smith and temper share skein; what both would
 otherwise each keep goes there, as generic kit, when it is extracted:
 
-- **framed channels:** frames, a hello with versions, bounds sealed by
-  constructors, a channel's state machine; smith's and temper's channels
-  keep only their payloads;
+- **framed channels:** frames over any stream, an opening that agrees a
+  version, bounds sealed by constructors, a channel's state machine; and
+  codecs generated from schemas; smith's and temper's channels keep only
+  their records;
 - **an OAuth client:** sign-in, refresh, tokens kept as secrets; smith's
   local host and temper's forge sign-in add their endpoints;
-- **supervised processes:** spawning within a deadline, cancel then
-  terminate then kill, proof that a tree is empty; `smith-host-domain`
-  adds the channel's rules and the watchdog;
+- **supervised processes:** spawning within a deadline, with a view of
+  the file system in which only named directories are writable, cancel
+  then terminate then kill, proof that a tree is empty;
+  `smith-host-domain` adds the channel's rules and the watchdog;
+- **connections for LLM calls:** connecting, TLS and the deadlines
+  skein's LLM client leaves to its owner;
 - **worlds' common fakes,** such as a scripted peer on a channel.
 
 What is about conversations, tools or runs stays in smith; providers'
