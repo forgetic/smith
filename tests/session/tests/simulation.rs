@@ -468,3 +468,39 @@ fn facts_change_nothing_the_sessions_do() {
         assert_eq!((none, dropped > 0), (Told::default(), true), "seed {seed}: every fact dropped");
     }
 }
+
+#[test]
+fn a_yielded_call_tail_becomes_not_run_only_after_the_real_continue() {
+    use smith_domain_session::llm::{Block, Returned};
+    let calm = Settings::calm(13);
+    let mut world = World::new(Settings { nudges: Count { min: 1, max: 1 }, ..calm });
+    let opener = world.submit(Time::ZERO, Spec { max_tokens: 4, ..spec(b"fix the build") });
+    world.run(ITERATIONS);
+    let records = &world.session(opener).records;
+    assert_eq!(records.len(), 2, "the genuine nudge accepted two truncated provider completions");
+    let pending = records[0]
+        .messages
+        .iter()
+        .flat_map(|message| message.content.iter())
+        .find_map(|block| if let Block::ToolCall { id, .. } = block { Some(id) } else { None })
+        .expect("the actual truncated provider payload retained its unanswered call");
+    assert!(
+        !records[0]
+            .messages
+            .iter()
+            .flat_map(|message| message.content.iter())
+            .any(|block| matches!(block, Block::ToolResult { id, .. } if id == pending)),
+        "yielding cannot invent a result without Continue"
+    );
+    assert!(
+        matches!(&records[1].messages[0].content[0], Block::ToolResult {
+        id, result: Returned::NotRun,
+    } if id == pending),
+        "the actual Continue carries exact NotRun before the waking assistant"
+    );
+    assert_eq!(
+        (world.stats().ops, world.stats().delegates, world.stats().continues),
+        (0, 0, 1),
+        "the yielded call had no effect and exactly one genuine continuation"
+    );
+}

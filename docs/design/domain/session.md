@@ -53,13 +53,13 @@ What is still open is listed in section 11.
   inside the session that made it.
 - **Delegated origin.** Every opener-served call carries its concrete accepted
   completion sequence and zero-based assistant block position, in addition to
-  its live callback and temporary opener ticket. V2 includes restored transcript
-  history in the sequence; V1 counts only the current activation. Provider ids
+  its live callback and temporary opener ticket. The sequence includes restored
+  transcript history and advances once per accepted completion. Provider ids
   may repeat in different turns. The composing root preserves this fixed origin
   as the durable host call name, scoped by the same logical run across restart
   (run.md, section 8.2). Checked sequence overflow refuses the next completion's
   effects before any tool or host submission. Resolving tickets changes neither
-  sequence nor position. Root V2 restart and concrete answered-after-transcript
+  sequence nor position. Root restart and concrete answered-after-transcript
   restoration use that same origin without re-executing the old effect.
 - **Told as it ends.** Closing waits for actual terminal answers before
   telling the last turn, including answers that win a cancellation.
@@ -83,7 +83,7 @@ What is still open is listed in section 11.
 
 ### 3.1 Receiving room before work
 
-For V2, `completion_bytes` caps the full owning translated completion: Block
+`completion_bytes` caps the full owning translated completion: Block
 cells, all text/id/name/input bytes, replay envelopes and decoded owning calls.
 `completion_blocks` independently caps the number of cells. Root and adapter
 additionally require a complete `Decoded` classification cell for every possible
@@ -129,7 +129,11 @@ actual result because later history filled the conversation.
 `session_bytes` counts Block wrappers and owning payloads, including secured
 result skeletons, separately from Message arrays. The worst case additionally
 prices Message storage, result Slot containers including their coexistence with
-an assembled result Block array, and restore Turn/Message staging. Root and
+an assembled result Block array, and restore Turn/Message staging. The single
+boxed Opening at the synchronous admission boundary adds its exact fixed node
+size to that staging; its bounded payload and restore envelopes are counted
+separately. The root includes this child bound and does not charge the node
+again. Root and
 caller price their concrete transcript/Turn output envelopes and transit copies
 independently. No logical reservation allocates bytes or abandons a terminal.
 
@@ -227,8 +231,14 @@ The parent emits its Turn after all its admitted calls settle; denial itself
 creates no Turn.
 
 The typed 05s4 budget increment is tracked in
-`docs/development/migration-05s4-budget.md`. First-version contraction remains a
-separate increment; this contract describes the second recording entrance.
+`docs/development/migration-05s4-budget.md`. The single concrete entrance uses
+`Open { opener, opening }` for fresh and restored transcripts. Opener-served
+terminals use `Answered` with owned result bytes, its error bit and the inclusive
+child activation bill, or `AnswerCancelled` with the settled bill. Live tickets
+name pending work only; they never survive in a Turn. The retained transcript
+format version is 2; removing the older entrance does not change its encoding.
+The contraction and preserved source scenarios are recorded in
+`docs/development/migration-05s4-session-contraction.md`.
 
 ## 7. Sub-agents
 

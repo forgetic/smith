@@ -46,18 +46,29 @@ fn transcript_refusals_precede_tools_and_completions() {
                     llm::Block::ToolResult { id: b"unmatched".as_slice().into(), result: llm::Returned::NotRun }
             }),
         ),
+        (record::Refusal::Unresolved, Box::new(|t| t.turns[0].messages[1].content = recorded::called())),
         (
             record::Refusal::Unresolved,
             Box::new(|t| {
-                t.turns[0].messages[2].content[0] = llm::Block::ToolResult {
-                    id: b"provider-call".as_slice().into(),
-                    result: llm::Returned::Delegated {
-                        answer: llm::Answer { ticket: Token::new(1), bytes: 1, error: false },
-                    },
-                }
+                let llm::Block::ToolCall { call, .. } = &mut t.turns[0].messages[1].content[1] else {
+                    panic!("the saved scenario contains the provider call");
+                };
+                *call = llm::Decoded::Invalid { problem: llm::Problem::UnknownTool };
             }),
         ),
-        (record::Refusal::Unresolved, Box::new(|t| t.turns[0].messages[1].content = recorded::called())),
+        (
+            record::Refusal::Unresolved,
+            Box::new(|t| {
+                let llm::Block::ToolCall { call, .. } = &mut t.turns[0].messages[1].content[1] else {
+                    panic!("the saved scenario contains the provider call");
+                };
+                *call = llm::Decoded::Owned {
+                    call: smith_domain_tools::Call::List {
+                        path: smith_domain_tools::Path { absolute: true, parts: Box::default() },
+                    },
+                };
+            }),
+        ),
     ];
     for (reason, change) in changes {
         let mut history = transcript(&old);
@@ -99,7 +110,7 @@ fn unit_budget_stops_after_the_crossing_turn_settles_and_child_counts_once() {
     world.open(opening(None, 20));
     world.complete(recorded::called(), llm::Stop::ToolUse, recorded::USAGE);
     let owner = world.delegated[0];
-    world.step(session::Event::AnsweredV2 {
+    world.step(session::Event::Answered {
         owner,
         text: b"answer".as_slice().into(),
         error: false,
@@ -118,7 +129,7 @@ fn unit_budget_stops_after_the_crossing_turn_settles_and_child_counts_once() {
         session::step(
             &mut world.domain,
             &world.env,
-            session::Event::AnsweredV2 {
+            session::Event::Answered {
                 owner,
                 text: b"duplicate".as_slice().into(),
                 error: false,
@@ -177,7 +188,7 @@ fn closing_preserves_withdrawn_and_late_answers_and_provider_completions() {
         let owner = world.delegated[0];
         world.step(session::Event::Close { session: world.session.expect("the scenario supplied a value") });
         if wins {
-            world.step(session::Event::AnsweredV2 {
+            world.step(session::Event::Answered {
                 owner,
                 text: b"late child".as_slice().into(),
                 error: false,
@@ -186,7 +197,7 @@ fn closing_preserves_withdrawn_and_late_answers_and_provider_completions() {
             });
             assert_eq!(world.turns[0].spent, 25);
         } else {
-            world.step(session::Event::AnswerCancelledV2 { owner, spent: 9, spend_overflow: false });
+            world.step(session::Event::AnswerCancelled { owner, spent: 9, spend_overflow: false });
             assert_eq!(world.turns[0].spent, 25, "withdrawn child spend is included");
             assert_eq!(
                 world.turns[0].messages[2].content[0],
@@ -306,7 +317,7 @@ fn cumulative_child_spend_overflow_is_a_typed_failure() {
     let mut world = World::new(31, 256);
     world.open(opening(None, u64::MAX));
     world.complete(recorded::called(), llm::Stop::ToolUse, recorded::USAGE);
-    world.step(session::Event::AnsweredV2 {
+    world.step(session::Event::Answered {
         owner: world.delegated[0],
         text: b"child".as_slice().into(),
         error: false,
@@ -408,7 +419,7 @@ fn repeated_provider_ids_keep_distinct_origins_and_restore_includes_history_pref
     first.open(opening(None, 1000));
     first.complete(recorded::called(), llm::Stop::ToolUse, llm::Usage::ZERO);
     let owner = first.delegated[0];
-    first.step(session::Event::AnsweredV2 {
+    first.step(session::Event::Answered {
         owner,
         text: b"first".as_slice().into(),
         error: false,
@@ -417,7 +428,7 @@ fn repeated_provider_ids_keep_distinct_origins_and_restore_includes_history_pref
     });
     first.complete(recorded::called(), llm::Stop::ToolUse, llm::Usage::ZERO);
     let owner = first.delegated[0];
-    first.step(session::Event::AnsweredV2 {
+    first.step(session::Event::Answered {
         owner,
         text: b"second".as_slice().into(),
         error: false,
@@ -434,7 +445,7 @@ fn repeated_provider_ids_keep_distinct_origins_and_restore_includes_history_pref
     resumed.complete(recorded::called(), llm::Stop::ToolUse, llm::Usage::ZERO);
     assert_eq!(resumed.origins, [record::Origin { sequence: 3, position: 1 }]);
     let owner = resumed.delegated[0];
-    resumed.step(session::Event::AnsweredV2 {
+    resumed.step(session::Event::Answered {
         owner,
         text: b"third".as_slice().into(),
         error: false,
@@ -587,7 +598,7 @@ fn full_history_batch_credit_keeps_maximum_actual_late_results_or_prevents_every
             assert!(world.end.is_none());
             for byte in [b'a', b'b'] {
                 let owner = world.delegated[0];
-                world.step(session::Event::AnsweredV2 {
+                world.step(session::Event::Answered {
                     owner,
                     text: vec![byte; 2048].into(),
                     error: byte == b'b',

@@ -1,4 +1,4 @@
-//! The copied smith agent's session child domain
+//! The smith agent's session child domain
 //! (programming-model.md, section 4.5): one conversation with an LLM, driven turn by
 //! turn, running the tools the LLM asks for, its own or, delegated, those its
 //! opener serves. When the LLM stops calling tools the session yields to its
@@ -27,11 +27,10 @@
 
 //!
 //! Copy baseline: temper `25ac2ad`, migration 05s2 (domain/session.md, section 12).
-//! The temper-specific charter, push, verdict and token-budget vocabulary
-//! is retained until 05s4; this copy does not yet implement the generic design.
 
 //!
-//! It keeps bounded concrete messages, opaque tickets, completion/retry state,
+//! One concrete opening admits fresh or restored bounded messages. It keeps
+//! live call/descriptor tickets, completion/retry state,
 //! outstanding tool terminals, injected deadlines and accepted usage/pricing.
 //! It never knows the host's charter, outcome meanings, credential secrets,
 //! provider wire grammar, forge state or CI. [`resume`] drains bounded deferred

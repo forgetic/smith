@@ -232,7 +232,6 @@ impl Peer {
             sllm::Block::ToolResult { id, result } => {
                 let result = match result {
                     sllm::Returned::Owned { outcome } => Returned::Owned { outcome },
-                    sllm::Returned::Delegated { .. } => unreachable!("V2 records contain concrete run answers"),
                     sllm::Returned::Invalid { problem } => Returned::Invalid { problem },
                     sllm::Returned::NotRun => Returned::NotRun,
                     sllm::Returned::Text { text, error, replay } => Returned::Text { text, error, replay },

@@ -124,7 +124,7 @@ pub(crate) fn deliver(domain: &mut Domain, env: &Env<Limits>, handoff: Handoff) 
         Handoff::Answer { owner } => {
             let flight = domain.flights.remove(&owner).expect("a call is in flight until it is answered");
             match flight.answer {
-                Due::Answered { feedback, spent, spend_overflow } => session::Event::AnsweredV2 {
+                Due::Answered { feedback, spent, spend_overflow } => session::Event::Answered {
                     owner,
                     text: feedback.text,
                     error: feedback.error,
@@ -132,7 +132,7 @@ pub(crate) fn deliver(domain: &mut Domain, env: &Env<Limits>, handoff: Handoff) 
                     spend_overflow,
                 },
                 Due::Cancelled { spent, spend_overflow } => {
-                    session::Event::AnswerCancelledV2 { owner, spent, spend_overflow }
+                    session::Event::AnswerCancelled { owner, spent, spend_overflow }
                 }
                 Due::Waiting => unreachable!("a call is on the ready list once the run has returned it"),
             }
@@ -538,9 +538,9 @@ fn open(domain: &mut Domain, env: &Env<Limits>, conversation: Token, opening: ru
     let id = domain.peers.insert(peer).expect("a peer for every conversation the run has");
     let fresh = domain.conversations.insert(conversation, id).expect("a peer for every conversation");
     assert!(fresh.is_none(), "the run names its conversations apart");
-    let event = session::Event::OpenV2 {
+    let event = session::Event::Open {
         opener: conversation,
-        spec: session::record::Opening {
+        opening: Box::new(session::record::Opening {
             spec,
             dialect,
             prices: session::record::Prices {
@@ -551,7 +551,7 @@ fn open(domain: &mut Domain, env: &Env<Limits>, conversation: Token, opening: ru
             },
             budget,
             transcript,
-        },
+        }),
     };
     session_step(domain, env, event);
 }

@@ -11,7 +11,7 @@ use run::outcome::{Form, Problem, Problems};
 use skein_lib::Writer;
 use smith_domain_run::{self as run, Returned, Stop};
 
-/// One complete concrete application result, supplied to session `AnsweredV2`.
+/// One complete concrete application result, supplied to session `Answered`.
 /// It carries no authority or pending operation; ownership passes to the caller.
 /// Contract: domain/run.md, sections 7, 8 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]

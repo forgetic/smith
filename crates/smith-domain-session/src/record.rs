@@ -19,8 +19,7 @@ pub const VERSION: u16 = 2;
 /// Contract: domain/session.md, sections 3 and 5; domain/run.md, section 8.2.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Origin {
-    /// One-based accepted completion sequence, including a restored V2 prefix.
-    /// V1 counts accepted completions in this activation and does not resume history.
+    /// One-based accepted completion sequence, including a restored prefix.
     /// Checked exhaustion refuses the next completion's effects.
     ///
     /// Contract: domain/session.md, sections 3 and 5.
@@ -76,7 +75,8 @@ impl Prices {
     }
 }
 
-/// Version two is selected by the event, even with `transcript: None`.
+/// Parent-owned concrete opening, validated before any tools or provider effect.
+/// `transcript: None` starts fresh under the same reservation and terminal rules.
 ///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(PartialEq, Eq, Debug)]

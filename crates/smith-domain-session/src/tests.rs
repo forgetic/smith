@@ -3,14 +3,13 @@
 use alloc::boxed::Box;
 use core::mem::size_of;
 
-use skein_lib::{Duration, Env, List, Queue, Time, Token, Wall};
+use skein_lib::{Duration, Env, List, Queue, Time, Token, Wall, bytes as owned_bytes};
 use smith_domain_tools::{
     self as tools, Authority, Call, Done, Effect, Grants, Name, Op, Outcome, Part, Path, Place, Repo, Version,
 };
 
 use crate::llm::{
-    Answer, Block, Completion, Decoded, Descriptor, Endpoint, Failure, Message, Problem, Prompt, Returned, Role, Stop,
-    Usage,
+    Block, Completion, Decoded, Descriptor, Endpoint, Failure, Message, Problem, Prompt, Returned, Role, Stop, Usage,
 };
 use crate::{
     Budget, Dimension, Domain, End, Event, Fact, Limits, MAX_PARALLEL, Request, Spec, Yield, fire, max_out, resume,
@@ -54,7 +53,7 @@ const TOOLS: tools::Limits = tools::Limits {
 
 const LIMITS: Limits = Limits {
     sessions: 2,
-    spend: 0,
+    spend: 100,
     messages: 8,
     session_bytes: 65_536,
     completion_bytes: 4096,
@@ -83,6 +82,9 @@ struct Harness {
     out: Queue<Request>,
     turns: u32,
     usage: Usage,
+    usage_overflow: bool,
+    turn_records: List<crate::record::Turn>,
+    prices_reported: u32,
 }
 
 impl Harness {
@@ -93,6 +95,11 @@ impl Harness {
             out: Queue::with_capacity(max_out(&limits)),
             turns: 0,
             usage: Usage::ZERO,
+            usage_overflow: false,
+            turn_records: List::with_capacity(
+                limits.sessions.checked_mul(limits.messages).expect("all fixture turns fit"),
+            ),
+            prices_reported: 0,
         }
     }
 
@@ -122,13 +129,18 @@ impl Harness {
     /// The one request out besides `Used`, which is tallied.
     fn one(&mut self) -> Option<Request> {
         let mut one = None;
-        while let Some(request) = self.out.pop() {
+        while let Some(request) = self.next() {
             match request {
-                Request::Turn { .. } | Request::Priced { .. } => unreachable!("v1 scenarios"),
+                Request::Turn { .. } | Request::Priced { .. } => unreachable!("next observes records"),
                 Request::Used { opener: _, usage, .. } => {
                     assert!(one.is_none(), "a completion's usage comes first");
-                    self.turns = self.turns.saturating_add(1);
-                    self.usage = self.usage.saturating_add(usage);
+                    self.turns = self.turns.checked_add(1).expect("bounded completions");
+                    if !self.usage_overflow {
+                        match usage_sum(self.usage, usage) {
+                            Some(total) => self.usage = total,
+                            None => self.usage_overflow = true,
+                        }
+                    }
                 }
                 request @ (Request::Opened { .. }
                 | Request::Yielded { .. }
@@ -147,14 +159,51 @@ impl Harness {
         one
     }
 
+    /// Observe the concrete record outputs independently from lifecycle/effects.
+    fn next(&mut self) -> Option<Request> {
+        while let Some(request) = self.out.pop() {
+            match request {
+                Request::Priced { spent, overflow, own_spent, own_overflow, .. } => {
+                    assert_eq!((spent, overflow, own_spent, own_overflow), (0, false, 0, false));
+                    self.prices_reported = self.prices_reported.checked_add(1).expect("bounded fixture prices");
+                }
+                Request::Turn { turn, .. } => {
+                    assert_eq!(turn.version, crate::record::VERSION);
+                    assert_eq!((turn.endpoint, turn.dialect), (spec().endpoint, 1));
+                    assert_eq!((turn.spent, turn.spend_overflow), (0, false));
+                    assert!(!turn.messages.is_empty());
+                    for message in &turn.messages {
+                        for block in &message.content {
+                            if let Block::ToolCall { call, .. } = block {
+                                assert_eq!(call, &Decoded::Historical, "saved turns resolve all live call tickets");
+                            }
+                        }
+                    }
+                    self.turn_records.push(turn).expect("configured fixture turn observation bound");
+                }
+                other @ (Request::Opened { .. }
+                | Request::Yielded { .. }
+                | Request::Used { .. }
+                | Request::Ended { .. }
+                | Request::Complete { .. }
+                | Request::Cancel { .. }
+                | Request::Io { .. }
+                | Request::CancelIo { .. }
+                | Request::Delegate { .. }
+                | Request::Withdraw { .. }) => return Some(other),
+            }
+        }
+        None
+    }
+
     /// Steps the domain with `event`, which starts or cancels a batch of tool
     /// runs, and returns the tokens of the runs it names, in order.
     fn batch(&mut self, event: Event) -> List<Token> {
         step(&mut self.domain, &self.env, event, &mut self.out);
         let mut runs = List::with_capacity(max_out(&self.env.limits));
-        while let Some(request) = self.out.pop() {
+        while let Some(request) = self.next() {
             match request {
-                Request::Turn { .. } | Request::Priced { .. } => unreachable!("v1 scenarios"),
+                Request::Turn { .. } | Request::Priced { .. } => unreachable!("next observes records"),
                 Request::Io { owner, .. }
                 | Request::CancelIo { owner }
                 | Request::Delegate { owner, .. }
@@ -179,8 +228,13 @@ impl Harness {
     }
 
     fn open_with(&mut self, opener: u64, spec: Spec) -> (Token, Prompt) {
-        step(&mut self.domain, &self.env, Event::Open { opener: Token::new(opener), spec }, &mut self.out);
-        let Some(Request::Opened { opener: to, session }) = self.out.pop() else {
+        step(
+            &mut self.domain,
+            &self.env,
+            Event::Open { opener: Token::new(opener), opening: opening(spec) },
+            &mut self.out,
+        );
+        let Some(Request::Opened { opener: to, session }) = self.next() else {
             panic!("expected the session to open");
         };
         assert_eq!(to.raw(), opener);
@@ -336,9 +390,67 @@ fn delegated(id: &[u8], ticket: u64, effect: Effect) -> Block {
     Block::ToolCall { id: bytes(id), name: bytes(b"finish"), input: bytes(b"{}"), call, replay: None }
 }
 
-/// The opener's answer, kept under `ticket`.
-fn answer(ticket: u64, bytes: u64, error: bool) -> Answer {
-    Answer { ticket: Token::new(ticket), bytes, error }
+/// A concrete answer preserves the old ticket's distinct payload and length.
+fn answer(ticket: u64, length: u64) -> Box<[u8]> {
+    let mut payload = owned_bytes::zeroed(usize::try_from(length).expect("fixture length"));
+    let fill = u8::try_from(ticket).expect("fixture byte");
+    payload.fill(fill);
+    payload
+}
+
+fn answered(owner: Token, ticket: u64, length: u64, error: bool) -> Event {
+    Event::Answered { owner, text: answer(ticket, length), error, spent: 0, spend_overflow: false }
+}
+
+fn answer_cancelled(owner: Token) -> Event {
+    Event::AnswerCancelled { owner, spent: 0, spend_overflow: false }
+}
+
+fn opening(spec: Spec) -> Box<crate::record::Opening> {
+    Box::new(crate::record::Opening {
+        spec,
+        dialect: 1,
+        prices: crate::record::Prices { input: 0, cached: 0, output: 0, unit: 1 },
+        budget: 100,
+        transcript: None,
+    })
+}
+
+/// Preserve the original pressure bytes and add only this scene's actual
+/// provider/result reservation envelope; all payload lengths remain unchanged.
+fn receiving_limits(pressure: u64, content: &[Block], result_credit: u64) -> Limits {
+    let limits = Limits {
+        completion_bytes: crate::session::content_cost(content).expect("fixture completion fits"),
+        completion_blocks: u32::try_from(content.len()).expect("fixture blocks fit"),
+        ..LIMITS
+    };
+    let envelope = crate::completion_reserve(&limits).expect("provider bounds fit").max(result_credit);
+    Limits { session_bytes: pressure.checked_add(envelope).expect("fixture envelope fits"), ..limits }
+}
+
+fn initial_bytes() -> u64 {
+    let spec = spec();
+    let model = u64::try_from(spec.model.len()).expect("fixture model fits");
+    let system = u64::try_from(spec.system.len()).expect("fixture system fits");
+    let prompt = u64::try_from(spec.prompt.len()).expect("fixture prompt fits");
+    let descriptor = u64::try_from(size_of::<Descriptor>()).expect("descriptor fits");
+    let descriptors = descriptor
+        .checked_mul(u64::try_from(spec.delegated.len()).expect("descriptor count fits"))
+        .expect("descriptors fit");
+    let block = u64::try_from(size_of::<Block>()).expect("block fits");
+    let names = model.checked_add(system).expect("fixture names fit");
+    let payload = names.checked_add(prompt).expect("fixture opening payload fits");
+    let described = payload.checked_add(descriptors).expect("fixture descriptors fit");
+    described.checked_add(block).expect("fixture initial block fits")
+}
+
+fn usage_sum(previous: Usage, usage: Usage) -> Option<Usage> {
+    Some(Usage {
+        input_tokens: previous.input_tokens.checked_add(usage.input_tokens)?,
+        output_tokens: previous.output_tokens.checked_add(usage.output_tokens)?,
+        cache_read_tokens: previous.cache_read_tokens.checked_add(usage.cache_read_tokens)?,
+        cache_write_tokens: previous.cache_write_tokens.checked_add(usage.cache_write_tokens)?,
+    })
 }
 
 /// A read that found `content`.
@@ -409,7 +521,7 @@ fn yielded(request: Option<Request>) -> (u64, Yield, Box<[u8]>) {
 fn ended(end: End, turns: u32) -> Request {
     let mut usage = Usage::ZERO;
     for _ in 0..turns {
-        usage = usage.saturating_add(USAGE);
+        usage = usage_sum(usage, USAGE).expect("bounded fixture usage");
     }
     Request::Ended { opener: Token::new(1), end, turns, usage, usage_overflow: false }
 }
@@ -425,8 +537,8 @@ fn a_session_runs_the_tools_it_is_asked_for_and_yields_once_the_llm_is_done() {
         Box::new([text(b"let me look"), tool_call(b"c1", cat(b"main.rs")), tool_call(b"c2", cat(b"gone.rs"))]);
     // Two reads: they run together, each the tools' load of its file.
     step(&mut h.domain, &h.env, Event::Completed { owner, completion: completion(content, Stop::ToolUse) }, &mut h.out);
-    h.out.pop().expect("the completion's usage");
-    let (first, op) = running(h.out.pop());
+    h.next().expect("the completion's usage");
+    let (first, op) = running(h.next());
     assert_eq!(loading(&op), place(b"main.rs"));
     let (second, op) = running(h.one());
     assert_eq!(loading(&op), place(b"gone.rs"));
@@ -550,7 +662,7 @@ fn a_tool_call_carries_its_deadline_and_one_that_runs_out_of_time_goes_back_to_t
     let (owner, _) = h.open(1);
     h.after(Duration::from_secs(1));
     step(&mut h.domain, &h.env, Event::Completed { owner, completion: reading() }, &mut h.out);
-    drop(h.out.pop());
+    drop(h.next());
     let Some(Request::Io { owner: run, op: _, deadline }) = h.one() else {
         panic!("expected an operation for the tools");
     };
@@ -645,7 +757,7 @@ fn a_batch_as_wide_as_the_most_a_step_emits_fits() {
     }
     let completion = completion(content.into_boxed(), Stop::ToolUse);
     step(&mut h.domain, &h.env, Event::Completed { owner, completion }, &mut h.out);
-    assert_eq!(h.out.len(), 1 + MAX_PARALLEL, "the usage, and an operation for each call");
+    assert_eq!(h.out.len(), 2 + MAX_PARALLEL, "the price, usage, and an operation for each call");
     assert!(h.out.len() <= max_out(&limits), "within what a step may emit");
     assert_eq!(worst_case(&Limits { parallel_tools: 0, ..LIMITS }), None);
     assert_eq!(worst_case(&Limits { parallel_tools: MAX_PARALLEL + 1, ..LIMITS }), None);
@@ -671,30 +783,45 @@ fn closing_a_session_with_a_batch_in_flight_closes_its_kit_and_waits_for_every_r
 }
 
 #[test]
-fn a_result_that_does_not_fit_cancels_the_rest_of_its_batch() {
-    let mut h = Harness::new(Limits { session_bytes: 2048, ..LIMITS });
-    let (owner, _) = h.open(1);
+fn result_space_is_refused_before_any_batch_and_actual_maximum_winners_fit() {
     let content = Box::new([tool_call(b"a", cat(b"a")), tool_call(b"b", cat(b"b"))]);
+    let refusal_limits = receiving_limits(2048, &content[..], 0);
+    let mut h = Harness::new(refusal_limits);
+    let (owner, _) = h.open(1);
+    assert_eq!(
+        h.step(Event::Completed { owner, completion: completion(content.clone(), Stop::ToolUse) }),
+        Some(ended(End::TranscriptFull, 1)),
+        "no IO starts without the entire result batch's credit"
+    );
+    assert_eq!((h.domain.runs(), h.domain.jobs()), (0, 0));
+
+    let batch_credit = u64::from(TOOLS.read_bytes).checked_mul(2).expect("two full read results fit");
+    let mut h = Harness::new(receiving_limits(2048, &content[..], batch_credit));
+    let (owner, _) = h.open(1);
     let runs = h.batch(Event::Completed { owner, completion: completion(content, Stop::ToolUse) });
     let &[a, b] = runs.as_slice() else { panic!("two reads, not {runs:?}") };
-    assert_eq!(h.step(ran(a, &[b'x'; 4096])), Some(Request::CancelIo { owner: b }));
-    let end = h.step(Event::Done { owner: b, done: Done::Cancelled });
-    assert_eq!(end, Some(ended(End::TranscriptFull, 1)));
+    assert_eq!(h.batch(Event::Close { session: owner }).as_slice(), runs.as_slice());
+    assert_eq!(h.step(ran(a, &[b'x'; 4096])), None, "the admitted maximum result wins cancellation");
+    assert_eq!(h.step(Event::Done { owner: b, done: Done::Cancelled }), Some(ended(End::Closed, 1)));
+    let turn = &h.turn_records.get(0).expect("actual observed turn");
+    assert_eq!(turn.messages[2].content[0], result(b"a", read(&[b'x'; 4096])));
 }
 
 #[test]
 fn a_result_is_charged_its_id_with_its_call_so_a_refusal_at_the_entrance_always_fits() {
-    let limits = Limits { session_bytes: 4096, ..LIMITS };
     let away = Call::Read { path: outside(), skip: 0, lines: None };
-    // An id the transcript has room for once but not twice: the message that
-    // carries it does not fit, and no batch starts to be cancelled.
+    let large = Box::new([tool_call(b"a", cat(b"main.rs")), tool_call(&[b'i'; 2100], away.clone())]);
+    let credit = u64::from(TOOLS.read_bytes).checked_mul(2).expect("two read credits fit");
+    let limits = receiving_limits(4096, &large[..], credit);
     let mut h = Harness::new(limits);
     let (owner, _) = h.open(1);
-    let content = Box::new([tool_call(b"a", cat(b"main.rs")), tool_call(&[b'i'; 2100], away.clone())]);
-    let end = h.step(Event::Completed { owner, completion: completion(content, Stop::ToolUse) });
-    assert_eq!(end, Some(ended(End::TranscriptFull, 1)));
-    // Room for it twice: the refusal at the entrance fits, and its batch goes
-    // on.
+    assert_eq!(
+        h.step(Event::Completed { owner, completion: completion(large, Stop::ToolUse) }),
+        Some(ended(End::TranscriptFull, 1)),
+        "copied IDs plus both result rights refuse before any IO"
+    );
+    assert_eq!(h.domain.runs(), 0);
+
     let mut h = Harness::new(limits);
     let (owner, _) = h.open(1);
     let id = [b'i'; 1500];
@@ -702,7 +829,13 @@ fn a_result_is_charged_its_id_with_its_call_so_a_refusal_at_the_entrance_always_
     let runs = h.batch(Event::Completed { owner, completion: completion(content, Stop::ToolUse) });
     let &[a] = runs.as_slice() else { panic!("the read alone runs, not {runs:?}") };
     let (_, prompt) = calling(h.step(ran(a, b"main.rs")));
-    assert_eq!(&*prompt.messages[2].content, &[result(b"a", read(b"main.rs")), result(&id, Outcome::Outside)]);
+    let expected = [result(b"a", read(b"main.rs")), result(&id, Outcome::Outside)];
+    assert_eq!(&*prompt.messages[2].content, &expected);
+    assert_eq!(
+        &*h.turn_records.get(0).expect("actual observed turn").messages[2].content,
+        &expected,
+        "full IDs survive concrete Turn emission"
+    );
 }
 
 #[test]
@@ -733,14 +866,17 @@ fn a_delegated_call_goes_to_the_opener_and_its_answer_goes_back_to_the_llm() {
     assert_eq!(&*prompt.delegated, &[FINISH], "the prompt offers what the opener serves");
     let content = Box::new([delegated(b"c1", 9, Effect::Write)]);
     step(&mut h.domain, &h.env, Event::Completed { owner, completion: completion(content, Stop::ToolUse) }, &mut h.out);
-    drop(h.out.pop());
+    drop(h.next());
     let Some(Request::Delegate { owner: run, opener, call, deadline, origin: _ }) = h.one() else {
         panic!("expected the call delegated");
     };
     assert_eq!((opener, call), (Token::new(1), Token::new(9)));
     assert_eq!(deadline, h.env.now.saturating_add(BUDGET.time), "the opener races it against the session's time");
-    let (_, prompt) = calling(h.step(Event::Answered { owner: run, answer: answer(11, 20, true) }));
-    let result = Block::ToolResult { id: bytes(b"c1"), result: Returned::Delegated { answer: answer(11, 20, true) } };
+    let (_, prompt) = calling(h.step(answered(run, 11, 20, true)));
+    let result = Block::ToolResult {
+        id: bytes(b"c1"),
+        result: Returned::Text { text: answer(11, 20), error: true, replay: None },
+    };
     assert_eq!(&*prompt.messages[2].content, &[result]);
 }
 
@@ -756,22 +892,28 @@ fn owned_and_delegated_calls_run_in_one_order_of_batches() {
     ]);
     // A read of the tools and one the opener serves, together.
     step(&mut h.domain, &h.env, Event::Completed { owner, completion: completion(content, Stop::ToolUse) }, &mut h.out);
-    drop(h.out.pop());
-    let Some(Request::Io { owner: read_a, .. }) = h.out.pop() else { panic!("expected the tools' read") };
+    drop(h.next());
+    let Some(Request::Io { owner: read_a, .. }) = h.next() else { panic!("expected the tools' read") };
     let Some(Request::Delegate { owner: read_b, call, .. }) = h.one() else { panic!("expected the opener's read") };
     assert_eq!(call, Token::new(9));
-    assert_eq!(h.step(Event::Answered { owner: read_b, answer: answer(20, 3, false) }), None);
+    assert_eq!(h.step(answered(read_b, 20, 3, false)), None);
     // The write alone, then the last read.
     let Some(Request::Delegate { owner: write_c, call, .. }) = h.step(ran(read_a, b"a")) else {
         panic!("expected the opener's write");
     };
     assert_eq!(call, Token::new(10));
-    let (read_d, _) = running(h.step(Event::Answered { owner: write_c, answer: answer(21, 3, false) }));
+    let (read_d, _) = running(h.step(answered(write_c, 21, 3, false)));
     let (_, prompt) = calling(h.step(ran(read_d, b"d")));
     let results = [
         result(b"a", read(b"a")),
-        Block::ToolResult { id: bytes(b"b"), result: Returned::Delegated { answer: answer(20, 3, false) } },
-        Block::ToolResult { id: bytes(b"c"), result: Returned::Delegated { answer: answer(21, 3, false) } },
+        Block::ToolResult {
+            id: bytes(b"b"),
+            result: Returned::Text { text: answer(20, 3), error: false, replay: None },
+        },
+        Block::ToolResult {
+            id: bytes(b"c"),
+            result: Returned::Text { text: answer(21, 3), error: false, replay: None },
+        },
         result(b"d", read(b"d")),
     ];
     assert_eq!(&*prompt.messages[2].content, &results);
@@ -786,10 +928,10 @@ fn closing_withdraws_the_delegated_calls_in_flight_and_waits_for_their_terminals
     let &[read_a, read_b] = runs.as_slice() else { panic!("two runs, not {runs:?}") };
     // The withdraw, then the kit's close, which cancels the tools' read.
     step(&mut h.domain, &h.env, Event::Close { session: owner }, &mut h.out);
-    assert_eq!(h.out.pop(), Some(Request::Withdraw { owner: read_b }));
-    assert_eq!(h.out.pop(), Some(Request::CancelIo { owner: read_a }));
+    assert_eq!(h.next(), Some(Request::Withdraw { owner: read_b }));
+    assert_eq!(h.next(), Some(Request::CancelIo { owner: read_a }));
     // The answer won its race with the withdraw; the session still waits.
-    assert_eq!(h.step(Event::Answered { owner: read_b, answer: answer(20, 3, false) }), None);
+    assert_eq!(h.step(answered(read_b, 20, 3, false)), None);
     let end = h.step(Event::Done { owner: read_a, done: Done::Cancelled });
     assert_eq!(end, Some(ended(End::Closed, 1)));
 
@@ -799,20 +941,39 @@ fn closing_withdraws_the_delegated_calls_in_flight_and_waits_for_their_terminals
     let runs = h.batch(Event::Completed { owner, completion: completion(content, Stop::ToolUse) });
     h.after(BUDGET.time);
     assert_eq!(h.fire(), Some(Request::Withdraw { owner: runs.as_slice()[0] }));
-    assert_eq!(h.step(Event::AnswerCancelled { owner: runs.as_slice()[0] }), Some(ended(OUT_OF_TIME, 1)));
+    assert_eq!(h.step(answer_cancelled(runs.as_slice()[0])), Some(ended(OUT_OF_TIME, 1)));
 }
 
 #[test]
-fn an_answer_counts_against_the_byte_limit() {
-    let mut h = Harness::new(Limits { session_bytes: 2048, ..LIMITS });
-    let (owner, _) = h.open(1);
+fn delegated_result_space_is_refused_before_effects_and_actual_answers_count() {
     let content = Box::new([delegated(b"b", 9, Effect::Read), tool_call(b"a", cat(b"a"))]);
-    let runs = h.batch(Event::Completed { owner, completion: completion(content, Stop::ToolUse) });
-    let &[read_b, read_a] = runs.as_slice() else { panic!("two runs, not {runs:?}") };
-    let end = h.step(Event::Answered { owner: read_b, answer: answer(20, 4096, false) });
-    assert_eq!(end, Some(Request::CancelIo { owner: read_a }));
-    let end = h.step(Event::Done { owner: read_a, done: Done::Cancelled });
-    assert_eq!(end, Some(ended(End::TranscriptFull, 1)));
+    let mut h = Harness::new(receiving_limits(2048, &content[..], 0));
+    let (owner, _) = h.open(1);
+    assert_eq!(
+        h.step(Event::Completed { owner, completion: completion(content.clone(), Stop::ToolUse) }),
+        Some(ended(End::TranscriptFull, 1)),
+        "neither delegate nor IO starts without both result rights"
+    );
+    assert_eq!((h.domain.runs(), h.domain.jobs()), (0, 0));
+
+    let credit = LIMITS.delegated_result_bytes.checked_add(u64::from(TOOLS.read_bytes)).expect("mixed batch fits");
+    for length in [4096, LIMITS.delegated_result_bytes] {
+        let mut h = Harness::new(receiving_limits(2048, &content[..], credit));
+        let (owner, _) = h.open(1);
+        let runs = h.batch(Event::Completed { owner, completion: completion(content.clone(), Stop::ToolUse) });
+        let &[read_b, read_a] = runs.as_slice() else { panic!("two runs, not {runs:?}") };
+        let cancels = h.batch(Event::Close { session: owner });
+        assert_eq!(cancels.as_slice(), &[read_b, read_a]);
+        assert_eq!(h.step(answered(read_b, 20, length, false)), None);
+        assert_eq!(h.step(Event::Done { owner: read_a, done: Done::Cancelled }), Some(ended(End::Closed, 1)));
+        assert_eq!(
+            h.turn_records.get(0).expect("actual observed turn").messages[2].content[0],
+            Block::ToolResult {
+                id: bytes(b"b"),
+                result: Returned::Text { text: answer(20, length), error: false, replay: None }
+            }
+        );
+    }
 }
 
 #[test]
@@ -821,7 +982,7 @@ fn the_turn_that_crosses_a_budget_still_has_its_delegated_calls_answered() {
     let (owner, _) = h.open_with(1, budget(Budget { input: 9, ..BUDGET }));
     let content = Box::new([delegated(b"f", 9, Effect::Write)]);
     let runs = h.batch(Event::Completed { owner, completion: completion(content, Stop::ToolUse) });
-    let end = h.step(Event::Answered { owner: runs.as_slice()[0], answer: answer(20, 3, false) });
+    let end = h.step(answered(runs.as_slice()[0], 20, 3, false));
     assert_eq!(end, Some(ended(End::Budget { spent: Dimension::Input }, 1)));
 }
 
@@ -832,9 +993,9 @@ fn delegated_calls_are_told_as_they_start_and_end() {
     let (owner, _) = h.open(1);
     let content = Box::new([delegated(b"a", 9, Effect::Read), delegated(b"b", 10, Effect::Read)]);
     let runs = h.batch(Event::Completed { owner, completion: completion(content, Stop::ToolUse) });
-    assert_eq!(h.step(Event::Answered { owner: runs.as_slice()[0], answer: answer(20, 3, true) }), None);
+    assert_eq!(h.step(answered(runs.as_slice()[0], 20, 3, true)), None);
     drop(h.batch(Event::Close { session: owner }));
-    drop(h.step(Event::AnswerCancelled { owner: runs.as_slice()[1] }));
+    drop(h.step(answer_cancelled(runs.as_slice()[1])));
     h.told(&[
         Fact::Opened { opener },
         Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 },
@@ -863,9 +1024,9 @@ fn the_llm_yields_whenever_it_stops_calling_tools() {
 
 #[test]
 fn opens_beyond_the_session_slots_are_refused_as_busy() {
-    let mut h = Harness::new(Limits { sessions: 1, spend: 0, ..LIMITS });
+    let mut h = Harness::new(Limits { sessions: 1, ..LIMITS });
     drop(h.open(1));
-    let refused = h.step(Event::Open { opener: Token::new(2), spec: spec() });
+    let refused = h.step(Event::Open { opener: Token::new(2), opening: opening(spec()) });
     assert_eq!(
         refused,
         Some(Request::Ended {
@@ -882,7 +1043,7 @@ fn opens_beyond_the_session_slots_are_refused_as_busy() {
 fn specs_beyond_the_limits_are_refused_as_invalid() {
     for limits in [Limits { session_bytes: 16, ..LIMITS }, Limits { max_tokens: 1, ..LIMITS }] {
         let mut h = Harness::new(limits);
-        let refused = h.step(Event::Open { opener: Token::new(1), spec: spec() });
+        let refused = h.step(Event::Open { opener: Token::new(1), opening: opening(spec()) });
         assert_eq!(refused, Some(ended(End::Invalid, 0)));
         assert_eq!(h.domain.sessions(), 0);
     }
@@ -892,7 +1053,8 @@ fn specs_beyond_the_limits_are_refused_as_invalid() {
 fn a_spec_whose_authority_the_tools_refuse_is_refused_as_invalid() {
     // More repositories than the tools' limits let a kit name.
     let mut h = Harness::new(LIMITS);
-    let refused = h.step(Event::Open { opener: Token::new(1), spec: Spec { authority: authority(3), ..spec() } });
+    let refused =
+        h.step(Event::Open { opener: Token::new(1), opening: opening(Spec { authority: authority(3), ..spec() }) });
     assert_eq!(refused, Some(ended(End::Invalid, 0)));
     h.domain.reclaim();
     assert_eq!((h.domain.sessions(), h.domain.kits()), (0, 0));
@@ -1031,7 +1193,7 @@ fn closing_a_session_that_is_already_closing_changes_nothing() {
 
 #[test]
 fn a_handle_to_a_session_that_has_ended_is_dropped() {
-    let mut h = Harness::new(Limits { sessions: 1, spend: 0, ..LIMITS });
+    let mut h = Harness::new(Limits { sessions: 1, ..LIMITS });
     let session = h.yielded();
     assert_eq!(h.step(Event::Close { session }), Some(ended(End::Closed, 1)));
     // Ended, and not yet reclaimed.
@@ -1101,7 +1263,7 @@ fn every_completion_is_reported_before_what_follows_it() {
     let mut h = Harness::new(LIMITS);
     let (owner, _) = h.open(1);
     step(&mut h.domain, &h.env, Event::Completed { owner, completion: reading() }, &mut h.out);
-    assert_eq!(h.out.pop(), Some(Request::Used { opener: Token::new(1), usage: USAGE, usage_overflow: false }));
+    assert_eq!(h.next(), Some(Request::Used { opener: Token::new(1), usage: USAGE, usage_overflow: false }));
     let (run, _) = running(h.one());
     drop(calling(h.step(ran(run, b"main.rs"))));
     drop(yielded(h.step(Event::Completed { owner, completion: done() })));
@@ -1123,7 +1285,7 @@ fn a_spec_whose_budget_is_beyond_the_limits_is_refused() {
     ];
     for asked in budgets {
         let mut h = Harness::new(LIMITS);
-        let refused = h.step(Event::Open { opener: Token::new(1), spec: budget(asked) });
+        let refused = h.step(Event::Open { opener: Token::new(1), opening: opening(budget(asked)) });
         assert_eq!(refused, Some(ended(End::Invalid, 0)), "{asked:?}");
     }
 }
@@ -1138,8 +1300,8 @@ fn a_session_whose_budget_leaves_no_room_for_a_completion_ends_as_it_opens() {
     ];
     for (asked, spent) in cases {
         let mut h = Harness::new(LIMITS);
-        step(&mut h.domain, &h.env, Event::Open { opener: Token::new(1), spec: budget(asked) }, &mut h.out);
-        let Some(Request::Opened { .. }) = h.out.pop() else {
+        step(&mut h.domain, &h.env, Event::Open { opener: Token::new(1), opening: opening(budget(asked)) }, &mut h.out);
+        let Some(Request::Opened { .. }) = h.next() else {
             panic!("{asked:?}: the session opens");
         };
         assert_eq!(h.one(), Some(ended(End::Budget { spent }, 0)), "{asked:?}");
@@ -1241,7 +1403,7 @@ fn each_answer_may_take_no_more_than_the_output_budget_left() {
     assert_eq!(yielded(request), (1, Yield::Truncated, bytes(b"I was")));
     let end = h.step(Event::Continue { session: owner, content: bytes(b"go on") });
     let spent = End::Budget { spent: Dimension::Output };
-    let usage = USAGE.saturating_add(usage);
+    let usage = usage_sum(USAGE, usage).expect("bounded fixture usage");
     assert_eq!(end, Some(Request::Ended { opener: Token::new(1), end: spent, turns: 2, usage, usage_overflow: false }));
 
     // A spec's own max_tokens stays the cap while more is left.
@@ -1277,7 +1439,10 @@ fn a_session_whose_time_is_up_starts_no_completion_even_before_its_alarm_fires()
 
 #[test]
 fn a_conversation_that_outgrows_its_bytes_ends_the_session() {
-    let mut h = Harness::new(Limits { session_bytes: 1024, ..LIMITS });
+    let envelope = crate::completion_reserve(&LIMITS).expect("provider reservation fits");
+    let limits =
+        Limits { session_bytes: 1024_u64.checked_add(envelope).expect("pressure plus envelope fits"), ..LIMITS };
+    let mut h = Harness::new(limits);
     let (owner, _) = h.open(1);
     let content = Box::new([tool_call(b"c1", cat(b"main.rs"))]);
     let (run, _) = running(h.step(Event::Completed { owner, completion: completion(content, Stop::ToolUse) }));
@@ -1293,7 +1458,12 @@ fn a_conversation_that_outgrows_its_bytes_ends_the_session() {
     let (owner, _) = h.open(1);
     let huge = Box::new([Block::Text { text: Box::from([b'x'; 2048].as_slice()), replay: None }]);
     let end = h.step(Event::Completed { owner, completion: completion(huge, Stop::EndTurn) });
-    assert_eq!(end, Some(ended(End::TranscriptFull, 1)), "a yield the session could not continue from ends it");
+    assert_eq!(yielded(end), (1, Yield::Done, bytes(&[b'x'; 2048])));
+    assert_eq!(
+        h.step(Event::Continue { session: owner, content: bytes(b"go on") }),
+        Some(ended(End::TranscriptFull, 1)),
+        "the accepted full answer is told before refusing another provider effect"
+    );
 }
 
 #[test]
@@ -1310,8 +1480,14 @@ fn a_session_starts_no_completion_whose_answer_it_could_not_keep() {
 #[test]
 fn a_transcript_with_no_room_for_another_message_ends_the_session() {
     let mut h = Harness::new(Limits { messages: 2, ..LIMITS });
+    let refused = h.step(Event::Open { opener: Token::new(1), opening: opening(spec()) });
+    assert_eq!(refused, Some(ended(End::TranscriptRefused { reason: crate::record::Refusal::TooLarge }, 0)));
+    assert_eq!((h.domain.sessions(), h.domain.kits()), (0, 0), "two slots refuse before acquiring a kit");
+
+    let mut h = Harness::new(Limits { messages: 3, ..LIMITS });
     let session = h.yielded();
     assert_eq!(h.step(Event::Continue { session, content: bytes(b"go on") }), Some(ended(End::TranscriptFull, 1)));
+    assert_eq!(h.turn_records.len(), 1, "the actual admitted completion is recorded");
 }
 
 #[test]
@@ -1355,7 +1531,7 @@ fn a_session_tells_what_happens_as_facts() {
 
 #[test]
 fn retries_cancels_and_refusals_are_told_too() {
-    let mut h = Harness::new(Limits { sessions: 1, spend: 0, ..LIMITS });
+    let mut h = Harness::new(Limits { sessions: 1, ..LIMITS });
     let opener = Token::new(1);
     let (owner, _) = h.open(1);
     assert_eq!(
@@ -1382,7 +1558,7 @@ fn retries_cancels_and_refusals_are_told_too() {
     h.told(&[Fact::CompletionStarted { opener, attempt: 1, messages: 1, max_tokens: 1024 }]);
 
     let refused = Token::new(2);
-    drop(h.step(Event::Open { opener: refused, spec: spec() }));
+    drop(h.step(Event::Open { opener: refused, opening: opening(spec()) }));
     h.told(&[Fact::Ended { opener: refused, end: End::Busy, turns: 0, usage: Usage::ZERO, usage_overflow: false }]);
 
     assert_eq!(h.step(Event::Close { session: owner }), Some(Request::Cancel { owner }));
@@ -1442,10 +1618,10 @@ fn the_worst_case_is_bounded_or_refused() {
 
 #[test]
 fn completion_name_exhaustion_ends_before_any_owned_or_delegated_effect() {
-    for recorded in [false, true] {
+    {
         let mut harness = Harness::new(LIMITS);
         let (session, _) = harness.open_with(1, spec());
-        crate::session::exhaust_origin_for_test(&mut harness.domain, session, recorded);
+        crate::session::exhaust_origin_for_test(&mut harness.domain, session);
         let answer = completion(
             Box::new([
                 delegated(b"repeated-provider-id", 7, Effect::Write),
@@ -1467,7 +1643,9 @@ fn completion_name_exhaustion_ends_before_any_owned_or_delegated_effect() {
                     assert_eq!(usage, USAGE);
                     used = true;
                 }
-                Request::Priced { .. } => assert!(recorded),
+                Request::Priced { spent, overflow, own_spent, own_overflow, .. } => {
+                    assert_eq!((spent, overflow, own_spent, own_overflow), (0, false, 0, false));
+                }
                 Request::Ended { end, .. } => {
                     assert_eq!(end, End::TranscriptFull);
                     ended = true;
@@ -1487,21 +1665,21 @@ fn completion_name_exhaustion_ends_before_any_owned_or_delegated_effect() {
     }
 }
 
-/// A concrete recording entrance owns a provider reservation, unlike V1.
+/// A concrete recording entrance owns its real provider reservation.
 /// This fixture retains the original raw receiving caps and tools authority.
 fn reserved_recorded_call(harness: &mut Harness) -> Token {
     step(
         &mut harness.domain,
         &harness.env,
-        Event::OpenV2 {
+        Event::Open {
             opener: Token::new(1),
-            spec: crate::record::Opening {
+            opening: Box::new(crate::record::Opening {
                 spec: spec(),
                 dialect: 1,
                 prices: crate::record::Prices { input: 0, cached: 0, output: 0, unit: 1 },
                 budget: 100,
                 transcript: None,
-            },
+            }),
         },
         &mut harness.out,
     );
@@ -1539,7 +1717,7 @@ fn unsent_denial_releases_actual_reserved_provider_credit_before_kit_settlement(
 }
 
 #[test]
-fn legacy_raw_overflow_still_yields_and_saturates_each_counter_with_a_diagnostic_flag() {
+fn raw_overflow_freezes_the_whole_exact_prefix_and_emits_the_actual_turn() {
     let budget = Budget { input: u64::MAX, output: u64::MAX, cache_read: u64::MAX, cache_write: u64::MAX, ..BUDGET };
     let mut harness = Harness::new(Limits { budget, ..LIMITS });
     let (owner, _) = harness.open_with(1, Spec { budget, ..spec() });
@@ -1547,16 +1725,19 @@ fn legacy_raw_overflow_still_yields_and_saturates_each_counter_with_a_diagnostic
     drop(yielded(harness.step(Event::Completed { owner, completion: Completion { usage: first, ..done() } })));
     drop(calling(harness.step(Event::Continue { session: owner, content: bytes(b"go on") })));
     let second = Usage { input_tokens: 2, output_tokens: 2, cache_read_tokens: 5, cache_write_tokens: 6 };
-    drop(yielded(harness.step(Event::Completed { owner, completion: Completion { usage: second, ..done() } })));
-    let saturated = Usage { input_tokens: u64::MAX, output_tokens: 3, cache_read_tokens: 8, cache_write_tokens: 10 };
-    assert_eq!(harness.usage, saturated);
+    let terminal = harness.step(Event::Completed { owner, completion: Completion { usage: second, ..done() } });
+    assert_eq!(harness.usage, first);
+    assert!(harness.usage_overflow);
+    assert_eq!(harness.turn_records.len(), 2);
+    assert_eq!(harness.turn_records.get(1).expect("actual observed turn").usage, second);
+    assert_eq!(harness.turn_records.get(1).expect("actual observed turn").sequence, 2);
     assert_eq!(
-        harness.step(Event::Close { session: owner }),
+        terminal,
         Some(Request::Ended {
             opener: Token::new(1),
-            end: End::Closed,
+            end: End::UsageOverflow,
             turns: 2,
-            usage: saturated,
+            usage: first,
             usage_overflow: true
         }),
     );
@@ -1569,7 +1750,7 @@ fn legacy_raw_overflow_still_yields_and_saturates_each_counter_with_a_diagnostic
                 overflow_used = true;
             }
             Fact::Ended { usage, usage_overflow: true, .. } => {
-                assert_eq!(usage, saturated);
+                assert_eq!(usage, first);
                 overflow_ended = true;
             }
             Fact::Used { usage_overflow: false, .. }
@@ -1602,4 +1783,56 @@ fn unsent_close_releases_actual_provider_credit_without_requesting_a_cancel() {
     assert_eq!(harness.step(Event::UnsentClosed { owner }), None);
     harness.domain.reclaim();
     assert_eq!((harness.domain.sessions(), harness.domain.kits()), (0, 0));
+}
+
+#[test]
+fn exact_provider_envelope_admits_and_one_byte_short_refuses_before_effects() {
+    let reservation = crate::completion_reserve(&LIMITS).expect("configured provider bounds fit");
+    let exact = initial_bytes().checked_add(reservation).expect("exact entrance fits");
+    let mut admitted = Harness::new(Limits { session_bytes: exact, ..LIMITS });
+    let (owner, _) = admitted.open(1);
+    assert_eq!(crate::session::provider_credit_for_test(&admitted.domain, owner), (reservation, Some(reservation)));
+    assert_eq!(admitted.step(Event::UnsentClosed { owner }), Some(ended(End::Closed, 0)));
+    let mut refused = Harness::new(Limits { session_bytes: exact.checked_sub(1).expect("positive cap"), ..LIMITS });
+    assert_eq!(
+        refused.step(Event::Open { opener: Token::new(1), opening: opening(spec()) }),
+        Some(ended(End::TranscriptRefused { reason: crate::record::Refusal::TooLarge }, 0))
+    );
+    assert_eq!((refused.domain.sessions(), refused.domain.kits(), refused.domain.runs()), (0, 0, 0));
+}
+
+#[test]
+fn exact_batch_envelope_keeps_both_maximum_results_and_one_byte_short_starts_nothing() {
+    let content = Box::new([tool_call(b"a", cat(b"a")), tool_call(b"b", cat(b"b"))]);
+    let credit = u64::from(TOOLS.read_bytes).checked_mul(2).expect("both maximum read results fit");
+    let limits = receiving_limits(2048, &content[..], credit);
+    let mut held = crate::session::content_cost(&content[..]).expect("actual content fits");
+    for block in &content[..] {
+        let Block::ToolCall { id, .. } = block else { panic!("fixture contains only calls") };
+        let block = u64::try_from(size_of::<Block>()).expect("result block fits");
+        let copied_id = u64::try_from(id.len()).expect("copied ID fits");
+        held = held.checked_add(block).expect("actual result block fits");
+        held = held.checked_add(copied_id).expect("actual copied result ID fits");
+    }
+    let held_prefix = initial_bytes().checked_add(held).expect("batch prefix fits");
+    let exact = held_prefix.checked_add(credit).expect("batch fits");
+    let provider = crate::completion_reserve(&limits).expect("provider envelope fits");
+    let provider_entrance = initial_bytes().checked_add(provider).expect("provider entrance fits");
+    assert!(exact > provider_entrance);
+    let mut admitted = Harness::new(Limits { session_bytes: exact, ..limits });
+    let (owner, _) = admitted.open(1);
+    let runs = admitted.batch(Event::Completed { owner, completion: completion(content.clone(), Stop::ToolUse) });
+    let &[first, second] = runs.as_slice() else { panic!("both reads are admitted") };
+    assert_eq!(admitted.step(ran(second, &[b'y'; 4096])), None);
+    assert_eq!(admitted.step(ran(first, &[b'x'; 4096])), Some(ended(End::TranscriptFull, 1)));
+    let expected = [result(b"a", read(&[b'x'; 4096])), result(b"b", read(&[b'y'; 4096]))];
+    assert_eq!(&*admitted.turn_records.get(0).expect("actual observed turn").messages[2].content, &expected);
+
+    let mut refused = Harness::new(Limits { session_bytes: exact.checked_sub(1).expect("positive cap"), ..limits });
+    let (owner, _) = refused.open(1);
+    assert_eq!(
+        refused.step(Event::Completed { owner, completion: completion(content, Stop::ToolUse) }),
+        Some(ended(End::TranscriptFull, 1))
+    );
+    assert_eq!((refused.domain.runs(), refused.domain.jobs()), (0, 0), "no partial batch is published");
 }

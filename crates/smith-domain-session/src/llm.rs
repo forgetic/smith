@@ -155,7 +155,7 @@ pub enum Decoded {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Delegated {
-        /// Opener-issued opaque name for a tool, delegated call or returned answer.
+        /// Opener-issued opaque name for a tool or delegated call.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         ticket: Token,
@@ -197,15 +197,6 @@ pub enum Returned {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         outcome: tools::Outcome,
-    },
-    /// The opener's answer to a delegated call.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-    Delegated {
-        /// Single terminal value returned to the caller.
-        ///
-        /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-        answer: Answer,
     },
     /// The call was malformed, and this is why.
     ///
@@ -251,7 +242,7 @@ pub enum Returned {
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Descriptor {
-    /// Opener-issued opaque name for a tool, delegated call or returned answer.
+    /// Opener-issued opaque name for a tool or delegated call.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub ticket: Token,
@@ -259,28 +250,6 @@ pub struct Descriptor {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub effect: tools::Effect,
-}
-
-/// The opener's answer to a delegated call: what it says is the opener's,
-/// kept under `ticket`, and takes `bytes`, which count against the session's
-/// byte limit as if the session held them; `error` marks a failure, one that
-/// ran out of time included.
-///
-/// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Answer {
-    /// Opener-issued opaque name for a tool, delegated call or returned answer.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-    pub ticket: Token,
-    /// Owned payload bytes charged against the enclosing session limit.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-    pub bytes: u64,
-    /// Whether the returned tool result represents a failure.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-    pub error: bool,
 }
 
 /// Why a tool call is no call: the protocol layer could not decode it, or the
@@ -456,19 +425,6 @@ impl Usage {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub const ZERO: Usage = Usage { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
-
-    /// Adds accepted cumulative usage by dimension, saturating rather than wrapping on overflow.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-    #[must_use]
-    pub const fn saturating_add(self, other: Usage) -> Usage {
-        Usage {
-            input_tokens: self.input_tokens.saturating_add(other.input_tokens),
-            output_tokens: self.output_tokens.saturating_add(other.output_tokens),
-            cache_read_tokens: self.cache_read_tokens.saturating_add(other.cache_read_tokens),
-            cache_write_tokens: self.cache_write_tokens.saturating_add(other.cache_write_tokens),
-        }
-    }
 }
 
 /// What the actual transport terminal proves about a provider operation.

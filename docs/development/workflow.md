@@ -155,3 +155,15 @@ mapped source behavior and new typed ownership controls. Budgets are unchanged.
 Source `eb46ecc` passed the exact-tip four gates before merging: 459 focused /
 1.606 seconds and ten fuzzy / 2.593 seconds, without skips; formatting and
 workspace all-target clippy also passed.
+
+05s4 SESSION CONTRACTION was measured serially on 2026-10-06 from temporary
+parent `9930191` plus this increment's frozen source. Section 2's commands
+passed 567 focused tests in 9.064 seconds and eleven fuzzy tests in 8.153
+seconds, with no skips. The affected Session world contributes 66 focused
+tests / 3.308 seconds and two fuzzy tests / 0.769 seconds; Session's unit
+crate contributes 59 focused tests / 0.240 seconds. Shares sum rounded PASS
+durations. Original scheduled seeds and fault classes, 3 x 4 payload-pressure
+memory cases and new exact/full/one-short receiving controls remain. The
+parallel gate passed 567 focused / 3.138 seconds and eleven fuzzy / 3.917
+seconds; formatting and all-target Clippy passed. This is temporary-checkout
+validation; original-main acceptance still requires reconciliation and gates.

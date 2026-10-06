@@ -34,7 +34,7 @@ enum Family {
 }
 
 /// The provider's query for an agent's prompt, its tickets resolved in
-/// `tickets`: the tools the opener serves, and its answers. There is one
+/// `tickets`: the live tools the opener serves. Concrete results are rendered directly. There is one
 /// provider, so the endpoint names nothing.
 ///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
@@ -53,7 +53,7 @@ pub fn query(prompt: agent::Prompt, tickets: &Tickets) -> provider::Query {
             parameters: (*schema).into(),
         });
     }
-    let messages = messages.into_iter().map(|message| translate_message(message, tickets)).collect();
+    let messages = messages.into_iter().map(translate_message).collect();
     provider::Query { model, system, tools: offered.into(), messages, max_tokens }
 }
 
@@ -101,29 +101,21 @@ fn offer(grants: Grants) -> Box<[provider::ToolSpec]> {
         .collect()
 }
 
-fn translate_message(message: agent::Message, tickets: &Tickets) -> provider::Message {
+fn translate_message(message: agent::Message) -> provider::Message {
     let role = match message.role {
         agent::Role::User => provider::Role::User,
         agent::Role::Assistant => provider::Role::Assistant,
     };
-    provider::Message { role, parts: message.content.into_iter().map(|block| part(block, tickets)).collect() }
+    provider::Message { role, parts: message.content.into_iter().map(part).collect() }
 }
 
-fn part(block: agent::Block, tickets: &Tickets) -> provider::Part {
+fn part(block: agent::Block) -> provider::Part {
     match block {
         agent::Block::Text { text, .. } | agent::Block::Refusal { text, .. } => provider::Part::Text { text },
         agent::Block::Opaque { bytes } => provider::Part::Opaque { bytes },
         // The call goes back as the LLM wrote it.
         agent::Block::ToolCall { id, name, input, call: _, .. } => {
             provider::Part::ToolCall { id, name, arguments: input }
-        }
-        agent::Block::ToolResult { id, result: agent::Returned::Delegated { answer } } => {
-            let Ticketed::Answer { text, error } = tickets.resolve(answer.ticket) else {
-                panic!("an answer's ticket names an answer");
-            };
-            assert_eq!(u64::try_from(text.len()), Ok(answer.bytes), "an answer counts its bytes");
-            assert_eq!(*error, answer.error, "an answer says whether it failed");
-            provider::Part::ToolOutput { id, output: text.clone(), is_error: *error }
         }
         agent::Block::ToolResult { id, result } => {
             let (output, is_error) = render(&result);
@@ -179,7 +171,7 @@ fn block(part: provider::Part, tickets: &mut Tickets, opener: u64, served: &[age
 fn delegated(name: &[u8], served: &[agent::Descriptor], tickets: &Tickets) -> Option<(&'static [u8], Effect)> {
     served.iter().find_map(|descriptor| match tickets.resolve(descriptor.ticket) {
         Ticketed::Tool { name: tool, effect, .. } => (*tool == name).then_some((*tool, *effect)),
-        Ticketed::Call { .. } | Ticketed::Answer { .. } => panic!("a descriptor's ticket names a tool"),
+        Ticketed::Call { .. } => panic!("a descriptor's ticket names a tool"),
     })
 }
 
@@ -302,7 +294,6 @@ pub fn render(result: &agent::Returned) -> (Box<[u8]>, bool) {
             (text, failed)
         }
         agent::Returned::Invalid { problem } => (format!("malformed call: {problem:?}").into_bytes().into(), true),
-        agent::Returned::Delegated { .. } => unreachable!("the opener's answers are rendered from their tickets"),
         agent::Returned::Withdrawn => (b"withdrawn".as_slice().into(), true),
         agent::Returned::NotRun => (b"not run: the answer stopped first".as_slice().into(), true),
     }

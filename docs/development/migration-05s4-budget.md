@@ -23,8 +23,10 @@ parameter names, blank item separation and domain/<file>.md citations, plus no
 standard Result shadowing. Strict-subset control flow, checked ownership, original
 recording/fuzzy oracles and unchanged receiving/test budgets remain mandatory.
 
+The following Session contraction checkpoint removes the copied first-version
+entrance; its receiving-envelope changes are recorded separately.
+
 ## Still open
 
-- Contract the session's first version in the next 05s4 increment.
 - Reconcile original tips and pass shared and consumer gates before original-main acceptance.
 - Extract protocol rendering and complete channel, transcript and executable integration.

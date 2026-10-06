@@ -174,9 +174,7 @@ impl World {
             | session::Event::Failed { owner, .. } => {
                 assert_eq!(self.completing.take(), Some(*owner), "one terminal per completion");
             }
-            session::Event::AnsweredV2 { owner, .. }
-            | session::Event::AnswerCancelledV2 { owner, .. }
-            | session::Event::AnswerCancelled { owner } => {
+            session::Event::Answered { owner, .. } | session::Event::AnswerCancelled { owner, .. } => {
                 let position =
                     self.delegated.iter().position(|pending| pending == owner).expect("one terminal per delegate");
                 self.delegated.remove(position);
@@ -189,11 +187,7 @@ impl World {
                     .expect("one terminal per owned operation");
                 self.operations.remove(position);
             }
-            session::Event::Open { .. }
-            | session::Event::OpenV2 { .. }
-            | session::Event::Continue { .. }
-            | session::Event::Close { .. }
-            | session::Event::Answered { .. } => {}
+            session::Event::Open { .. } | session::Event::Continue { .. } | session::Event::Close { .. } => {}
         }
         self.domain.reclaim();
         session::step(&mut self.domain, &self.env, event, &mut self.out);
@@ -259,7 +253,7 @@ impl World {
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub fn open(&mut self, opening: record::Opening) {
-        self.step(session::Event::OpenV2 { opener: Token::new(31), spec: opening });
+        self.step(session::Event::Open { opener: Token::new(31), opening: Box::new(opening) });
     }
 
     /// Answers the pending provider completion with the supplied blocks and fixed usage.
@@ -316,7 +310,7 @@ pub fn scenario(seed: u64, facts: u32) -> World {
     world.complete(called(), llm::Stop::ToolUse, USAGE);
     assert!(world.turns.is_empty(), "the turn waits for its tool results");
     let owner = world.delegated[0];
-    world.step(session::Event::AnsweredV2 {
+    world.step(session::Event::Answered {
         owner,
         text: b"child finished".as_slice().into(),
         error: false,

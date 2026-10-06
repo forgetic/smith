@@ -23,15 +23,15 @@ use alloc::boxed::Box;
 use skein_lib::{Duration, Time, Token};
 use smith_domain_tools as tools;
 
-use crate::llm::{Answer, Completion, Descriptor, Endpoint, Failure, Prompt, Usage};
+use crate::llm::{Completion, Descriptor, Endpoint, Failure, Prompt, Usage};
 
 /// parent -> session
 ///
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 #[derive(PartialEq, Eq, Debug)]
 pub enum Event {
-    /// Open a session for `spec`, on behalf of `opener`. Answered by exactly one
-    /// `Ended`, after an `Opened` if the session was admitted.
+    /// Parent admission of bounded concrete history, including a fresh session.
+    /// Ends exactly once after all provider, tools and delegated work settles.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Open {
@@ -39,42 +39,38 @@ pub enum Event {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         opener: Token,
-        /// The original session opening, validated before replaying any history.
+        /// Parent-owned spec, prices and optional concrete history. Admission
+        /// checks receiving caps, transcript identity and provider/result space
+        /// before any effect; refusal returns one `Ended` without `Opened`.
+        /// Exactly one fixed `Opening` node is owned in transit, in addition
+        /// to its bounded payload/envelopes. The entry consumes its ownership
+        /// as admission validates and moves content; `worst_case` separately
+        /// counts the node while it may coexist with admission state.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-        spec: Spec,
+        opening: Box<crate::record::Opening>,
     },
-    /// Explicit version-two admission, including a fresh session with no history.
+    /// Parent terminal for Delegate, possibly winning a Withdraw race. Its
+    /// concrete payload consumes the result space reserved before that call.
+    /// The current live identity charges the child bill once; stale repeats
+    /// neither retain bytes nor change own or inclusive pricing.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-    OpenV2 {
-        /// Parent-issued session or conversation name, echoed unchanged.
-        ///
-        /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-        opener: Token,
-        /// The original session opening, validated before replaying any history.
-        ///
-        /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-        spec: crate::record::Opening,
-    },
-    /// A concrete delegated answer, including the spend of a sub-agent served
-    /// by this call. The opener charges each child once, at its terminal answer.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-    AnsweredV2 {
+    Answered {
         /// Requester-issued opaque name, echoed on the one terminal for this request.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         owner: Token,
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
-        ///
-        /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
+        /// Parent-owned result bytes, at most `Limits::delegated_result_bytes`.
+        /// Moved into concrete history even while closing; no answer ticket remains.
+        /// Contract: domain/session.md, sections 3, 5 and 12.
         text: Box<[u8]>,
         /// Whether the returned tool result represents a failure.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         error: bool,
-        /// Accepted cumulative usage across the enclosing run or session.
+        /// Child activation's inclusive cumulative bill, in deployment units;
+        /// historical spend is excluded. Only the inclusive parent prefix changes.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         spent: u64,
@@ -83,15 +79,18 @@ pub enum Event {
         /// Contract: domain/session.md, section 6; domain/run.md, section 9.
         spend_overflow: bool,
     },
-    /// A withdrawn child terminal still reports what it spent before stopping.
+    /// Parent terminal acknowledging Withdraw. Its current delegated identity
+    /// settles exactly once and releases its reserved result space. A withdrawn
+    /// child still reports its activation bill; stale repeats remain inert.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-    AnswerCancelledV2 {
+    AnswerCancelled {
         /// Requester-issued opaque name, echoed on the one terminal for this request.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         owner: Token,
-        /// Accepted cumulative usage across the enclosing run or session.
+        /// Child activation's inclusive cumulative bill, in deployment units;
+        /// historical spend is excluded. Only the inclusive parent prefix changes.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         spent: u64,
@@ -206,28 +205,6 @@ pub enum Event {
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         done: tools::Done,
     },
-    /// Terminal for `Delegate`: the opener's answer, a success or a failure.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-    Answered {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        ///
-        /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-        owner: Token,
-        /// Single terminal value returned to the caller.
-        ///
-        /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-        answer: Answer,
-    },
-    /// Terminal for `Delegate`, after `Withdraw`: the call was abandoned.
-    ///
-    /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-    AnswerCancelled {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        ///
-        /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
-        owner: Token,
-    },
 }
 
 /// session -> parent
@@ -262,7 +239,7 @@ pub enum Request {
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         turn: crate::record::Turn,
     },
-    /// Version two's cumulative deployment-unit spend, including child calls.
+    /// The cumulative deployment-unit spend, including child calls.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Priced {
@@ -323,7 +300,7 @@ pub enum Request {
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         usage: Usage,
         /// Cumulative raw usage overflowed. This completion's usage remains
-        /// exact; V2 freezes the whole last representable cumulative prefix.
+        /// exact; the session freezes the whole last representable cumulative prefix.
         /// Contract: domain/session.md, section 6; domain/run.md, section 9.
         usage_overflow: bool,
     },
@@ -345,12 +322,12 @@ pub enum Request {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         turns: u32,
-        /// Cumulative raw usage, exact when `usage_overflow` is false. V2
+        /// Cumulative raw usage, exact when `usage_overflow` is false. The session
         /// otherwise preserves the whole last representable prefix.
         /// Contract: domain/session.md, section 6; domain/run.md, section 10.
         usage: Usage,
-        /// The cumulative raw counters overflowed; usage is V2's last exact
-        /// whole prefix, or V1's legacy saturated diagnostic counters.
+        /// The cumulative raw counters overflowed; usage is the last exact
+        /// whole prefix.
         /// Contract: domain/session.md, section 6; domain/run.md, section 10.
         usage_overflow: bool,
     },
@@ -646,7 +623,8 @@ pub enum End {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     Budget {
-        /// Accepted cumulative usage across the enclosing run or session.
+        /// Exhausted receiving or deployment-unit dimension, reported to the
+        /// parent only after all started provider, tool and child work settles.
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         spent: Dimension,
@@ -667,7 +645,7 @@ pub enum End {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     PriceOverflow,
-    /// V2's cumulative raw usage did not fit all four counters. Its accepted
+    /// Cumulative raw usage did not fit all four counters. Its accepted
     /// completion and exact usage were told before this settled failure.
     /// `PriceOverflow` takes precedence if both attestations fail.
     /// Contract: domain/session.md, section 6; domain/run.md, sections 9 and 10.

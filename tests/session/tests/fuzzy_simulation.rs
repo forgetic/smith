@@ -9,6 +9,23 @@ use smith_session_world::{Ended, World, noisy, submit_noisily};
 
 const ITERATIONS: u32 = 100_000;
 
+/// Every original scheduled ending class remains mandatory across the full sweep.
+/// World contract: domain/session.md, sections 4, 6, 10 and 12.
+const EXPECTED_ENDS: [&str; 12] = [
+    "busy",
+    "invalid",
+    "closed",
+    "failed",
+    "timed out",
+    "transcript full",
+    "Turns",
+    "Input",
+    "Output",
+    "CacheRead",
+    "CacheWrite",
+    "Time",
+];
+
 /// A thousand worlds with random limits, faults, schedules and openers: each
 /// settles, with every session ended once and nothing left alive or in flight
 /// (checked by `World::run`), and between them they reach every way a session
@@ -19,6 +36,7 @@ fn random_worlds_settle_with_every_session_ended() {
     let mut stops = BTreeSet::new();
     let (mut stale, mut invalid, mut not_run, mut parallel, mut op_timeouts) = (0, 0, 0, 0, 0);
     let mut most_runs = 0;
+    let mut concrete_turns = 0;
     let mut failures = BTreeSet::new();
     let mut races = [0; 4];
     let mut served = [0; 6];
@@ -55,6 +73,7 @@ fn random_worlds_settle_with_every_session_ended() {
             *race += count;
         }
         for (_, session) in world.sessions() {
+            concrete_turns += session.records.len();
             if let Some(Ended {
                 end: End::Failed { failure, evidence: smith_domain_session::llm::Evidence::Unknown },
                 ..
@@ -72,27 +91,19 @@ fn random_worlds_settle_with_every_session_ended() {
                 End::Failed { failure: Failure::TimedOut, .. } => "timed out".into(),
                 End::Failed { .. } => "failed".into(),
                 End::Budget { spent } => format!("{spent:?}"),
-                End::TranscriptRefused { .. } | End::PriceOverflow | End::UsageOverflow => unreachable!("v1 scenarios"),
+                End::TranscriptRefused { .. } | End::PriceOverflow | End::UsageOverflow => {
+                    unreachable!("bounded scheduled peers neither restore nor overflow")
+                }
                 End::TranscriptFull => "transcript full".into(),
             };
             ends.insert(kind);
         }
     }
-    let expected = [
-        "busy",
-        "invalid",
-        "closed",
-        "failed",
-        "timed out",
-        "transcript full",
-        "Turns",
-        "Input",
-        "Output",
-        "CacheRead",
-        "CacheWrite",
-        "Time",
-    ];
-    assert_eq!(ends, expected.into_iter().map(String::from).collect());
+    assert_eq!(ends, EXPECTED_ENDS.into_iter().map(String::from).collect());
+    assert!(concrete_turns > 0, "real accepted provider completions emitted concrete checked Turns");
+    println!(
+        "canonical scheduled hits: concrete_turns={concrete_turns}, stale={stale}, invalid={invalid}, not_run={not_run}, parallel={parallel}, most_runs={most_runs}, op_timeouts={op_timeouts}, delegated={served:?}, races={races:?}, ends={ends:?}, stops={stops:?}"
+    );
     assert_eq!(stops, ["Done", "Malformed", "Refused", "Truncated"].into_iter().map(String::from).collect());
     assert!(stale > 0, "some continues and closes reached sessions that had ended");
     assert!(parallel > 1, "some reads ran side by side");

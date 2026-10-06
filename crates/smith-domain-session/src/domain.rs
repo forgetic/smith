@@ -174,10 +174,9 @@ impl Domain {
 /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     match event {
-        Event::Open { opener, spec } => session::open(domain, env, opener, spec, out),
-        Event::OpenV2 { opener, spec } => session::open_v2(domain, env, opener, spec, out),
-        Event::AnsweredV2 { owner, text, error, spent, spend_overflow } => {
-            session::delegate_ended_v2(
+        Event::Open { opener, opening } => session::open(domain, env, opener, *opening, out),
+        Event::Answered { owner, text, error, spent, spend_overflow } => {
+            session::delegate_ended(
                 domain,
                 env,
                 owner,
@@ -186,8 +185,8 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
                 out,
             );
         }
-        Event::AnswerCancelledV2 { owner, spent, spend_overflow } => {
-            session::delegate_ended_v2(
+        Event::AnswerCancelled { owner, spent, spend_overflow } => {
+            session::delegate_ended(
                 domain,
                 env,
                 owner,
@@ -206,8 +205,6 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
         }
         Event::Cancelled { owner } => session::cancelled(domain, env, owner, out),
         Event::Done { owner, done } => session::io_done(domain, env, owner, done, out),
-        Event::Answered { owner, answer } => session::delegate_answered(domain, env, owner, answer, out),
-        Event::AnswerCancelled { owner } => session::delegate_cancelled(domain, env, owner, out),
     }
     session::pass_on_facts(domain, env);
 }

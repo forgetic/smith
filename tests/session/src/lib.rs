@@ -30,5 +30,5 @@ mod world;
 
 pub use noisy::{noisy, submit_noisily};
 pub use skein_world::domain::Span;
-pub use world::{BUDGET, Count, Ended, Session, Settings, Stats, TOOLS, Told, World, spec};
+pub use world::{BUDGET, Count, Ended, Session, Settings, Stats, TOOLS, Told, World, reservation_envelope, spec};
 pub mod recorded;

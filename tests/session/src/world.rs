@@ -5,7 +5,7 @@ use skein_fake_llm_domain as provider;
 use skein_lib::{Duration, ReplyTo, Rng, Time, Token};
 use skein_world::domain::{Key, Ledger, Schedule, Span, Stage, Trace};
 use smith_domain_session as agent;
-use smith_domain_session::llm::{Answer, Block, Decoded, Descriptor, Endpoint, Failure, Prompt, Returned, Usage};
+use smith_domain_session::llm::{Block, Decoded, Descriptor, Endpoint, Failure, Prompt, Returned, Usage};
 use smith_domain_tools::{self as tools, Authority, Done, Effect, Fault, Grants, Op, Repo};
 use smith_tools_world::translate as io;
 
@@ -63,6 +63,30 @@ pub const TOOLS: tools::Limits = tools::Limits {
     search_timeout: Duration::from_secs(30),
     facts: 256,
 };
+
+/// Checked credit envelope around the original retained-payload pressure.
+/// The provider and a result batch own their credits successively, so the larger
+/// envelope suffices. All six owned result families and concrete delegated results
+/// are included; record arrays and caller/emitted copies remain independently
+/// counted by `worst_case` and the shared heap meter.
+/// World contract: domain/session.md, sections 3, 5, 6 and 12;
+/// domain/tools.md, sections 4, 5 and 9; programming-model.md, section 6.3.
+#[must_use]
+pub fn reservation_envelope(limits: &agent::Limits) -> Option<u64> {
+    let tools = &limits.tools;
+    let search = u64::try_from(std::mem::size_of::<tools::Hit>())
+        .ok()?
+        .checked_mul(u64::from(tools.search_hits))?
+        .checked_add(u64::from(tools.search_bytes))?;
+    let edit = u64::try_from(std::mem::size_of::<u32>()).ok()?.checked_mul(u64::from(tools.match_lines))?;
+    let shell = u64::from(tools.shell_head).checked_add(u64::from(tools.shell_tail))?;
+    let largest =
+        [u64::from(tools.read_bytes), tools.list_bytes, search, 0, edit, shell, limits.delegated_result_bytes]
+            .into_iter()
+            .max()?;
+    let batch = largest.checked_mul(u64::from(limits.parallel_tools))?;
+    Some(agent::completion_reserve(limits)?.max(batch))
+}
 
 /// Counts drawn uniformly from `min..=max`.
 ///
@@ -167,7 +191,7 @@ impl Settings {
             seed,
             agent: agent::Limits {
                 sessions: 4,
-                spend: 0,
+                spend: 1,
                 messages: 32,
                 session_bytes: 1 << 20,
                 completion_bytes: 4096,
@@ -493,6 +517,33 @@ pub struct Session {
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     pub usage: Usage,
+    /// Concrete history emitted in sequence, with historical calls and actual results.
+    /// World contract: domain/session.md, sections 3, 5, 6 and 12.
+    pub records: Vec<agent::record::Turn>,
+    /// Exact accepted completion usage, independently matched against each emitted Turn.
+    /// World contract: domain/session.md, sections 3, 6 and 12.
+    accepted: Vec<Usage>,
+    /// Actual provider payload awaiting the corresponding Used acceptance.
+    /// World contract: domain/session.md, sections 3, 5 and 12.
+    received: Option<(Box<[Block]>, agent::llm::Stop, bool)>,
+    /// Original accepted provider payloads before historical call conversion.
+    /// World contract: domain/session.md, sections 3, 5 and 12.
+    accepted_content: Vec<Box<[Block]>>,
+    /// Actual provider stop determines whether calls executed or remained a yielded tail.
+    /// World contract: domain/session.md, sections 3, 5 and 12.
+    accepted_stop: Vec<agent::llm::Stop>,
+    /// Actual provider closing witnesses, kept independently of tool timeout race bookkeeping.
+    /// World contract: domain/session.md, sections 5 and 12.
+    provider_closing: ProviderClosing,
+    /// Actual late Closing winners settle every call as `NotRun` for any provider stop.
+    /// World contract: domain/session.md, sections 5 and 12.
+    accepted_late: Vec<bool>,
+    /// Actual delegated terminal values, indexed by their immutable origin.
+    /// World contract: domain/session.md, sections 3, 5 and 12.
+    delegated_results: BTreeMap<(u32, u32), Returned>,
+    /// Exact inclusive and own price reports observed before terminal handoff.
+    /// World contract: domain/session.md, sections 6 and 12.
+    priced: u32,
     /// When its time budget runs out, once it opened.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
@@ -521,6 +572,14 @@ pub struct Session {
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     finishes: u32,
+}
+
+/// Actual provider lifecycle evidence; ordinary IO/withdraw race bookkeeping
+/// cannot turn a yielded provider completion into a late Closing winner.
+#[derive(Default, Debug)]
+struct ProviderClosing {
+    close_seen: bool,
+    cancel_seen: bool,
 }
 
 /// How a session ended.
@@ -600,7 +659,8 @@ enum Delivery {
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     Answered {
         owner: Token,
-        answer: Answer,
+        text: Box<[u8]>,
+        error: bool,
     },
     /// An operation of the tools ends.
     ///
@@ -618,6 +678,9 @@ struct Running {
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     delivery: Key,
+    /// Immutable position used to prove exact concrete delegated result retention.
+    /// World contract: domain/session.md, sections 3 and 5.
+    origin: agent::record::Origin,
     /// The session that started it.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
@@ -918,6 +981,17 @@ impl World {
         }
         while let Some(event) = self.agent_stage.next_event() {
             self.log(&format!("agent <- {}", describe_agent_event(&event)));
+            if let agent::Event::Close { session } = &event
+                && let Some(opener) = self.openers.get(session)
+            {
+                self.sessions.get_mut(opener).expect("the addressed live opener").provider_closing.close_seen = true;
+            }
+            if let agent::Event::Completed { owner, completion } = &event {
+                let opener = self.openers[owner];
+                let session = self.sessions.get_mut(&opener).expect("a provider terminal names its opener");
+                let late = session.provider_closing.close_seen || session.provider_closing.cancel_seen;
+                session.received = Some((completion.content.clone(), completion.stop, late));
+            }
             let ended = ended_run(&event);
             let from = self.agent_stage.out.len();
             agent::step(&mut self.agent, &self.agent_stage.env, event, &mut self.agent_stage.out);
@@ -995,15 +1069,25 @@ impl World {
     fn agent_request(&mut self, request: agent::Request) {
         self.log(&format!("agent -> {}", describe_agent_request(&request)));
         match request {
-            agent::Request::Turn { .. } | agent::Request::Priced { .. } => unreachable!("v1 scenarios"),
+            agent::Request::Turn { opener, turn } => self.recorded(opener.raw(), turn),
+            agent::Request::Priced { opener, spent, overflow, own_spent, own_overflow } => {
+                let session = self.sessions.get_mut(&opener.raw()).expect("a price names its opener");
+                assert!(session.ended.is_none(), "prices precede the terminal");
+                assert_eq!(
+                    (spent, overflow, own_spent, own_overflow),
+                    (0, false, 0, false),
+                    "zero-rate provider and zero-bill fake children have exact zero inclusive and own prices"
+                );
+                session.priced += 1;
+            }
             agent::Request::Opened { opener, session } => self.opened(opener.raw(), session),
             agent::Request::Yielded { opener, stop, text } => self.yielded(opener.raw(), stop, text),
             agent::Request::Used { opener, usage, usage_overflow } => {
-                assert!(!usage_overflow, "the original V1 peer stays within representable raw usage");
+                assert!(!usage_overflow, "the scheduled peer stays within representable raw usage");
                 self.used(opener.raw(), usage);
             }
             agent::Request::Ended { opener, end, turns, usage, usage_overflow } => {
-                assert!(!usage_overflow, "the original V1 terminal attests its exact accumulated usage");
+                assert!(!usage_overflow, "the scheduled terminal attests its exact accumulated usage");
                 self.ended(opener.raw(), Ended { end, turns, usage });
             }
             agent::Request::Complete { owner, prompt, timeout, .. } => {
@@ -1022,6 +1106,12 @@ impl World {
                 self.stats.calls += 1;
             }
             agent::Request::Cancel { owner } => {
+                let opener = self.openers[&owner];
+                self.sessions
+                    .get_mut(&opener)
+                    .expect("actual provider cancellation names a live session")
+                    .provider_closing
+                    .cancel_seen = true;
                 self.closing.insert(owner);
                 // A call that has already ended has its terminal event on the
                 // way: the cancel lost the race and changes nothing. One still
@@ -1039,11 +1129,11 @@ impl World {
             }
             agent::Request::Io { owner, op, deadline } => self.start_op(owner, op, deadline),
             agent::Request::CancelIo { owner } => self.cancel_op(owner),
-            agent::Request::Delegate { owner, opener, call, deadline, origin: _ } => {
+            agent::Request::Delegate { owner, opener, call, deadline, origin } => {
                 let session = self.sessions.get(&opener.raw()).and_then(|session| session.session);
                 let session = session.expect("a session delegates once it has opened");
                 assert!(self.runs.insert(owner, session).is_none(), "each delegated call has a token of its own");
-                self.serve(owner, opener.raw(), call, deadline);
+                self.serve(owner, opener.raw(), call, deadline, origin);
             }
             agent::Request::Withdraw { owner } => {
                 let Some(&session) = self.runs.get(&owner) else {
@@ -1054,7 +1144,13 @@ impl World {
                 if self.tools.contains(owner) && self.rng.chance(self.settings.cancels_lost) {
                     self.run_cancel_lost.insert(owner);
                     self.stats.withdraws_lost += 1;
-                } else if let Some(Running { delivery, .. }) = self.tools.take(owner) {
+                } else if let Some(Running { delivery, origin, .. }) = self.tools.take(owner) {
+                    let opener = self.openers[&session];
+                    self.sessions
+                        .get_mut(&opener)
+                        .expect("delegation belongs to its opener")
+                        .delegated_results
+                        .insert((origin.sequence, origin.position), Returned::Withdrawn);
                     self.wire.withdraw(delivery).expect("a served call in flight has its answer on the way");
                     self.send(Delivery::AnswerCancelled { owner });
                     self.stats.withdraws += 1;
@@ -1114,7 +1210,105 @@ impl World {
         let session = self.sessions.get_mut(&opener).expect("a session reports to its opener");
         assert!(session.session.is_some() && session.ended.is_none(), "a session uses tokens while it lives");
         session.turns += 1;
-        session.usage = session.usage.saturating_add(usage);
+        session.usage = add_usage(session.usage, usage);
+        session.accepted.push(usage);
+        let (content, stop, late) = session.received.take().expect("usage accepts an actual provider payload");
+        session.accepted_content.push(content);
+        session.accepted_stop.push(stop);
+        session.accepted_late.push(late);
+    }
+
+    /// Check every concrete handoff against accepted usage and its historical representation.
+    /// World contract: domain/session.md, sections 3, 5, 6 and 12.
+    fn recorded(&mut self, opener: u64, turn: agent::record::Turn) {
+        let session = self.sessions.get_mut(&opener).expect("a Turn names its opener");
+        assert!(session.ended.is_none(), "concrete history precedes terminal handoff");
+        assert_eq!((turn.version, turn.endpoint, turn.dialect), (agent::record::VERSION, Endpoint(0), 2));
+        let index = session.records.len();
+        assert_eq!(turn.sequence, u32::try_from(index + 1).expect("bounded sequence"));
+        assert_eq!(turn.usage, session.accepted[index], "each Turn records its actual accepted provider usage");
+        assert_eq!((turn.spent, turn.spend_overflow), (0, false), "zero-price exact bill");
+        let assistant_index = turn
+            .messages
+            .iter()
+            .position(|message| message.role == agent::llm::Role::Assistant)
+            .expect("every settled Turn contains the actual assistant payload");
+        let assistant = &turn.messages[assistant_index];
+        assert_resumed_tail(session, index, &turn.messages[..assistant_index]);
+        let original = &session.accepted_content[index];
+        assert_eq!(assistant.content.len(), original.len(), "every provider block retains its position");
+        for (position, (block, original)) in assistant.content.iter().zip(original.iter()).enumerate() {
+            match original {
+                Block::ToolCall { id, name, input, replay, call } => {
+                    assert_eq!(
+                        *block,
+                        Block::ToolCall {
+                            id: id.clone(),
+                            name: name.clone(),
+                            input: input.clone(),
+                            replay: replay.clone(),
+                            call: Decoded::Historical,
+                        },
+                        "concrete calls preserve exact provider bytes and shed only live authority"
+                    );
+                    let result = recorded_result(&turn.messages[assistant_index + 1..], id);
+                    if session.accepted_stop[index] != agent::llm::Stop::ToolUse {
+                        if session.accepted_late[index] {
+                            assert_eq!(
+                                result,
+                                Some(&Returned::NotRun),
+                                "actual late Closing winners settle calls without effects"
+                            );
+                        } else {
+                            assert!(
+                                result.is_none(),
+                                "a yielded call retains its unanswered tail until a real Continue"
+                            );
+                        }
+                        continue;
+                    }
+                    let result = result.expect("every callable ToolUse block has its actual settled result");
+                    match call {
+                        Decoded::Delegated { .. } => {
+                            let position = u32::try_from(position).expect("bounded provider position");
+                            if let Some(expected) = session.delegated_results.get(&(turn.sequence, position)) {
+                                assert_eq!(
+                                    result, expected,
+                                    "exact delegated text/error or withdrawal is retained once"
+                                );
+                            } else {
+                                assert_eq!(
+                                    *result,
+                                    Returned::NotRun,
+                                    "an unstarted delegated call has no terminal right"
+                                );
+                            }
+                        }
+                        Decoded::Owned { call } => match result {
+                            Returned::Owned { outcome } => {
+                                assert!(fixture::fits(call, outcome), "actual result belongs to its call");
+                            }
+                            Returned::NotRun => {}
+                            Returned::Text { .. } | Returned::Invalid { .. } | Returned::Withdrawn => {
+                                panic!("an owned call retains its actual owned result or never ran")
+                            }
+                        },
+                        Decoded::Invalid { problem } => match result {
+                            Returned::Invalid { problem: actual } => assert_eq!(actual, problem),
+                            Returned::NotRun => {}
+                            Returned::Text { .. } | Returned::Owned { .. } | Returned::Withdrawn => {
+                                panic!("an invalid call retains its exact problem or never ran")
+                            }
+                        },
+                        Decoded::Historical => panic!("the provider must classify every live call"),
+                    }
+                }
+                Block::Opaque { .. } | Block::Text { .. } | Block::Refusal { .. } | Block::ToolResult { .. } => {
+                    assert_eq!(block, original, "concrete payloads preserve actual provider bytes");
+                }
+            }
+        }
+        session.records.push(turn);
     }
 
     /// The session that owns `owner` starts a completion: it must have turns,
@@ -1144,7 +1338,7 @@ impl World {
         assert!(session.ended.is_none(), "a session ends once");
         match ended.end {
             agent::End::TranscriptRefused { .. } | agent::End::PriceOverflow | agent::End::UsageOverflow => {
-                unreachable!("v1 scenarios")
+                unreachable!("bounded scheduled peers neither restore nor overflow; zero prices cannot spend the unit")
             }
             agent::End::Busy | agent::End::Invalid => {
                 assert!(session.session.is_none(), "a session refused at the entrance never opened");
@@ -1176,7 +1370,9 @@ impl World {
     fn spent(&self, session: &Session, dimension: agent::Dimension) -> bool {
         let (budget, usage) = (&session.budget, &session.usage);
         match dimension {
-            agent::Dimension::Unit => unreachable!("v1 scenarios"),
+            agent::Dimension::Unit => {
+                unreachable!("bounded scheduled peers neither restore nor overflow; zero prices cannot spend the unit")
+            }
             agent::Dimension::Turns => session.turns >= budget.turns,
             agent::Dimension::Input => usage.input_tokens >= budget.input,
             agent::Dimension::Output => usage.output_tokens >= budget.output,
@@ -1192,8 +1388,13 @@ impl World {
     /// deadline itself.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
-    fn serve(&mut self, owner: Token, opener: u64, call: Token, deadline: Time) {
+    fn serve(&mut self, owner: Token, opener: u64, call: Token, deadline: Time, origin: agent::record::Origin) {
         let session = *self.runs.get(&owner).expect("a run is worked out from the step that started it");
+        assert_eq!(
+            self.sessions[&opener].accepted_stop.last(),
+            Some(&agent::llm::Stop::ToolUse),
+            "only actual callable ToolUse completions delegate effects"
+        );
         let Ticketed::Call { tool, arguments: _ } = self.tickets.resolve(call).clone() else {
             panic!("a delegated call's ticket names a call");
         };
@@ -1222,10 +1423,8 @@ impl World {
                 self.stats.finishes_refused += 1;
             }
         }
-        let ticket = self.tickets.issue(opener, Ticketed::Answer { text: text.into(), error });
-        let answer = Answer { ticket, bytes: u64::try_from(text.len()).expect("a short answer"), error };
-        let delivery = self.schedule(at, Delivery::Answered { owner, answer });
-        let running = Running { delivery, session, effect, accepts };
+        let delivery = self.schedule(at, Delivery::Answered { owner, text: text.into(), error });
+        let running = Running { delivery, origin, session, effect, accepts };
         self.tools.open(owner, running);
         self.stats.delegates += 1;
     }
@@ -1244,6 +1443,11 @@ impl World {
         let opener = *self.roots.get(&at.raw()).expect("an operation is in a session's repository");
         let session = self.sessions.get(&opener).and_then(|session| session.session);
         let session = session.expect("a session's tools ask io for something once it has opened");
+        assert_eq!(
+            self.sessions[&opener].accepted_stop.last(),
+            Some(&agent::llm::Stop::ToolUse),
+            "yielded and late Closing call tails never start owned IO effects"
+        );
         let writes = self.writes(owner, session, &op);
         self.batched(session, writes);
         let mut ends = self.now.saturating_add(self.draw(self.settings.tool));
@@ -1503,14 +1707,27 @@ impl World {
                     self.stats.timeouts += 1;
                 }
                 Delivery::Cancelled { owner } => self.agent_stage.push(agent::Event::Cancelled { owner }),
-                Delivery::AnswerCancelled { owner } => self.agent_stage.push(agent::Event::AnswerCancelled { owner }),
-                Delivery::Answered { owner, answer } => {
+                Delivery::AnswerCancelled { owner } => {
+                    self.agent_stage.push(agent::Event::AnswerCancelled { owner, spent: 0, spend_overflow: false });
+                }
+                Delivery::Answered { owner, text, error } => {
                     // A withdrawn call's answer is withdrawn.
                     let run = self.tools.end(owner);
+                    let opener = self.openers[&run.session];
+                    self.sessions.get_mut(&opener).expect("delegation belongs to its opener").delegated_results.insert(
+                        (run.origin.sequence, run.origin.position),
+                        Returned::Text { text: text.clone(), error, replay: None },
+                    );
                     if self.run_cancel_lost.remove(&owner) {
                         self.stats.answered_after_withdraw += 1;
                     }
-                    self.agent_stage.push(agent::Event::Answered { owner, answer });
+                    self.agent_stage.push(agent::Event::Answered {
+                        owner,
+                        text,
+                        error,
+                        spent: 0,
+                        spend_overflow: false,
+                    });
                     // The opener has its finish, and closes the session.
                     if run.accepts {
                         let opener = *self.openers.get(&run.session).expect("a session lives while its calls run");
@@ -1537,6 +1754,15 @@ impl World {
             yields: Vec::new(),
             turns: 0,
             usage: Usage::ZERO,
+            accepted: Vec::new(),
+            received: None,
+            accepted_content: Vec::new(),
+            accepted_stop: Vec::new(),
+            provider_closing: ProviderClosing::default(),
+            accepted_late: Vec::new(),
+            delegated_results: BTreeMap::new(),
+            records: Vec::new(),
+            priced: 0,
             expires: None,
             ended: None,
             nudges,
@@ -1553,7 +1779,16 @@ impl World {
         for repo in &mut spec.authority.repos {
             repo.root = io::token(root);
         }
-        self.agent_stage.push(agent::Event::Open { opener: Token::new(opener), spec });
+        self.agent_stage.push(agent::Event::Open {
+            opener: Token::new(opener),
+            opening: Box::new(agent::record::Opening {
+                spec,
+                dialect: 2,
+                prices: agent::record::Prices { input: 0, cached: 0, output: 0, unit: 1 },
+                budget: 1,
+                transcript: None,
+            }),
+        });
     }
 
     /// Ends the agent's call `call` if it is still in flight, withdrawing its
@@ -1672,6 +1907,14 @@ impl World {
         );
         for (opener, session) in &self.sessions {
             assert!(session.ended.is_some(), "session {opener} has ended");
+            assert_eq!(
+                session.records.len(),
+                session.accepted.len(),
+                "every accepted completion emits concrete history"
+            );
+            if session.session.is_some() {
+                assert!(session.priced >= session.turns, "every actual usage and final terminal is priced");
+            }
         }
         if self.agent.facts_lost() == 0 {
             self.assert_told();
@@ -1705,12 +1948,8 @@ impl World {
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 fn ended_run(event: &agent::Event) -> Option<Token> {
     match event {
-        agent::Event::Answered { owner, .. }
-        | agent::Event::AnsweredV2 { owner, .. }
-        | agent::Event::AnswerCancelledV2 { owner, .. }
-        | agent::Event::AnswerCancelled { owner } => Some(*owner),
-        agent::Event::OpenV2 { .. }
-        | agent::Event::Open { .. }
+        agent::Event::Answered { owner, .. } | agent::Event::AnswerCancelled { owner, .. } => Some(*owner),
+        agent::Event::Open { .. }
         | agent::Event::Continue { .. }
         | agent::Event::Close { .. }
         | agent::Event::Completed { .. }
@@ -1724,13 +1963,10 @@ fn ended_run(event: &agent::Event) -> Option<Token> {
 
 fn describe_agent_event(event: &agent::Event) -> String {
     match event {
-        agent::Event::AnswerCancelledV2 { owner, spent, .. } => format!("cancelled v2 {} {spent}", owner.raw()),
-        agent::Event::OpenV2 { opener, spec } => format!("open v2 {} {spec:?}", opener.raw()),
-        agent::Event::AnsweredV2 { owner, text, error, spent, .. } => {
-            format!("answered v2 {} {text:?} {error} {spent}", owner.raw())
-        }
-        agent::Event::Open { opener, spec } => {
-            format!("open {} {:?}", opener.raw(), String::from_utf8_lossy(&spec.prompt))
+        agent::Event::AnswerCancelled { owner, spent, .. } => format!("answer cancelled {} {spent}", owner.raw()),
+        agent::Event::Open { opener, opening } => format!("open {} {opening:?}", opener.raw()),
+        agent::Event::Answered { owner, text, error, spent, .. } => {
+            format!("answered {} {text:?} {error} {spent}", owner.raw())
         }
         agent::Event::Continue { session, content } => {
             format!("continue {} {:?}", session.raw(), String::from_utf8_lossy(content))
@@ -1744,8 +1980,6 @@ fn describe_agent_event(event: &agent::Event) -> String {
         agent::Event::Failed { owner, failure, .. } => format!("failed {} {failure:?}", owner.raw()),
         agent::Event::Cancelled { owner } => format!("cancelled {}", owner.raw()),
         agent::Event::Done { owner, done } => format!("done {} {done:?}", owner.raw()),
-        agent::Event::Answered { owner, answer } => format!("answered {} {answer:?}", owner.raw()),
-        agent::Event::AnswerCancelled { owner } => format!("answer cancelled {}", owner.raw()),
     }
 }
 
@@ -1770,8 +2004,13 @@ fn describe_agent_request(request: &agent::Request) -> String {
         agent::Request::Cancel { owner } => format!("cancel {}", owner.raw()),
         agent::Request::Io { owner, op, deadline } => format!("io {} {op:?} by {}", owner.raw(), deadline.as_nanos()),
         agent::Request::CancelIo { owner } => format!("cancel io {}", owner.raw()),
-        agent::Request::Delegate { owner, opener, call, deadline, origin: _ } => {
-            format!("delegate {} for {} {call:?} by {}", owner.raw(), opener.raw(), deadline.as_nanos())
+        agent::Request::Delegate { owner, opener, call, deadline, origin } => {
+            format!(
+                "delegate {} for {} {call:?} origin {origin:?} by {}",
+                owner.raw(),
+                opener.raw(),
+                deadline.as_nanos()
+            )
         }
         agent::Request::Withdraw { owner } => format!("withdraw {}", owner.raw()),
     }
@@ -1803,4 +2042,45 @@ fn in_call_order(prompt: &Prompt) {
         .filter_map(|block| if let Block::ToolResult { id, .. } = block { Some(&**id) } else { None })
         .collect();
     assert_eq!(calls, results, "the results go back in call order");
+}
+
+/// Every genuinely resumed yielded tail settles before the waking assistant.
+fn assert_resumed_tail(session: &Session, index: usize, preceding: &[agent::llm::Message]) {
+    if index > 0 && session.accepted_stop[index - 1] != agent::llm::Stop::ToolUse && !session.accepted_late[index - 1] {
+        for block in &session.accepted_content[index - 1] {
+            if let Block::ToolCall { id, .. } = block {
+                let result = recorded_result(preceding, id)
+                    .expect("continuing a yielded call supplies its genuine next-Turn result");
+                assert_eq!(*result, Returned::NotRun, "yielded calls did not execute and precede the waking assistant");
+            }
+        }
+    }
+}
+
+/// The concrete result after/before the actual assistant, scoped by the caller
+/// to avoid matching a reused provider id in a different Turn segment.
+fn recorded_result<'a>(messages: &'a [agent::llm::Message], id: &[u8]) -> Option<&'a Returned> {
+    messages.iter().flat_map(|message| message.content.iter()).find_map(|block| {
+        if let Block::ToolResult { id: result_id, result } = block {
+            (id == result_id.as_ref()).then_some(result)
+        } else {
+            None
+        }
+    })
+}
+
+/// Checked raw-prefix addition: the scripted peer cannot overflow these bounded counters.
+fn add_usage(left: Usage, right: Usage) -> Usage {
+    Usage {
+        input_tokens: left.input_tokens.checked_add(right.input_tokens).expect("bounded scheduled input"),
+        output_tokens: left.output_tokens.checked_add(right.output_tokens).expect("bounded scheduled output"),
+        cache_read_tokens: left
+            .cache_read_tokens
+            .checked_add(right.cache_read_tokens)
+            .expect("bounded scheduled cache reads"),
+        cache_write_tokens: left
+            .cache_write_tokens
+            .checked_add(right.cache_write_tokens)
+            .expect("bounded scheduled cache writes"),
+    }
 }

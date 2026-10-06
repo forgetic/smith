@@ -38,7 +38,7 @@ fn randomized_priced_turns_and_terminal_races() {
             (false, false) => unreachable!("a call not closed answers"),
         }
         if wins {
-            world.step(session::Event::AnsweredV2 {
+            world.step(session::Event::Answered {
                 owner,
                 text: vec![b'v'; usize::try_from(rng.below(64)).expect("the scenario supplied a value")].into(),
                 error: false,
@@ -46,7 +46,7 @@ fn randomized_priced_turns_and_terminal_races() {
                 spend_overflow: false,
             });
         } else {
-            world.step(session::Event::AnswerCancelledV2 { owner, spent: child, spend_overflow: false });
+            world.step(session::Event::AnswerCancelled { owner, spent: child, spend_overflow: false });
         }
         assert_eq!(world.turns.len(), 1, "seed {seed}");
         let expected = parent + child;

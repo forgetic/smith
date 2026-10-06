@@ -224,8 +224,8 @@ pub enum Fact {
         ///
         /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
         usage: Usage,
-        /// True when the cumulative usage is an overflowed prefix (V2) or the
-        /// legacy saturated diagnostic counters (V1), copied from actual Ended.
+        /// True when cumulative usage overflowed; the whole exact prefix
+        /// is copied from the actual Ended terminal.
         /// Contract: domain/session.md, section 6; domain/run.md, section 10.
         usage_overflow: bool,
     },

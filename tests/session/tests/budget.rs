@@ -19,7 +19,7 @@ fn nudge(world: &mut World) {
 
 fn answer(world: &mut World, spent: u64, spend_overflow: bool, error: bool) -> Token {
     let owner = world.delegated[0];
-    world.step(session::Event::AnsweredV2 {
+    world.step(session::Event::Answered {
         owner,
         text: b"actual child result".as_slice().into(),
         error,
@@ -43,7 +43,7 @@ fn redeliver(world: &mut World, owner: Token) {
         }
         inert(
             world,
-            session::Event::AnsweredV2 {
+            session::Event::Answered {
                 owner,
                 text: b"stale error bill".as_slice().into(),
                 error: true,
@@ -51,7 +51,7 @@ fn redeliver(world: &mut World, owner: Token) {
                 spend_overflow: true,
             },
         );
-        inert(world, session::Event::AnswerCancelledV2 { owner, spent: u64::MAX, spend_overflow: true });
+        inert(world, session::Event::AnswerCancelled { owner, spent: u64::MAX, spend_overflow: true });
     }
 }
 
@@ -116,7 +116,7 @@ fn unknown_failed_and_withdrawn_child_bills_preserve_the_turn_and_own_price() {
         let owner = world.delegated[0];
         if withdrawn {
             world.step(session::Event::Close { session: world.session.expect("admitted session") });
-            world.step(session::Event::AnswerCancelledV2 { owner, spent: 4, spend_overflow: true });
+            world.step(session::Event::AnswerCancelled { owner, spent: 4, spend_overflow: true });
             assert_eq!(
                 world.turns[0].messages[2].content[0],
                 llm::Block::ToolResult { id: b"provider-call".as_slice().into(), result: llm::Returned::Withdrawn },

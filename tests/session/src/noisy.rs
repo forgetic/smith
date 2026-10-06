@@ -27,7 +27,7 @@ pub fn noisy(seed: u64) -> Settings {
     let mut rng = Rng::new(seed.wrapping_add(1));
     let mut pick = |low: u64, high: u64| u32::try_from(rng.between(low, high)).expect("small numbers");
     let (sessions, parallel_tools) = (pick(1, 4), pick(1, 4));
-    Settings {
+    let mut settings = Settings {
         agent: Limits {
             sessions,
             messages: pick(4, 16),
@@ -83,7 +83,17 @@ pub fn noisy(seed: u64) -> Settings {
         granule: Duration::from_millis((pick(0, 1) * pick(100, 1_000)).into()),
         serving: Span::millis(10, 3_000),
         ..calm
-    }
+    };
+    // Keep the original 2000..8000 draw and every RNG operation above. The
+    // original draw pressures retained payload; canonical terminals additionally
+    // require pre-effect provider/result credit (domain/session.md, sections 3, 5
+    // and 12). This checked envelope retains the original receiving maxima.
+    settings.agent.session_bytes = settings
+        .agent
+        .session_bytes
+        .checked_add(crate::reservation_envelope(&settings.agent).expect("bounded scripted credits"))
+        .expect("bounded pressure plus credit envelope");
+    settings
 }
 
 /// Up to eight sessions opened at random times in the first minute, each with

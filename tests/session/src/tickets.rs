@@ -1,7 +1,7 @@
 //! Tickets: the values a session names but cannot hold, kept for it by its
 //! opener's side, as the root domain keeps them for a real session: the
-//! tools the opener serves, the calls the LLM made to them, and the opener's
-//! answers. A session's tickets are freed when it ends, and resolving one
+//! tools the opener serves, the calls the LLM made to them. Concrete answers move directly
+//! into the session. A session's tickets are freed when it ends, and resolving one
 //! after that is a bug the world catches.
 
 use std::collections::BTreeMap;
@@ -50,19 +50,6 @@ pub enum Ticketed {
         ///
         /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
         arguments: Box<[u8]>,
-    },
-    /// The opener's answer to a call.
-    ///
-    /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
-    Answer {
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
-        ///
-        /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
-        text: Box<[u8]>,
-        /// Whether the scripted opener answer reports a tool failure.
-        ///
-        /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
-        error: bool,
     },
 }
 

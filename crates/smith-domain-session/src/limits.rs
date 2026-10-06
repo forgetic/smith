@@ -9,7 +9,7 @@ use smith_domain_tools as tools;
 use crate::boundary::Budget;
 use crate::facts::Fact;
 use crate::llm::{Block, Message};
-use crate::record::Turn;
+use crate::record::{Opening, Turn};
 use crate::session::{Alarm, Ready, Run, Session, Slot};
 
 /// The most tool calls a session runs at once: what `Limits::parallel_tools`
@@ -28,7 +28,7 @@ pub struct Limits {
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub sessions: u32,
-    /// Largest version-two deployment-unit budget admitted. V1 does not use it.
+    /// Largest deployment-unit budget admitted by the parent opening.
     ///
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub spend: u64,
@@ -43,13 +43,13 @@ pub struct Limits {
     /// Copy baseline: domain/session.md, sections 3, 4, 5, 6 and 12.
     pub session_bytes: u64,
 
-    /// Maximum owned content of one actual V2 provider completion, including
+    /// Maximum owned content of one actual provider completion, including
     /// block cells, replay envelopes and decoded owned-call fields. The session
     /// reserves this and every possible unstarted result before asking the provider.
     /// Contract: domain/session.md, sections 3, 5 and 12.
     pub completion_bytes: u64,
 
-    /// Maximum blocks in an actual V2 completion; result-slot storage is
+    /// Maximum blocks in an actual completion; result-slot storage is
     /// reserved independently before the provider request. The adapter's full
     /// translated completion bound must obey both receiving caps.
     /// Contract: domain/session.md, sections 3, 5 and 12.
@@ -118,7 +118,7 @@ pub struct Limits {
     pub tools: tools::Limits,
 }
 
-/// Logical V2 room secured before each provider request: maximum completion,
+/// Logical room secured before each provider request: maximum completion,
 /// copied result IDs/details and independent Block/Slot skeleton wrappers.
 /// This does not allocate memory or lower the transcript payload ceiling; it
 /// prevents a provider effect whose actual in-cap terminal cannot be retained.
@@ -163,18 +163,24 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     // Each session owns its transcript's list and up to its byte limit.
     // Result slots coexist with the assembled result Block array. The latter
     // is charged in session_bytes; the full Slot container is additional.
-    // V1 can fill the byte cap with minimal calls; V2 additionally promises
-    // its configured block count. No assumption that Slot <= Block is needed.
+    // The whole byte-cap quotient and configured completion block cap form
+    // a conservative bound for any admitted live batch, also across restore.
+    // Keeping their maximum avoids assuming Slot <= Block.
     let block = u64::try_from(size_of::<Block>()).ok()?;
     let calls = u32::try_from(limits.session_bytes.checked_div(block)?).ok()?.max(limits.completion_blocks);
     let slots = List::<Slot>::worst_case(calls)?;
     let session =
         List::<Message>::worst_case(limits.messages)?.checked_add(slots)?.checked_add(limits.session_bytes)?;
     let held = u64::from(limits.sessions).checked_mul(session)?;
-    // One restore event at a time may still own its bounded record envelopes
-    // while its messages move into the already allocated transcript list.
-    let staging =
-        List::<Turn>::worst_case(limits.messages)?.checked_add(List::<Message>::worst_case(limits.messages)?)?;
+    // One parent handoff owns exactly one fixed boxed Opening node. Its
+    // validated payload is charged by the session byte cap, and its restore
+    // envelopes may coexist while messages move into the transcript list.
+    // Count the node throughout input validation and transfer, independently
+    // of its release timing and all payload/record cells.
+    let opening = u64::try_from(size_of::<Opening>()).ok()?;
+    let staging = List::<Turn>::worst_case(limits.messages)?
+        .checked_add(List::<Message>::worst_case(limits.messages)?)?
+        .checked_add(opening)?;
     sessions
         .checked_add(runs)?
         .checked_add(alarms)?
