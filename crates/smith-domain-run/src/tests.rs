@@ -905,11 +905,11 @@ fn a_change_that_fails_its_checks_or_its_push_goes_back_to_the_llm() {
     assert_eq!(
         &*h.step(Event::Delivered {
             owner,
-            delivery: Delivery::Failed(crate::DeliveryFailure::new(crate::DeliveryReason::Unknown))
+            delivery: Delivery::Failed(crate::DeliveryFailure::new(0, crate::DeliveryReason::Unknown))
         }),
         &[returned(
             8,
-            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(crate::DeliveryReason::Unknown) }
+            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(0, crate::DeliveryReason::Unknown) }
         )]
     );
     assert!(h.step(end_turn(conversation)).len() == 1, "the run goes on: a nudge");
@@ -1030,11 +1030,11 @@ fn a_landing_past_its_deadline_is_stopped_and_returns_timed_out_once_it_has() {
     assert_eq!(
         &*h.step(Event::Delivered {
             owner,
-            delivery: Delivery::Failed(crate::DeliveryFailure::new(crate::DeliveryReason::TimedOut))
+            delivery: Delivery::Failed(crate::DeliveryFailure::new(0, crate::DeliveryReason::TimedOut))
         }),
         &[returned(
             8,
-            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(crate::DeliveryReason::TimedOut) }
+            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(0, crate::DeliveryReason::TimedOut) }
         )]
     );
     h.domain.reclaim();
@@ -1179,11 +1179,11 @@ fn a_push_that_lands_while_a_cancel_closes_main_wins_over_it() {
     assert_eq!(
         &*h.step(Event::Delivered {
             owner,
-            delivery: Delivery::Failed(crate::DeliveryFailure::new(crate::DeliveryReason::TimedOut))
+            delivery: Delivery::Failed(crate::DeliveryFailure::new(0, crate::DeliveryReason::TimedOut))
         }),
         &[returned(
             8,
-            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(crate::DeliveryReason::TimedOut) }
+            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(0, crate::DeliveryReason::TimedOut) }
         )]
     );
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
@@ -1661,6 +1661,7 @@ fn failed_push_reason_and_diagnostics_return_to_the_finish_caller() {
     drop(h.step(Event::Checked { owner, ran: ran(0, b"") }));
     drop(h.step(Event::Checked { owner, ran: ran(0, b"") }));
     let failure = crate::DeliveryFailure {
+        directory: 1,
         reason: crate::DeliveryReason::RefusedByTarget,
         diagnostic: crate::Diagnostic::new(b"remote: protected branch", 17),
     };
@@ -1688,6 +1689,23 @@ fn failed_push_reason_and_diagnostics_return_to_the_finish_caller() {
         pushed,
         crate::DeliveryStatus::Failed(crate::DeliveryReason::RefusedByTarget),
         "facts retain classification, no diagnostic content"
+    );
+}
+
+#[test]
+fn a_failed_delivery_with_an_unmounted_directory_is_broken_evidence() {
+    let mut h = Harness::new(LIMITS);
+    let (_, conversation) = h.coding(1, 100);
+    let owner = h.land(conversation, 7);
+    drop(h.step(Event::Checked { owner, ran: ran(0, b"") }));
+    drop(h.step(Event::Checked { owner, ran: ran(0, b"") }));
+    let failure = crate::DeliveryFailure::new(99, crate::DeliveryReason::RefusedByTarget);
+    assert_eq!(
+        &*h.step(Event::Delivered { owner, delivery: Delivery::Failed(failure) }),
+        &[returned(
+            7,
+            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(0, crate::DeliveryReason::Broken) }
+        )]
     );
 }
 
@@ -1923,7 +1941,7 @@ fn malformed_host_mount_or_zero_origin_never_becomes_successful_delivery() {
         harness.step(Event::Delivered { owner, delivery: Delivery::Delivered(wrong) }).as_ref(),
         &[returned(
             50,
-            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(crate::DeliveryReason::Broken) }
+            Returned::DeliveryFailed { failure: crate::DeliveryFailure::new(0, crate::DeliveryReason::Broken) }
         )]
     );
     drop(harness.step(finish(conversation, 51, report())));

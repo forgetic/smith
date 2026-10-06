@@ -450,11 +450,11 @@ impl Host {
         let (job, timed_out) = self.pushes.remove(&owner).expect("a push is in flight until its alarm fires");
         let moved = self.jobs.get(&job).expect("a job lives until its run, which waits on its push, answers").moved;
         let push = if timed_out {
-            Delivery::Failed(smith_domain_run::DeliveryFailure::new(smith_domain_run::DeliveryReason::TimedOut))
+            Delivery::Failed(smith_domain_run::DeliveryFailure::new(0, smith_domain_run::DeliveryReason::TimedOut))
         } else if moved {
             Delivery::Stale
         } else if self.rng.chance(self.script.push_failures) {
-            Delivery::Failed(smith_domain_run::DeliveryFailure::new(smith_domain_run::DeliveryReason::Unknown))
+            Delivery::Failed(smith_domain_run::DeliveryFailure::new(0, smith_domain_run::DeliveryReason::Unknown))
         } else {
             delivered(&self.jobs[&job].writable)
         };

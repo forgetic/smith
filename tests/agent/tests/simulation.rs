@@ -141,6 +141,7 @@ fn a_push_on_a_moved_branch_answers_stale_and_lands_nothing() {
 #[test]
 fn refused_push_feedback_reaches_the_llm_and_is_retried() {
     let failure = run::DeliveryFailure {
+        directory: 0,
         reason: run::DeliveryReason::RefusedByTarget,
         diagnostic: run::Diagnostic::new(b"remote: push refused", 0),
     };
@@ -315,7 +316,7 @@ fn five_host_terminals_preserve_report_only_contract_and_stale_ends_it() {
         HostReply::Delivered,
         HostReply::Nothing,
         HostReply::Refused,
-        HostReply::Failed(run::DeliveryFailure::new(run::DeliveryReason::Broken)),
+        HostReply::Failed(run::DeliveryFailure::new(0, run::DeliveryReason::Broken)),
         HostReply::Stale,
     ] {
         let world = settled(&Settings { job: Job::MidReport, push: reply, ..Settings::calm(42) });
@@ -375,7 +376,7 @@ fn submitted_delivery_gets_a_timed_out_host_terminal_during_shutdown() {
     };
     settings.limits.run.delivery_timeout = Duration::from_nanos(10);
     let world = settled(&settings);
-    assert_eq!(world.pushes(), [Delivery::Failed(run::DeliveryFailure::new(run::DeliveryReason::TimedOut))]);
+    assert_eq!(world.pushes(), [Delivery::Failed(run::DeliveryFailure::new(0, run::DeliveryReason::TimedOut))]);
     assert!(world.landed().is_empty());
     assert!(matches!(world.answer(), Answer::Failed { failure: Failure::Cancelled, .. }));
 }

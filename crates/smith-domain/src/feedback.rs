@@ -139,7 +139,9 @@ fn render(text: &mut Text, returned: &Returned) {
         Returned::ChecksFailed { repository, ran } => render_checks(text, repository, ran),
         Returned::Stale => text.put(b"stale"),
         Returned::DeliveryFailed { failure } => {
-            text.put(b"delivery-failed reason=");
+            text.put(b"delivery-failed directory=");
+            text.number(u64::from(failure.directory));
+            text.put(b" reason=");
             text.put(delivery_reason(failure.reason));
             text.put(b" cut=");
             text.number(failure.diagnostic.cut());

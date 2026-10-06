@@ -447,7 +447,7 @@ impl Driver {
                 let push = [
                     smith_agent_world::delivered(),
                     run::Delivery::Stale,
-                    run::Delivery::Failed(run::DeliveryFailure::new(run::DeliveryReason::Unknown)),
+                    run::Delivery::Failed(run::DeliveryFailure::new(0, run::DeliveryReason::Unknown)),
                 ][choice]
                     .clone();
                 self.seen[9 + choice] += 1;

@@ -61,6 +61,7 @@ fn opaque_receipts_diagnostics_markers_and_check_tail_are_lossless_ascii() {
     let got = feedback(
         run::Returned::DeliveryFailed {
             failure: run::DeliveryFailure {
+                directory: 0,
                 reason: run::DeliveryReason::Unknown,
                 diagnostic: run::Diagnostic::new(&opaque, u64::MAX),
             },
@@ -70,7 +71,7 @@ fn opaque_receipts_diagnostics_markers_and_check_tail_are_lossless_ascii() {
     .expect("diagnostic");
     assert_eq!(
         got.text.as_ref(),
-        [b"delivery-failed reason=unknown cut=18446744073709551615 tail=".as_slice(), encoded].concat()
+        [b"delivery-failed directory=0 reason=unknown cut=18446744073709551615 tail=".as_slice(), encoded].concat()
     );
     assert!(got.error);
     let marker = run::Marker::new(1, bytes(&[b'd', b'/', 0xff, b'"'])).expect("bounded marker");

@@ -316,6 +316,9 @@ pub enum DeliveryReason {
 /// The run forwards it as feedback and continues unless shutdown already started.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct DeliveryFailure {
+    /// Position of the first failed writable directory in workspace order.
+    pub directory: u32,
+
     /// Generic host classification, never a forge or policy label.
     pub reason: DeliveryReason,
 
@@ -326,8 +329,8 @@ pub struct DeliveryFailure {
 impl DeliveryFailure {
     /// Construct a reason-only host failure without diagnostic ownership.
     #[must_use]
-    pub const fn new(reason: DeliveryReason) -> Self {
-        Self { reason, diagnostic: Diagnostic::empty() }
+    pub const fn new(directory: u32, reason: DeliveryReason) -> Self {
+        Self { directory, reason, diagnostic: Diagnostic::empty() }
     }
 }
 

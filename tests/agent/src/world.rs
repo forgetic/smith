@@ -1089,7 +1089,7 @@ impl World {
                 let after = self.settings.network.draw(&mut self.rng);
                 let complete = self.now.saturating_add(after);
                 let push = if complete > deadline {
-                    run::Delivery::Failed(run::DeliveryFailure::new(run::DeliveryReason::TimedOut))
+                    run::Delivery::Failed(run::DeliveryFailure::new(0, run::DeliveryReason::TimedOut))
                 } else if self.settings.job == Job::MarkerReport
                     && self
                         .disk

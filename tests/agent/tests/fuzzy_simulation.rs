@@ -21,7 +21,7 @@ fn many_host_schedules_settle_against_the_boundary_referee() {
         };
         let push = match rng.below(4) {
             0 => HostReply::Stale,
-            1 => HostReply::Failed(run::DeliveryFailure::new(run::DeliveryReason::Unreachable)),
+            1 => HostReply::Failed(run::DeliveryFailure::new(0, run::DeliveryReason::Unreachable)),
             _ => HostReply::Delivered,
         };
         let cancel_at = if rng.chance(300) { Some(Duration::from_millis(rng.below(20_000))) } else { None };
@@ -49,7 +49,7 @@ fn mid_delivery_schedules_settle_with_all_terminals() {
             0 => HostReply::Delivered,
             1 => HostReply::Nothing,
             2 => HostReply::Refused,
-            3 => HostReply::Failed(run::DeliveryFailure::new(run::DeliveryReason::Unreachable)),
+            3 => HostReply::Failed(run::DeliveryFailure::new(0, run::DeliveryReason::Unreachable)),
             _ => HostReply::Stale,
         };
         let settings = Settings {

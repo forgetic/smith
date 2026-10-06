@@ -116,7 +116,7 @@ pub(crate) fn delivered(
         Delivery::Delivered(receipts) => {
             for receipt in receipts.receipts() {
                 if !writable(run, receipt.directory()) {
-                    return malformed(owner, out);
+                    return malformed(run, owner, out);
                 }
             }
             let settled =
@@ -128,19 +128,31 @@ pub(crate) fn delivered(
             if let Some(marker) = refusal.marker()
                 && !writable(run, marker.directory())
             {
-                return malformed(owner, out);
+                return malformed(run, owner, out);
             }
             back(owner, Returned::DeliveryRefused(refusal), Settled::Refused, out)
         }
-        Delivery::Failed(failure) => back(owner, Returned::DeliveryFailed { failure }, Settled::Refused, out),
+        Delivery::Failed(failure) => {
+            if !writable(run, failure.directory) {
+                return malformed(run, owner, out);
+            }
+            back(owner, Returned::DeliveryFailed { failure }, Settled::Refused, out)
+        }
         Delivery::Stale => back(owner, Returned::Stale, Settled::Stale, out),
     }
 }
 
-fn malformed(owner: Token, out: &mut Queue<Request>) -> Settled {
+fn malformed(run: &Run, owner: Token, out: &mut Queue<Request>) -> Settled {
+    let mut directory = 0;
+    for (position, mounted) in workspace::directories(run.workspace.as_ref()).iter().enumerate() {
+        if mounted.writable {
+            directory = u32::try_from(position).expect("bounded directory ordinal fits");
+            break;
+        }
+    }
     back(
         owner,
-        Returned::DeliveryFailed { failure: DeliveryFailure::new(DeliveryReason::Broken) },
+        Returned::DeliveryFailed { failure: DeliveryFailure::new(directory, DeliveryReason::Broken) },
         Settled::Refused,
         out,
     )

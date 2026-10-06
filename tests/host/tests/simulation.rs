@@ -764,6 +764,7 @@ fn every_delivery_terminal_survives_withdrawal_and_expired_deadline() {
             .expect("refusal"),
         ),
         Delivery::Failed(smith_host_domain::DeliveryFailure {
+            directory: 0,
             reason: smith_host_domain::DeliveryReason::Broken,
             diagnostic: smith_host_domain::Diagnostic::new(b"tail", 0),
         }),

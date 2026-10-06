@@ -97,6 +97,50 @@ fn feedback_has(query: &Query, part: &[u8]) -> bool {
 }
 
 #[test]
+fn a_delivery_to_three_directories_failing_in_the_second_names_that_directory() {
+    let mut disk = Checkout::new();
+    let mut directories = Vec::new();
+    for name in [b"one".as_slice(), b"two", b"three"] {
+        disk.mkdir(name);
+        disk.write(&[name, b"/.temper/pre-pr"].concat(), b"#!checks");
+        disk.write(&[name, b"/src/lib.rs"].concat(), b"pub fn answer() -> u32 { 43 }\n");
+        directories.push(run::Directory {
+            name: name.into(),
+            root: Token::new(disk.root(name)),
+            writable: true,
+            git: false,
+            conflicts: Box::new([]),
+        });
+    }
+    let workspace = run::Workspace { directories: directories.into() };
+    let mut settings = Settings { job: Job::MidReport, ..Settings::calm(1003) };
+    settings.limits.run.directories = 3;
+    settings.limits.session.tools.repos = 3;
+    let scripts = Box::new([Script {
+        cue: b"@midreport".as_slice().into(),
+        turns: Box::new([
+            calls(vec![call(b"deliver", br#"{"ticket":"three-directory-tree"}"#)], 1),
+            calls(vec![call(b"finish", br#"{"report":"Delivery failed.","source":"workspace"}"#)], 1),
+        ]),
+    }]);
+    let mut world = World::with_workspace_scripts(settings, None, Some(workspace), disk, scripts);
+    world.enable_parent_deliveries();
+    for _ in 0..10_000 {
+        assert!(!world.drive(1));
+        if !world.delivery_submissions().is_empty() {
+            break;
+        }
+    }
+    assert_eq!(world.delivery_submissions().len(), 1);
+    let owner = world.delivery_submissions()[0].owner;
+    let failure = run::DeliveryFailure::new(1, run::DeliveryReason::RefusedByTarget);
+    world.return_delivery(owner, run::Delivery::Failed(failure)).expect("one failed delivery terminal");
+    world.run(10_000);
+    assert!(world.prompts().iter().any(|query| feedback_has(query, b"delivery-failed directory=1")));
+    assert!(matches!(world.answer(), run::Answer::Accepted { outcome: run::outcome::Declared::Report(_), .. }));
+}
+
+#[test]
 fn mixed_git_plain_and_readonly_mounts_share_discovery_and_child_authority() {
     let (disk, workspace) = mixed_disk();
     let readonly_git = disk.tree(b"archive");

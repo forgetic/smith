@@ -44,8 +44,8 @@ fn every_run_call_terminal_has_canonical_feedback() {
         ),
         (run::Returned::Stale, "stale", true),
         (
-            run::Returned::DeliveryFailed { failure: run::DeliveryFailure::new(run::DeliveryReason::Unknown) },
-            "delivery-failed reason=unknown cut=0 tail=\"\"",
+            run::Returned::DeliveryFailed { failure: run::DeliveryFailure::new(0, run::DeliveryReason::Unknown) },
+            "delivery-failed directory=0 reason=unknown cut=0 tail=\"\"",
             true,
         ),
         (run::Returned::Cancelled, "cancelled", true),
@@ -131,11 +131,16 @@ fn every_delivery_reason_and_check_exit_is_visible() {
         (run::DeliveryReason::Unknown, "unknown"),
     ] {
         rendered(
-            run::Returned::DeliveryFailed { failure: run::DeliveryFailure::new(reason) },
-            &format!("delivery-failed reason={label} cut=0 tail=\"\""),
+            run::Returned::DeliveryFailed { failure: run::DeliveryFailure::new(0, reason) },
+            &format!("delivery-failed directory=0 reason={label} cut=0 tail=\"\""),
             true,
         );
     }
+    rendered(
+        run::Returned::DeliveryFailed { failure: run::DeliveryFailure::new(2, run::DeliveryReason::Unreachable) },
+        "delivery-failed directory=2 reason=unreachable cut=0 tail=\"\"",
+        true,
+    );
     for (exit, label) in [
         (run::Exit::Code { code: 7 }, "code:7"),
         (run::Exit::Signalled, "signalled"),
