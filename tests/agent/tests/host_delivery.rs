@@ -160,7 +160,7 @@ fn submitted(agent: &mut Agent, host: &mut Host, next: &mut usize) -> DeliverySu
     host.up(Up::Call {
         call: submission.owner,
         name: host::CallName {
-            activation: 1,
+            activation: submission.name.activation,
             completion: submission.name.completion,
             position: submission.name.position,
         },
@@ -217,7 +217,7 @@ fn final_answer(agent: &Agent) -> host::Answer {
         spend_overflow: spent.units_overflow,
         usage_overflow: spent.usage_overflow,
         result: RunResult::Delivered {
-            name: host::CallName { activation: 1, completion: name.completion, position: name.position },
+            name: host::CallName { activation: name.activation, completion: name.completion, position: name.position },
             receipts: host_receipt(receipts),
             stopped: host::RunFailure::Cancelled,
         },

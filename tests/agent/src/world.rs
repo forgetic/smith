@@ -484,7 +484,7 @@ impl World {
         stage.push(Event::Start {
             reply_to: ReplyTo::new(Token::new(1)),
             worker: Token::new(1),
-            activation: 1,
+            activation: if settings.resume { 2 } else { 1 },
             charter,
             workspace,
             grants: Box::new([Grant {

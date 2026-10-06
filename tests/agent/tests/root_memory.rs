@@ -946,7 +946,7 @@ impl Counted {
             workspace: Some(workspace()),
             reply_to: ReplyTo::new(PARENT),
             worker: WORKER,
-            activation: 1,
+            activation: if restoring { 2 } else { 1 },
             charter: charter(restoring),
             transcript: history,
             grants: Box::new([Grant {
