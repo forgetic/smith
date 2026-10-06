@@ -1,10 +1,10 @@
 //! Memory stays within the worst case (programming-model.md, section 6.3), measured by
 //! a counting allocator: the session child domain with every session filled to
-//! its limits, and lib's containers on their own.
+//! its limits. Skein tests its generic containers in its own memory world.
 
 use std::mem::size_of;
 
-use skein_lib::{Deadlines, Duration, Env, List, Map, Queue, Rng, Set, Slab, Time, Token, Wall};
+use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 use skein_world::domain::heap::{self, Meter};
 use smith_domain_session::llm::{Block, Completion, Decoded, Descriptor, Endpoint, Failure, Problem, Stop, Usage};
 use smith_domain_session::{Budget, Domain, Event, Limits, MAX_PARALLEL, Request, Spec, max_out, worst_case};
@@ -382,120 +382,6 @@ fn a_domain_with_every_session_full_stays_within_its_worst_case() {
             fill(Limits { sessions: 1000, spend: 1, messages: 8, session_bytes: 600, ..LIMITS }, route, full_service);
             fill(Limits { sessions: 64, spend: 1, parallel_tools: MAX_PARALLEL, ..LIMITS }, route, full_service);
         }
-    }
-}
-
-/// Arms, re-arms, cancels and fires timers at random in a table of `capacity`,
-/// checking the peak of its heap in every change against its worst case. The
-/// bound
-/// leans on how the standard library builds its B-trees, which this checks.
-fn churn<K: Ord + Copy>(capacity: u32, seed: u64, key: fn(u64) -> K) {
-    let bound = Deadlines::<K>::worst_case(capacity).expect("a test capacity fits");
-    let mut rng = Rng::new(seed);
-    let meter = Meter::new();
-    let mut timers = Deadlines::with_capacity(capacity);
-    let keys = u64::from(capacity) * 2;
-    for round in 0..u64::from(capacity) * 20 {
-        meter.start();
-        match rng.below(8) {
-            0..=4 => drop(timers.arm(key(rng.below(keys)), Time::from_nanos(round + rng.below(keys)))),
-            5 | 6 => timers.cancel(key(rng.below(keys))),
-            _ => drop(timers.expire(Time::from_nanos(round))),
-        }
-        meter.check(meter.end(), bound, &format_args!("{capacity} timers"));
-    }
-}
-
-#[test]
-fn a_deadline_table_stays_within_its_worst_case_whatever_its_keys_and_order() {
-    for capacity in [1, 2, 11, 64, 1000] {
-        for seed in 0..4 {
-            churn(capacity, seed, |n| u8::try_from(n % 256).expect("below 256"));
-            churn(capacity, seed, |n| (u32::try_from(n).expect("a small key"), 7_u32));
-            churn(capacity, seed, |n| [n; 4]);
-        }
-    }
-}
-
-/// Inserts, replaces, updates and removes entries at random in a map of
-/// `capacity`, checking the peak of its heap in every change against its worst
-/// case. `payload` is the heap each entry's key and value own, which is the
-/// owner's to count: the bound adds it for each entry held, and for the key
-/// handed in.
-fn traffic<K: Ord, V>(capacity: u32, seed: u64, key: fn(u64) -> K, value: fn(u64) -> V, payload: u64) {
-    let bound = Map::<K, V>::worst_case(capacity).expect("a test capacity fits");
-    let mut rng = Rng::new(seed);
-    let meter = Meter::new();
-    let mut map = Map::with_capacity(capacity);
-    let keys = u64::from(capacity) * 2;
-    for _ in 0..u64::from(capacity) * 20 {
-        let owned = (u64::from(map.len()) + 1) * payload;
-        meter.start();
-        match rng.below(8) {
-            0..=4 => drop(map.insert(key(rng.below(keys)), value(rng.next_u64()))),
-            5 => {
-                if let Some(slot) = map.get_mut(&key(rng.below(keys))) {
-                    *slot = value(rng.next_u64());
-                }
-            }
-            _ => drop(map.remove(&key(rng.below(keys)))),
-        }
-        meter.check(meter.end(), bound + owned, &format_args!("{capacity} entries"));
-    }
-}
-
-/// The same for a set.
-fn members<K: Ord>(capacity: u32, seed: u64, key: fn(u64) -> K) {
-    let bound = Set::<K>::worst_case(capacity).expect("a test capacity fits");
-    let mut rng = Rng::new(seed);
-    let meter = Meter::new();
-    let mut set = Set::with_capacity(capacity);
-    let keys = u64::from(capacity) * 2;
-    for _ in 0..u64::from(capacity) * 20 {
-        meter.start();
-        if rng.chance(600) {
-            drop(set.insert(key(rng.below(keys))));
-        } else {
-            let _: bool = set.remove(&key(rng.below(keys)));
-        }
-        meter.check(meter.end(), bound, &format_args!("{capacity} keys"));
-    }
-}
-
-#[test]
-fn maps_and_sets_stay_within_their_worst_case_whatever_their_keys_and_values() {
-    for capacity in [1, 2, 11, 64, 1000] {
-        for seed in 0..4 {
-            traffic(capacity, seed, |n| u8::try_from(n % 256).expect("below 256"), |_| (), 0);
-            traffic(capacity, seed, |n| (u32::try_from(n).expect("a small key"), 7_u32), |n| n, 0);
-            traffic(capacity, seed, |n| [n; 4], |n| [n.to_be_bytes()[7]; 3], 0);
-            // Keys that own their bytes, as paths do: eight each.
-            traffic(capacity, seed, |n| Box::<[u8]>::from(n.to_be_bytes()), |n| n, 8);
-            members(capacity, seed, |n| u16::try_from(n).expect("a small key"));
-            members(capacity, seed, |n| [n; 3]);
-        }
-    }
-}
-
-#[test]
-fn slabs_lists_and_queues_take_no_more_than_their_worst_case() {
-    for capacity in [0, 1, 100] {
-        let meter = Meter::new();
-        meter.start();
-        let slab: Slab<[u64; 5]> = Slab::with_capacity(capacity);
-        let bound = Slab::<[u64; 5]>::worst_case(capacity).expect("fits");
-        meter.check(meter.end(), bound, &format_args!("a slab of {capacity}"));
-        drop(slab);
-        meter.start();
-        let list: List<[u64; 5]> = List::with_capacity(capacity);
-        let bound = List::<[u64; 5]>::worst_case(capacity).expect("fits");
-        meter.check(meter.end(), bound, &format_args!("a list of {capacity}"));
-        drop(list);
-        meter.start();
-        let queue: Queue<[u64; 5]> = Queue::with_capacity(capacity);
-        let bound = Queue::<[u64; 5]>::worst_case(capacity).expect("fits");
-        meter.check(meter.end(), bound, &format_args!("a queue of {capacity}"));
-        drop(queue);
     }
 }
 
