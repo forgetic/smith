@@ -1,4 +1,4 @@
-//! Host-owned optional workspace metadata (domain/run.md, sections 3.2, 8.3 and 14).
+//! Host-owned optional workspace metadata (domain/run.md, sections 3.2 and 8.3).
 //! Admission bounds counts and payloads before comparing names or paths. Retained
 //! roots and write authority are immutable; this module never knows filesystem
 //! contents, host delivery policy or credentials. `check` validates before effects.
@@ -13,41 +13,33 @@ use skein_lib::Token;
 
 /// Host-selected directories, moved with Start and retained until the run ends.
 /// None at Start means no workspace; a present empty workspace is refused.
-/// Contract: domain/run.md, sections 3.2, 8.3 and 14; domain/tools.md, section 2.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Workspace {
     /// Ordered unique mounts, bounded by receiving `Limits::directories`.
-    /// Contract: domain/run.md, sections 3.2 and 14.
     pub directories: Box<[Directory]>,
 }
 
 /// Immutable host mount and initial git merge evidence, admitted before IO.
-/// Contract: domain/run.md, sections 3.2, 8.1, 8.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Directory {
     /// Unique safe single component, bounded by `Limits::directory_name_bytes`.
     /// The host attests textual encoding; bytes are compared and rendered
     /// unchanged without domain decoding or replacement.
-    /// Contract: domain/run.md, sections 3.2 and 12; domain/tools.md, section 2.
     pub name: Box<[u8]>,
 
     /// Unique opaque lower IO root, carrying no filesystem knowledge here.
-    /// Contract: domain/run.md, sections 3.2 and 12.
     pub root: Token,
 
     /// Host write authority; discovery and checks never widen it.
-    /// Contract: domain/run.md, sections 2, 3.2 and 8.1.
     pub writable: bool,
 
     /// Whether the host prepared this directory as a git working tree.
-    /// Contract: domain/run.md, sections 3.2 and 8.3.
     pub git: bool,
 
     /// Initial relative conflict paths, unique within this git directory and
     /// bounded by receiving count/path caps. The host attests text encoding;
     /// paths are preserved unchanged. Plain directories require none;
     /// read-only git conflict evidence remains informative and grants no writes.
-    /// Contract: domain/run.md, sections 3.2, 8.3, 12 and 14.
     pub conflicts: Box<[Box<[u8]>]>,
 }
 

@@ -1,5 +1,5 @@
 //! What a run finds in its checkout before it opens its main conversation
-//! (domain/run.md, section 14). The engine never reads a repository, so the
+//! (domain/run.md, sections 3.3 and 8.1). The engine never reads a repository, so the
 //! run looks for itself:
 //!
 //! - For each repository, the start of its selected guide, which the system text

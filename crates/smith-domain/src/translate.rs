@@ -1,7 +1,11 @@
-//! The translations between the run's vocabulary and the session's (programming-model.md, section 4.5):
+//! The translations between the run's vocabulary and the session's (programming-model.md, section 4.5;
+//! domain/run.md, sections 5, 6, 9 and 13; domain/session.md, sections 3–6):
 //! siblings share no types, so the run's conversations and the sessions meet
 //! here, through small total functions, each an exhaustive match, so that a
 //! variant added on either side breaks the build in one place.
+//! These functions retain no state and know no provider wire syntax, host
+//! policy or checkout contents. The root calls them while routing openings,
+//! tools, outcomes and turn records between its two child domains.
 
 use alloc::boxed::Box;
 
@@ -22,11 +26,9 @@ pub(crate) const SUB_AGENT: Token = Token::new(1);
 pub(crate) const DELIVER: Token = Token::new(2);
 
 /// First live ticket, separate from the fixed served-tool descriptors.
-/// Contract: domain/run.md, sections 8.2 and 8.4.
 pub(crate) const WAIT: Token = Token::new(3);
 
 /// First live descriptor/ask ticket, separate from all fixed tool descriptors.
-/// Contract: domain/run.md, sections 6 and 13.
 pub(crate) const FIRST: u64 = 4;
 
 /// The tools the run serves a conversation.
@@ -240,7 +242,6 @@ pub(crate) const fn host_effect(effect: run::HostEffect) -> Effect {
 }
 
 /// Lossless small sibling translation; no provider parsing or retry policy.
-/// Contract: domain/run.md, sections 5, 10 and 14; domain/session.md, section 5.
 fn completion_failure(failure: llm::Failure) -> run::CompletionFailure {
     match failure {
         llm::Failure::Limit => run::CompletionFailure::Limit,
@@ -258,7 +259,6 @@ fn completion_failure(failure: llm::Failure) -> run::CompletionFailure {
 }
 
 /// Transport evidence is copied exactly, without inferring absence of effects.
-/// Contract: domain/run.md, sections 5, 10 and 14; domain/session.md, section 5.
 fn completion_evidence(evidence: llm::Evidence) -> run::CompletionEvidence {
     match evidence {
         llm::Evidence::Unsent => run::CompletionEvidence::Unsent,
@@ -268,7 +268,6 @@ fn completion_evidence(evidence: llm::Evidence) -> run::CompletionEvidence {
 }
 
 /// Small total sibling translation; no history refusal becomes a fresh retry.
-/// Contract: domain/run.md, section 13; domain/session.md, section 3.
 const fn transcript_refusal(reason: session::record::Refusal) -> run::TranscriptRefusal {
     match reason {
         session::record::Refusal::Version => run::TranscriptRefusal::Version,

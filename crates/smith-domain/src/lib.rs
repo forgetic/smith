@@ -1,4 +1,4 @@
-//! The agent root (domain/run.md, sections 2, 3, 10 and 14;
+//! The agent root (domain/run.md, sections 2, 3 and 10;
 //! programming-model.md, sections 4.4 and 4.5). It owns the run and session
 //! children, opaque credential names and validity, conversation bindings,
 //! tool tickets, deferred handoffs and bounded observation queues.

@@ -1,5 +1,5 @@
 //! Host-supplied result contracts and protocol-decoded finish values
-//! (domain/run.md, sections 3.1, 7.1–7.3 and 14). Labels have no built-in
+//! (domain/run.md, sections 3.1, 7.1–7.3). Labels have no built-in
 //! meaning: this module keeps no runtime state, reads no clocks and performs
 //! no checkout or host effect. The run admits a satisfiable bounded contract,
 //! bounds a declaration with `owned_bytes`, then calls `judge` for shape.
@@ -15,149 +15,93 @@ use crate::charter::{count, len};
 use crate::limits::Limits;
 
 /// The host's permitted forms. Admission requires at least one, valid unique rules and a smallest accepted value for every allowed form within the result cap.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct OutcomeSpec {
     /// `Change` contract, or none. A validated change requires the existing host `Delivery` terminal before acceptance.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub change: Option<ChangeSpec>,
     /// Closed host labels and their contracts; empty forbids verdicts. Count is bounded by `Limits`.verdicts, total rule ownership by `Limits`.`run_bytes`.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub verdicts: Box<[VerdictRule]>,
     /// `Report` contract, or none. A validated report ends after all sessions settle, without checks or `Delivery`.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub report: Option<TextSpec>,
     /// Declared-failure contract, or none. An admitted reason is an accepted result, distinct from a runtime failure.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub failure: Option<TextSpec>,
 }
 
 /// One required field chosen by the host; the run compares its name exactly and applies its byte bound.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FieldRule {
     /// Nonempty required byte name, unique within this rule list. Box and name count against `Limits`.`run_bytes`.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub name: Box<[u8]>,
     /// Positive largest accepted value byte length. The required value must be present exactly once and nonempty; all fields also share the aggregate outcome cap.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub max: u32,
 }
 
 /// Host field contract for a final Change or separately granted mid-run delivery.
 /// The result contract decides whether failing checks block delivery.
 /// Minimum field/container storage is checked at charter admission.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3, 8.1, 8.4 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ChangeSpec {
     /// Whether a failing workspace check blocks delivery. A mid-run delivery
     /// without a Change result contract always requires passing checks.
-    /// Contract: domain/run.md, sections 7.1, 8.1 and 8.4.
     pub checks_must_pass: bool,
 
     /// Required result fields with host-chosen byte names and individual value bounds; no title/body vocabulary is interpreted by smith.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[FieldRule]>,
 }
 
 /// The host's report or declared-failure contract. Its text or reason has a
 /// maximum byte length; required fields are nonempty and bounded.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TextSpec {
     /// Inclusive largest report text or declared failure reason length in bytes; aggregate ownership still obeys `Limits`.`outcome_bytes`.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub max: u32,
     /// Required host-named result fields; retained rules count against `Limits`.`run_bytes`.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[FieldRule]>,
 }
 
 /// One host-chosen label and its text, root fields and allowed result items. Label equality is byte-exact; smith assigns no review semantics.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct VerdictRule {
     /// Nonempty host label, unique across the closed verdict list; counted in charter ownership.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub name: Box<[u8]>,
     /// Largest verdict text byte length; zero permits empty text only. `Verdict` text is otherwise allowed to be empty.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub text_max: u32,
     /// Required fields on the verdict itself, checked independently of item fields.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[FieldRule]>,
     /// Host-selected count range and per-kind field requirements; no items are required when min is zero.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub items: ItemSpec,
 }
 
 /// Host contract for the result's ordered items. Admission requires min <= max and a nonempty kind list when max is positive; the minimum accepted result must fit aggregate ownership.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ItemSpec {
     /// Inclusive smallest accepted item count; its smallest admissible items must fit `Limits`.`outcome_bytes` together with the result.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub min: u32,
     /// Inclusive largest accepted item count; concrete item storage and payload remain bounded by the aggregate outcome cap.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub max: u32,
     /// Closed, uniquely named item kinds. Each carries its own required fields, and every rule contributes to charter ownership.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub kinds: Box<[ItemRule]>,
 }
 
 /// One host-named allowed item kind, with field requirements specific to that kind.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct ItemRule {
     /// Nonempty byte name, unique in the kind list. The run never interprets its meaning.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub kind: Box<[u8]>,
     /// Required fields on an item of this exact kind; another kind's fields confer no requirement.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[FieldRule]>,
 }
 
 /// Protocol-decoded LLM change result. The run validates fields and aggregate ownership before checks/`Delivery`; the host receives these fields unchanged.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Change {
     /// LLM-provided named values. Host rules require nonempty bounded values for their names; extra names are permitted. All names must be unique.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[Field]>,
 }
 
 impl Change {
     /// Count every owned field container, name and value, including unknown extra
     /// fields. The run/root check this aggregate before retaining a delivery ask.
-    /// Contract: domain/run.md, sections 7.1 and 8.4; programming-model.md, section 6.3.
     #[must_use]
     pub fn owned_bytes(&self) -> Option<u64> {
         fields_cost(&self.fields)
@@ -165,246 +109,177 @@ impl Change {
 }
 
 /// Protocol-decoded LLM report. Accepted after contract judgement and settlement, without checking or pushing the workspace.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Report {
     /// Report text within the host `TextSpec` maximum; its bytes count against aggregate ownership.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub text: Box<[u8]>,
     /// LLM-provided result fields, checked against the report's own required rules and aggregate ownership.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[Field]>,
 }
 
 /// Protocol-decoded LLM declaration that the work cannot be completed. Its successful contract judgement yields an accepted result, never a runtime failure classification.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct DeclaredFailure {
     /// LLM explanation within the host `TextSpec` maximum; the host interprets its meaning.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub reason: Box<[u8]>,
     /// LLM-provided result fields, checked against this failure contract's required rules and aggregate ownership.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[Field]>,
 }
 
 /// Protocol-decoded LLM verdict. The closed host label selects text, root-field and per-kind item requirements.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Verdict {
     /// Byte-exact host verdict label; an unknown label is rejected as finish feedback.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub name: Box<[u8]>,
     /// LLM verdict explanation, at most `VerdictRule::text_max` bytes; empty is permitted.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub text: Box<[u8]>,
     /// Named values on the verdict itself; independent of every item's field list.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[Field]>,
     /// Ordered result items. Count, kind-specific required fields and aggregate boxed-storage-plus-payload ownership are checked before acceptance.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub items: Box<[Item]>,
 }
 
 /// One LLM-provided item whose byte kind selects its host-defined field rules. It starts no task or action on its own.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Item {
     /// Exact allowed host kind name, counted with item storage against the aggregate outcome cap.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub kind: Box<[u8]>,
     /// LLM-provided named values, unique within this item and validated under this kind's required rules.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub fields: Box<[Field]>,
 }
 
 /// One LLM-provided named result value. Required host names must exist, be nonempty and fit their own cap; extra fields may be empty, but duplicates are always refused.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Field {
     /// Byte name interpreted only as a contract label; box storage and name bytes count against `Limits`.`outcome_bytes`.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub name: Box<[u8]>,
     /// Result value bytes interpreted by the host. Required names obey `FieldRule::max`; extra fields remain bounded by aggregate ownership.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub value: Box<[u8]>,
 }
 
 /// Bounded typed finish feedback returned to the LLM; it does not end the run and carries no authority.
-///
-/// Contract: domain/run.md, sections 3.1, 7.1–7.3 and 14.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Problems {
     /// First at most `LISTED` problems in deterministic validation order. Copied field names come from the already bounded contract or declaration.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub listed: Box<[Problem]>,
     /// Saturating count of additional problems omitted after the feedback list fills.
-    ///
-    /// Contract: domain/run.md, section 7.1.
     pub more: u32,
 }
 
 /// Protocol-decoded finish form. All payloads share `Limits.outcome_bytes`
 /// checked by the run before shape judgement. Only `Change` requires `Delivery`;
 /// every other valid form winds down the sessions and becomes the accepted answer.
-///
-/// Contract: domain/run.md, sections 7.1, 7.2 and 10.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum Declared {
     /// Workspace change with generic host fields; accepts only after host delivery.
-    /// Contract: domain/run.md, sections 7.1, 7.2 and 8.
     Change(
         /// Protocol-decoded fields validated before any check or `Delivery`.
-        /// Contract: domain/run.md, sections 7.1 and 7.2.
         Change,
     ),
     /// Host-labelled verdict; starts no workspace delivery.
-    /// Contract: domain/run.md, sections 7.1 and 7.2.
     Verdict(
         /// Protocol-decoded verdict and per-kind items, bounded before judgement.
-        /// Contract: domain/run.md, sections 7.1 and 7.2.
         Verdict,
     ),
     /// Text report satisfying the host's own report fields.
-    /// Contract: domain/run.md, sections 7.1 and 7.2.
     Report(
         /// Protocol-decoded text and fields, accepted without `Delivery`.
-        /// Contract: domain/run.md, sections 7.1 and 7.2.
         Report,
     ),
     /// LLM-declared inability to complete, distinct from runtime failure.
-    /// Contract: domain/run.md, sections 7.1, 7.2 and 10.
     Failure(
         /// Protocol-decoded bounded reason and fields, accepted after judgement.
-        /// Contract: domain/run.md, sections 7.1 and 7.2.
         DeclaredFailure,
     ),
 }
 
 /// Form whose text failed its host contract; it contains no user content.
-/// Contract: domain/run.md, section 7.1.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Form {
-    /// `Report` text. Contract: domain/run.md, section 7.1.
+    /// `Report` text.
     Report,
-    /// `Verdict` explanation. Contract: domain/run.md, section 7.1.
+    /// `Verdict` explanation.
     Verdict,
-    /// Declared failure reason. Contract: domain/run.md, section 7.1.
+    /// Declared failure reason.
     Failure,
 }
 
 /// One shape or ownership violation returned as finish feedback. `Item` indices
 /// are zero-based and `None` on fields of the result itself. Names are copied
 /// only into the first eight listed problems, from already bounded inputs.
-/// Contract: domain/run.md, sections 7.1 and 7.2.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Problem {
     /// Aggregate boxed-storage-plus-payload bytes exceed the run's cap.
-    /// Contract: domain/run.md, sections 7.1 and 7.2.
     TooLarge {
         /// `Limits.outcome_bytes` applied before shape judgement.
-        /// Contract: domain/run.md, section 7.1.
         max: u64,
     },
-    /// Host forbids change. Contract: domain/run.md, section 7.1.
+    /// Host forbids change.
     ChangeNotAllowed,
-    /// Host forbids verdict. Contract: domain/run.md, section 7.1.
+    /// Host forbids verdict.
     VerdictNotAllowed,
-    /// Host forbids report. Contract: domain/run.md, section 7.1.
+    /// Host forbids report.
     ReportNotAllowed,
-    /// Host forbids declared failure. Contract: domain/run.md, section 7.1.
+    /// Host forbids declared failure.
     FailureNotAllowed,
-    /// No byte-exact host verdict label matches. Contract: domain/run.md, section 7.1.
+    /// No byte-exact host verdict label matches.
     UnknownVerdict,
-    /// Result text exceeds its host-defined individual byte cap. Contract: domain/run.md, section 7.1.
+    /// Result text exceeds its host-defined individual byte cap.
     TextTooLarge {
         /// The text-bearing form whose byte length exceeded the cap.
-        /// Contract: domain/run.md, section 7.1.
         form: Form,
         /// Inclusive host text/reason byte limit.
-        /// Contract: domain/run.md, section 7.1.
         max: u32,
     },
-    /// `Verdict` has fewer items than required. Contract: domain/run.md, section 7.1.
+    /// `Verdict` has fewer items than required.
     TooFewItems {
         /// Inclusive host minimum item count.
-        /// Contract: domain/run.md, section 7.1.
         min: u32,
     },
-    /// `Verdict` has more items than allowed. Contract: domain/run.md, section 7.1.
+    /// `Verdict` has more items than allowed.
     TooManyItems {
         /// Inclusive host maximum item count.
-        /// Contract: domain/run.md, section 7.1.
         max: u32,
     },
-    /// `Item` kind is not in this verdict's closed list. Contract: domain/run.md, section 7.1.
+    /// `Item` kind is not in this verdict's closed list.
     KindNotAllowed {
         /// Zero-based index in the declared verdict's ordered items.
-        /// Contract: domain/run.md, section 7.1.
         item: u32,
     },
-    /// A required named field is absent. Contract: domain/run.md, section 7.1.
+    /// A required named field is absent.
     MissingField {
         /// `None` for the result itself; otherwise its zero-based item index.
-        /// Contract: domain/run.md, section 7.1.
         item: Option<u32>,
         /// Exact required or repeated byte name; copied only while feedback room remains.
-        /// Contract: domain/run.md, sections 7.1 and 7.2.
         field: Box<[u8]>,
     },
-    /// A required named value is empty. Contract: domain/run.md, section 7.1.
+    /// A required named value is empty.
     EmptyField {
         /// `None` for the result itself; otherwise its zero-based item index.
-        /// Contract: domain/run.md, section 7.1.
         item: Option<u32>,
         /// Exact required or repeated byte name; copied only while feedback room remains.
-        /// Contract: domain/run.md, sections 7.1 and 7.2.
         field: Box<[u8]>,
     },
-    /// The same byte field name occurs more than once. Contract: domain/run.md, section 7.1.
+    /// The same byte field name occurs more than once.
     RepeatedField {
         /// `None` for the result itself; otherwise its zero-based item index.
-        /// Contract: domain/run.md, section 7.1.
         item: Option<u32>,
         /// Exact required or repeated byte name; copied only while feedback room remains.
-        /// Contract: domain/run.md, sections 7.1 and 7.2.
         field: Box<[u8]>,
     },
-    /// A required named value exceeds its individual host cap. Contract: domain/run.md, section 7.1.
+    /// A required named value exceeds its individual host cap.
     FieldTooLarge {
         /// `None` for the result itself; otherwise its zero-based item index.
-        /// Contract: domain/run.md, section 7.1.
         item: Option<u32>,
         /// Exact required or repeated byte name; copied only while feedback room remains.
-        /// Contract: domain/run.md, sections 7.1 and 7.2.
         field: Box<[u8]>,
         /// Inclusive maximum required value byte length supplied by the host.
-        /// Contract: domain/run.md, section 7.1.
         max: u32,
     },
 }
 
 impl Problems {
     /// Maximum retained feedback problems; additional problems are counted.
-    /// Contract: domain/run.md, section 7.2; programming-model.md, section 6.3.
     pub const LISTED: u32 = 8;
 }
 
@@ -413,7 +288,6 @@ impl Problems {
 /// It checks individual field/text caps and item rules, not the aggregate
 /// ownership cap: the run first calls `owned_bytes` and checks its limit.
 /// Other callers must supply their own aggregate input bound.
-/// Contract: domain/run.md, sections 7.1–7.3; programming-model.md, section 6.3.
 pub fn judge(spec: &OutcomeSpec, declared: &Declared) -> Result<(), Problems> {
     let mut found = Found { listed: List::with_capacity(Problems::LISTED), more: 0 };
     match declared {
@@ -578,7 +452,6 @@ fn judge_verdict(rules: &[VerdictRule], verdict: &Verdict, found: &mut Found) {
 
 /// Admission shape and checked minimum-fit validation, without effects.
 /// Charter ownership is bounded separately by charter admission.
-/// Contract: domain/run.md, sections 3.1, 4 and 7.1.
 pub(crate) fn is_valid(spec: &OutcomeSpec, limits: &Limits) -> bool {
     if spec.change.is_none() && spec.verdicts.is_empty() && spec.report.is_none() && spec.failure.is_none() {
         return false;
@@ -675,7 +548,6 @@ fn min_verdict(rule: &VerdictRule) -> Option<u64> {
 
 /// Checked owned rule containers and names beyond the inline charter.
 /// Overflow refuses charter admission rather than truncating its charge.
-/// Contract: domain/run.md, sections 3.1 and 7.1; programming-model.md, section 6.3.
 pub(crate) fn cost(spec: &OutcomeSpec) -> Option<u64> {
     let mut cost: u64 = 0;
     if let Some(rule) = &spec.change {
@@ -711,7 +583,6 @@ fn rule_fields_cost(rules: &[FieldRule]) -> Option<u64> {
 /// once, excluding allocator overhead and the inline enum's fixed size.
 /// The run and its root both use this value for their respective admission
 /// and ownership checks. Overflow yields `None`, never an accepted charge.
-/// Contract: domain/run.md, sections 7.1 and 7.2; programming-model.md, section 6.3.
 #[must_use]
 pub fn owned_bytes(declared: &Declared) -> Option<u64> {
     match declared {
@@ -741,7 +612,6 @@ fn fields_cost(fields: &[Field]) -> Option<u64> {
 }
 
 /// One bounded aggregate-ownership refusal for the supplied run byte cap.
-/// Contract: domain/run.md, sections 7.1 and 7.2.
 pub(crate) fn too_large(max: u64) -> Problems {
     Problems { listed: Box::new([Problem::TooLarge { max }]), more: 0 }
 }

@@ -1,5 +1,5 @@
 //! The smith agent's run child domain
-//! (programming-model.md, section 4.5; domain/run.md, sections 2 and 14): one agent instance.
+//! (programming-model.md, section 4.5; domain/run.md, section 2): one agent instance.
 //! A run takes its charter from the host, opens the conversation that does
 //! the work, accounts what it spends against one budget, and answers once.
 //!
@@ -27,7 +27,7 @@
 //! The run never knows authentication, provider dialect bytes,
 //! credential secrets, forge state, CI or the host's delivery policy. Entrances
 //! reserve [`MAX_OUT`] output slots, and the caller delivers pending terminals
-//! even while cancellation is settling (domain/run.md, sections 2, 10 and 14;
+//! even while cancellation is settling (domain/run.md, sections 2, 10;
 //! programming-model.md, sections 5.2, 5.3 and 7).
 
 #![cfg_attr(not(test), no_std)]

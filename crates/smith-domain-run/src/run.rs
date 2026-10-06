@@ -10,7 +10,7 @@
 //! ending answers. Sessions alone price own usage;
 //! global scalar admission sums monotonic own deltas, while inclusive subtree
 //! totals transfer only as child bills. A charge that cannot fit ends the
-//! session before it is added (domain/run.md, sections 9, 10 and 14).
+//! session before it is added (domain/run.md, sections 9 and 10).
 //!
 //! The run and its conversations move through these retained phases. Each row
 //! names the event that changes the phase; all issued operations still owe their
@@ -33,13 +33,38 @@
 //! Winding      main and pending calls settled     Closed      Answer
 //! ```
 //!
-//! A conversation opens as Pending, then Opening. Started makes it Running;
-//! closing before Started marks it Unwanted and Started closes it. Closing
-//! retains its call terminals until Ended makes it Closed. A host relay may
-//! withdraw or retry before it settles, but its `HostReturned` terminal
-//! remains owed. A delivery checks an exclusive snapshot and may abort before
-//! submission; once submitted, Delivered remains owed even after withdrawal,
-//! caller expiry or process shutdown (domain/run.md, sections 5.2 and 8.2).
+//! ```text
+//! conversation  event                         next       outward action
+//! Pending       run prepared                  Opening    Open
+//! Opening       Started                       Running    -
+//! Opening       close before Started          Unwanted   await Started or Ended
+//! Unwanted      Started                       Closing    Close
+//! Running       close                         Closing    Close
+//! Opening, Unwanted, Running, Closing
+//!               Ended, after its calls return Closed     release bill; maybe Answer
+//! ```
+//!
+//! The two calls with independent lower terminals keep their own phases
+//! (domain/run.md, sections 5.2 and 8.2):
+//!
+//! ```text
+//! operation  phase       event                          next        outward action
+//! relay      Sending     timeout or withdrawal          Withdrawing WithdrawHost
+//! relay      Sending     Busy or Unanswered terminal    Backoff/Closed retry if permitted
+//! relay      Withdrawing HostReturned                   Backoff/Closed retry if permitted
+//! relay      Backoff     retry alarm                    Sending     HostCall
+//! relay      any live    Answered or final terminal     Closed      Return
+//! delivery   Checking    check passed, more remain      Checking    Check
+//! delivery   Checking    all checks passed             Delivering  Deliver
+//! delivery   Checking    required check failed         Closed      Return feedback
+//! delivery   Checking    withdrawal                    Aborting    Abort
+//! delivery   Aborting    check/abort terminal           Closed      Return stopped
+//! delivery   Delivering  Delivered terminal             Closed      Return result
+//! ```
+//!
+//! A submitted delivery remains in Delivering through caller expiry, withdrawal
+//! and shutdown; its typed terminal is still owed. The run answers only after
+//! the operations it started have settled.
 
 use alloc::boxed::Box;
 use core::mem;
@@ -75,7 +100,6 @@ pub(crate) struct Run {
     /// The host's name for it.
     pub(crate) host_name: Token,
     /// Host-supplied number that distinguishes this activation's call names.
-    /// Contract: domain/run.md, sections 3.2 and 8.2.
     pub(crate) activation: u64,
     /// What its conversations have spent.
     spent: Spend,
@@ -105,7 +129,6 @@ pub(crate) struct Run {
 }
 
 /// Retained FIFO payload; parent names remain opaque. Payload moves into Say.
-/// Contract: domain/run.md, sections 6 and 14.
 #[derive(Debug)]
 pub(crate) struct Message {
     name: Token,
@@ -179,12 +202,11 @@ enum Phase {
 pub(crate) enum Alarm {
     /// The budget's time of the run `run` runs out.
     Deadline { run: Id<Run> },
-    /// Idle expiry of a waiting main. Contract: domain/run.md, section 6.
+    /// Idle expiry of a waiting main.
     Park { run: Id<Run> },
     /// The deadline of the call `call` passes.
     Call { call: Id<Call> },
     /// Per-relay timeout or retry backoff, independent of caller expiry.
-    /// Contract: domain/run.md, section 5.2.
     Host { call: Id<Call> },
 }
 
@@ -193,24 +215,23 @@ pub(crate) enum Alarm {
 
 /// Owned Start fields moved directly from the boundary event into admission.
 /// This transient bundle retains no additional copy or separate allocation.
-/// Contract: domain/run.md, sections 3.2, 10 and 14.
 #[derive(Debug)]
 pub(crate) struct Start {
-    /// Affine right to the run's one final answer (domain/run.md, section 10).
+    /// Affine right to the run's one final answer.
     pub(crate) reply_to: ReplyTo,
 
-    /// Host-selected logical run identity (domain/run.md, sections 3.2 and 10).
+    /// Host-selected logical run identity.
     pub(crate) host_run: Token,
-    /// Host-supplied positive activation number (domain/run.md, sections 3.2 and 8.2).
+    /// Host-supplied positive activation number.
     pub(crate) activation: u64,
 
-    /// Immutable requested contract and budget (domain/run.md, sections 3.1 and 14).
+    /// Immutable requested contract and budget.
     pub(crate) charter: Charter,
 
-    /// Optional host-owned mount metadata (domain/run.md, sections 3.2 and 14).
+    /// Optional host-owned mount metadata.
     pub(crate) workspace: Option<Workspace>,
 
-    /// Optional opaque history handle (domain/run.md, sections 11 and 14).
+    /// Optional opaque history handle.
     pub(crate) transcript: Option<Token>,
 }
 
@@ -281,7 +302,6 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
 
 /// Retain a host-bounded named message while the run can read it; a message
 /// arriving during shutdown remains unread. Input precedes idle alarms.
-/// Contract: domain/run.md, sections 6 and 14.
 pub(crate) fn message(
     domain: &mut Domain,
     env: &Env<Limits>,
@@ -344,8 +364,7 @@ fn continue_message(
 }
 
 /// Root calls this only for main; child bodies are discarded at its routing seam.
-/// Actual turns may still arrive during shutdown, before the terminal.
-/// Contract: domain/run.md, sections 6, 10 and 13.
+/// Turns may still arrive during shutdown, before the terminal.
 pub(crate) fn turn(domain: &mut Domain, conversation: Token, record: Token, sequence: u32, out: &mut Queue<Request>) {
     let conversation = domain.conversations.get(Id::from_token(conversation)).expect("turn precedes session end");
     assert!(conversation.asker.is_none(), "only main enters the host transcript");
@@ -531,7 +550,7 @@ pub(crate) fn yielded(
 }
 
 /// Session own prices are monotonic activation totals. Stale names are inert;
-/// subtree updates do not add global spend (domain/run.md, sections 9 and 14).
+/// subtree updates do not add global spend.
 #[must_use]
 pub fn completion_overflow(domain: &Domain, conversation: Token, price: u64, usage: Spend) -> Option<Failure> {
     let conversation =
@@ -552,7 +571,7 @@ pub fn completion_overflow(domain: &Domain, conversation: Token, price: u64, usa
 }
 
 /// Session own prices are monotonic activation totals. Stale names are inert;
-/// subtree updates do not add global spend (domain/run.md, sections 9 and 14).
+/// subtree updates do not add global spend.
 pub(crate) fn priced(domain: &mut Domain, conversation: Token, own: u64, subtree: u64, out: &mut Queue<Request>) {
     let id = Id::<Conversation>::from_token(conversation);
     let Some(conversation) = domain.conversations.get_mut(id) else {
@@ -754,7 +773,7 @@ pub(crate) fn delegated(
 }
 
 /// Current completion-local call context; scalar crossing keeps these calls
-/// stable while preventing the next completion (domain/run.md, sections 9 and 14).
+/// stable while preventing the next completion.
 struct Serving {
     reply_to: ReplyTo,
     main: Id<Conversation>,

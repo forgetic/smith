@@ -158,14 +158,13 @@ pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
 
 /// Root asks before publishing a completion. A denial has no effects and names
 /// the exhausted global scalar dimension. Stale/closing conversations deny.
-/// Contract: domain/run.md, sections 9, 10 and 14.
 #[must_use]
 pub fn completion_permit(domain: &Domain, conversation: Token) -> crate::CompletionPermit {
     run::completion_permit(domain, conversation)
 }
 
 /// Check one provider completion against exact run-wide arithmetic before its
-/// calls enter the session. Contract: domain/run.md, section 9.
+/// calls enter the session.
 #[must_use]
 pub fn completion_overflow(
     domain: &Domain,

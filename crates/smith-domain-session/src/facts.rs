@@ -1,5 +1,5 @@
-//! What the sessions tell whoever watches the agent (domain/run.md, section
-//! 7): a fact for each thing that happened, content-free (tokens, counts and
+//! What the sessions tell whoever watches the agent (domain/session.md,
+//! sections 3–5): a fact for each thing that happened, content-free (tokens, counts and
 //! classifications, never what the LLM or the opener said), in a bounded
 //! queue the parent drains at its own pace.
 //!
@@ -17,14 +17,10 @@ use crate::llm::{Failure, Stop, Usage};
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Fact {
     /// The session was admitted.
-    Opened {
-        /// Parent-issued session or conversation name, echoed unchanged.
-        opener: Token,
-    },
+    Opened { opener: Token },
     /// A completion was asked for, after `attempt` retries, with `messages`
     /// messages and room for `max_tokens` in its answer.
     CompletionStarted {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// Retry number for the pending provider completion.
         attempt: u32,
@@ -36,9 +32,7 @@ pub enum Fact {
     /// The completion came back with an answer of `blocks` blocks, `calls` of
     /// them tool calls, of which `invalid` could not be decoded.
     CompletionAnswered {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
-        /// Why the provider stopped this completion, independently of its content.
         stop: Stop,
         /// Count of provider answer blocks, independent of their content.
         blocks: u32,
@@ -49,24 +43,17 @@ pub enum Fact {
     },
     /// The completion produced no answer.
     CompletionFailed {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
-        /// Typed reason why the pending operation produced no successful value.
         failure: Failure,
 
         /// Content-free lower transport evidence; diagnostic text is not retained.
-        /// Contract: domain/session.md, sections 4, 5 and 12.
         evidence: crate::llm::Evidence,
     },
     /// The completion was abandoned.
-    CompletionCancelled {
-        /// Parent-issued session or conversation name, echoed unchanged.
-        opener: Token,
-    },
+    CompletionCancelled { opener: Token },
     /// The completion that failed is tried again after `delay`, as retry
     /// `attempt`.
     CompletionRetried {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// Retry number for the pending provider completion.
         attempt: u32,
@@ -78,7 +65,6 @@ pub enum Fact {
     /// The tools name the session by its own token; `opener` names its
     /// conversation, as every other fact does.
     Tools {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// Content-free child observation, dropped and counted if the queue is full.
         fact: tools::Fact,
@@ -86,14 +72,12 @@ pub enum Fact {
     /// The tool call at `block` of the last message was delegated to the
     /// opener.
     DelegateStarted {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// Index of the delegated tool-call block in its completion.
         block: u32,
     },
     /// The opener answered, with `bytes`; `error` marks a failure.
     DelegateAnswered {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// Owned payload bytes charged against the enclosing session limit.
         bytes: u64,
@@ -101,33 +85,18 @@ pub enum Fact {
         error: bool,
     },
     /// The delegated call was withdrawn.
-    DelegateCancelled {
-        /// Parent-issued session or conversation name, echoed unchanged.
-        opener: Token,
-    },
+    DelegateCancelled { opener: Token },
     /// The session yielded.
-    Yielded {
-        /// Parent-issued session or conversation name, echoed unchanged.
-        opener: Token,
-        /// Why the provider stopped this completion, independently of its content.
-        stop: Yield,
-    },
+    Yielded { opener: Token, stop: Yield },
     /// A completion came back, and used one turn and `usage`.
-    Used {
-        /// Parent-issued session or conversation name, echoed unchanged.
-        opener: Token,
-        /// Provider-reported token usage, charged exactly once when its completion ends.
-        usage: Usage,
-    },
+    Used { opener: Token, usage: Usage },
     /// The session ended, or was refused at the entrance.
     Ended {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// Terminal classification after everything started beneath this entity has settled.
         end: End,
         /// Completion count, bounded across the enclosing run or session.
         turns: u32,
-        /// Provider-reported token usage, charged exactly once when its completion ends.
         usage: Usage,
     },
 }

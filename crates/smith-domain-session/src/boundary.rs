@@ -1,20 +1,24 @@
 //! The records that cross the boundary with the session's parent, the
 //! root domain (programming-model.md, section 4.5), which routes them to and from the protocol layer and
 //! the session's opener. The session defines them; its parent depends on it.
+//! Contracts: domain/session.md, sections 3–7.
+//! This module retains no runtime state and knows no provider wire format,
+//! host policy or checkout contents; [`Event`] and [`Request`] are the typed
+//! entrances and exits for the stateful session module.
 //!
 //! Two shapes cross it. A session's lifecycle, with its opener: an
 //! [`Event::Open`] is answered by exactly one [`Request::Ended`], after an
 //! [`Request::Opened`] that names the session if it was admitted, and any
 //! number of [`Request::Yielded`] and [`Request::Used`] in between; the opener
 //! addresses the session by that name, and every record back carries the
-//! opener's token (programming-model.md, section 4.2). And requests out with exactly one terminal event in
-//! (a [`Request::Complete`] is ended by one of [`Event::Completed`],
+//! opener's token (programming-model.md, section 4.2). Each request has one
+//! terminal event: a [`Request::Complete`] is ended by one of [`Event::Completed`],
 //! [`Event::Failed`] or [`Event::Cancelled`], or by [`Event::BudgetDenied`]
 //! when the root withholds it before any provider lease, or [`Event::UnsentClosed`]
 //! when the run closes before publication; a [`Request::Delegate`], to the
 //! opener, by [`Event::Answered`] or [`Event::AnswerCancelled`]; a
 //! [`Request::Io`], the tools' file and process operations passed on as they
-//! are, by [`Event::Done`]). A request's `owner` is echoed on its terminal
+//! are, by [`Event::Done`]. A request's `owner` is echoed on its terminal
 //! event: the session's token for a call to the LLM, a tool run's own for a
 //! delegated call, and the tools' own for an operation.
 
@@ -31,7 +35,6 @@ pub enum Event {
     /// Parent admission of bounded concrete history, including a fresh session.
     /// Ends exactly once after all provider, tools and delegated work settles.
     Open {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// Parent-owned spec, prices and optional concrete history. Admission
         /// checks receiving caps, transcript identity and provider/result space
@@ -47,11 +50,9 @@ pub enum Event {
     /// The current live identity charges the child bill once; stale repeats
     /// neither retain bytes nor change own or inclusive pricing.
     Answered {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Parent-owned result bytes, at most `Limits::delegated_result_bytes`.
         /// Moved into concrete history even while closing; no answer ticket remains.
-        /// Contract: domain/session.md, sections 3, 5 and 12.
         text: Box<[u8]>,
         /// Whether the returned tool result represents a failure.
         error: bool,
@@ -63,7 +64,6 @@ pub enum Event {
     /// settles exactly once and releases its reserved result space. A withdrawn
     /// child still reports its activation bill; stale repeats remain inert.
     AnswerCancelled {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Child activation's inclusive cumulative bill, in deployment units;
         /// historical spend is excluded. Only the inclusive parent prefix changes.
@@ -73,27 +73,21 @@ pub enum Event {
     /// Sent only while the session is yielded; a `session` that has ended
     /// meanwhile is dropped.
     Continue {
-        /// Parent-supplied session token identifying the owning kit.
         session: Token,
         /// Owned content blocks or file bytes, bounded by the enclosing record's byte cap.
         content: Box<[u8]>,
     },
     /// End the session, whatever its state: it cancels what is in flight, and
     /// ends once that has settled. A `session` that has ended is dropped.
-    Close {
-        /// Parent-supplied session token identifying the owning kit.
-        session: Token,
-    },
+    Close { session: Token },
     /// Terminal for `Complete`: the LLM produced its next message.
     Completed {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Provider completion, validated and charged once before its tools run.
         completion: Completion,
     },
     /// The parent received a completion whose checked run-wide charge or usage
     /// cannot be added. Its content and calls are discarded before any effect.
-    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
     Overflowed {
         /// The pending provider request whose terminal was received.
         owner: Token,
@@ -104,13 +98,10 @@ pub enum Event {
     /// provider. Only its current Calling owner releases credit and ends the
     /// session, after kit settlement. Stale or duplicate denials are inert;
     /// no cancellation, retry, usage or Turn is produced.
-    /// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
     BudgetDenied {
         /// Session-issued pending completion owner, echoed without a provider lease.
-        /// Contract: domain/session.md, sections 3 and 5; domain/run.md, section 9.
         owner: Token,
         /// Exact exhausted root allowance, mapped to the settled Budget terminal.
-        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
         reason: BudgetDenial,
     },
     /// The root closed the run before publishing this requested completion.
@@ -118,40 +109,26 @@ pub enum Event {
     /// Closed after the kit closes. Stale, duplicate and already-closing
     /// events are inert; a provider terminal remains owed once started.
     /// No cancellation, retry, usage or Turn is invented.
-    /// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
     UnsentClosed {
         /// Session-issued pending completion owner, without a provider lease.
-        /// Contract: domain/session.md, sections 3 and 5; domain/run.md, section 9.
         owner: Token,
     },
     /// Terminal for `Complete`: the call produced no message.
     Failed {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
-        /// Typed reason why the pending operation produced no successful value.
         failure: Failure,
 
         /// Exact content-free transport evidence carried by the terminal.
-        /// Contract: domain/session.md, sections 4, 5 and 12.
         evidence: crate::llm::Evidence,
 
         /// Bounded exact shared-client diagnostic, consumed and dropped by policy.
         /// It never controls text-based retry decisions or enters saved history.
-        /// Contract: domain/session.md, sections 4, 5 and 12.
         detail: Box<[u8]>,
     },
     /// Terminal for `Complete`, after `Cancel`: the call was abandoned.
-    Cancelled {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    Cancelled { owner: Token },
     /// Terminal for `Io`, for the tools.
-    Done {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-        /// IO's one terminal for the named pending operation.
-        done: tools::Done,
-    },
+    Done { owner: Token, done: tools::Done },
 }
 
 /// session -> parent
@@ -159,69 +136,45 @@ pub enum Event {
 pub enum Request {
     /// The session for `opener` was admitted, and `session` names it from now
     /// on.
-    Opened {
-        /// Parent-issued session or conversation name, echoed unchanged.
-        opener: Token,
-        /// Parent-supplied session token identifying the owning kit.
-        session: Token,
-    },
+    Opened { opener: Token, session: Token },
     /// A settled turn, copied at emission. Its values contain no session tickets.
     Turn {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// Settled concrete transcript turn handed to the opener.
         turn: crate::record::Turn,
     },
     /// The cumulative deployment-unit spend, including child calls.
     Priced {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// This activation's exact inclusive subtree charge. Historical turns
         /// do not seed it; own completions and delegated terminal bills do.
-        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
         spent: u64,
         /// Cumulative price of this activation's own completions only. The
         /// root counts its checked deltas; delegated bills never change it.
-        /// Contract: domain/session.md, section 6; domain/run.md, section 9.
         own_spent: u64,
     },
     /// The LLM stopped calling tools, saying `text` (its message's text blocks,
     /// one after another). The session waits for `Continue` or `Close`, and
     /// its time budget keeps running.
-    Yielded {
-        /// Parent-issued session or conversation name, echoed unchanged.
-        opener: Token,
-        /// Why the provider stopped this completion, independently of its content.
-        stop: Yield,
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
-        text: Box<[u8]>,
-    },
+    Yielded { opener: Token, stop: Yield, text: Box<[u8]> },
     /// A completion came back: one turn, and `usage` as the provider counts
     /// it. One per completion, the ones that win a race with a cancel
     /// included.
-    Used {
-        /// Parent-issued session or conversation name, echoed unchanged.
-        opener: Token,
-        /// Provider-reported token usage, charged exactly once when its completion ends.
-        usage: Usage,
-    },
+    Used { opener: Token, usage: Usage },
     /// The session for `opener` has ended, after `turns` completions that used
     /// `usage`, their exact sum: exactly one
     /// per `Open`, once nothing the session asked for is in flight.
     Ended {
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// Terminal classification after everything started beneath this entity has settled.
         end: End,
         /// Completion count, bounded across the enclosing run or session.
         turns: u32,
         /// Exact cumulative raw usage of charged completions.
-        /// Contract: domain/session.md, section 6; domain/run.md, section 10.
         usage: Usage,
     },
     /// Ask an LLM for the next assistant message, giving up after `timeout`.
     Complete {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// First user message supplied by the opener.
         prompt: Prompt,
@@ -231,41 +184,30 @@ pub enum Request {
         /// Maximum owned translated completion bytes, including block cells,
         /// replay envelopes and decoded calls. The adapter verifies its configured
         /// bound before preparing the provider request; terminals obey it.
-        /// Contract: domain/session.md, sections 3, 5 and 12.
         max_completion_bytes: u64,
 
         /// Maximum translated completion blocks, reserved with result skeletons
         /// before this request. One terminal remains owed after Cancel.
-        /// Contract: domain/session.md, sections 3, 5 and 12.
         max_completion_blocks: u32,
 
         /// Maximum exact shared-client failure diagnostic bytes. The adapter
         /// verifies compatibility before prepare; policy consumes the         /// terminal and drops detail without retaining text in facts/history.
-        /// Contract: domain/session.md, sections 4, 5 and 12.
         max_failure_bytes: u32,
     },
     /// Abandon the `Complete` in flight for `owner`. Its terminal event still
     /// comes: `Cancelled`, or whichever outcome won the race.
-    Cancel {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    Cancel { owner: Token },
     /// Ask io for `op` for the tools, giving up at `deadline`: io runs the
     /// race (programming-model.md, section 5.3).
     Io {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Typed IO operation carrying only the authority and bounds required for it.
         op: tools::Op,
-        /// Injected monotonic deadline, never obtained from a live clock.
         deadline: Time,
     },
     /// Abandon the `Io` in flight for `owner`. Its terminal event still comes:
     /// `Done` with `Cancelled`, or whichever outcome won the race.
-    CancelIo {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    CancelIo { owner: Token },
     /// Ask the opener to serve the delegated call `call`, a ticket, and to
     /// answer it by `deadline`, when the session's time runs out: the opener
     /// runs the race, within limits of its own if it has shorter ones, and
@@ -273,31 +215,22 @@ pub enum Request {
     Delegate {
         /// Concrete transcript origin supplied by the session, preserved by the opener.
         /// It is fixed-size; its sequence is checked before any delegated effect.
-        ///
-        /// Contract: domain/session.md, sections 3 and 5; domain/run.md, section 8.2.
         origin: crate::record::Origin,
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
-        /// Parent-issued session or conversation name, echoed unchanged.
         opener: Token,
         /// Typed checkout-tool call decoded below the domain.
         call: Token,
-        /// Injected monotonic deadline, never obtained from a live clock.
         deadline: Time,
     },
     /// Abandon the `Delegate` in flight for `owner`, as the session closes.
     /// Its terminal event still comes: `AnswerCancelled`, or `Answered` if
     /// the answer won the race.
-    Withdraw {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    Withdraw { owner: Token },
 }
 
 /// What a session is opened for.
 #[derive(PartialEq, Eq, Debug)]
 pub struct Spec {
-    /// Configured provider endpoint identity; the domain never resolves its address.
     pub endpoint: Endpoint,
     /// The provider's name for the model.
     pub model: Box<[u8]>,
@@ -390,11 +323,9 @@ pub enum End {
     Closed,
     /// A call failed, for good or after its retries ran out.
     Failed {
-        /// Typed reason why the pending operation produced no successful value.
         failure: Failure,
 
         /// Exact content-free transport evidence carried by the terminal.
-        /// Contract: domain/session.md, sections 4, 5 and 12.
         evidence: crate::llm::Evidence,
     },
     /// The session's budget ran out in the `spent` dimension: it needed a
@@ -407,7 +338,7 @@ pub enum End {
     /// The conversation outgrew the session's message or byte limit.
     TranscriptFull,
     /// A transcript cannot be resumed. The next attempt must start fresh;
-    /// this is a transient run failure (domain/session.md, sections 3 and 12).
+    /// this is a transient run failure.
     TranscriptRefused {
         /// Typed terminal reason supplied by the lower layer.
         reason: crate::record::Refusal,
@@ -416,19 +347,15 @@ pub enum End {
     PriceOverflow,
     /// Cumulative raw usage did not fit; the rejected completion is not
     /// charged or told. `PriceOverflow` takes precedence when both fail.
-    /// Contract: domain/session.md, section 6; domain/run.md, sections 9 and 10.
     UsageOverflow,
 }
 
 /// A root allowance exhausted before publishing a requested completion.
 /// This carries no provider policy and allocates no payload.
-/// Contract: domain/session.md, section 6; domain/run.md, section 9.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum BudgetDenial {
     /// No global completion remains; ends as `Dimension::Turns` after kit close.
-    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
     Turns,
     /// No global deployment-unit allowance remains; ends as `Dimension::Unit`.
-    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
     Spend,
 }

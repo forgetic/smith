@@ -2,36 +2,36 @@
 //! programming-model.md, section 3). Dropping facts never changes a terminal.
 use crate::{End, Fault};
 use skein_lib::Token;
-/// Parent-drained diagnostic observation; no payload or credential detail (domain/host.md, section 4).
+/// Parent-drained diagnostic observation; no payload or credential detail.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Fact {
-    /// A contained process started; independent from run admission (domain/host.md, section 4).
+    /// A contained process started; independent from run admission.
     Started {
-        /// Opaque parent owner (domain/host.md, section 4).
+        /// Opaque parent owner.
         client: Token,
     },
-    /// Run accepted its start (domain/host.md, section 2).
+    /// Run accepted its start.
     Admitted {
-        /// Opaque parent owner (domain/host.md, section 2).
+        /// Opaque parent owner.
         client: Token,
     },
-    /// One agent last word was accepted (domain/host.md, section 2).
+    /// One agent last word was accepted.
     Answered {
-        /// Opaque parent owner (domain/host.md, section 2).
+        /// Opaque parent owner.
         client: Token,
     },
-    /// One typed agent failure was reported (domain/host.md, section 4).
+    /// One typed agent failure was reported.
     Faulted {
-        /// Opaque parent owner (domain/host.md, section 4).
+        /// Opaque parent owner.
         client: Token,
-        /// Content-free failure class (domain/host.md, section 4).
+        /// Content-free failure class.
         fault: Fault,
     },
-    /// Spawn containment terminal, after every retained right (domain/host.md, section 4).
+    /// Spawn containment terminal, after every retained right.
     Gone {
-        /// Opaque parent owner (domain/host.md, section 4).
+        /// Opaque parent owner.
         client: Token,
-        /// Entrance refusal or completed cleanup (domain/host.md, section 4).
+        /// Entrance refusal or completed cleanup.
         end: End,
     },
 }

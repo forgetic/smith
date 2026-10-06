@@ -1,5 +1,5 @@
 //! The smith agent's tools child domain
-//! (programming-model.md, section 4.5; domain/tools.md, section 9): what a session does to the
+//! (programming-model.md, section 4.5; domain/tools.md, sections 1–5): what a session does to the
 //! checkout. It reads, lists, searches, writes and edits files, and runs
 //! commands, for the calls a session's LLM makes.
 //!
@@ -29,7 +29,7 @@
 //! results, authentication, forge state or CI. The parent reserves [`max_out`]
 //! output slots before every entrance and returns each started operation's
 //! one terminal, including a cancellation terminal when cancellation wins
-//! (domain/tools.md, sections 4, 5, 6 and 9; programming-model.md, sections 5.2
+//! (domain/tools.md, sections 4–6; programming-model.md, sections 5.2
 //! and 7).
 
 #![cfg_attr(not(test), no_std)]

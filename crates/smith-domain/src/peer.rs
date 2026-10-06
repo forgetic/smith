@@ -10,7 +10,7 @@
 //! calls are concrete provider id/name/input/replay with Historical classification.
 //! The peer never knows provider syntax, credential secrets or host effects.
 //!
-//! Contract: domain/run.md, section 14; programming-model.md, sections 4.4 and 6.3.
+//! Contract: domain/run.md, sections 5.2 and 13; programming-model.md, sections 4.4 and 6.3.
 
 use core::mem::size_of;
 
@@ -25,7 +25,6 @@ use crate::translate::{self, DELIVER, FINISH, FIRST, Offered, SUB_AGENT, WAIT};
 #[derive(Debug)]
 pub(crate) struct Peer {
     /// Host-supplied activation used in every name made by this conversation.
-    /// Contract: domain/run.md, sections 3.2 and 8.2.
     pub(crate) activation: u64,
     /// The run's token for the conversation, which is its session's opener.
     pub(crate) conversation: Token,

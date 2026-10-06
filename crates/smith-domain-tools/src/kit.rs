@@ -24,7 +24,7 @@
 //! A call or a close to a kit that is not open is the session's bug. A kit is
 //! retired once it is Closed.
 //!
-//! Contract: domain/tools.md, section 9; programming-model.md, sections 4.4 and 6.3.
+//! Contract: domain/tools.md, sections 2–4; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;
 
@@ -45,14 +45,10 @@ use crate::window::Span;
 #[derive(Debug)]
 pub(crate) struct Kit {
     /// The session's token, echoed when the kit closes.
-    ///
-    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     session: Token,
     checkout: Checkout,
     pub(crate) knowledge: Knowledge,
     /// The jobs running its calls.
-    ///
-    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     jobs: Set<Id<Job>>,
     state: State,
 }
@@ -61,12 +57,8 @@ pub(crate) struct Kit {
 enum State {
     Open,
     /// Its jobs have been cancelled; it ends with the last.
-    ///
-    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Closing,
     /// Terminal: retired, until the reclaim point frees it.
-    ///
-    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     Closed,
 }
 
@@ -146,15 +138,11 @@ pub(crate) fn close(domain: &mut Domain, kit: Token, out: &mut Queue<Request>) {
 }
 
 /// The token of the kit's session.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn session(kit: &Kit) -> Token {
     kit.session
 }
 
 /// Whether the kit is closing, its jobs cancelled.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn closing(kit: &Kit) -> bool {
     match kit.state {
         State::Open => false,
@@ -165,8 +153,6 @@ pub(crate) fn closing(kit: &Kit) -> bool {
 
 /// The job `job` of the kit `id` has answered: it leaves the kit, which ends
 /// with it if it was the last of a closing kit.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub(crate) fn finished(kits: &mut Slab<Kit>, facts: &mut Facts, id: Id<Kit>, job: Id<Job>, out: &mut Queue<Request>) {
     let kit = kits.get_mut(id).expect("a kit lives until its jobs have ended");
     let running = kit.jobs.remove(&job);
@@ -183,8 +169,6 @@ pub(crate) fn finished(kits: &mut Slab<Kit>, facts: &mut Facts, id: Id<Kit>, job
 }
 
 /// Ends the kit `id`, which runs nothing: its session learns it has closed.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn end(kits: &mut Slab<Kit>, facts: &mut Facts, id: Id<Kit>, out: &mut Queue<Request>) {
     let kit = kits.get_mut(id).expect("a kit lives until it is retired");
     kit.state = State::Closed;
@@ -194,8 +178,6 @@ fn end(kits: &mut Slab<Kit>, facts: &mut Facts, id: Id<Kit>, out: &mut Queue<Req
 }
 
 /// What `call` does if it passes the entrance, or the outcome that refuses it.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn admit(kit: &Kit, call: Call, deadline: Time, env: &Env<Limits>) -> Result<Work, Outcome> {
     let limits = &env.limits;
     if !authority::granted(kit.checkout.grants, &call) {
@@ -268,8 +250,6 @@ fn admit(kit: &Kit, call: Call, deadline: Time, env: &Env<Limits>) -> Result<Wor
 
 /// Where `path` is, if the kit may write there: in a writable repository, and
 /// not in its `.git`.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn writable(checkout: &Checkout, path: &Path, limits: &Limits) -> Result<Located, Outcome> {
     let located = authority::locate(checkout, path, limits.path_bytes)?;
     if !located.writable {
@@ -282,8 +262,6 @@ fn writable(checkout: &Checkout, path: &Path, limits: &Limits) -> Result<Located
 }
 
 /// Refuses `bytes` as an argument to a process if they hold a NUL.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn passable(bytes: &[u8]) -> Result<(), Outcome> {
     for byte in bytes {
         if *byte == 0 {
@@ -294,8 +272,6 @@ fn passable(bytes: &[u8]) -> Result<(), Outcome> {
 }
 
 /// Refuses `content` if it is larger than the tools store.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 fn fits(content: &[u8], limits: &Limits) -> Result<(), Outcome> {
     let size = u64::try_from(content.len()).unwrap_or(u64::MAX);
     if size > u64::from(limits.file_bytes) {

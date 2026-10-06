@@ -125,7 +125,7 @@ pub(crate) struct Agent {
 }
 
 /// Bounded process/channel state, parent terminal rights and content-free facts;
-/// no credentials, durable host policy or frame bytes (domain/host.md, sections 2–7).
+/// no credentials, durable host policy or frame bytes.
 #[derive(Debug)]
 pub struct Domain {
     agents: Slab<Agent>,
@@ -136,7 +136,7 @@ pub struct Domain {
 
 impl Domain {
     /// Allocate once from validated bounds; invalid arithmetic/turn/delivery capacity
-    /// panics before any process effect (domain/host.md, sections 3, 4 and 6).
+    /// panics before any process effect.
     #[must_use]
     pub fn new(limits: &Limits) -> Domain {
         assert!(crate::worst_case(limits).is_some(), "host limits are representable and every sealed delivery fits");
@@ -148,19 +148,19 @@ impl Domain {
         }
     }
 
-    /// Retired slots count until iteration-boundary reclaim (domain/host.md, section 4).
+    /// Retired slots count until iteration-boundary reclaim.
     #[must_use]
     pub fn agents(&self) -> u32 {
         self.agents.len()
     }
 
-    /// Pure earliest armed monotonic deadline (domain/host.md, section 4).
+    /// Pure earliest armed monotonic deadline.
     #[must_use]
     pub fn next_deadline(&self) -> Option<Time> {
         self.alarms.next()
     }
 
-    /// Pure scheduling query; expiration itself occurs in fire (domain/host.md, section 4).
+    /// Pure scheduling query; expiration itself occurs in fire.
     #[must_use]
     pub fn is_due(&self, now: Time) -> bool {
         match self.alarms.next() {
@@ -169,17 +169,17 @@ impl Domain {
         }
     }
 
-    /// Reclaim only after parent routed outputs for this iteration (domain/host.md, section 4).
+    /// Reclaim only after parent routed outputs for this iteration.
     pub fn reclaim(&mut self) {
         self.agents.reclaim();
     }
 
-    /// Drain one best-effort observation; decisions never depend on it (domain/host.md, section 4).
+    /// Drain one best-effort observation; decisions never depend on it.
     pub fn pop_fact(&mut self) -> Option<Fact> {
         self.facts.pop()
     }
 
-    /// Saturating dropped diagnostic count; not a terminal (domain/host.md, section 4).
+    /// Saturating dropped diagnostic count; not a terminal.
     #[must_use]
     pub const fn facts_lost(&self) -> u64 {
         self.lost
@@ -188,7 +188,7 @@ impl Domain {
 
 /// Reserve these free output slots for one step/fire: full call withdrawal fanout,
 /// lower/process notifications and the next Send/Read; payload bytes priced
-/// separately (domain/host.md, sections 2 and 4).
+/// separately.
 #[must_use]
 pub fn max_out(limits: &Limits) -> u32 {
     limits.calls.saturating_add(8)
@@ -196,7 +196,7 @@ pub fn max_out(limits: &Limits) -> u32 {
 
 /// Consume one parent notice or lower terminal with injected clocks.
 /// Caller reserves `max_out` free slots and returns every operation terminal,
-/// even after cancellation/EOF (domain/host.md, sections 2–7).
+/// even after cancellation/EOF.
 #[expect(clippy::too_many_lines, reason = "one exhaustive typed boundary keeps terminal ownership visible")]
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     let before = out.len();
@@ -344,7 +344,7 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
 }
 
 /// Expire one due timer; repeat while due with `max_out` free slots. Wall never
-/// pauses with progress credit (domain/host.md, sections 4 and 6).
+/// pauses with progress credit.
 pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     let before = out.len();
     let Some(alarm) = domain.alarms.expire(env.now) else {

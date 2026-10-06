@@ -1,4 +1,4 @@
-//! What the runs tell whoever watches the agent (domain/run.md, section 14):
+//! What the runs tell whoever watches the agent (domain/run.md, section 11):
 //! a fact for each thing that happened, content-free (tokens, counts and
 //! classifications, never what an LLM, the charter or the host said), in a
 //! bounded queue the parent drains at its own pace.
@@ -25,14 +25,10 @@ use crate::run::{self, Conversation, Run};
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Fact {
     /// The run was admitted.
-    Admitted {
-        /// Admitted run token, retained and echoed within this child's boundary.
-        run: Token,
-    },
+    Admitted { run: Token },
     /// It looked in its checkout, and found `guides` guides and `checks`
     /// repositories with checks.
     Prepared {
-        /// Admitted run token, retained and echoed within this child's boundary.
         run: Token,
         /// Number of repository guides retained during preparation.
         guides: u32,
@@ -41,27 +37,21 @@ pub enum Fact {
     },
     /// It opened the conversation `conversation`, at `depth`: zero for main.
     Opened {
-        /// Admitted run token, retained and echoed within this child's boundary.
         run: Token,
-        /// Run-issued opaque conversation name, echoed on every conversation event.
         conversation: Token,
         /// Nesting or JSON depth, bounded by the enclosing immutable limits.
         depth: u32,
     },
     /// The conversation ended, or was refused at its entrance.
     Ended {
-        /// Admitted run token, retained and echoed within this child's boundary.
         run: Token,
-        /// Run-issued opaque conversation name, echoed on every conversation event.
         conversation: Token,
         /// Terminal classification after everything started beneath this entity has settled.
         end: End,
     },
     /// A conversation made the call `call` of the run.
     Called {
-        /// Admitted run token, retained and echoed within this child's boundary.
         run: Token,
-        /// Run-issued opaque conversation name, echoed on every conversation event.
         conversation: Token,
         /// Run-issued call token, identifying the observed finish or sub-agent ask.
         call: Token,
@@ -70,7 +60,6 @@ pub enum Fact {
     },
     /// The call returned.
     Returned {
-        /// Admitted run token, retained and echoed within this child's boundary.
         run: Token,
         /// Run-issued call token, identifying the observed finish or sub-agent ask.
         call: Token,
@@ -78,29 +67,17 @@ pub enum Fact {
         result: Return,
     },
     /// Checks started, to be stopped at `deadline` at the latest.
-    CheckStarted {
-        /// Admitted run token, retained and echoed within this child's boundary.
-        run: Token,
-        /// Injected monotonic deadline, never obtained from a live clock.
-        deadline: Time,
-    },
+    CheckStarted { run: Token, deadline: Time },
     /// Checks ended.
     CheckFinished {
-        /// Admitted run token, retained and echoed within this child's boundary.
         run: Token,
         /// Terminal process classification; only a zero exit code passes checks.
         exit: Exit,
     },
     /// An host delivery ended with its content-free classification.
-    Delivered {
-        /// Admitted run token, retained and echoed within this child's boundary.
-        run: Token,
-        /// Typed terminal for the host's change-delivery request.
-        status: crate::DeliveryStatus,
-    },
+    Delivered { run: Token, status: crate::DeliveryStatus },
     /// The run answered.
     Answered {
-        /// Admitted run token, retained and echoed within this child's boundary.
         run: Token,
         /// Single terminal value returned to the caller.
         answer: Answered,
@@ -110,11 +87,11 @@ pub enum Fact {
 /// What a call asked for.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Asked {
-    /// Main requested settled waiting. Contract: domain/run.md, section 6.
+    /// Main requested settled waiting.
     Wait,
-    /// An opaque declared host-tool call. Contract: domain/run.md, sections 5.2 and 11.
+    /// An opaque declared host-tool call.
     Host,
-    /// Main requested separately granted delivery. Contract: domain/run.md, sections 8.4 and 12.
+    /// Main requested separately granted delivery.
     Deliver,
     /// The LLM declared a run result.
     Finish,
@@ -125,19 +102,19 @@ pub enum Asked {
 /// How a call returned.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Return {
-    /// Main wait intent accepted. Contract: domain/run.md, section 6.
+    /// Main wait intent accepted.
     Waiting,
-    /// Actual bounded host text reached the caller. Contract: domain/run.md, sections 5.2 and 11.
+    /// Actual bounded host text reached the caller.
     HostAnswered,
-    /// Relay settled but no permitted recovery can learn its outcome. Contract: domain/run.md, sections 5.2 and 11.
+    /// Relay settled but no permitted recovery can learn its outcome.
     HostUnknown,
-    /// Host declaration/input refused before effects. Contract: domain/run.md, sections 5.2 and 11.
+    /// Host declaration/input refused before effects.
     HostRejected,
-    /// Actual host delivery evidence. Contract: domain/run.md, sections 8.2 and 12.
+    /// Actual host delivery evidence.
     Delivered,
-    /// No changed directory. Contract: domain/run.md, sections 8.2 and 12.
+    /// No changed directory.
     Nothing,
-    /// Named correctable host refusal. Contract: domain/run.md, sections 8.2 and 12.
+    /// Named correctable host refusal.
     DeliveryRefused,
     /// The run accepted its declared result.
     Accepted,
@@ -166,7 +143,7 @@ pub enum Return {
 /// How a run answered.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Answered {
-    /// Settled idle main parked. Contract: domain/run.md, section 6.
+    /// Settled idle main parked.
     Parked,
     /// The entrance or operation was refused with the enclosing typed reason.
     Refused(Refusal),

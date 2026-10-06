@@ -32,7 +32,7 @@
 //! provider wire grammar, forge state or CI. [`resume`] drains bounded deferred
 //! tool handoffs; every entrance reserves [`max_out`] slots, then the caller
 //! delivers or discards owned records before reclaiming at iteration end
-//! (domain/session.md, sections 3, 4, 5, 6 and 12; programming-model.md, sections
+//! (domain/session.md, sections 3–6; programming-model.md, sections
 //! 4.5 and 7).
 //! Exact own and inclusive activation spend are retained separately. The root's
 //! `BudgetDenied` and `UnsentClosed` entrances release only

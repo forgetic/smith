@@ -5,7 +5,7 @@
 //! It retains the run and session children, conversation and credential
 //! bindings, pending starts, turn handoffs and bounded notices. [`step`],
 //! [`fire`] and [`resume`] are its entries (domain/run.md, sections 2, 3, 10,
-//! 13 and 14; domain/session.md, sections 3 and 5). It never knows provider
+//! 13; domain/session.md, sections 3 and 5). It never knows provider
 //! wire syntax, credential secrets, forge state or host delivery policy.
 //!
 //! Hand-offs between the run and the sessions go both ways, so a chain of them
@@ -88,7 +88,6 @@ pub struct Domain {
 
 /// Original parent right and optional history survive run admission/preparation.
 /// The main takes history once; the terminal alone consumes the right.
-/// Contract: domain/run.md, sections 3, 10 and 13.
 #[derive(Debug)]
 pub(crate) struct StartContext {
     pub(crate) reply_to: Option<ReplyTo>,
@@ -98,7 +97,6 @@ pub(crate) struct StartContext {
 
 /// Single-use ownership while a main turn crosses the sibling seam. Both
 /// queues can coexist; capacity and complete envelope/payload costs are priced.
-/// Contract: domain/run.md, section 13; programming-model.md, section 6.3.
 #[derive(Debug)]
 pub(crate) struct TurnHandoff {
     pub(crate) turn: Option<session::record::Turn>,

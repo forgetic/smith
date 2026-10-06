@@ -1,7 +1,7 @@
 //! Ownership caps and checked worst-case arithmetic. This module retains no runtime state.
 //! `worst_case` projects immutable limits into container and payload bounds, returning `None` on overflow.
 //!
-//! Contract: domain/session.md, section 12; programming-model.md, sections 4.4, 4.5 and 6.3.
+//! Contract: domain/session.md, sections 3 and 6; programming-model.md, sections 4.4, 4.5 and 6.3.
 
 use skein_lib::{Deadlines, Duration, List, Queue, Slab};
 use smith_domain_tools as tools;
@@ -34,24 +34,20 @@ pub struct Limits {
     /// Maximum owned content of one provider completion, including
     /// block cells, replay envelopes and decoded owned-call fields. The session
     /// reserves this and every possible unstarted result before asking the provider.
-    /// Contract: domain/session.md, sections 3, 5 and 12.
     pub completion_bytes: u64,
 
     /// Maximum blocks in a completion; result-slot storage is
     /// reserved independently before the provider request. The adapter's full
     /// translated completion bound must obey both receiving caps.
-    /// Contract: domain/session.md, sections 3, 5 and 12.
     pub completion_blocks: u32,
 
     /// Maximum exact failure diagnostic bytes. Provider receiving credit
     /// covers this terminal before work; policy drops detail after consumption.
-    /// Contract: domain/session.md, sections 4, 5 and 12.
     pub failure_bytes: u32,
 
     /// Maximum concrete opener-result payload per admitted delegated call.
     /// A whole batch reserves its possible results before any effect; each
     /// terminal owns its reservation through close and turn emission.
-    /// Contract: domain/session.md, sections 3, 5 and 12.
     pub delegated_result_bytes: u64,
 
     /// The largest budget a spec may ask for, dimension by dimension. Its time
@@ -93,7 +89,6 @@ pub struct Limits {
 /// It also covers the full bounded failure terminal; diagnostic policy consumes
 /// and drops that transient detail. Returns None on zero completion caps or
 /// checked arithmetic overflow.
-/// Contract: domain/session.md, sections 3, 5 and 12.
 #[must_use]
 pub fn completion_reserve(limits: &Limits) -> Option<u64> {
     crate::session::provider_reserve(limits)

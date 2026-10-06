@@ -1,4 +1,4 @@
-//! Concrete session history (domain/session.md, sections 3 and 12). Encoding these
+//! Concrete session history (domain/session.md, section 3). Encoding these
 //! versioned values into bytes belongs to the protocol layer, never the domain.
 
 use crate::{
@@ -13,19 +13,13 @@ pub const VERSION: u16 = 2;
 /// Session-issued position of an opener call in its concrete logical transcript.
 /// This fixed name survives ticket translation; provider ids and callback tokens
 /// are not its identity. The host scopes it by the logical run, never a live slab.
-///
-/// Contract: domain/session.md, sections 3 and 5; domain/run.md, section 8.2.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Origin {
     /// One-based accepted completion sequence, including a restored prefix.
     /// Checked exhaustion refuses the next completion's effects.
-    ///
-    /// Contract: domain/session.md, sections 3 and 5.
     pub sequence: u32,
     /// Zero-based assistant block position, including preceding non-call blocks.
     /// The receiving session bounds message storage and refuses unrepresentable block counts before effects.
-    ///
-    /// Contract: domain/session.md, sections 3 and 5.
     pub position: u32,
 }
 
@@ -83,13 +77,11 @@ pub struct Opening {
 pub struct Turn {
     /// Concrete transcript encoding version; unsupported versions are refused.
     pub version: u16,
-    /// Configured provider endpoint identity; the domain never resolves its address.
     pub endpoint: Endpoint,
     /// Configured provider dialect identity; replay requires an exact match.
     pub dialect: u32,
     /// Monotonic turn sequence within the concrete transcript.
     pub sequence: u32,
-    /// Provider-reported token usage, charged exactly once when its completion ends.
     pub usage: Usage,
     /// Cumulative spend of this activation, children included.
     pub spent: u64,
@@ -102,7 +94,6 @@ pub struct Turn {
 pub struct Transcript {
     /// Concrete transcript encoding version; unsupported versions are refused.
     pub version: u16,
-    /// Configured provider endpoint identity; the domain never resolves its address.
     pub endpoint: Endpoint,
     /// Configured provider dialect identity; replay requires an exact match.
     pub dialect: u32,
@@ -136,7 +127,6 @@ impl Transcript {
     /// while session performs the semantic admission before any effects.
     /// `None` means checked ownership arithmetic overflow; the caller refuses
     /// before retaining the history or starting effects.
-    /// Contract: domain/session.md, sections 3 and 12; programming-model.md, section 6.3.
     #[must_use]
     pub fn owned_bytes(&self) -> Option<u64> {
         let mut bytes = u64::try_from(size_of::<Turn>()).ok()?.checked_mul(u64::try_from(self.turns.len()).ok()?)?;

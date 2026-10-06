@@ -1,5 +1,6 @@
 //! The records that cross the boundary with the run's parent, the top-level
 //! domain (programming-model.md, section 4.5). The run defines them; its parent depends on it.
+//! Contracts: domain/run.md, sections 3, 5, 6, 8, 9 and 10.
 //!
 //! All three of the run's faces cross here:
 //!
@@ -49,11 +50,10 @@ use crate::outcome::{Change, Declared, Problems};
 #[derive(PartialEq, Eq, Debug)]
 pub enum Event {
     /// Actual terminal of one host relay; old attempts and callback generations are inert.
-    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     HostReturned {
-        /// Live attempt identity, distinct from durable `CallName`. Contract: domain/run.md, section 5.2.
+        /// Live attempt identity, distinct from durable `CallName`.
         relay: crate::RelayName,
-        /// Bounded answer or settled retry classification. Contract: domain/run.md, section 5.2.
+        /// Bounded answer or settled retry classification.
         reply: crate::HostReply,
     },
     /// From the host, a call: start a run on `charter`, and answer once it
@@ -65,91 +65,71 @@ pub enum Event {
         /// Parent-supplied stable logical host-run scope, preserved across relay
         /// recovery and restarted activations. Distinct from the returned live run
         /// token and every callback slab generation; echoed without interpretation.
-        /// Contract: domain/run.md, sections 3.2 and 5.2; domain/host.md, section 2.
         host_run: Token,
         /// Host-supplied positive activation number, unique within `host_run` across starts.
-        /// Contract: domain/run.md, sections 3.2 and 8.2; domain/host.md, section 2.
         activation: u64,
         /// Host-supplied admission policy, validated before the run starts.
         charter: Charter,
         /// Optional immutable host mounts and initial conflicts, admitted before effects.
-        /// Contract: domain/run.md, sections 3.2, 8.3 and 14.
         workspace: Option<crate::Workspace>,
         /// Root-owned restore binding, consumed by main once; never decoded here.
-        /// Contract: domain/run.md, sections 3 and 13.
         transcript: Option<Token>,
     },
 
     /// Parent-labelled live message; names, including zero, are opaque and
     /// unique for the active run. Admission yields a bounce only on refusal.
-    /// Contract: domain/run.md, section 6.
     Message {
-        /// Admitted live run handle. Contract: domain/run.md, section 6.
+        /// Admitted live run handle.
         run: Token,
 
-        /// Parent-issued active-run unique name. Contract: domain/run.md, section 6.
+        /// Parent-issued active-run unique name.
         name: Token,
 
         /// Attested UTF-8, including the sender label, bounded before retention.
-        /// Contract: domain/run.md, section 6.
         text: Box<[u8]>,
     },
 
     /// Actual concrete session turn; the root owns the body behind record.
-    /// Contract: domain/run.md, sections 6 and 13.
     Turn {
-        /// Run-issued conversation binding. Contract: domain/run.md, section 13.
+        /// Run-issued conversation binding.
         conversation: Token,
 
-        /// Single-use root handoff name. Contract: domain/run.md, section 13.
+        /// Single-use root handoff name.
         record: Token,
 
         /// Historical transcript sequence, independent of activation numbering.
-        /// Contract: domain/run.md, section 13.
         sequence: u32,
     },
 
     /// From the host: end the run `run` as cancelled. A run that has already
     /// answered, or decided how it ends, ignores it.
-    Cancel {
-        /// Admitted run token, retained and echoed within this child's boundary.
-        run: Token,
-    },
+    Cancel { run: Token },
     /// The conversation was admitted, and `peer` names it from now on.
     Started {
-        /// Run-issued opaque conversation name, echoed on every conversation event.
         conversation: Token,
         /// Conversation-issued opaque handle used after admission.
         peer: Token,
     },
     /// The LLM stopped calling tools, `text` being its last message. The
     /// conversation waits for `Say` or `Close`, and its time keeps running.
-    Yielded {
-        /// Run-issued opaque conversation name, echoed on every conversation event.
-        conversation: Token,
-        /// Why the provider stopped this completion, independently of its content.
-        stop: Stop,
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
-        text: Box<[u8]>,
-    },
+    Yielded { conversation: Token, stop: Stop, text: Box<[u8]> },
     /// Session-priced cumulative own and inclusive subtree units. Own deltas
     /// are counted globally once; subtree totals are only terminal child bills.
-    /// Unknown/stale conversations are inert. Contract: domain/run.md, sections 9, 10 and 14.
+    /// Unknown/stale conversations are inert.
     Priced {
-        /// Live run conversation. Contract: domain/run.md, sections 9 and 14.
+        /// Live run conversation.
         conversation: Token,
 
-        /// Cumulative own completion units. Contract: domain/run.md, section 9.
+        /// Cumulative own completion units.
         own_spent: u64,
 
-        /// Inclusive subtree units. Contract: domain/run.md, section 14.
+        /// Inclusive subtree units.
         subtree_spent: u64,
     },
 
     /// The Session completed a turn with exact raw counters in `spend`.
     /// Units are supplied separately by Priced; this event cannot reprice them.
     Used {
-        /// Run-issued opaque conversation name, echoed on every conversation event.
         conversation: Token,
         /// Session's exact single-completion raw counters and one turn increment.
         /// Units are ignored: `Priced` alone charges them.
@@ -158,7 +138,6 @@ pub enum Event {
     /// Terminal for `Open`: the conversation ended, having spent `spend` in
     /// all, once nothing it started was in flight.
     Ended {
-        /// Run-issued opaque conversation name, echoed on every conversation event.
         conversation: Token,
         /// Terminal classification after everything started beneath this entity has settled.
         end: End,
@@ -168,7 +147,6 @@ pub enum Event {
     },
     /// Terminal for `Read`.
     Read {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// IO's one terminal for the run's pending text read.
         read: Read,
@@ -176,7 +154,6 @@ pub enum Event {
     /// Terminal for `Probe`: whether an executable file is at the place. A
     /// failure or a deadline passed reads as not.
     Probed {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Whether IO found an executable within the named root before its deadline.
         executable: bool,
@@ -190,47 +167,33 @@ pub enum Event {
     Delegated {
         /// Parent-translated concrete transcript origin, fixed-size and distinct
         /// from `call`'s live callback. Zero completion is refused before effects.
-        /// Contract: domain/run.md, section 8.2; domain/session.md, sections 3 and 5.
         name: CallName,
-        /// Run-issued opaque conversation name, echoed on every conversation event.
         conversation: Token,
         /// Root-issued live call token, echoed on the one finish, delivery or sub-agent terminal.
         call: Token,
         /// Typed run tool ask, validated against the asker's authority and charter.
         ask: Ask,
-        /// Injected monotonic deadline, never obtained from a live clock.
         deadline: Time,
     },
     /// The conversation abandons its call `call`: it is closing. Its `Return`
     /// still comes, once what the call was doing has settled.
     Withdraw {
-        /// Run-issued opaque conversation name, echoed on every conversation event.
         conversation: Token,
         /// Root-issued live call token, echoed on the one finish, delivery or sub-agent terminal.
         call: Token,
     },
     /// Terminal for `Check`: what the checks' process did.
     Checked {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Checks' process terminal, including its bounded diagnostic tail.
         ran: Ran,
     },
     /// Terminal for `Check`, after `Abort`: the checks were stopped.
-    Aborted {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    Aborted { owner: Token },
     /// Actual host terminal for `Deliver`, including while shutdown settles.
     /// Constructor-sealed owned evidence is revalidated against admitted writable
     /// mounts; stale callback generations are inert.
-    /// Contract: domain/run.md, sections 8.2 and 10.
-    Delivered {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-        /// Typed terminal for the host's change-delivery request.
-        delivery: Delivery,
-    },
+    Delivered { owner: Token, delivery: Delivery },
 }
 
 /// run -> parent
@@ -238,72 +201,59 @@ pub enum Event {
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Request {
     /// Main yielded after a settled wait with an empty inbox. No terminal is owed.
-    /// Contract: domain/run.md, sections 6 and 10.
     Waiting {
-        /// Stable parent logical run scope. Contract: domain/run.md, section 6.
+        /// Stable parent logical run scope.
         host_run: Token,
 
-        /// Latest message consumed by a told turn. Contract: domain/run.md, section 6.
+        /// Latest message consumed by a told turn.
         read: Option<Token>,
     },
 
     /// One settled main turn, emitted before the final answer; root moves its body.
-    /// Contract: domain/run.md, sections 6 and 13.
     Turn {
-        /// Stable parent logical run scope. Contract: domain/run.md, section 13.
+        /// Stable parent logical run scope.
         host_run: Token,
 
-        /// Single-use root-owned concrete body binding. Contract: domain/run.md, section 13.
+        /// Single-use root-owned concrete body binding.
         record: Token,
 
-        /// One-based activation-local output number. Contract: domain/run.md, section 13.
+        /// One-based activation-local output number.
         number: u32,
 
-        /// Latest message actually consumed by this turn. Contract: domain/run.md, section 6.
+        /// Latest message actually consumed by this turn.
         read: Option<Token>,
 
-        /// Actual cumulative run token usage. Contract: domain/run.md, sections 9 and 13.
+        /// Actual cumulative run token usage.
         spent: Spend,
     },
 
     /// Relay an admitted main host-tool call without interpreting its bytes. Each
     /// attempt gets exactly one terminal; a durable name is decided once.
-    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     HostCall {
-        /// Host logical run identity, preserved across restart. Contract: domain/host.md, section 2.
+        /// Host logical run identity, preserved across restart.
         host_run: Token,
-        /// Live relay attempt, never the durable operation name. Contract: domain/run.md, section 5.2.
+        /// Live relay attempt, never the durable operation name.
         relay: crate::RelayName,
         /// Immutable transcript-derived name, identical on every recovery attempt.
-        /// Contract: domain/run.md, section 5.2.
         name: CallName,
-        /// Exact declared tool name. Contract: domain/run.md, section 5.2.
+        /// Exact declared tool name.
         tool: Box<[u8]>,
-        /// Declared scheduling effect, identical across attempts. Contract: domain/run.md, section 5.2.
+        /// Declared scheduling effect, identical across attempts.
         effect: crate::HostEffect,
         /// Complete immutable protocol-attested JSON object, including whitespace.
-        /// Contract: domain/run.md, sections 5.2 and 12.
         input: crate::HostInput,
         /// This relay's bounded deadline; a timeout requests withdrawal and waits for the terminal.
-        /// Contract: domain/run.md, section 5.2.
         deadline: Time,
     },
     /// Request settlement of a host relay, retaining its terminal right.
     /// This is transport withdrawal, never cancellation of submitted Delivery.
-    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     WithdrawHost {
         /// The one live attempt to withdraw, answered by `HostReturned` exactly once.
-        /// Contract: domain/run.md, section 5.2.
         relay: crate::RelayName,
     },
     /// To the host: the run it names `host_run` was admitted, and is `run` to
     /// the run child domain from now on.
-    Admitted {
-        /// Scripted host or host's opaque run name, echoed without interpretation.
-        host_run: Token,
-        /// Admitted run token, retained and echoed within this child's boundary.
-        run: Token,
-    },
+    Admitted { host_run: Token, run: Token },
     /// To the host, the answer to a `Start`: exactly one per start.
     Answer {
         /// Single-use reply right returned to the layer that issued it.
@@ -313,7 +263,6 @@ pub enum Request {
     },
     /// Open a conversation, which every event about it names `conversation`.
     Open {
-        /// Run-issued opaque conversation name, echoed on every conversation event.
         conversation: Token,
         /// Opener-supplied conversation policy, checked at admission.
         opening: Opening,
@@ -323,7 +272,6 @@ pub enum Request {
     Say {
         /// Conversation-issued opaque handle used after admission.
         peer: Token,
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
         text: Box<[u8]>,
     },
     /// Close `peer`, in any state: it stops what is in flight, then ends.
@@ -334,78 +282,50 @@ pub enum Request {
     /// Read the first `max` bytes of the regular file at `at`, following
     /// symbolic links within its root, giving up at `deadline`.
     Read {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
-        /// IO-confined place relative to the named repository root.
         at: Place,
         /// Inclusive maximum count allowed by this contract.
         max: u32,
-        /// Injected monotonic deadline, never obtained from a live clock.
         deadline: Time,
     },
     /// Find out whether an executable file is at `at`, giving up at
     /// `deadline`.
-    Probe {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-        /// IO-confined place relative to the named repository root.
-        at: Place,
-        /// Injected monotonic deadline, never obtained from a live clock.
-        deadline: Time,
-    },
+    Probe { owner: Token, at: Place, deadline: Time },
     /// Run the executable at `program`, in its repository's root, as a
     /// contained process, stopping it at `deadline`; keep the last `tail`
     /// bytes of what it writes.
     Check {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// IO-confined check executable, run as a contained process tree.
         program: Place,
-        /// Injected monotonic deadline, never obtained from a live clock.
         deadline: Time,
         /// Last output bytes retained under the caller's cap.
         tail: u32,
     },
     /// Stop the `Check` in flight for `owner`. Its terminal still comes:
     /// `Aborted`, or `Checked` if the checks ended first.
-    Abort {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    Abort { owner: Token },
     /// To the host: checks of the run it names `host_run` are running until
     /// `deadline` at the latest, so its watchdog waits that long. A notice,
     /// with no terminal. It is a request, not only a fact (`CheckStarted`),
     /// because the watchdog decides on it, and nothing may depend on whether
     /// a fact is kept.
-    Checking {
-        /// Scripted host or host's opaque run name, echoed without interpretation.
-        host_run: Token,
-        /// Injected monotonic deadline, never obtained from a live clock.
-        deadline: Time,
-    },
+    Checking { host_run: Token, deadline: Time },
     /// To the host, deliver the exact checked writable-directory state under
     /// the logical run named `host_run`. The host interprets the unchanged
     /// generic fields and returns its bounded host terminal. Final Change
     /// and separately granted main delivery share the same exclusive checks;
     /// the terminal remains owed through shutdown.
-    ///
-    /// Contract: domain/run.md, sections 7.1, 8 and 14.
     Deliver {
         /// Durable transcript-derived host call name, scoped by the logical host run.
         /// Callback `owner` is separate; retries of this operation reuse this name.
-        /// Contract: domain/run.md, section 8.2; domain/host.md, section 2.
         name: CallName,
         /// Bounded host-operation deadline; the host supplies exactly one
         /// terminal even during shutdown. The run never abandons submission.
-        /// Contract: domain/run.md, sections 8.2 and 10.
         deadline: Time,
-        /// Scripted host or host's opaque run name, echoed without interpretation.
         host_run: Token,
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Declared checkout change with validated host-named fields and bounded aggregate ownership, forwarded unchanged.
-        ///
-        /// Contract: domain/run.md, sections 7.1, 8 and 14.
         change: Change,
     },
 
@@ -417,7 +337,6 @@ pub enum Request {
         result: Returned,
 
         /// Inclusive child bill; zero for every non-child call terminal.
-        /// Contract: domain/run.md, sections 9 and 14.
         spent: u64,
     },
 }
@@ -426,30 +345,25 @@ pub enum Request {
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum Ask {
     /// Main-only exclusive request to wait after this turn settles and yields.
-    /// Contract: domain/run.md, section 6.
     Wait,
 
     /// Invoke a host-declared tool. Main-only declaration and effect are checked
     /// before effects; provider-written JSON bytes are relayed unchanged.
-    /// Contract: domain/run.md, sections 5.1, 5.2 and 12.
     Host {
-        /// Exact declaration name, not interpreted as host policy. Contract: domain/run.md, section 5.2.
+        /// Exact declaration name, not interpreted as host policy.
         tool: Box<[u8]>,
         /// Protocol-selected effect; must equal the admitted declaration.
-        /// Contract: domain/run.md, section 5.2; domain/session.md, section 5.
         effect: crate::HostEffect,
-        /// Complete protocol-attested bounded object input. Contract: domain/run.md, sections 5.2 and 12.
+        /// Complete protocol-attested bounded object input.
         input: crate::HostInput,
     },
     /// Main-only, separately granted mid-run delivery. Fields use that grant's
     /// required-name caps; every extra value counts toward `Limits::outcome_bytes`.
     /// It takes the same exclusive checked snapshot as finishing Change, then
     /// returns the terminal and continues unless shutdown was pending.
-    /// Contract: domain/run.md, sections 7.1, 8.1 and 8.4.
     Deliver {
         /// Opaque host-named metadata, passed unchanged after checked aggregate
         /// ownership and required field validation. No title/body interpretation.
-        /// Contract: domain/run.md, sections 7.1 and 8.4.
         change: Change,
     },
     /// Finish the run with `outcome`.
@@ -479,43 +393,33 @@ pub enum Ask {
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Returned {
     /// Main's wait intent was accepted; ordinary result and continuation settle first.
-    /// Contract: domain/run.md, section 6.
     Waiting,
 
     /// Actual host result/error text; the host's error is forwarded, never retried.
-    /// Contract: domain/run.md, section 5.2.
     HostAnswered(
         /// Exact constructor-bounded host text and error bit, at most receiving reply cap.
-        /// Contract: domain/run.md, section 5.2.
         crate::HostAnswer,
     ),
     /// No permissible recovery remains after the earlier relay settled. This
     /// means outcome unknown, never evidence of failure or permission to decide twice.
-    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     HostUnknown,
     /// Host-tool declaration or owned input was refused before any relay.
-    /// Contract: domain/run.md, sections 5.1, 5.2 and 12.
     HostRejected(
-        /// Typed pre-relay semantic admission failure. Contract: domain/run.md, sections 5.2 and 12.
+        /// Typed pre-relay semantic admission failure.
         crate::HostProblem,
     ),
     /// Actual host landing evidence. A mid-run call continues normally; a finish
     /// call ends with its admitted Change. Receipt constructors cap each copy.
-    /// Contract: domain/run.md, sections 8.2 and 8.4.
     Delivered(
         /// Constructor-bounded host receipts, at most 64 unique writable mounts.
-        /// Contract: domain/run.md, sections 8.2 and 8.4.
         Delivered,
     ),
     /// Host found no changed writable directory; correctable LLM feedback.
-    /// Contract: domain/run.md, section 8.2.
     Nothing,
     /// Host named correctable feedback, bounded by `DeliveryRefusal`. Any marker
     /// ordinal is revalidated against admitted writable mounts before forwarding.
-    /// Contract: domain/run.md, sections 8.1 and 8.2.
     DeliveryRefused(
         /// Named bounded explanation and optional relative marker location.
-        /// Contract: domain/run.md, sections 8.1 and 8.2.
         DeliveryRefusal,
     ),
     /// A non-Change outcome is accepted: the run finishes with it.
@@ -537,30 +441,21 @@ pub enum Returned {
     Stale,
     /// The host operation failed. Its fixed generic reason and sealed
     /// 512-byte diagnostic/drop count return as feedback; no landing is claimed.
-    ///
-    /// Contract: domain/run.md, sections 8.2 and 10.
-    DeliveryFailed {
-        /// Typed reason why the pending operation produced no successful value.
-        failure: DeliveryFailure,
-    },
+    DeliveryFailed { failure: DeliveryFailure },
     /// Nothing was decided: the call was withdrawn, or the run is ending
     /// otherwise.
     Cancelled,
     /// Before submission, the call's deadline passed and its sub-agent or
     /// checks settled. A submitted delivery instead owes its settled host terminal.
-    ///
-    /// Contract: domain/run.md, sections 8.2 and 10.
     TimedOut,
     /// The run has no room for another call now; it may have later.
     Busy,
     /// The sub-agent's last message: at most the run's limit of its first
     /// bytes, with the `cut` bytes past them dropped, and why it stopped.
     Answered {
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
         text: Box<[u8]>,
         /// Bytes omitted outside the retained output window.
         cut: u64,
-        /// Why the provider stopped this completion, independently of its content.
         stop: Stop,
     },
     /// The sub-agent ended without an answer: refused at its entrance, its
@@ -581,7 +476,6 @@ pub enum Returned {
 pub enum AskRefusal {
     /// Parent supplied a zero transcript completion. No check or host effect
     /// begins; a valid session origin is one-based and bounded before dispatch.
-    /// Contract: domain/run.md, section 8.2; domain/session.md, sections 3 and 5.
     Name,
     /// The asker lacks this mid-run delivery or sub-agent grant, or asked for families of tools
     /// it does not have itself.
@@ -634,7 +528,6 @@ pub enum Exit {
 pub struct Place {
     /// IO-issued repository root token, stored and echoed without interpreting it.
     pub root: Token,
-    /// Path relative to the named root, resolved and confined by the receiving IO layer.
     pub path: Box<[u8]>,
 }
 
@@ -646,7 +539,6 @@ pub enum Read {
     /// The file's first characters, in at most as many bytes as asked for,
     /// cut where a character ends; `whole` when they are all of it.
     Text {
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
         text: Box<[u8]>,
         /// Whether the retained text includes the entire file.
         whole: bool,
@@ -663,23 +555,18 @@ pub enum Read {
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Opening {
     /// Host-supplied activation shared by this run's main and child sessions.
-    /// Contract: domain/run.md, sections 3.2 and 8.2.
     pub activation: u64,
 
     /// Root-owned restore binding for main, None for every child.
-    /// Contract: domain/run.md, sections 3 and 13.
     pub transcript: Option<Token>,
 
     /// Main-only wait descriptor; children cannot acquire this authority.
-    /// Contract: domain/run.md, section 6.
     pub wait: bool,
 
     /// Main's bounded host declarations, copied whole; every child receives none.
-    /// Contract: domain/run.md, sections 5.1–5.3 and 12.
     pub host_tools: Box<[crate::HostTool]>,
     /// Whether the parent offers main the separately granted delivery tool.
     /// It is false for every child; this descriptor grants no final outcome form.
-    /// Contract: domain/run.md, section 8.4.
     pub deliver: bool,
     /// The LLM it talks to.
     pub llm: Llm,
@@ -721,25 +608,20 @@ pub enum Stop {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum End {
     /// Session price cannot be added; prior charges remain exact.
-    /// Contract: domain/run.md, sections 9, 10 and 14.
     PriceOverflow,
 
     /// Session usage cannot be added; prior charges remain exact.
-    /// Contract: domain/run.md, sections 9, 10 and 14.
     UsageOverflow,
 
     /// Session per-kind receiving cap, independent of scalar run exhaustion.
-    /// Contract: domain/run.md, section 9; domain/session.md, section 6.
     Receiving(
-        /// Exact receiving dimension. Contract: domain/session.md, section 6.
+        /// Exact receiving dimension.
         crate::ReceivingLimit,
     ),
 
     /// Exact V2 history refusal before provider or tool effects.
-    /// Contract: domain/run.md, section 13.
     TranscriptRefused {
         /// Small lossless sibling-independent admission reason.
-        /// Contract: domain/run.md, section 13.
         reason: TranscriptRefusal,
     },
 
@@ -758,77 +640,59 @@ pub enum End {
 
 /// Exact neutral completion failure after retries or nonretryable refusal.
 /// Diagnostic bytes were consumed by session policy; this record remains content-free.
-/// Contract: domain/run.md, sections 2, 5 and 10.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum CompletionFailure {
     /// Shared-client receiving allowance exceeded.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Limit,
 
     /// Shared protocol response contract violated.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Protocol,
 
     /// Unsolicited lower cancellation.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Cancelled,
 
     /// Provider capacity refused the request.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Overloaded,
 
     /// Provider could not be reached or failed.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Unavailable,
 
     /// The completion deadline elapsed.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     TimedOut,
 
     /// Provider context allowance was exceeded.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     ContextTooLong,
 
     /// Provider rejected the request shape.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Invalid,
 
     /// Provider rejected the credential.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Unauthorized,
 
     /// Provider rate allowance requires the retained cooldown.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     RateLimited {
         /// Exact lower cooldown, without scheduling or recovery policy.
-        /// Contract: domain/run.md, sections 2, 5 and 10.
         retry_after: skein_lib::Duration,
     },
 
     /// Provider account allowance requires the retained cooldown.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Exhausted {
         /// Exact lower cooldown, without scheduling or recovery policy.
-        /// Contract: domain/run.md, sections 2, 5 and 10.
         retry_after: skein_lib::Duration,
     },
 }
 
 /// Actual transport evidence retained alongside a neutral completion failure.
 /// No domain infers this from an error label or from requested cancellation.
-/// Contract: domain/run.md, sections 2, 5 and 10.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum CompletionEvidence {
     /// The lower proves no request bytes were sent.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Unsent,
 
     /// The request may have reached the peer; outcome is unknown.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Unknown,
 
     /// A peer response, including a refusal, was received.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Response,
 }
 
@@ -837,14 +701,11 @@ pub enum CompletionEvidence {
 pub enum Fault {
     /// Full neutral failure and evidence after session retry policy.
     /// This is distinct from local model stopping rules and requested run Cancel.
-    /// Contract: domain/run.md, sections 2, 5 and 10.
     Completion {
         /// Exact content-free shared-client classification and cooldown.
-        /// Contract: domain/run.md, sections 2, 5 and 10.
         failure: CompletionFailure,
 
         /// Exact transport evidence, including across interrupted Delivery.
-        /// Contract: domain/run.md, sections 2, 5 and 10.
         evidence: CompletionEvidence,
     },
 
@@ -868,12 +729,10 @@ pub enum Fault {
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub enum Answer {
     /// Settled main wait reached its idle threshold; all terminal rights have closed.
-    /// Contract: domain/run.md, sections 6, 10 and 13.
     Parked {
-        /// Actual cumulative run token usage. Contract: domain/run.md, section 9.
+        /// Actual cumulative run token usage.
         spent: Spend,
         /// Number of main turns emitted in this activation.
-        /// Contract: domain/run.md, section 13.
         turns: u32,
     },
     /// Refused at the entrance: nothing was done.
@@ -893,17 +752,14 @@ pub enum Answer {
         /// Accepted cumulative usage across the enclosing run or session.
         spent: Spend,
         /// Actual main turns emitted in this activation before this terminal.
-        /// Contract: domain/run.md, section 13.
         turns: u32,
     },
     /// The run ended without an outcome, having spent `spent`.
     Failed {
-        /// Typed reason why the pending operation produced no successful value.
         failure: Failure,
         /// Accepted cumulative usage across the enclosing run or session.
         spent: Spend,
         /// Actual main turns emitted in this activation before this terminal.
-        /// Contract: domain/run.md, section 13.
         turns: u32,
     },
 }
@@ -921,12 +777,10 @@ pub enum Refusal {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Invalid {
     /// A host Start with activation zero is refused before the run opens.
-    /// Contract: domain/run.md, sections 3.2 and 5.2.
     Activation,
 
     /// A host convention path is empty, oversized, absolute or has unsafe
     /// components/bytes. The Start is refused before admission or any effects.
-    /// Contract: domain/run.md, sections 3.1, 8.1, 12 and 14.
     Conventions,
 
     /// It holds more bytes than a run may.
@@ -959,25 +813,20 @@ pub enum Invalid {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Failure {
     /// Actual priced total cannot be represented; a prefix remains attested.
-    /// Contract: domain/run.md, sections 9, 10 and 14.
     PriceOverflow,
 
     /// Actual cumulative raw usage cannot be represented; a prefix remains attested.
-    /// Contract: domain/run.md, sections 9, 10 and 14.
     UsageOverflow,
 
     /// Session per-kind receiving cap, independent of scalar run exhaustion.
-    /// Contract: domain/run.md, section 9; domain/session.md, section 6.
     Receiving(
-        /// Exact receiving dimension. Contract: domain/session.md, section 6.
+        /// Exact receiving dimension.
         crate::ReceivingLimit,
     ),
 
     /// Exact transient history refusal; never silently starts fresh.
-    /// Contract: domain/run.md, section 13.
     Transcript(
         /// Session admission classification, translated exhaustively by root.
-        /// Contract: domain/run.md, section 13.
         TranscriptRefusal,
     ),
 
@@ -1008,24 +857,23 @@ pub enum Policy {
 }
 
 /// Exact concrete-history entrance classification, independent of the sibling type.
-/// Contract: domain/run.md, section 13.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum TranscriptRefusal {
-    /// Unsupported record version. Contract: domain/run.md, section 13.
+    /// Unsupported record version.
     Version,
 
-    /// Configured endpoint differs. Contract: domain/run.md, section 13.
+    /// Configured endpoint differs.
     Endpoint,
 
-    /// Configured replay dialect differs. Contract: domain/run.md, section 13.
+    /// Configured replay dialect differs.
     Dialect,
 
-    /// Invalid concrete record structure. Contract: domain/run.md, section 13.
+    /// Invalid concrete record structure.
     Malformed,
 
-    /// History retains a live ticket. Contract: domain/run.md, section 13.
+    /// History retains a live ticket.
     Unresolved,
 
-    /// Receiving ownership/count cap is incompatible. Contract: domain/run.md, section 13.
+    /// Receiving ownership/count cap is incompatible.
     TooLarge,
 }

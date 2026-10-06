@@ -1,4 +1,4 @@
-//! LLM sessions: a conversation with an LLM, driven turn by turn until the LLM
+//! LLM sessions (domain/session.md, sections 3–7): a conversation with an LLM, driven turn by turn until the LLM
 //! yields, a limit or the budget ends it, or its opener closes it.
 //!
 //! An `Open` opens a session, and its kit in the tools the session owns
@@ -475,7 +475,6 @@ pub(crate) fn completed(
 
 /// Check one completion before the parent decodes any of its calls. The same
 /// arithmetic is repeated when the session commits the completion.
-/// Contract: domain/session.md, section 6; domain/run.md, section 9.
 pub fn preview_completion(domain: &Domain, owner: Token, usage: Usage) -> Result<u64, End> {
     let session = domain.sessions.get(Id::from_token(owner)).expect("completion retains its session");
     let conversation = &session.conversation;
@@ -489,7 +488,6 @@ pub fn preview_completion(domain: &Domain, owner: Token, usage: Usage) -> Result
 
 /// Settle a provider completion rejected by the parent's run-wide arithmetic
 /// check. Its calls and turn never enter the session.
-/// Contract: domain/session.md, section 6; domain/run.md, section 9.
 pub(crate) fn overflowed(domain: &mut Domain, env: &Env<Limits>, owner: Token, end: End, out: &mut Queue<Request>) {
     match end {
         End::PriceOverflow | End::UsageOverflow => {}
@@ -526,7 +524,6 @@ pub(crate) fn overflowed(domain: &mut Domain, env: &Env<Limits>, owner: Token, e
 /// The root refused the current requested completion before any provider start.
 /// Its reservation is released and only the kit closes. No accepted completion,
 /// retry or external cancellation is invented; stale/duplicate denials are inert.
-/// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
 pub(crate) fn budget_denied(
     domain: &mut Domain,
     env: &Env<Limits>,
@@ -545,14 +542,12 @@ pub(crate) fn budget_denied(
 /// Only its current Calling reservation settles Closed; no provider lease,
 /// cancel or completion evidence is fabricated. Closing calls still
 /// require their terminal.
-/// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
 pub(crate) fn unsent_closed(domain: &mut Domain, env: &Env<Limits>, owner: Token, out: &mut Queue<Request>) {
     unsent_finished(domain, env, owner, End::Closed, out);
 }
 
 /// Settles a current reserved but unpublished provider request. Other states
 /// retain their terminal obligations and all stale identities are inert.
-/// Contract: domain/session.md, sections 3, 5 and 6; domain/run.md, section 9.
 fn unsent_finished(domain: &mut Domain, env: &Env<Limits>, owner: Token, end: End, out: &mut Queue<Request>) {
     let Some(id) = addressed(&domain.sessions, owner) else {
         return;
@@ -1279,7 +1274,6 @@ fn advance(
 
 /// Assemble a fully settled batch in original call order, then issue the next
 /// provider request only after its new receiving credit is available.
-/// Contract: domain/session.md, sections 3 and 5.
 fn finish_tools(
     conversation: &mut Conversation,
     id: Id<Session>,
@@ -1520,7 +1514,6 @@ fn used(conversation: &mut Conversation, usage: Usage, out: &mut Queue<Request>)
 }
 
 /// All four raw counters commit together, or preserve the previous exact prefix.
-/// Contract: domain/session.md, section 6; domain/run.md, section 9.
 fn checked_usage(previous: Usage, received: Usage) -> Option<Usage> {
     Some(Usage {
         input_tokens: previous.input_tokens.checked_add(received.input_tokens)?,
@@ -1974,7 +1967,6 @@ fn payload_cost(block: &Block) -> Option<u64> {
 }
 
 /// The replay wrapper is inline in Block; its owned envelope is additional.
-/// Contract: domain/session.md, sections 3 and 12.
 fn replay_cost(replay: Option<&crate::llm::Replay>) -> Option<u64> {
     match replay {
         Some(replay) => len(&replay.bytes),
@@ -2356,18 +2348,15 @@ fn tell_turn(conversation: &mut Conversation, out: &mut Queue<Request>) -> Optio
 
 /// A child's exact cumulative inclusive bill. This fixed handoff carries no
 /// payload and never changes the receiver's own price.
-/// Contract: domain/session.md, section 6; domain/run.md, section 9.
 #[derive(Debug)]
 pub(crate) struct Bill {
     /// Exact child bill, added once after the identity guard.
-    /// Contract: domain/session.md, section 6; domain/run.md, section 9.
     pub(crate) spent: u64,
 }
 
 /// An addressed delegated terminal charges its inclusive bill once before
 /// settling its result. Retired, stale, wrong-owner and duplicate bills
 /// change neither price prefix; the own prefix never includes a child bill.
-/// Contract: domain/session.md, sections 5 and 6; domain/run.md, section 9.
 pub(crate) fn delegate_ended(
     domain: &mut Domain,
     env: &Env<Limits>,
@@ -2604,16 +2593,14 @@ fn recorded_shape(message: &Message, limits: &Limits) -> Result<(), crate::recor
 /// Fault injection for the unit test of the integer naming fence. A
 /// bounded transcript cannot hold this many turns; this tests the fence before
 /// delegated or owned effects, while retaining the received provider usage.
-/// Contract: domain/session.md, sections 3 and 5; testing-strategy.md, section 2.2.
 #[cfg(test)]
 pub(crate) fn exhaust_origin_for_test(domain: &mut Domain, owner: Token) {
     let session = domain.sessions.get_mut(Id::from_token(owner)).expect("live test session");
     session.conversation.recording.sequence = u32::MAX;
 }
 
-/// Actual reserved provider rights for focused settlement controls. This
+/// Reserved provider rights for focused settlement controls. This
 /// observes bounded retained state, never supplies a completion or price.
-/// Contract: domain/session.md, sections 3, 5 and 6; testing-strategy.md, section 2.2.
 #[cfg(test)]
 pub(crate) fn provider_credit_for_test(domain: &Domain, owner: Token) -> (u64, Option<u64>) {
     let session = domain.sessions.get(Id::from_token(owner)).expect("admitted test session before reclaim");

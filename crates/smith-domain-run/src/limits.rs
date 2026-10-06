@@ -1,7 +1,7 @@
 //! Ownership caps and checked worst-case arithmetic. This module retains no runtime state.
 //! `worst_case` projects immutable limits into container and payload bounds, returning `None` on overflow.
 //!
-//! Contract: domain/run.md, section 14; programming-model.md, sections 4.4, 4.5 and 6.3.
+//! Contract: domain/run.md, section 13; programming-model.md, sections 4.4, 4.5 and 6.3.
 
 use skein_lib::{Deadlines, Duration, List, Queue, Slab};
 
@@ -16,21 +16,17 @@ use crate::run::{Alarm, Conversation, Run};
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
     /// Live FIFO messages per admitted run. Full admission bounces before retention.
-    /// Contract: domain/run.md, sections 6 and 14.
     pub messages: u32,
 
     /// Maximum attested labelled text bytes retained per queued message.
-    /// Contract: domain/run.md, sections 6 and 14.
     pub message_bytes: u32,
 
     /// Maximum positive charter idle interval; it never pauses the wall budget.
-    /// Contract: domain/run.md, sections 6 and 10.
     pub waiting: Duration,
 
     /// Maximum host operation duration after checked submission. It must
     /// be positive for a delivery-capable charter; caller expiry may be earlier.
     /// The host supplies the bounded host terminal even after run shutdown.
-    /// Contract: domain/run.md, sections 8.2 and 10.
     pub delivery_timeout: Duration,
     /// Runs at once. A start beyond them is refused as busy.
     pub runs: u32,
@@ -45,45 +41,34 @@ pub struct Limits {
     /// Host-written main Brief sections. Exact count is checked before section
     /// traversal, rendering or effects; excess refuses as `Invalid::TooLarge`.
     /// Cells, instructions and all title/text payloads also fit `run_bytes`.
-    /// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
     pub brief_sections: u32,
     /// Directories a present workspace may list; empty present workspaces refuse.
     pub directories: u32,
 
     /// Maximum opaque safe mount component bytes, checked before pairwise admission.
-    /// Contract: domain/run.md, sections 3.2 and 14; domain/tools.md, section 2.
     pub directory_name_bytes: u32,
 
     /// Maximum initial conflict paths per git directory, checked before comparisons.
-    /// Contract: domain/run.md, sections 3.2, 8.3 and 14.
     pub conflicts: u32,
 
     /// Maximum relative conflict path bytes, at most `Marker::CAPACITY` (4096).
-    /// Contract: domain/run.md, sections 3.2, 8.3 and 14.
     pub conflict_path_bytes: u32,
     /// Host tool declarations a charter may grant.
-    ///
-    /// Contract: domain/run.md, sections 3, 5.2, 13 and 14.
     pub host_tools: u32,
 
     /// Maximum immutable protocol-attested host input bytes per call, at most the vocabulary cap.
-    /// Contract: domain/run.md, sections 5.2 and 12.
     pub host_input_bytes: u32,
 
     /// Maximum host answer text bytes accepted and retained per call.
-    /// Contract: domain/run.md, sections 5.2 and 12.
     pub host_reply_bytes: u32,
 
     /// Receiving ceiling for each relay timeout; caller and run expiry may be earlier.
-    /// Contract: domain/run.md, section 5.2.
     pub host_timeout: Duration,
 
     /// Positive deterministic backoff between settled retryable relays.
-    /// Contract: domain/run.md, section 5.2.
     pub host_backoff: Duration,
 
     /// Maximum relay attempts per durable operation, including the first.
-    /// Contract: domain/run.md, section 5.2.
     pub host_attempts: u32,
     /// Verdicts an outcome spec may list.
     pub verdicts: u32,

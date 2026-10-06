@@ -1,7 +1,7 @@
 //! Ownership caps and checked worst-case arithmetic. This module retains no runtime state.
 //! `worst_case` projects immutable limits into container and payload bounds, returning `None` on overflow.
 //!
-//! Contract: domain/run.md, section 14; programming-model.md, sections 4.4, 4.5 and 6.3.
+//! Contract: domain/run.md, section 13; programming-model.md, sections 4.4, 4.5 and 6.3.
 
 use skein_lib::{Id, Map, Queue, Set, Slab, Token};
 use smith_domain_run::{self as run, Ask};
@@ -25,7 +25,6 @@ pub struct Limits {
     /// bound before provider work; oversized classifications become `TooLarge`.
     /// This includes one Decoded cell for every possible completion block,
     /// including classifications with no payload after a refusal.
-    /// Contract: domain/run.md, sections 3 and 14.
     pub decoded_call_bytes: u64,
 
     /// Safety margin subtracted from credential validity before use.
@@ -171,7 +170,6 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
 /// Deferred concrete payload outside session while one complete delegate batch
 /// owns its pre-effect receiving credit. Actual queued bytes are separately
 /// allocated and priced; no post-effect history-full result is discarded.
-/// Contract: domain/run.md, sections 6, 10 and 14; domain/session.md, section 3.
 #[cfg(test)]
 pub(crate) fn uncharged(limits: &Limits) -> Option<u64> {
     u64::from(limits.session.parallel_tools).checked_mul(limits.session.delegated_result_bytes)
@@ -239,7 +237,6 @@ pub(crate) const fn run_steps(limits: &Limits) -> u32 {
 
 /// History payload and separate allocated record/message envelopes. The source
 /// session byte cap prices Block cells/payloads, never these arrays.
-/// Contract: domain/run.md, sections 3, 13 and 14; domain/session.md, section 3.
 pub(crate) fn record_payload(limits: &Limits) -> Option<u64> {
     let messages = u64::from(limits.session.messages);
     limits
@@ -254,7 +251,6 @@ pub(crate) fn record_payload(limits: &Limits) -> Option<u64> {
 /// cap prices all source Block/payload bytes, while this separate conservative
 /// bound prices every allocated root Block/Message/served descriptor and the
 /// copied host declarations. Child queue and caller-output ownership coexist.
-/// Contract: domain/run.md, sections 13 and 14; programming-model.md, section 6.3.
 pub(crate) fn prompt_payload(limits: &Limits) -> Option<u64> {
     let session_block = u64::try_from(size_of::<session::llm::Block>()).ok()?;
     let blocks = limits.session.session_bytes.checked_div(session_block)?;

@@ -1,5 +1,5 @@
 //! The tools child domain's state and its entry point (domain/tools.md,
-//! sections 4–6 and 9; programming-model.md, sections 4.5 and 6.3). [`Domain`]
+//! sections 3–6; programming-model.md, sections 4.5 and 6.3). [`Domain`]
 //! retains kits, pending IO jobs and bounded facts. [`step`] emits the kit's
 //! bounded requests and accepts its typed terminals. This module never knows
 //! provider text, run outcomes, credentials or filesystem contents beyond
@@ -17,16 +17,12 @@ use crate::limits::Limits;
 /// cancels each call it is running, up to `limits.calls`, and any other event
 /// emits at most two. The parent reserves this much room in `out` before
 /// calling it.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[must_use]
 pub const fn max_out(limits: &Limits) -> u32 {
     if limits.calls > 2 { limits.calls } else { 2 }
 }
 
 /// The tools child domain's state.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 #[derive(Debug)]
 pub struct Domain {
     pub(crate) kits: Slab<Kit>,
@@ -36,8 +32,6 @@ pub struct Domain {
 
 impl Domain {
     /// A domain with room for `limits`.
-    ///
-    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     #[must_use]
     pub fn new(limits: &Limits) -> Domain {
         let jobs = job::slots(limits).expect("worst_case accepted the limits");
@@ -49,16 +43,12 @@ impl Domain {
     }
 
     /// Kits present, closed ones included until they are reclaimed.
-    ///
-    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     #[must_use]
     pub fn kits(&self) -> u32 {
         self.kits.len()
     }
 
     /// Calls running, answered ones included until they are reclaimed.
-    ///
-    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     #[must_use]
     pub fn jobs(&self) -> u32 {
         self.jobs.len()
@@ -66,24 +56,18 @@ impl Domain {
 
     /// The oldest fact not yet drained. The parent drains them at its own
     /// pace; what does not fit meanwhile is dropped and counted.
-    ///
-    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub fn pop_fact(&mut self) -> Option<Fact> {
         self.facts.pop()
     }
 
     /// How many facts were dropped for want of room, since the domain was
     /// made.
-    ///
-    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     #[must_use]
     pub fn facts_lost(&self) -> u64 {
         self.facts.lost()
     }
 
     /// The reclaim point: frees what closed in this iteration.
-    ///
-    /// Contract: domain/tools.md, sections 4, 5, 6 and 9.
     pub fn reclaim(&mut self) {
         self.jobs.reclaim();
         self.kits.reclaim();
@@ -91,8 +75,6 @@ impl Domain {
 }
 
 /// Handles one event, emitting at most [`max_out`] requests.
-///
-/// Contract: domain/tools.md, sections 4, 5, 6 and 9.
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     match event {
         Event::Open { session, authority } => kit::open(domain, env, session, authority, out),

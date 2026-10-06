@@ -1,9 +1,14 @@
-//! Routing (programming-model.md, section 4.5): each of the protocol's events to the child domain it is for,
+//! Routing (programming-model.md, section 4.5; domain/run.md, sections 2, 3, 10 and 13;
+//! domain/session.md, sections 3–6): each of the protocol's events to the child domain it is for,
 //! each child domain's requests to the protocol layer or, translated, to the
 //! other, and the hand-offs the ready list deferred.
 //!
 //! Every match is exhaustive, so a variant added to either side's vocabulary
 //! breaks the build here.
+//! The functions retain no independent state: they mutate the root's bounded
+//! queues and child domains. They never know provider wire syntax, credential
+//! secrets or the host's delivery policy. [`event`], [`deliver`] and
+//! [`hand_off`] perform the boundary handoffs.
 
 use alloc::boxed::Box;
 
@@ -339,7 +344,7 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
 }
 
 /// Transfer one live ask into a pending terminal right, retaining its complete
-/// historical origin. The session's expiry bounds the call; only its /// terminal releases this flight. Contract: domain/run.md, sections 5 and 10.
+/// historical origin. The session's expiry bounds the call; only its /// terminal releases this flight.
 fn delegated(
     domain: &mut Domain,
     owner: Token,
@@ -426,7 +431,7 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
 
 /// Unsent session request moved into one concrete root admission cell. Its
 /// source prompt already owns the receiving reservation; no extra copy is made
-/// until the pure run gate accepts (domain/run.md, sections 9, 10 and 14).
+/// until the pure run gate accepts.
 struct PendingCompletion {
     owner: Token,
     prompt: session::llm::Prompt,
@@ -495,7 +500,6 @@ fn complete(domain: &mut Domain, env: &Env<Limits>, pending: PendingCompletion, 
 
 /// Host rate/share translation and concrete restore admission precede effects.
 /// Session alone prices, while token ceilings remain receiving limits.
-/// Contract: domain/run.md, sections 3, 9, 13 and 14; domain/session.md, section 6.
 fn open(domain: &mut Domain, env: &Env<Limits>, conversation: Token, opening: run::Opening) {
     let activation = opening.activation;
     let account = opening.llm.account;

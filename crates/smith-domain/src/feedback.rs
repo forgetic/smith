@@ -3,7 +3,7 @@
 //! then write one owning text, preserving all semantic fields and opaque bytes.
 //! Provider-attested host text and ordinary child text move verbatim; opaque
 //! evidence uses lossless quoted ASCII byte literals. Contract: domain/run.md,
-//! sections 7, 8, 10 and 14; programming-model.md, sections 4.5, 6.3 and 8.
+//! sections 7, 8, 10; programming-model.md, sections 4.5, 6.3 and 8.
 
 use alloc::boxed::Box;
 
@@ -13,27 +13,22 @@ use smith_domain_run::{self as run, Returned, Stop};
 
 /// One complete concrete application result, supplied to session `Answered`.
 /// It carries no authority or pending operation; ownership passes to the caller.
-/// Contract: domain/run.md, sections 7, 8 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Feedback {
     /// Complete valid protocol text, at most the checked receiving byte cap.
     /// Attested host/child bytes remain exact; opaque evidence is escaped losslessly.
-    /// Contract: domain/run.md, sections 7, 8 and 14.
     pub text: Box<[u8]>,
 
     /// Exact application error classification, independent of transport evidence.
-    /// Contract: domain/run.md, sections 7, 8 and 14.
     pub error: bool,
 }
 
 /// Pure feedback construction failed before allocation. A root must reserve a
 /// compatible cap before admitting an effect whose result uses this helper.
-/// Contract: domain/run.md, sections 7, 8 and 14.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum FeedbackRefusal {
     /// The complete text exceeds the caller's cap or checked length arithmetic.
     /// No partial evidence or replacement operation result is constructed.
-    /// Contract: domain/run.md, sections 7, 8 and 14.
     TooLarge,
 }
 
@@ -41,7 +36,6 @@ pub enum FeedbackRefusal {
 /// mechanical application translation, never a new request, retry or effect.
 /// The caller prices simultaneous semantic and rendered ownership. `TooLarge`
 /// precedes allocation; admitted results require a compatible receiving cap.
-/// Contract: domain/run.md, sections 7, 8, 10 and 14.
 ///
 /// # Errors
 /// Returns `TooLarge` when complete feedback cannot fit `max_bytes`.
@@ -96,7 +90,6 @@ fn unchanged(text: Box<[u8]>, error: bool, max_bytes: u64) -> Result<Feedback, F
 /// caps, including four-byte ASCII expansion, every label/count and child cut/stop.
 /// Returned None means arithmetic overflow; callers refuse before effects.
 /// Semantic ownership and this text are separately priced during construction.
-/// Contract: domain/run.md, sections 7, 8 and 14.
 #[must_use]
 pub fn feedback_worst_case(limits: &run::Limits) -> Option<u64> {
     let fields = limits.run_bytes.max(limits.outcome_bytes).checked_mul(4)?;

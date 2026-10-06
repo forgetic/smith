@@ -10,7 +10,7 @@
 //! typed call, or into the [`Problem`] that keeps it from being one, and
 //! renders what comes of a call as the text the LLM reads.
 //!
-//! Contract: domain/run.md, section 14; programming-model.md, sections 4.4 and 6.3.
+//! Contract: domain/session.md, section 4; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;
 
@@ -23,7 +23,6 @@ pub use smith_domain_session::llm::{Endpoint, Evidence, Failure, Problem, Replay
 /// message.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Prompt {
-    /// Configured provider endpoint identity; the domain never resolves its address.
     pub endpoint: Endpoint,
     /// The provider's name for the model.
     pub model: Box<[u8]>,
@@ -45,19 +44,15 @@ pub struct Prompt {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Served {
     /// Main-only exclusive settled-wait descriptor, fixed name wait and no arguments.
-    /// Contract: domain/run.md, section 6.
     Wait,
 
     /// Main-only host declaration, handed unchanged to the provider schema layer.
-    /// Contract: domain/run.md, sections 3, 5.1, 5.2 and 12.
     Host(
         /// Whole admitted bounded declaration, copied without schema or policy interpretation.
-        /// Contract: domain/run.md, sections 3, 5.2 and 12.
         run::HostTool,
     ),
     /// Main-only mid-run delivery descriptor, offered only by a separate grant.
     /// This fixed descriptor names a tool; operation names come from transcript origin.
-    /// Contract: domain/run.md, sections 8.2 and 8.4; domain/host.md, section 2.
     Deliver,
     /// Finish the run with an outcome.
     Finish,
@@ -89,40 +84,26 @@ pub enum Block {
         bytes: Box<[u8]>,
     },
     /// Explicit provider refusal, distinct from ordinary text and preserved in place.
-    /// Contract: domain/run.md, sections 3 and 12.
     Refusal {
         /// Provider-attested UTF-8 refusal bytes, bounded with enclosing content.
-        /// Contract: domain/run.md, sections 3 and 12.
         text: Box<[u8]>,
         /// Complete optional provider replay envelope, preserved opaquely.
-        /// Contract: domain/run.md, sections 3 and 12.
         replay: Option<Replay>,
     },
     /// Owned bounded text in its original provider position.
-    Text {
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
-        text: Box<[u8]>,
-        /// Complete optional provider replay envelope, copied with this block.
-        /// Contract: domain/run.md, sections 3 and 12.
-        replay: Option<Replay>,
-    },
+    Text { text: Box<[u8]>, replay: Option<Replay> },
     /// A tool call the LLM made, sent back as it wrote it: `id` is the
     /// provider's name for the call, `name` and `input` what the LLM wrote.
     ToolCall {
-        /// Provider-issued tool-call identifier, preserved verbatim in its result.
         id: Box<[u8]>,
-        /// Boundary name, compared byte for byte; it carries no authority by itself.
         name: Box<[u8]>,
         /// Exact provider-written argument bytes, retained for concrete replay and
         /// counted with their enclosing message against session ownership limits.
         input: Box<[u8]>,
-        /// Complete optional provider replay envelope, copied with this block.
-        /// Contract: domain/run.md, sections 3 and 12.
         replay: Option<Replay>,
     },
     /// What came of the tool call `id`.
     ToolResult {
-        /// Provider-issued tool-call identifier, preserved verbatim in its result.
         id: Box<[u8]>,
         /// The one terminal value for the enclosing call; ownership passes to its receiver.
         result: Returned,
@@ -140,19 +121,15 @@ pub enum Returned {
     /// Actual concrete result, copied verbatim with error and optional opaque
     /// record metadata. Canonical live run feedback carries replay None; an
     /// adapter unable to carry restored metadata refuses before provider work.
-    /// Contract: domain/run.md, sections 6 and 13; domain/session.md, section 3.
     Text {
         /// Attested UTF-8 result bytes, bounded before effects.
-        /// Contract: domain/session.md, sections 3 and 5.
         text: Box<[u8]>,
-        /// Actual caller error classification. Contract: domain/session.md, section 3.
+        /// Actual caller error classification.
         error: bool,
         /// Complete optional concrete replay metadata, never silently discarded.
-        /// Contract: domain/session.md, section 3.
         replay: Option<Replay>,
     },
     /// Actual cancellation won the delegated operation; distinct from error text.
-    /// Contract: domain/run.md, section 10; domain/session.md, section 3.
     Withdrawn,
 
     /// The tools' outcome: a success, or a failure, one that ran out of time
@@ -186,9 +163,7 @@ pub struct Completion {
     /// Ordered provider-neutral blocks; boxed storage and owned payloads count
     /// against the receiving session's aggregate ownership limits.
     pub content: Box<[Said]>,
-    /// Why the provider stopped this completion, independently of its content.
     pub stop: Stop,
-    /// Provider-reported token usage, charged exactly once when its completion ends.
     pub usage: Usage,
 }
 
@@ -201,31 +176,20 @@ pub enum Said {
         bytes: Box<[u8]>,
     },
     /// Explicit provider refusal, distinct from ordinary text and preserved in place.
-    /// Contract: domain/run.md, sections 3 and 12.
     Refusal {
         /// Provider-attested UTF-8 refusal bytes, bounded with enclosing content.
-        /// Contract: domain/run.md, sections 3 and 12.
         text: Box<[u8]>,
         /// Complete optional provider replay envelope, preserved opaquely.
-        /// Contract: domain/run.md, sections 3 and 12.
         replay: Option<Replay>,
     },
     /// Owned bounded text in its original provider position.
-    Text {
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
-        text: Box<[u8]>,
-        /// Complete optional provider replay envelope, copied with this block.
-        /// Contract: domain/run.md, sections 3 and 12.
-        replay: Option<Replay>,
-    },
+    Text { text: Box<[u8]>, replay: Option<Replay> },
     /// The LLM asks for a tool to run. `id` is the provider's name for this
     /// call, which its result echoes; `name` and `input` are what the LLM
     /// wrote, the input a JSON object; `call` is what the protocol layer
     /// decoded from them.
     ToolCall {
-        /// Provider-issued tool-call identifier, preserved verbatim in its result.
         id: Box<[u8]>,
-        /// Boundary name, compared byte for byte; it carries no authority by itself.
         name: Box<[u8]>,
         /// Exact provider-written argument bytes, retained for concrete replay and
         /// counted with their enclosing message against session ownership limits.
@@ -233,8 +197,6 @@ pub enum Said {
         /// Full decoded classification: owned checkout call, run-served ask,
         /// or invalid-input problem; the domain executes only admitted classifications.
         call: Decoded,
-        /// Complete optional provider replay envelope, copied with this block.
-        /// Contract: domain/run.md, sections 3 and 12.
         replay: Option<Replay>,
     },
 }
@@ -266,7 +228,6 @@ impl Decoded {
     /// and root use the same count for the aggregate receiving allowance before
     /// effects; None means arithmetic overflow. Original provider call/replay
     /// bytes are counted independently with their enclosing Said block.
-    /// Contract: domain/run.md, sections 3, 5 and 14; domain/tools.md, section 9.
     #[must_use]
     pub fn owned_bytes(&self) -> Option<u64> {
         let payload = match self {

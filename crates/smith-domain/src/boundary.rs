@@ -1,4 +1,6 @@
-//! The records that cross the boundary with the protocol layer (programming-model.md, section 4.4). The
+//! The records that cross the boundary with the protocol layer (programming-model.md, section 4.4;
+//! domain/run.md, sections 2, 3, 5, 6, 8, 9, 10 and 13;
+//! domain/session.md, sections 3–6). The
 //! domain defines them; the protocol crate depends on it.
 //!
 //! Three peers are behind it, and each record names which by its variant:
@@ -66,11 +68,10 @@ pub struct Grant {
 #[derive(PartialEq, Eq, Debug)]
 pub enum Event {
     /// Actual terminal for one host relay attempt; old callbacks are inert.
-    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     HostReturned {
-        /// Live attempt identity, distinct from durable operation scope. Contract: domain/run.md, section 5.2.
+        /// Live attempt identity, distinct from durable operation scope.
         relay: run::RelayName,
-        /// Bounded host text or settled retry classification. Contract: domain/run.md, section 5.2.
+        /// Bounded host text or settled retry classification.
         reply: run::HostReply,
     },
     /// From the host, a call: start a run on `charter`, and answer once it
@@ -81,20 +82,16 @@ pub enum Event {
         reply_to: ReplyTo,
         /// Parent-supplied stable logical host-run scope, preserved across relay
         /// recovery and restarted activations; distinct from live run/callback tokens.
-        /// Contract: domain/run.md, sections 3.2 and 5.2; domain/host.md, section 2.
         host_run: Token,
         /// Host-supplied positive number, unique for each activation of `host_run`.
-        /// Contract: domain/run.md, sections 3.2 and 8.2; domain/host.md, section 2.
         activation: u64,
         /// Host-supplied admission policy, validated before the run starts.
         charter: run::Charter,
         /// Optional immutable host mounts and initial conflicts, moved to run admission.
-        /// Contract: domain/run.md, sections 3.2, 8.3 and 14.
         workspace: Option<run::Workspace>,
         /// Typed V2 history including committed post-transcript results.
         /// False charter.resume ignores it; semantic refusal never starts fresh.
         /// Receiving record/count caps are checked before root retention.
-        /// Contract: domain/run.md, sections 3 and 13; domain/session.md, section 3.
         transcript: Option<smith_domain_session::record::Transcript>,
         /// Host credential-name and remaining-validity notices, bounded by `Limits.accounts`.
         /// These select a usable credential generation; they grant no checkout or tool authority.
@@ -104,16 +101,14 @@ pub enum Event {
     /// Parent-labelled live message, FIFO and bounded before retention by
     /// `Limits.run.messages` and `Limits.run.message_bytes`. Accepted messages
     /// emit no separate admission terminal; the read fence reports consumption.
-    /// Contract: domain/run.md, section 6.
     Message {
-        /// Admitted live run handle. Contract: domain/run.md, section 6.
+        /// Admitted live run handle.
         run: Token,
 
-        /// Active-run unique opaque name, including zero. Contract: domain/run.md, section 6.
+        /// Active-run unique opaque name, including zero.
         name: Token,
 
         /// Attested UTF-8 including sender label, at most `Limits.run.message_bytes`.
-        /// Contract: domain/run.md, section 6.
         text: Box<[u8]>,
     },
 
@@ -131,52 +126,32 @@ pub enum Event {
     /// Actual host terminal for `Deliver`, including while shutdown settles.
     /// Constructor-sealed owned evidence is revalidated against admitted writable
     /// mounts; stale callback generations are inert.
-    /// Contract: domain/run.md, sections 8.2 and 10.
-    Delivered {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-        /// Typed terminal for the host's change-delivery request.
-        delivery: run::Delivery,
-    },
+    Delivered { owner: Token, delivery: run::Delivery },
 
     /// Terminal for `Complete`: the LLM produced its next message.
     Completed {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Provider completion, validated and charged once before its tools run.
         completion: Completion,
     },
     /// Terminal for `Complete`: the call produced no message.
     Failed {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
-        /// Typed reason why the pending operation produced no successful value.
         failure: Failure,
 
         /// Exact content-free transport evidence carried by the terminal.
-        /// Contract: domain/run.md, sections 4, 5 and 12.
         evidence: crate::llm::Evidence,
 
         /// Bounded exact shared-client diagnostic, consumed and dropped by policy.
         /// It never controls text-based retry decisions or enters saved history.
-        /// Contract: domain/run.md, sections 4, 5 and 12.
         detail: Box<[u8]>,
     },
     /// Terminal for `Complete`, after `Cancel`: the call was abandoned.
-    Cancelled {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    Cancelled { owner: Token },
     /// Terminal for `Io`.
-    Done {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-        /// IO's one terminal for the named pending operation.
-        done: tools::Done,
-    },
+    Done { owner: Token, done: tools::Done },
     /// Terminal for `Read`.
     Read {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// IO's one terminal for the run's pending text read.
         read: run::Read,
@@ -184,23 +159,18 @@ pub enum Event {
     /// Terminal for `Probe`: whether an executable file is at the place. A
     /// failure or a deadline passed reads as not.
     Probed {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Whether IO found an executable within the named root before its deadline.
         executable: bool,
     },
     /// Terminal for `Check`: what the checks' process did.
     Checked {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Checks' process terminal, including its bounded diagnostic tail.
         ran: run::Ran,
     },
     /// Terminal for `Check`, after `Abort`: the checks were stopped.
-    Aborted {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    Aborted { owner: Token },
 }
 
 /// Owned host notices and calls, provider calls and IO operations emitted by
@@ -210,69 +180,60 @@ pub enum Request {
     /// Settled main wait and yield with empty inbox; wall time keeps running.
     /// This observation to the parent owes no terminal; Start's reply right
     /// remains pending until the run's final Answer.
-    /// Contract: domain/run.md, sections 6 and 10.
     Waiting {
-        /// Stable parent run scope. Contract: domain/run.md, section 6.
+        /// Stable parent run scope.
         host_run: Token,
 
-        /// Latest name consumed by a turn. Contract: domain/run.md, section 6.
+        /// Latest name consumed by a turn.
         read: Option<Token>,
     },
 
     /// Actual main turn; caller owns durable payload and host ACK metadata has
     /// its separate existing owner. Emitted before the final Answer.
-    /// Contract: domain/run.md, section 13; domain/host.md, section 6.
     Turn {
-        /// Stable parent run scope. Contract: domain/run.md, section 13.
+        /// Stable parent run scope.
         host_run: Token,
 
-        /// One-based output number within this activation. Contract: domain/run.md, section 13.
+        /// One-based output number within this activation.
         number: u32,
 
-        /// Latest message consumed by this turn. Contract: domain/run.md, section 6.
+        /// Latest message consumed by this turn.
         read: Option<Token>,
 
         /// Cumulative token usage, independently enforced from record prices.
-        /// Contract: domain/run.md, sections 9 and 13.
         spent: run::Spend,
 
         /// Full concrete record including replay and terminal results.
-        /// Contract: domain/session.md, section 3.
         turn: smith_domain_session::record::Turn,
     },
 
     /// Opaque declared main host tool, forwarded without interpreting its input.
     /// One terminal is owed per attempt; durable decisions replay by name.
-    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     HostCall {
-        /// Stable logical run scope supplied by Start. Contract: domain/host.md, section 2.
+        /// Stable logical run scope supplied by Start.
         host_run: Token,
-        /// One live relay attempt. Contract: domain/run.md, section 5.2.
+        /// One live relay attempt.
         relay: run::RelayName,
-        /// Immutable accepted-transcript operation name. Contract: domain/run.md, section 5.2.
+        /// Immutable accepted-transcript operation name.
         name: run::CallName,
-        /// Exact declared tool name. Contract: domain/run.md, section 5.2.
+        /// Exact declared tool name.
         tool: Box<[u8]>,
-        /// Checked declaration effect, used for session scheduling. Contract: domain/session.md, section 5.
+        /// Checked declaration effect, used for session scheduling.
         effect: run::HostEffect,
-        /// Complete bounded attested object bytes, unchanged. Contract: domain/run.md, sections 5.2 and 12.
+        /// Complete bounded attested object bytes, unchanged.
         input: run::HostInput,
         /// Per-relay bounded deadline; withdrawal still owes its terminal.
-        /// Contract: domain/run.md, section 5.2.
         deadline: Time,
     },
     /// Ask the host to settle its live relay, retaining the original terminal.
     /// Submitted delivery has no such cancellation operation.
-    /// Contract: domain/run.md, section 5.2; domain/host.md, section 2.
     WithdrawHost {
         /// The live relay attempt, echoed by its `HostReturned` terminal.
-        /// Contract: domain/run.md, section 5.2.
         relay: run::RelayName,
     },
     /// To the host: the run it names `host_run` was admitted, and is `run`
     /// from now on.
     Admitted {
-        /// Scripted host or host's opaque run name, echoed without interpretation.
         host_run: Token,
         /// Root-issued admitted run token, supplied in `Request::Admitted` and echoed by cancellation.
         run: Token,
@@ -286,41 +247,27 @@ pub enum Request {
     },
     /// To the host: checks of the run it names `host_run` are running until
     /// `deadline` at the latest, so its watchdog waits that long.
-    Checking {
-        /// Scripted host or host's opaque run name, echoed without interpretation.
-        host_run: Token,
-        /// Injected monotonic deadline, never obtained from a live clock.
-        deadline: Time,
-    },
+    Checking { host_run: Token, deadline: Time },
     /// To the host, deliver the exact checked writable-directory state under
     /// the logical run named `host_run`. The host interprets the unchanged
     /// generic fields and returns its bounded host terminal. Final Change
     /// and separately granted main delivery share the same exclusive checks;
     /// the terminal remains owed through shutdown.
-    ///
-    /// Contract: domain/run.md, sections 7.1, 8 and 14; domain/host.md, section 2.
     Deliver {
         /// Durable transcript-derived host call name, scoped by the logical host run.
         /// Callback `owner` is separate; retries of this operation reuse this name.
-        /// Contract: domain/run.md, section 8.2; domain/host.md, section 2.
         name: run::CallName,
         /// Bounded host-operation deadline; the host supplies exactly one
         /// terminal even during shutdown. The run never abandons submission.
-        /// Contract: domain/run.md, sections 8.2 and 10.
         deadline: Time,
-        /// Scripted host or host's opaque run name, echoed without interpretation.
         host_run: Token,
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Declared checkout change with validated host-named fields and bounded aggregate ownership, forwarded unchanged.
-        ///
-        /// Contract: domain/run.md, sections 7.1, 8 and 14; domain/host.md, section 2.
         change: run::outcome::Change,
     },
 
     /// Ask an LLM for the next assistant message, giving up after `timeout`.
     Complete {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Credential name or refresh notice; its secret value stays below the domain.
         grant: GrantName,
@@ -332,22 +279,18 @@ pub enum Request {
         /// Maximum owned translated completion bytes, including block cells,
         /// replay envelopes and decoded calls. The adapter verifies its configured
         /// bound before preparing the provider request; terminals obey it.
-        /// Contract: domain/run.md, sections 3 and 14.
         max_completion_bytes: u64,
 
         /// Maximum translated completion blocks, reserved with result skeletons
         /// before this request. One terminal remains owed after Cancel.
-        /// Contract: domain/run.md, sections 3 and 14.
         max_completion_blocks: u32,
 
         /// Maximum exact shared-client failure diagnostic bytes. The adapter
         /// verifies compatibility before prepare; policy consumes the         /// terminal and drops detail without retaining text in facts/history.
-        /// Contract: domain/run.md, sections 4, 5 and 12.
         max_failure_bytes: u32,
 
         /// Aggregate decoded application-call ownership permitted in this
         /// completion, included by the adapter in its full translated byte bound.
-        /// Contract: domain/run.md, sections 3 and 14.
         decoded_call_bytes: u64,
     },
     /// Provider authentication rejected this exact credential generation; a notice
@@ -365,64 +308,41 @@ pub enum Request {
     },
     /// Abandon the `Complete` in flight for `owner`. Its terminal event still
     /// comes: `Cancelled`, or whichever outcome won the race.
-    Cancel {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    Cancel { owner: Token },
     /// Ask io for `op` for a session's tools, giving up at `deadline`.
     Io {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// Typed IO operation carrying only the authority and bounds required for it.
         op: tools::Op,
-        /// Injected monotonic deadline, never obtained from a live clock.
         deadline: Time,
     },
     /// Abandon the `Io` in flight for `owner`. Its terminal event still comes:
     /// `Done` with `Cancelled`, or whichever outcome won the race.
-    CancelIo {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    CancelIo { owner: Token },
     /// Read the first `max` bytes of the regular file at `at`, following
     /// symbolic links within its root, giving up at `deadline`.
     Read {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
-        /// IO-confined place relative to the named repository root.
         at: run::Place,
         /// Requested retained UTF-8 file-byte cap; the IO terminal reports whether the whole file fits.
         max: u32,
-        /// Injected monotonic deadline, never obtained from a live clock.
         deadline: Time,
     },
     /// Find out whether an executable file is at `at`, giving up at
     /// `deadline`.
-    Probe {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-        /// IO-confined place relative to the named repository root.
-        at: run::Place,
-        /// Injected monotonic deadline, never obtained from a live clock.
-        deadline: Time,
-    },
+    Probe { owner: Token, at: run::Place, deadline: Time },
     /// Run the executable at `program`, in its repository's root, as a
     /// contained process, stopping it at `deadline`; keep the last `tail`
     /// bytes of what it writes.
     Check {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
         /// IO-confined check executable, run as a contained process tree.
         program: run::Place,
-        /// Injected monotonic deadline, never obtained from a live clock.
         deadline: Time,
         /// Last output bytes retained under the caller's cap.
         tail: u32,
     },
     /// Stop the `Check` in flight for `owner`. Its terminal still comes:
     /// `Aborted`, or `Checked` if the checks ended first.
-    Abort {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-    },
+    Abort { owner: Token },
 }

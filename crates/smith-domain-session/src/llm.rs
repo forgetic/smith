@@ -9,7 +9,7 @@
 //! parses: it keeps a call's input as the bytes the LLM wrote, to send back
 //! verbatim, beside what was decoded from it.
 //!
-//! Contract: domain/session.md, section 12; programming-model.md, sections 4.4 and 6.3.
+//! Contract: domain/session.md, section 4; programming-model.md, sections 4.4 and 6.3.
 
 use alloc::boxed::Box;
 
@@ -21,20 +21,16 @@ use smith_domain_tools as tools;
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Endpoint(
     /// Host-configured numeric provider endpoint name, echoed without address resolution or authority inference.
-    ///
-    /// Contract: domain/session.md, sections 4 and 12.
     pub u32,
 );
 
 /// A complete shared-client replay envelope, preserved opaquely by the domain.
 /// Skein owns its format; Smith's protocol attests its size before delivering a block.
 /// This wrapper and all bytes count against completion and transcript ownership.
-/// Contract: domain/session.md, sections 3 and 12.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Replay {
     /// Complete bounded tagged envelope, including unknown provider extensions.
     /// The domain neither parses it nor selects a provider from it.
-    /// Contract: domain/session.md, sections 3 and 12.
     pub bytes: Box<[u8]>,
 }
 
@@ -56,31 +52,20 @@ pub enum Block {
         bytes: Box<[u8]>,
     },
     /// Explicit provider refusal, distinct from ordinary text and preserved in place.
-    /// Contract: domain/session.md, sections 3 and 12.
     Refusal {
         /// Provider-attested UTF-8 refusal bytes, bounded with enclosing content.
-        /// Contract: domain/session.md, sections 3 and 12.
         text: Box<[u8]>,
         /// Complete optional provider replay envelope, preserved opaquely.
-        /// Contract: domain/session.md, sections 3 and 12.
         replay: Option<Replay>,
     },
     /// Owned bounded text in its original provider position.
-    Text {
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
-        text: Box<[u8]>,
-        /// Complete optional provider replay envelope, copied with this block.
-        /// Contract: domain/session.md, sections 3 and 12.
-        replay: Option<Replay>,
-    },
+    Text { text: Box<[u8]>, replay: Option<Replay> },
     /// The LLM asks for a tool to run. `id` is the provider's name for this
     /// call, which its result echoes; `name` and `input` are what the LLM
     /// wrote, the input a JSON object; `call` is what the protocol layer
     /// decoded from them.
     ToolCall {
-        /// Provider-issued tool-call identifier, preserved verbatim in its result.
         id: Box<[u8]>,
-        /// Boundary name, compared byte for byte; it carries no authority by itself.
         name: Box<[u8]>,
         /// Exact provider-written argument bytes, retained for concrete replay and
         /// counted with their enclosing message against session ownership limits.
@@ -88,13 +73,10 @@ pub enum Block {
         /// Full decoded classification: owned tool call, opener-served ticket,
         /// invalid-input problem, or non-executable concrete-history replay marker.
         call: Decoded,
-        /// Complete optional provider replay envelope, copied with this block.
-        /// Contract: domain/session.md, sections 3 and 12.
         replay: Option<Replay>,
     },
     /// What came of the tool call `id`.
     ToolResult {
-        /// Provider-issued tool-call identifier, preserved verbatim in its result.
         id: Box<[u8]>,
         /// The one terminal value for the enclosing call; ownership passes to its receiver.
         result: Returned,
@@ -155,8 +137,6 @@ pub enum Returned {
         text: Box<[u8]>,
         /// Whether the returned tool result represents a failure.
         error: bool,
-        /// Complete optional provider replay envelope, copied with this block.
-        /// Contract: domain/session.md, sections 3 and 12.
         replay: Option<Replay>,
     },
     /// A delegated call whose withdrawal won its terminal race.
@@ -216,7 +196,6 @@ pub struct Message {
 /// message.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Prompt {
-    /// Configured provider endpoint identity; the domain never resolves its address.
     pub endpoint: Endpoint,
     /// The provider's name for the model.
     pub model: Box<[u8]>,
@@ -239,9 +218,7 @@ pub struct Completion {
     /// Ordered provider-neutral blocks; boxed storage and owned payloads count
     /// against the receiving session's aggregate ownership limits.
     pub content: Box<[Block]>,
-    /// Why the provider stopped this completion, independently of its content.
     pub stop: Stop,
-    /// Provider-reported token usage, charged exactly once when its completion ends.
     pub usage: Usage,
 }
 
@@ -279,19 +256,15 @@ impl Usage {
 
 /// What the transport terminal proves about a provider operation.
 /// It is supplied by the shared client, never inferred from failure wording.
-/// Contract: domain/session.md, sections 4, 5 and 12.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Evidence {
     /// The lower proves no request bytes were sent.
-    /// Contract: domain/session.md, sections 4, 5 and 12.
     Unsent,
 
     /// The operation may have reached the peer; no response proves its outcome.
-    /// Contract: domain/session.md, sections 4, 5 and 12.
     Unknown,
 
     /// The peer response was received, including a refused response.
-    /// Contract: domain/session.md, sections 4, 5 and 12.
     Response,
 }
 
@@ -301,16 +274,13 @@ pub enum Evidence {
 pub enum Failure {
     /// The shared client's bounded receiving allowance was exceeded.
     /// This terminal is nonretryable; it is distinct from provider rejection.
-    /// Contract: domain/session.md, sections 4, 5 and 12.
     Limit,
 
     /// The peer response violated the shared protocol contract, nonretryably.
-    /// Contract: domain/session.md, sections 4, 5 and 12.
     Protocol,
 
     /// An unsolicited lower cancellation, not acknowledgement of a
     /// requested Cancel. This failure is nonretryable and keeps transport evidence.
-    /// Contract: domain/session.md, sections 4, 5 and 12.
     Cancelled,
 
     /// The provider is overloaded (HTTP 529, 503). Transient.

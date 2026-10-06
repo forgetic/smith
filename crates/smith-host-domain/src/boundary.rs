@@ -2,353 +2,276 @@
 //! Spawn ends in Gone; Started only names the process binding, Admitted names
 //! the run's independent acceptance. Parent call rights survive channel loss;
 //! Gone waits for IO proof, all IO terminals and exact parent commitments.
+//! This module retains no runtime state and knows no charter semantics or
+//! process internals; [`Event`] enters the stateful host kit, which emits
+//! [`Request`] values with one terminal right each.
 use crate::{Answer, Ask, CallName, Down, Grant, Reply, Start, Turn, Up};
 use alloc::boxed::Box;
 use skein_lib::{Time, Token};
 
-/// Parent notices and lower request terminals consumed by step (domain/host.md, sections 2–7).
+/// Parent notices and lower request terminals consumed by step.
 #[derive(PartialEq, Eq, Debug)]
 #[expect(
     clippy::large_enum_variant,
     reason = "sealed host diagnostic keeps a fixed inline tail; queue/state bounds price the full variant"
 )]
 pub enum Event {
-    /// Parent requests one contained process; exactly one Gone (domain/host.md, sections 2–7).
+    /// Parent requests one contained process; exactly one Gone.
     Spawn {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Bounded V2 start admitted before process IO (domain/host.md, sections 2–7).
+        /// Bounded V2 start admitted before process IO.
         start: Start,
     },
-    /// Parent notice, bounced if full/ending/reused (domain/host.md, sections 2–7).
+    /// Parent notice, bounced if full/ending/reused.
     Message {
-        /// Host kit handle from Started; stale parent notices are inert (domain/host.md, sections 2–7).
         agent: Token,
-        /// Opaque parent message name (domain/host.md, sections 2–7).
+        /// Opaque parent message name.
         name: Token,
-        /// Bounded parent message (domain/host.md, sections 2–7).
+        /// Bounded parent message.
         body: Box<[u8]>,
     },
-    /// Parent consumes one outstanding operation right, even after channel shutdown (domain/host.md, sections 2–7).
+    /// Parent consumes one outstanding operation right, even after channel shutdown.
     Answer {
-        /// Host kit handle from Started; stale parent notices are inert (domain/host.md, sections 2–7).
         agent: Token,
-        /// Agent callback identity; separate from durable operation name (domain/host.md, sections 2–7).
         call: Token,
-        /// Exactly one matching parent terminal; never abandons delivery (domain/host.md, sections 2–7).
+        /// Exactly one matching parent terminal; never abandons delivery.
         reply: Reply,
     },
-    /// Parent committed exactly this forwarded turn (domain/host.md, sections 2–7).
+    /// Parent committed exactly this forwarded turn.
     Acknowledge {
-        /// Host kit handle from Started; stale parent notices are inert (domain/host.md, sections 2–7).
         agent: Token,
-        /// Exact forwarded turn number; duplicate kept ACK is inert (domain/host.md, sections 2–7).
+        /// Exact forwarded turn number; duplicate kept ACK is inert.
         turn: u32,
     },
-    /// Parent replaces a known credential name (domain/host.md, sections 2–7).
+    /// Parent replaces a known credential name.
     Grant {
-        /// Host kit handle from Started; stale parent notices are inert (domain/host.md, sections 2–7).
         agent: Token,
-        /// Positive advancing generation and relative validity (domain/host.md, sections 2–7).
+        /// Positive advancing generation and relative validity.
         grant: Grant,
     },
-    /// Parent politely stops once; no deadline reset (domain/host.md, sections 2–7).
-    Stop {
-        /// Host kit handle from Started; stale parent notices are inert (domain/host.md, sections 2–7).
-        agent: Token,
-    },
-    /// Terminal of lower Spawn; process owns its tree (domain/host.md, sections 2–7).
-    Spawned {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
-        owner: Token,
-        /// Lower process-tree handle from Spawned (domain/host.md, sections 2–7).
-        process: Token,
-    },
-    /// Terminal of lower Spawn; no process resources remain (domain/host.md, sections 2–7).
+    /// Parent politely stops once; no deadline reset.
+    Stop { agent: Token },
+    /// Terminal of lower Spawn; process owns its tree.
+    Spawned { owner: Token, process: Token },
+    /// Terminal of lower Spawn; no process resources remain.
     Unspawned {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
         owner: Token,
-        /// Operator tail kept up to `Limits::detail_bytes` (domain/host.md, sections 2–7).
+        /// Operator tail kept up to `Limits::detail_bytes`.
         detail: Box<[u8]>,
     },
-    /// Terminal of Send; release its exact reservation (domain/host.md, sections 2–7).
-    Sent {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
-        owner: Token,
-    },
-    /// Terminal of Send; drain what agent already wrote (domain/host.md, sections 2–7).
-    Unsent {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
-        owner: Token,
-    },
-    /// Terminal of Read; decoded V2 record (domain/host.md, sections 2–7).
+    /// Terminal of Send; release its exact reservation.
+    Sent { owner: Token },
+    /// Terminal of Send; drain what agent already wrote.
+    Unsent { owner: Token },
+    /// Terminal of Read; decoded V2 record.
     Received {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
         owner: Token,
-        /// Bounded agent metadata and payload (domain/host.md, sections 2–7).
+        /// Bounded agent metadata and payload.
         message: Up,
     },
-    /// Terminal of Read; undecodable/version-mismatched or oversized channel frame (domain/host.md, sections 2–7).
-    Malformed {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
-        owner: Token,
-    },
-    /// Terminal of Read; channel EOF (domain/host.md, sections 2–7).
-    Hangup {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
-        owner: Token,
-    },
-    /// Terminal of Signal, whether or not signal reached process (domain/host.md, sections 2–7).
-    Signalled {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
-        owner: Token,
-    },
-    /// Terminal of Wait; descendants may still run (domain/host.md, sections 2–7).
-    Exited {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
-        owner: Token,
-    },
-    /// Terminal of Reap after Exited; proves `TreeEmpty` (domain/host.md, sections 2–7).
+    /// Terminal of Read; undecodable/version-mismatched or oversized channel frame.
+    Malformed { owner: Token },
+    /// Terminal of Read; channel EOF.
+    Hangup { owner: Token },
+    /// Terminal of Signal, whether or not signal reached process.
+    Signalled { owner: Token },
+    /// Terminal of Wait; descendants may still run.
+    Exited { owner: Token },
+    /// Terminal of Reap after Exited; proves `TreeEmpty`.
     Reaped {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
         owner: Token,
-        /// Operator tail only, never LLM feedback (domain/host.md, sections 2–7).
+        /// Operator tail only, never LLM feedback.
         detail: Box<[u8]>,
     },
 }
 
-/// Parent notifications and effects; each lower request retains one terminal right (domain/host.md, sections 2–7).
+/// Parent notifications and effects; each lower request retains one terminal right.
 #[derive(PartialEq, Eq, Debug)]
 #[expect(
     clippy::large_enum_variant,
     reason = "sealed host diagnostic keeps a fixed inline tail; queue/state bounds price the full variant"
 )]
 pub enum Request {
-    /// Process spawned; parent may now address kit agent (domain/host.md, sections 2–7).
-    Started {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
-        client: Token,
-        /// Host kit handle from Started; stale parent notices are inert (domain/host.md, sections 2–7).
-        agent: Token,
-    },
-    /// Agent independently accepted run (domain/host.md, sections 2–7).
-    Admitted {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
-        client: Token,
-    },
-    /// One parent operation; exact Answer required (domain/host.md, sections 2–7).
+    /// Process spawned; parent may now address kit agent.
+    Started { client: Token, agent: Token },
+    /// Agent independently accepted run.
+    Admitted { client: Token },
+    /// One parent operation; exact Answer required.
     Called {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Stable parent scope, not interpreted (domain/host.md, sections 2–7).
+        /// Stable parent scope, not interpreted.
         logical_run: Token,
-        /// Agent callback identity; separate from durable operation name (domain/host.md, sections 2–7).
         call: Token,
-        /// Positive completion and assistant-block position, scoped by logical run (domain/host.md, sections 2–7).
+        /// Positive completion and assistant-block position, scoped by logical run.
         name: CallName,
-        /// Actual operation deadline and bounded pause (domain/host.md, sections 2–7).
+        /// Actual operation deadline and bounded pause.
         deadline: Time,
-        /// Generic tool/effect or delivery fields (domain/host.md, sections 2–7).
+        /// Generic tool/effect or delivery fields.
         ask: Ask,
     },
-    /// Agent/process withdrew call once; parent terminal still required (domain/host.md, sections 2–7).
-    Withdrawn {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
-        client: Token,
-        /// Agent callback identity; separate from durable operation name (domain/host.md, sections 2–7).
-        call: Token,
-    },
-    /// Parent takes owned payload; kit retains exact ACK metadata (domain/host.md, sections 2–7).
+    /// Agent/process withdrew call once; parent terminal still required.
+    Withdrawn { client: Token, call: Token },
+    /// Parent takes owned payload; kit retains exact ACK metadata.
     Turn {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Validated numbered turn (domain/host.md, sections 2–7).
+        /// Validated numbered turn.
         turn: Turn,
     },
-    /// Validated read fence; crossed queued message prevents pause (domain/host.md, sections 2–7).
+    /// Validated read fence; crossed queued message prevents pause.
     Waiting {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Last sent message read (domain/host.md, sections 2–7).
+        /// Last sent message read.
         read: Option<Token>,
     },
-    /// Known-account credential rejection notice (domain/host.md, sections 2–7).
+    /// Known-account credential rejection notice.
     Rejected {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Credential account (domain/host.md, sections 2–7).
+        /// Credential account.
         account: u32,
-        /// Rejected generation (domain/host.md, sections 2–7).
+        /// Rejected generation.
         generation: u64,
     },
-    /// Known-account quota notice (domain/host.md, sections 2–7).
+    /// Known-account quota notice.
     Exhausted {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Credential account (domain/host.md, sections 2–7).
+        /// Credential account.
         account: u32,
-        /// Retry hint (domain/host.md, sections 2–7).
+        /// Retry hint.
         retry_after: skein_lib::Duration,
     },
-    /// Best-effort fact moved to parent (domain/host.md, sections 2–7).
+    /// Best-effort fact moved to parent.
     Told {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Bounded opaque agent fact (domain/host.md, sections 2–7).
+        /// Bounded opaque agent fact.
         body: Box<[u8]>,
     },
-    /// One run answer; process cleanup still owes Gone (domain/host.md, sections 2–7).
+    /// One run answer; process cleanup still owes Gone.
     Answered {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Validated last word (domain/host.md, sections 2–7).
+        /// Validated last word.
         answer: Answer,
     },
-    /// One typed failure before the run answer (domain/host.md, sections 2–7).
+    /// One typed failure before the run answer.
     Faulted {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Process/channel failure, not a fabricated run result (domain/host.md, sections 2–7).
+        /// Process/channel failure, not a fabricated run result.
         fault: Fault,
     },
-    /// Message rejected before queue mutation (domain/host.md, sections 2–7).
+    /// Message rejected before queue mutation.
     Bounced {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Original rejected message name (domain/host.md, sections 2–7).
+        /// Original rejected message name.
         name: Token,
-        /// Admission reason (domain/host.md, sections 2–7).
+        /// Admission reason.
         bounce: Bounce,
     },
-    /// Spawn terminal; all process and parent rights settled (domain/host.md, sections 2–7).
+    /// Spawn terminal; all process and parent rights settled.
     Gone {
-        /// Opaque parent owner from Spawn; echoed on notifications (domain/host.md, sections 2–7).
         client: Token,
-        /// Entrance or containment completion (domain/host.md, sections 2–7).
+        /// Entrance or containment completion.
         end: End,
-        /// Bounded operator detail (domain/host.md, sections 2–7).
+        /// Bounded operator detail.
         detail: Box<[u8]>,
     },
-    /// Lower contained process spawn with credential-free environment (domain/host.md, sections 2–7).
+    /// Lower contained process spawn with credential-free environment.
     Spawn {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
         owner: Token,
-        /// Optional prepared workspace handle (domain/host.md, sections 2–7).
+        /// Optional prepared workspace handle.
         workspace: Option<Token>,
-        /// Lower Spawn must settle by this deadline (domain/host.md, sections 2–7).
+        /// Lower Spawn must settle by this deadline.
         deadline: Time,
     },
-    /// Lower channel write; exactly one Sent/Unsent (domain/host.md, sections 2–7).
+    /// Lower channel write; exactly one Sent/Unsent.
     Send {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
         owner: Token,
-        /// Lower process-tree handle from Spawned (domain/host.md, sections 2–7).
         process: Token,
-        /// Owned downlink payload counted by receiving lower layer (domain/host.md, sections 2–7).
+        /// Owned downlink payload counted by receiving lower layer.
         message: Down,
     },
-    /// Demand one record; exactly one Received/Malformed/Hangup (domain/host.md, sections 2–7).
-    Read {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
-        owner: Token,
-        /// Lower process-tree handle from Spawned (domain/host.md, sections 2–7).
-        process: Token,
-    },
-    /// Signal every process-tree member; exactly one Signalled (domain/host.md, sections 2–7).
+    /// Demand one record; exactly one Received/Malformed/Hangup.
+    Read { owner: Token, process: Token },
+    /// Signal every process-tree member; exactly one Signalled.
     Signal {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
         owner: Token,
-        /// Lower process-tree handle from Spawned (domain/host.md, sections 2–7).
         process: Token,
-        /// Terminate or Kill (domain/host.md, sections 2–7).
+        /// Terminate or Kill.
         signal: Signal,
     },
-    /// Wait for main process exit; exactly one Exited (domain/host.md, sections 2–7).
-    Wait {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
-        owner: Token,
-        /// Lower process-tree handle from Spawned (domain/host.md, sections 2–7).
-        process: Token,
-    },
-    /// Await empty contained tree after exit; exactly one Reaped (domain/host.md, sections 2–7).
-    Reap {
-        /// Kit-issued live handle echoed by the matching lower terminal (domain/host.md, sections 2–7).
-        owner: Token,
-        /// Lower process-tree handle from Spawned (domain/host.md, sections 2–7).
-        process: Token,
-    },
+    /// Wait for main process exit; exactly one Exited.
+    Wait { owner: Token, process: Token },
+    /// Await empty contained tree after exit; exactly one Reaped.
+    Reap { owner: Token, process: Token },
 }
 
-/// Lower contained-tree signal (domain/host.md, sections 2–7).
+/// Lower contained-tree signal.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Signal {
-    /// Polite tree-wide termination (domain/host.md, sections 2–7).
+    /// Polite tree-wide termination.
     Terminate,
-    /// Final tree-wide kill (domain/host.md, sections 2–7).
+    /// Final tree-wide kill.
     Kill,
 }
 
-/// Typed failure while no agent final answer was accepted (domain/host.md, sections 2–7).
+/// Typed failure while no agent final answer was accepted.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Fault {
-    /// Channel/process ended without answer (domain/host.md, sections 2–7).
+    /// Channel/process ended without answer.
     Exited,
-    /// Agent broke sequence, ownership or typed channel rules (domain/host.md, sections 2–7).
+    /// Agent broke sequence, ownership or typed channel rules.
     Rules,
-    /// Decoded payload exceeded receiving bound (domain/host.md, sections 2–7).
+    /// Decoded payload exceeded receiving bound.
     TooLarge,
-    /// Unpaused progress clock expired (domain/host.md, sections 2–7).
+    /// Unpaused progress clock expired.
     NoProgress,
-    /// Independent wall bound expired (domain/host.md, sections 2–7).
+    /// Independent wall bound expired.
     WallTime,
 }
 
-/// Parent message admission refusal (domain/host.md, sections 2–7).
+/// Parent message admission refusal.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Bounce {
-    /// Payload exceeded bytes (domain/host.md, sections 2–7).
+    /// Payload exceeded bytes.
     TooLarge,
-    /// Bounded queued or unread messages full (domain/host.md, sections 2–7).
+    /// Bounded queued or unread messages full.
     Full,
-    /// Agent no longer accepts messages (domain/host.md, sections 2–7).
+    /// Agent no longer accepts messages.
     Ending,
-    /// Outstanding name or current read watermark reused (domain/host.md, sections 2–7).
+    /// Outstanding name or current read watermark reused.
     ReusedName,
 }
 
-/// Start refused before process resources or payload copying (domain/host.md, sections 2–7).
+/// Start refused before process resources or payload copying.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Invalid {
     /// A parent Start with activation zero is refused before process work.
-    /// Contract: domain/host.md, section 2.
     Activation,
 
-    /// Opaque charter too large (domain/host.md, sections 2–7).
+    /// Opaque charter too large.
     Charter,
-    /// Opaque transcript too large (domain/host.md, sections 2–7).
+    /// Opaque transcript too large.
     Transcript,
-    /// Post-transcript answer bytes too large (domain/host.md, sections 2–7).
+    /// Post-transcript answer bytes too large.
     Answered,
-    /// Invalid bounded mount/conflict descriptors (domain/host.md, sections 2–7).
+    /// Invalid bounded mount/conflict descriptors.
     Directories,
-    /// Duplicate/invalid/excess credential names (domain/host.md, sections 2–7).
+    /// Duplicate/invalid/excess credential names.
     Grants,
-    /// Configured arithmetic or mandatory turn capacity invalid (domain/host.md, sections 2–7).
+    /// Configured arithmetic or mandatory turn capacity invalid.
     Limits,
 }
 
-/// Terminal disposition of one parent Spawn (domain/host.md, sections 2–7).
+/// Terminal disposition of one parent Spawn.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum End {
-    /// No agent slab slot available (domain/host.md, sections 2–7).
+    /// No agent slab slot available.
     Busy,
-    /// Start refused before IO (domain/host.md, sections 2–7).
+    /// Start refused before IO.
     Invalid(
-        /// Sealed typed boundary value; no hidden policy (domain/host.md, section 2).
+        /// Sealed typed boundary value; no hidden policy.
         Invalid,
     ),
-    /// Lower could not spawn; no resources remain (domain/host.md, sections 2–7).
+    /// Lower could not spawn; no resources remain.
     Unspawned,
-    /// Process exited, tree empty, EOF and all rights settled (domain/host.md, sections 2–7).
+    /// Process exited, tree empty, EOF and all rights settled.
     Stopped,
 }

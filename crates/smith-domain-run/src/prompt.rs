@@ -65,7 +65,6 @@ pub(crate) fn nudge(stop: Stop, nudge: u32, nudges: u32) -> Box<[u8]> {
 /// Main's immutable literal prefix: instructions, then every section in order.
 /// Each section is `## {title}\n\n{text}` plus existing paragraph termination;
 /// the delimiter bound is two instruction LFs plus seven bytes per section.
-/// Contract: domain/run.md, sections 3.1, 3.3 and 14.
 fn render_main_prefix(text: &mut Text, charter: &Charter) {
     if !charter.instructions.is_empty() {
         text.put(&charter.instructions);
@@ -81,7 +80,6 @@ fn render_main_prefix(text: &mut Text, charter: &Charter) {
 }
 
 /// A child's caller task, with no parent instructions or structured context.
-/// Contract: domain/run.md, sections 3.3 and 5.3.
 fn render_child_prefix(text: &mut Text, brief: &[u8]) {
     if !brief.is_empty() {
         text.put(brief);
@@ -90,7 +88,6 @@ fn render_child_prefix(text: &mut Text, brief: &[u8]) {
 }
 
 /// Shared guides/mechanics after the distinct main or raw child prefix.
-/// Contract: domain/run.md, sections 3.3, 5.3 and 14.
 fn render_system(
     text: &mut Text,
     charter: &Charter,

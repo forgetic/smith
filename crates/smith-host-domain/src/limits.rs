@@ -7,63 +7,63 @@ use alloc::boxed::Box;
 use core::mem::size_of;
 use skein_lib::{Deadlines, Duration, Map, Queue, Slab, Token};
 
-/// Immutable parent bounds; invalid arithmetic refuses construction (domain/host.md, sections 2–7).
+/// Immutable parent bounds; invalid arithmetic refuses construction.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Limits {
-    /// Contained process slots (domain/host.md, sections 2–7).
+    /// Contained process slots.
     pub agents: u32,
-    /// Mount descriptors per start (domain/host.md, sections 2–7).
+    /// Mount descriptors per start.
     pub directories: u32,
-    /// Conflict paths per mount (domain/host.md, sections 2–7).
+    /// Conflict paths per mount.
     pub conflicts: u32,
     /// Relative conflict path bytes, at most 4096; larger configurations are
-    /// checked by admission and `worst_case` (domain/host.md, section 4).
+    /// checked by admission and `worst_case`.
     pub path_bytes: u32,
-    /// Mount and generic tool label bytes (domain/host.md, sections 2–7).
+    /// Mount and generic tool label bytes.
     pub name_bytes: u32,
-    /// Distinct credential names (domain/host.md, sections 2–7).
+    /// Distinct credential names.
     pub accounts: u32,
-    /// Opaque start charter bytes (domain/host.md, sections 2–7).
+    /// Opaque start charter bytes.
     pub charter_bytes: u64,
-    /// Opaque transcript bytes (domain/host.md, sections 2–7).
+    /// Opaque transcript bytes.
     pub transcript_bytes: u64,
-    /// Opaque post-transcript answer bytes (domain/host.md, sections 2–7).
+    /// Opaque post-transcript answer bytes.
     pub answered_bytes: u64,
-    /// One inbound message bytes (domain/host.md, sections 2–7).
+    /// One inbound message bytes.
     pub message_bytes: u64,
-    /// Queued plus sent-unread message names (domain/host.md, sections 2–7).
+    /// Queued plus sent-unread message names.
     pub messages: u32,
-    /// Outstanding parent operation rights and reply transmissions (domain/host.md, sections 2–7).
+    /// Outstanding parent operation rights and reply transmissions.
     pub calls: u32,
-    /// Generic tool or delivery argument bytes (domain/host.md, sections 2–7).
+    /// Generic tool or delivery argument bytes.
     pub call_bytes: u64,
-    /// Generic tool result and sealed delivery ownership cap (domain/host.md, sections 2–7).
+    /// Generic tool result and sealed delivery ownership cap.
     pub answer_bytes: u64,
-    /// Forwarded turn metadata including queued ACK transmissions (domain/host.md, sections 2–7).
+    /// Forwarded turn metadata including queued ACK transmissions.
     pub turns: u32,
-    /// Maximum one turn payload (domain/host.md, sections 2–7).
+    /// Maximum one turn payload.
     pub turn_bytes: u64,
-    /// Total parent-owned turn payload credit (domain/host.md, sections 2–7).
+    /// Total parent-owned turn payload credit.
     pub unacknowledged_bytes: u64,
-    /// Opaque agent fact bytes (domain/host.md, sections 2–7).
+    /// Opaque agent fact bytes.
     pub fact_bytes: u64,
-    /// Opaque declared answer bytes (domain/host.md, sections 2–7).
+    /// Opaque declared answer bytes.
     pub outcome_bytes: u64,
-    /// Operator process-tail bytes (domain/host.md, sections 2–7).
+    /// Operator process-tail bytes.
     pub detail_bytes: u32,
-    /// Lower spawn terminal deadline (domain/host.md, sections 2–7).
+    /// Lower spawn terminal deadline.
     pub spawn_timeout: Duration,
-    /// Unpaused progress deadline (domain/host.md, sections 2–7).
+    /// Unpaused progress deadline.
     pub no_progress: Duration,
-    /// Maximum declared long-operation extension (domain/host.md, sections 2–7).
+    /// Maximum declared long-operation extension.
     pub long_span: Duration,
-    /// Independent working wall deadline (domain/host.md, sections 2–7).
+    /// Independent working wall deadline.
     pub wall_time: Duration,
-    /// Cancel/answer/exit grace before tree termination (domain/host.md, sections 2–7).
+    /// Cancel/answer/exit grace before tree termination.
     pub grace: Duration,
-    /// Terminate grace before tree kill (domain/host.md, sections 2–7).
+    /// Terminate grace before tree kill.
     pub kill_after: Duration,
-    /// Content-free diagnostic queue capacity (domain/host.md, sections 2–7).
+    /// Content-free diagnostic queue capacity.
     pub facts: u32,
 }
 
@@ -72,7 +72,7 @@ pub struct Limits {
 /// Spawning rejects messages, so retained Start and queued messages are exclusive.
 /// The disconnect snapshot follows draining queued payloads and is counted separately.
 /// Emitted/lower-owned bytes are the caller's to count. None for
-/// invalid/unrepresentable limits (domain/host.md, sections 3, 4 and 6).
+/// invalid/unrepresentable limits.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     if limits.path_bytes > 4096 {

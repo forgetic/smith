@@ -1,4 +1,4 @@
-//! What the agent tells whoever watches it (domain/run.md, section 14): the
+//! What the agent tells whoever watches it (domain/run.md, section 11): the
 //! child domains' facts, content-free, gathered after every entry point into one
 //! bounded queue the loop drains at its own pace. What does not fit is dropped
 //! and counted, and nothing the domain decides depends on it.
@@ -17,37 +17,19 @@ use smith_domain_session as session;
 #[derive(PartialEq, Eq, Debug)]
 pub enum Content {
     /// Owned bounded text in its original provider position.
-    Text {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-        /// Owned UTF-8 text, bounded by the enclosing message or output cap.
-        text: Box<[u8]>,
-    },
+    Text { owner: Token, text: Box<[u8]> },
     /// Provider tool-call content observed at the root boundary; capture never authorizes or executes it.
     Call {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
         owner: Token,
-        /// Provider-issued tool-call identifier, preserved verbatim in its result.
         id: Box<[u8]>,
-        /// Boundary name, compared byte for byte; it carries no authority by itself.
         name: Box<[u8]>,
         /// Provider-written tool-argument bytes, retained exactly for replay.
         input: Box<[u8]>,
     },
     /// Content observation of a typed IO terminal; capture may drop it without changing decisions.
-    Tool {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-        /// IO's one terminal for the named pending operation.
-        done: crate::tools::Done,
-    },
+    Tool { owner: Token, done: crate::tools::Done },
     /// Content observation of provider-reported usage; charging does not depend on capture.
-    Usage {
-        /// Requester-issued opaque name, echoed on the one terminal for this request.
-        owner: Token,
-        /// Provider-reported token usage, charged exactly once when its completion ends.
-        usage: crate::llm::Usage,
-    },
+    Usage { owner: Token, usage: crate::llm::Usage },
 }
 
 pub(crate) fn done_bytes(done: &crate::tools::Done) -> u64 {

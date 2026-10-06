@@ -1,4 +1,4 @@
-//! Host policy retained by one admitted run (domain/run.md, sections 3.1 and 14).
+//! Host policy retained by one admitted run (domain/run.md, section 3.1).
 //! Admission checks counts and owned bytes before effects; this module knows no
 //! task vocabulary, provider credentials or meaning behind the supplied text.
 //!
@@ -24,31 +24,26 @@ pub use crate::host::{HostEffect, HostTool};
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Charter {
     /// Select supplied concrete history at the root entrance; false starts fresh.
-    /// Contract: domain/run.md, sections 3 and 13.
     pub resume: bool,
 
     /// Idle interval after a settled main wait and yield, bounded by the
     /// receiving waiting limit. Zero parks at once. Wall time continues.
-    /// Contract: domain/run.md, sections 6 and 10.
     pub waiting: Duration,
 
     /// Host-attested UTF-8 role instructions for main, copied verbatim before its
     /// Brief. Empty is allowed; children receive only their own raw task.
     /// Payload counts against receiving `Limits.run_bytes`; excess refuses as
     /// `Invalid::TooLarge` before effects. The rendered session cap still applies.
-    /// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14.
     pub instructions: Box<[u8]>,
 
     /// Host-written ordered context for main. Titles and text remain literal;
     /// no role, tools or authority are inferred from them. Count and aggregate
     /// ownership are admitted before discovery, or refuse as `Invalid::TooLarge`.
-    /// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14.
     pub brief: Brief,
 
     /// Host-supplied relative guide/check paths, admitted before effects. None
     /// selects AGENTS.md and .smith/check. Both owning paths count in `run_bytes`;
     /// workspace authority and lower IO root confinement still apply.
-    /// Contract: domain/run.md, sections 3.1, 3.3, 8.1, 12 and 14.
     pub conventions: Option<Conventions>,
 
     /// Explicit authority supplied by the opener, never inferred from role or text.
@@ -69,32 +64,27 @@ pub struct Charter {
 /// No context is derived or reordered; empty context is valid. Section count
 /// and owning bytes are bounded at admission, with `Invalid::TooLarge` terminal
 /// refusal before effects. Children receive their caller's raw task instead.
-/// Contract: domain/run.md, sections 3.1, 3.3, 5.3, 13 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Brief {
     /// Sections in host-supplied order, including empty or duplicate titles.
     /// Array cells and every title/text payload count in `Limits.run_bytes`;
     /// exact count above `Limits.brief_sections` refuses before traversal/effects.
-    /// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
     pub sections: Box<[Section]>,
 }
 
 /// One host-attested UTF-8 title and text, rendered literally for main.
 /// Empty payloads and repeated titles are valid; owning bytes count against
 /// receiving `Limits.run_bytes`, or refuse before effects as `Invalid::TooLarge`.
-/// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Section {
     /// Host-written title, emitted after `## ` without interpretation or escaping.
     /// Empty and duplicate titles are allowed; payload counts in `Limits.run_bytes`.
     /// Excess aggregate storage refuses at admission as `Invalid::TooLarge`.
-    /// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
     pub title: Box<[u8]>,
 
     /// Host-written section body, emitted verbatim with paragraph termination.
     /// Empty text is allowed; payload counts in `Limits.run_bytes`. Excess
     /// aggregate storage refuses before effects as `Invalid::TooLarge`.
-    /// Contract: domain/run.md, sections 3.1, 3.3, 13 and 14.
     pub text: Box<[u8]>,
 }
 
@@ -102,13 +92,12 @@ pub struct Section {
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Grants {
     /// Main-only waiting authority. When absent the main session cannot call
-    /// `wait`; children never inherit it. Contract: domain/run.md, sections 3.1 and 5.1.
+    /// `wait`; children never inherit it.
     pub wait: bool,
 
     /// Separately granted main-only delivery with required host field caps.
     /// Final Change permission does not grant this tool; children never inherit it.
     /// Admission checks minimum container/name/value fit before session or IO.
-    /// Contract: domain/run.md, sections 7.1, 8.1 and 8.4.
     pub deliver: Option<outcome::ChangeSpec>,
     /// The tools that act on the checkout, which conversations run themselves.
     pub tools: Tools,
@@ -116,7 +105,6 @@ pub struct Grants {
     pub agents: bool,
     /// Host-declared main-only tools. Names, descriptions, schemas, effects and
     /// relay deadlines are admitted as bounded data before session or IO.
-    /// Contract: domain/run.md, sections 3, 5.1, 5.2 and 12.
     pub host_tools: Box<[HostTool]>,
 }
 
@@ -161,16 +149,13 @@ pub struct Tools {
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Llm {
     /// Host model rates; unit zero refuses before discovery.
-    /// Contract: domain/run.md, sections 3, 9 and 14.
     pub prices: crate::Prices,
 
     /// Opaque configured replay dialect; history requires an exact match.
-    /// Contract: domain/run.md, sections 3 and 13.
     pub dialect: u32,
 
     /// The credential account configured for the endpoint.
     pub account: u32,
-    /// Configured provider endpoint identity; the domain never resolves its address.
     pub endpoint: Endpoint,
     /// The provider's name for the model.
     pub model: Box<[u8]>,
@@ -184,8 +169,6 @@ pub struct Llm {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Endpoint(
     /// Host-configured numeric provider endpoint name, echoed without address resolution or authority inference.
-    ///
-    /// Contract: domain/run.md, sections 3 and 14.
     pub u32,
 );
 
