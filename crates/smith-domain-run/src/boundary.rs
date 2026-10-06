@@ -1231,28 +1231,6 @@ pub enum Answer {
         /// Contract: domain/run.md, section 13.
         turns: u32,
     },
-    /// A mid-run delivery actually landed after shutdown was already decided.
-    /// This is host evidence, not an LLM-declared Accepted result: even a
-    /// Report-only charter preserves the real operation without inventing a Report.
-    /// Contract: domain/run.md, sections 8.2, 8.4 and 10; domain/host.md, section 2.
-    Delivered {
-        /// Stable transcript origin of the landed host operation, scoped by the logical run.
-        /// Contract: domain/run.md, section 8.2.
-        name: CallName,
-        /// Real bounded per-directory host receipts; this retained copy is priced.
-        /// Contract: domain/run.md, sections 8.2 and 11.
-        receipts: Delivered,
-        /// Typed stop already decided when the mid-run operation landed.
-        /// It does not erase the actual delivery evidence.
-        /// Contract: domain/run.md, sections 8.4 and 10.
-        stopped: Failure,
-        /// Accepted cumulative usage, including late completions while settling.
-        /// Contract: domain/run.md, sections 9 and 10.
-        spent: Spend,
-        /// Actual main turns emitted in this activation before this terminal.
-        /// Contract: domain/run.md, section 13.
-        turns: u32,
-    },
     /// Refused at the entrance: nothing was done.
     ///
     /// A run is refused at its own entrance, before `Admitted`; or after

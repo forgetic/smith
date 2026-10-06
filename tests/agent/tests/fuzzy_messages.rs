@@ -232,10 +232,9 @@ fn observations(world: &World, seed: u64, idle: Duration) -> [u64; 19] {
         run::Answer::Parked { .. } => counts[0] += 1,
         run::Answer::Failed { failure: run::Failure::Budget(run::Exhausted::Time), .. } => counts[1] += 1,
         run::Answer::Failed { failure: run::Failure::Cancelled, .. } => counts[2] += 1,
-        answer @ (run::Answer::Delivered { .. }
-        | run::Answer::Refused(_)
-        | run::Answer::Accepted { .. }
-        | run::Answer::Failed { .. }) => panic!("seed {seed}: unexpected actual message ending {answer:?}"),
+        answer @ (run::Answer::Refused(_) | run::Answer::Accepted { .. } | run::Answer::Failed { .. }) => {
+            panic!("seed {seed}: unexpected actual message ending {answer:?}")
+        }
     }
     chronology(world, &mut counts);
     counts

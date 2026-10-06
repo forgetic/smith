@@ -272,12 +272,6 @@ pub enum Return {
 pub enum Answered {
     /// Settled idle main parked. Contract: domain/run.md, section 6.
     Parked,
-    /// Mid-run delivery landed while shutdown was pending. Contract: domain/run.md, sections 8.4, 10 and 12.
-    Delivered(
-        /// Already-decided shutdown reason retained with the actual landing;
-        /// no receipt bytes enter facts. Contract: domain/run.md, sections 10 and 12.
-        Failure,
-    ),
     /// The entrance or operation was refused with the enclosing typed reason.
     ///
     /// Copy baseline: domain/run.md, sections 3, 7, 9, 10 and 14.
@@ -415,7 +409,6 @@ fn result_of(result: &Returned) -> Return {
 fn answered(answer: &Answer) -> Answered {
     match answer {
         Answer::Parked { .. } => Answered::Parked,
-        Answer::Delivered { stopped, .. } => Answered::Delivered(*stopped),
         Answer::Refused(refusal) => Answered::Refused(*refusal),
         Answer::Accepted { .. } => Answered::Accepted,
         Answer::Failed { failure, .. } => Answered::Failed(*failure),

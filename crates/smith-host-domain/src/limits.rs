@@ -1,7 +1,7 @@
 //! Checked capacities and ownership (domain/host.md, sections 3, 4 and 6;
 //! programming-model.md, section 6). Parent owns forwarded turn payloads; kit
-//! owns metadata, queued responses and actual landed proof through final Answer.
-use crate::domain::{Account, Agent, Alarm, Call, Proof, Sent, TurnMeta};
+//! owns metadata and queued responses through final Answer.
+use crate::domain::{Account, Agent, Alarm, Call, Sent, TurnMeta};
 use crate::{Delivered, Directory, Down, Fact, Grant};
 use alloc::boxed::Box;
 use core::mem::size_of;
@@ -70,7 +70,6 @@ pub struct Limits {
 /// Count domain containers, retained payloads, bounded scratch and each retained
 /// receipt copy. Start stays here only before Started, which emits its Send;
 /// Spawning rejects messages, so retained Start and queued messages are exclusive.
-/// A replacement proof clone uses its Parent-stage call's unoccupied reply reserve.
 /// The disconnect snapshot follows draining queued payloads and is counted separately.
 /// A refused issued message may still own its pending lower Send body while
 /// newly released credit fills the entire queued message payload allowance.
@@ -115,8 +114,6 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(Map::<Token, Call>::worst_case(limits.calls)?)?
         .checked_add(Map::<u32, TurnMeta>::worst_case(limits.turns)?)?
         .checked_add(Map::<u32, Account>::worst_case(limits.accounts)?)?
-        .checked_add(u64::try_from(size_of::<Proof>()).ok()?)?
-        .checked_add(Delivered::worst_case())?
         .checked_add(start.max(queued))?
         .checked_add(u64::from(limits.detail_bytes))?;
     Slab::<Agent>::worst_case(limits.agents)?

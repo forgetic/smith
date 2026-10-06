@@ -119,7 +119,6 @@ fn assert_ending(world: &World, fate: u64, seed: u64) {
                         if fate == 4 { RunFailure::Model(ModelFault::Provider) } else { RunFailure::Cancelled }
                     );
                 }
-                RunResult::Delivered { .. } => panic!("no landing in this scripted fate"),
             }
         }
         5 => assert_eq!(world.seen.fault, Some(Fault::Rules)),

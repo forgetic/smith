@@ -3,7 +3,7 @@
 //! No framing, secrets, policy decoding or V1 compatibility. All payloads are
 //! checked against receiving Limits before retained state changes. Durable decisions
 //! belong to the parent, which scopes `CallName` by the same logical run after restart.
-use crate::{Delivered, Delivery};
+use crate::Delivery;
 use alloc::boxed::Box;
 use skein_lib::{Duration, Time, Token};
 
@@ -438,15 +438,6 @@ pub enum RunResult {
     Failed {
         /// Agent-declared stop kind (domain/host.md, sections 2–7).
         failure: RunFailure,
-    },
-    /// Actual interrupted mid-run landing, not a declared accepted result (domain/host.md, sections 2–7).
-    Delivered {
-        /// Positive completion and assistant-block position, scoped by logical run (domain/host.md, sections 2–7).
-        name: CallName,
-        /// Sealed complete actual host receipts (domain/host.md, sections 2–7).
-        receipts: Delivered,
-        /// Already-decided stop observed while the actual delivery was pending (domain/host.md, sections 2–7).
-        stopped: RunFailure,
     },
 }
 

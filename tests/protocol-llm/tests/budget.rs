@@ -89,10 +89,9 @@ fn total(observations: &[CompletionObservation], rates: &[Rate]) -> run::Spend {
 
 fn spent(answer: &run::Answer) -> run::Spend {
     match answer {
-        run::Answer::Accepted { spent, .. }
-        | run::Answer::Delivered { spent, .. }
-        | run::Answer::Parked { spent, .. }
-        | run::Answer::Failed { spent, .. } => *spent,
+        run::Answer::Accepted { spent, .. } | run::Answer::Parked { spent, .. } | run::Answer::Failed { spent, .. } => {
+            *spent
+        }
         run::Answer::Refused(reason) => panic!("actual story was refused: {reason:?}"),
     }
 }

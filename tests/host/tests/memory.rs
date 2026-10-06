@@ -301,7 +301,7 @@ fn maximum_start_io_ownership_coexists_with_full_pre_read_message_queue() {
 }
 
 #[test]
-fn proof_replacement_clones_and_shutdown_rights_stay_priced() {
+fn delivery_replies_and_shutdown_rights_stay_priced() {
     let limits = smith_host_world::limits();
     let mut measured = Measured::new(limits, 0);
     let owner = measured.spawn(1);

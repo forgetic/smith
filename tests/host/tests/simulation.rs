@@ -63,28 +63,6 @@ fn faulted(world: &mut World, fault: Fault) {
     world.cleanup();
     world.settled();
 }
-fn silently_faulted(world: &mut World, fault: Fault) {
-    assert_eq!(world.seen.fault, None, "explicit Stop already owns shutdown");
-    assert!(world.seen.answer.is_none());
-    assert_eq!(world.seen.signals, [Signal::Terminate]);
-    let mut found = false;
-    while let Some(fact) = world.domain.pop_fact() {
-        match fact {
-            smith_host_domain::Fact::Faulted { fault: actual, .. } => {
-                assert_eq!(actual, fault);
-                found = true;
-            }
-            smith_host_domain::Fact::Started { .. }
-            | smith_host_domain::Fact::Admitted { .. }
-            | smith_host_domain::Fact::Answered { .. }
-            | smith_host_domain::Fact::Gone { .. } => {}
-        }
-    }
-    assert!(found, "diagnostic retains the actual breach");
-    world.cleanup();
-    world.settled();
-}
-
 fn receipts(text: &[u8]) -> Delivered {
     Delivered::new(Box::new([Receipt::new(0, Box::from(text)).expect("valid receipt")])).expect("valid sealed delivery")
 }
@@ -776,48 +754,6 @@ fn actual_delivery_right_outlives_process_tree_and_eof_without_abandonment() {
 }
 
 #[test]
-fn interrupted_landing_proof_survives_reply_terminal_and_matches_last_word() {
-    let receipt = receipts(b"landed");
-    for mutation in 0..3 {
-        let mut world = World::new(47, limits());
-        world.live();
-        call(&mut world, 20, 1, true, 100);
-        world.event(Event::Stop { agent: world.agent() });
-        world.sent();
-        reply(&mut world, 20, Reply::Delivery(Delivery::Delivered(receipt.clone())));
-        world.sent();
-        let name = CallName { activation: 1, completion: if mutation == 1 { 2 } else { 1 }, position: 2 };
-        let final_receipts = if mutation == 2 { receipts(b"invented") } else { receipt.clone() };
-        last(
-            &mut world,
-            RunResult::Delivered { name, receipts: final_receipts, stopped: RunFailure::Cancelled },
-            0,
-            25,
-        );
-        if mutation == 0 {
-            assert_eq!(world.seen.answer.as_ref().expect("verified real landing").spent, 25);
-            world.cleanup();
-            world.settled();
-        } else {
-            silently_faulted(&mut world, Fault::Rules);
-        }
-    }
-    let mut world = World::new(48, limits());
-    world.live();
-    last(
-        &mut world,
-        RunResult::Delivered {
-            name: CallName { activation: 1, completion: 1, position: 2 },
-            receipts: receipt,
-            stopped: RunFailure::Budget(smith_host_domain::Exhausted::Time),
-        },
-        0,
-        1,
-    );
-    faulted(&mut world, Fault::Rules);
-}
-
-#[test]
 fn ordinary_earlier_landing_then_later_stop_remains_an_ordinary_answer() {
     let mut world = World::new(49, limits());
     world.live();
@@ -982,15 +918,9 @@ fn a_seed_replays_the_same_v2_boundary_history() {
 #[test]
 fn final_answers_cannot_abandon_parent_or_queued_delivery_terminals() {
     for queued in [false, true] {
-        for result in [
-            RunResult::Accepted { outcome: Box::new([]) },
-            RunResult::Failed { failure: RunFailure::Cancelled },
-            RunResult::Delivered {
-                name: CallName { activation: 1, completion: 1, position: 2 },
-                receipts: receipts(b"landed"),
-                stopped: RunFailure::Budget(smith_host_domain::Exhausted::Time),
-            },
-        ] {
+        for result in
+            [RunResult::Accepted { outcome: Box::new([]) }, RunResult::Failed { failure: RunFailure::Cancelled }]
+        {
             let mut world = World::new(61, limits());
             world.live();
             if queued {
@@ -1015,16 +945,7 @@ fn final_answers_cannot_abandon_parent_or_queued_delivery_terminals() {
     world.live();
     call(&mut world, 20, 1, true, 100);
     reply(&mut world, 20, Reply::Delivery(Delivery::Delivered(receipts(b"landed"))));
-    last(
-        &mut world,
-        RunResult::Delivered {
-            name: CallName { activation: 1, completion: 1, position: 2 },
-            receipts: receipts(b"landed"),
-            stopped: RunFailure::Budget(smith_host_domain::Exhausted::Time),
-        },
-        0,
-        1,
-    );
+    last(&mut world, RunResult::Failed { failure: RunFailure::Budget(smith_host_domain::Exhausted::Time) }, 0, 1);
     assert!(world.seen.answer.is_some());
     world.cleanup();
     world.settled();

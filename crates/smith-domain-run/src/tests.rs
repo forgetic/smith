@@ -1895,7 +1895,7 @@ fn submit_mid(harness: &mut Harness, conversation: Token) -> Token {
 }
 
 #[test]
-fn mid_report_landing_continues_but_an_interrupted_landing_has_its_own_answer() {
+fn mid_report_landing_settles_before_an_interrupted_run_answers() {
     for interrupted in [false, true] {
         let mut harness = Harness::new(LIMITS);
         let (run, conversation) = mid_running(&mut harness);
@@ -1915,16 +1915,7 @@ fn mid_report_landing_continues_but_an_interrupted_landing_has_its_own_answer() 
         }
         let answer = answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })).1;
         if interrupted {
-            assert_eq!(
-                answer,
-                Answer::Delivered {
-                    name: crate::CallName { activation: 1, completion: 3, position: 2 },
-                    receipts: receipts(),
-                    stopped: Failure::Cancelled,
-                    spent: Spend::ZERO,
-                    turns: 0
-                }
-            );
+            assert_eq!(answer, Answer::Failed { failure: Failure::Cancelled, spent: Spend::ZERO, turns: 0 });
         } else {
             assert_eq!(answer, Answer::Accepted { outcome: report(), spent: Spend::ZERO, turns: 0 });
         }
@@ -1994,16 +1985,7 @@ fn time_and_spend_shutdown_keep_an_already_submitted_mid_landing() {
         // Closing the real session waits for the host terminal; its one End
         // then reports the spend it already used, without another delivery.
         let answer = answered(harness.step(Event::Ended { conversation, end: End::Closed, spend: expected_spend })).1;
-        assert_eq!(
-            answer,
-            Answer::Delivered {
-                name: crate::CallName { activation: 1, completion: 3, position: 2 },
-                receipts: receipts(),
-                stopped: expected,
-                spent: expected_spend,
-                turns: 0
-            }
-        );
+        assert_eq!(answer, Answer::Failed { failure: expected, spent: expected_spend, turns: 0 });
     }
 }
 
@@ -2978,7 +2960,7 @@ fn completion_gate_distinguishes_child_withdrawal_from_budget_denial() {
 }
 
 #[test]
-fn hard_overflow_retains_actual_final_and_interrupted_mid_delivery_evidence() {
+fn hard_overflow_keeps_a_final_change_and_a_mid_delivery_separate() {
     let actual = Spend { turns: 1, input: 1, cache_write: 1, ..Spend::ZERO };
     let mut harness = Harness::new(LIMITS);
     let (_, main) = harness.coding(1, 100);
@@ -3023,12 +3005,6 @@ fn hard_overflow_retains_actual_final_and_interrupted_mid_delivery_evidence() {
     );
     assert_eq!(
         answered(harness.step(Event::Ended { conversation: main, end: End::PriceOverflow, spend: actual })).1,
-        Answer::Delivered {
-            name: crate::CallName { activation: 1, completion: 3, position: 2 },
-            receipts: receipts(),
-            stopped: Failure::PriceOverflow,
-            spent,
-            turns: 0
-        }
+        Answer::Failed { failure: Failure::PriceOverflow, spent, turns: 0 }
     );
 }

@@ -36,9 +36,6 @@ fn random_worlds_settle_with_every_start_answered_once() {
             let kind = match answer {
                 Answer::Parked { .. } => panic!("source random partner does not request wait"),
                 Answer::Accepted { .. } => "accepted",
-                Answer::Delivered { .. } => {
-                    panic!("this copied random driver offers no mid-run delivery grant")
-                }
                 Answer::Refused(Refusal::Busy) => "busy",
                 Answer::Refused(Refusal::Invalid(Invalid::Conversation)) => "conversation invalid",
                 Answer::Refused(Refusal::Invalid(_)) => "invalid",

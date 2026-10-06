@@ -25,7 +25,6 @@ fn answers(world: &World) -> Vec<&Answer> {
 fn failure(answer: &Answer) -> Failure {
     match answer {
         Answer::Failed { failure, .. } => *failure,
-        Answer::Delivered { stopped, .. } => *stopped,
         Answer::Refused(refusal) => panic!("the run was refused: {refusal:?}"),
         Answer::Parked { .. } => panic!("this source partner never requests waiting"),
         Answer::Accepted { outcome, .. } => panic!("the run finished with {outcome:?}"),
@@ -482,7 +481,6 @@ fn empty_reports_and_declared_failures_are_terminal_results_without_delivery() {
                     assert_eq!(&*declared.reason, b"Required access is unavailable.");
                 }
                 Answer::Accepted { outcome: Declared::Change(_) | Declared::Verdict(_), .. }
-                | Answer::Delivered { .. }
                 | Answer::Failed { .. }
                 | Answer::Refused(_)
                 | Answer::Parked { .. } => {

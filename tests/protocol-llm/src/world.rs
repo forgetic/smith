@@ -1011,16 +1011,13 @@ impl World {
                 });
                 let (turns, parked) = match &answer {
                     run::Answer::Parked { turns, .. } => (*turns, true),
-                    run::Answer::Accepted { turns, .. }
-                    | run::Answer::Delivered { turns, .. }
-                    | run::Answer::Failed { turns, .. } => (*turns, false),
+                    run::Answer::Accepted { turns, .. } | run::Answer::Failed { turns, .. } => (*turns, false),
                     run::Answer::Refused(_) => (0, false),
                 };
                 let spent = match &answer {
                     run::Answer::Refused(_) => run::Spend::ZERO,
                     run::Answer::Parked { spent, .. }
                     | run::Answer::Accepted { spent, .. }
-                    | run::Answer::Delivered { spent, .. }
                     | run::Answer::Failed { spent, .. } => *spent,
                 };
                 assert!(self.answer.replace(answer).is_none(), "one answer per host start");
@@ -1382,7 +1379,6 @@ impl World {
                 self.terminals += 1;
             }
             Delivery::Cancel => {
-                self.observe(Seen::Stopped { failure: run::Failure::Cancelled });
                 if let Some(run) = self.admitted {
                     self.host_history.shutdown(self.now);
                     self.stage.push(Event::Cancel { run });
@@ -1567,7 +1563,7 @@ impl World {
     fn settled(&self) {
         let continuation = match self.answer() {
             run::Answer::Accepted { .. } | run::Answer::Parked { .. } => true,
-            run::Answer::Delivered { .. } | run::Answer::Failed { .. } | run::Answer::Refused(_) => false,
+            run::Answer::Failed { .. } | run::Answer::Refused(_) => false,
         };
         self.host_history
             .finish(continuation)
@@ -1631,7 +1627,6 @@ impl World {
         let spent = match self.answer() {
             run::Answer::Refused(_) => run::Spend::ZERO,
             run::Answer::Parked { spent, .. }
-            | run::Answer::Delivered { spent, .. }
             | run::Answer::Accepted { spent, .. }
             | run::Answer::Failed { spent, .. } => *spent,
         };
@@ -1913,13 +1908,6 @@ fn copy_answer(answer: &run::Answer) -> run::Answer {
     match answer {
         run::Answer::Refused(refusal) => run::Answer::Refused(*refusal),
         run::Answer::Parked { spent, turns } => run::Answer::Parked { spent: *spent, turns: *turns },
-        run::Answer::Delivered { name, receipts, stopped, spent, turns } => run::Answer::Delivered {
-            name: *name,
-            receipts: receipts.clone(),
-            stopped: *stopped,
-            spent: *spent,
-            turns: *turns,
-        },
         run::Answer::Failed { failure, spent, turns } => {
             run::Answer::Failed { failure: *failure, spent: *spent, turns: *turns }
         }

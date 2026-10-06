@@ -9,7 +9,7 @@
 use crate::boundary::{Exit, Place, Ran, Request, Returned};
 use crate::call::{self, Call, Withdrawal};
 use crate::conventions;
-use crate::delivery::{CallName, Delivered, Delivery, DeliveryFailure, DeliveryReason};
+use crate::delivery::{CallName, Delivery, DeliveryFailure, DeliveryReason};
 use crate::limits::Limits;
 use crate::outcome::Change;
 use crate::run::Run;
@@ -39,7 +39,7 @@ enum Stage {
 pub(crate) enum Settled {
     Going,
     Finished(Change),
-    Delivered { name: CallName, receipts: Delivered },
+    MidDelivered,
     Refused,
     Stale,
     Cancelled,
@@ -119,11 +119,8 @@ pub(crate) fn delivered(
                     return malformed(owner, out);
                 }
             }
-            let settled = if landing.finish {
-                Settled::Finished(landing.change.clone())
-            } else {
-                Settled::Delivered { name: landing.name, receipts: receipts.clone() }
-            };
+            let settled =
+                if landing.finish { Settled::Finished(landing.change.clone()) } else { Settled::MidDelivered };
             back(owner, Returned::Delivered(receipts), settled, out)
         }
         Delivery::Nothing => back(owner, Returned::Nothing, Settled::Refused, out),

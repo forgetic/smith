@@ -1,10 +1,10 @@
 //! V2 supervision cells and surviving terminal ledgers (domain/host.md, sections
-//! 2–7). Process exit never discards parent calls, exact turn ACKs or actual
-//! landed evidence. The kit knows channel send order, not private agent stop
+//! 2–7). Process exit never discards parent calls or turn ACKs.
+//! The kit knows channel send order, not private agent stop
 //! decisions; policy and durable decisions remain in the parent.
 use crate::{
-    Ask, Bounce, CallName, Delivered, Delivery, Down, End, Event, Fact, Fault, Grant, Invalid, Limits, MessageRefusal,
-    Reply, Request, RunFailure, RunResult, Signal, Start, Up,
+    Ask, Bounce, CallName, Down, End, Event, Fact, Fault, Grant, Invalid, Limits, MessageRefusal, Reply, Request,
+    RunFailure, RunResult, Signal, Start, Up,
 };
 use alloc::boxed::Box;
 use skein_lib::{Deadlines, Env, Id, Map, Queue, Slab, Time, Token};
@@ -82,15 +82,7 @@ pub(crate) enum Sent {
 }
 
 #[derive(Debug)]
-pub(crate) struct Proof {
-    name: CallName,
-    receipts: Delivered,
-    cancel_before_reply: bool,
-    reply_started: bool,
-}
-
-#[derive(Debug)]
-#[expect(clippy::struct_excessive_bools, reason = "independent terminal proofs survive every finite process phase")]
+#[expect(clippy::struct_excessive_bools, reason = "independent channel and process state spans finite phases")]
 pub(crate) struct Agent {
     client: Token,
     logical_run: Token,
@@ -123,7 +115,6 @@ pub(crate) struct Agent {
     spend_overflow: bool,
     usage_overflow: bool,
     turn_bytes: u64,
-    proof: Option<Proof>,
     cancel_queued: bool,
     cancel_sent: bool,
     progress: Time,
@@ -469,7 +460,6 @@ fn spawn(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<R
         spend_overflow: false,
         usage_overflow: false,
         turn_bytes: 0,
-        proof: None,
         cancel_queued: false,
         cancel_sent: false,
         progress: env.now,
@@ -773,17 +763,6 @@ fn answered(agent: &mut Agent, callback: Token, reply: Reply, env: &Env<Limits>)
     let reply = match reply {
         Reply::Delivery(delivery) => {
             assert!(call.kind == Kind::Delivery, "delivery terminal matches delivery call");
-            match &delivery {
-                Delivery::Delivered(receipts) => {
-                    agent.proof = Some(Proof {
-                        name: call.name,
-                        receipts: receipts.clone(),
-                        cancel_before_reply: false,
-                        reply_started: false,
-                    });
-                }
-                Delivery::Nothing | Delivery::Refused(_) | Delivery::Failed(_) | Delivery::Stale => {}
-            }
             Reply::Delivery(delivery)
         }
         Reply::Host { error, body } => {
@@ -988,11 +967,7 @@ fn heard_answer(agent: &mut Agent, answer: crate::Answer, env: &Env<Limits>, out
     agent.usage_overflow = answer.usage_overflow;
     let wall_cancel = match &answer.result {
         RunResult::Failed { failure: RunFailure::Cancelled } => agent.owed == Some(Fault::WallTime),
-        RunResult::Refused { .. }
-        | RunResult::Accepted { .. }
-        | RunResult::Parked
-        | RunResult::Failed { .. }
-        | RunResult::Delivered { .. } => false,
+        RunResult::Refused { .. } | RunResult::Accepted { .. } | RunResult::Parked | RunResult::Failed { .. } => false,
     };
     if wall_cancel {
         report_fault(agent, Fault::WallTime, out);
@@ -1009,7 +984,6 @@ fn heard_answer(agent: &mut Agent, answer: crate::Answer, env: &Env<Limits>, out
     if agent.phase != Phase::Terminating && agent.phase != Phase::Killing {
         agent.phase = Phase::Exiting;
     }
-    agent.proof = None;
 }
 
 fn too_large(message: &Up, limits: &Limits) -> bool {
@@ -1025,7 +999,7 @@ fn too_large(message: &Up, limits: &Limits) -> bool {
         Up::Answer { answer } => match &answer.result {
             RunResult::Refused { detail } => !within(detail, limits.outcome_bytes),
             RunResult::Accepted { outcome } => !within(outcome, limits.outcome_bytes),
-            RunResult::Parked | RunResult::Failed { .. } | RunResult::Delivered { .. } => false,
+            RunResult::Parked | RunResult::Failed { .. } => false,
         },
         Up::MessageBounced { .. }
         | Up::Admitted
@@ -1166,16 +1140,6 @@ fn valid_answer(agent: &Agent, answer: &crate::Answer, limits: &Limits) -> bool 
         }
         RunResult::Accepted { outcome } => agent.admitted && within(outcome, limits.outcome_bytes),
         RunResult::Parked | RunResult::Failed { .. } => agent.admitted,
-        RunResult::Delivered { name, receipts, stopped } => match &agent.proof {
-            Some(proof) => {
-                agent.admitted
-                    && proof.name == *name
-                    && proof.receipts == *receipts
-                    && proof.reply_started
-                    && (*stopped != RunFailure::Cancelled || proof.cancel_before_reply)
-            }
-            None => false,
-        },
     }
 }
 
@@ -1313,13 +1277,6 @@ fn send_next(agent: &mut Agent, owner: Token, out: &mut Queue<Request>) {
                 Down::Answer { call, .. } => {
                     let entry = agent.calls.get_mut(call).expect("answer retains callback until Sent");
                     entry.stage = CallStage::Sending;
-                    match &mut agent.proof {
-                        Some(proof) if proof.name == entry.name => {
-                            proof.reply_started = true;
-                            proof.cancel_before_reply = agent.cancel_sent;
-                        }
-                        Some(_) | None => {}
-                    }
                     Sent::Call(*call)
                 }
                 Down::Acknowledge { turn } => {

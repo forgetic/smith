@@ -6,8 +6,8 @@
 //! provider syntax. Generic final forms are judged before effects; delivery is
 //! one exclusive checked snapshot. Before submission checks may abort; after
 //! submission the actual bounded host terminal remains owed. Final Change
-//! landing wins shutdown; interrupted mid delivery preserves actual evidence
-//! in its distinct terminal answer. Sessions alone price actual own usage;
+//! landing wins shutdown; a mid-run delivery settles before the pending
+//! ending answers. Sessions alone price actual own usage;
 //! global scalar admission sums monotonic own deltas, while inclusive subtree
 //! totals transfer only as child bills. Raw and unit overflow retain independently
 //! attested representable prefixes (domain/run.md, sections 9, 10 and 14).
@@ -26,7 +26,7 @@ use crate::boundary::{
 use crate::budget::{Exhausted, Spend};
 use crate::call::{Call, Calls, Withdrawal, Work};
 use crate::charter::{self, Charter, Families, count};
-use crate::delivery::{CallName, Delivered, Delivery};
+use crate::delivery::{CallName, Delivery};
 use crate::domain::Domain;
 use crate::facts::{Asked, Fact};
 use crate::land::{self, Settled};
@@ -126,7 +126,6 @@ enum State {
 #[derive(Debug)]
 enum Ending {
     Parked,
-    Delivered { name: CallName, receipts: Delivered, stopped: Failure },
     Accepted(Declared),
     Failed(Failure),
 }
@@ -671,7 +670,6 @@ fn hard_stop(
 fn hard_ending(ending: Ending, failure: Failure) -> Ending {
     match ending {
         ending @ Ending::Accepted(Declared::Change(_)) => ending,
-        Ending::Delivered { name, receipts, stopped: _ } => Ending::Delivered { name, receipts, stopped: failure },
         Ending::Accepted(_) | Ending::Parked | Ending::Failed(_) => Ending::Failed(failure),
     }
 }
@@ -1088,24 +1086,12 @@ fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<R
     let run = runs.get_mut(run_id).expect("a run lives until its calls have returned");
     let state = mem::replace(&mut run.state, State::Closed);
     run.state = match settled {
-        Settled::Delivered { name, receipts } => match state {
+        Settled::MidDelivered => match state {
             State::Working { reply_to, main } => State::Working { reply_to, main },
-            State::Over { reply_to, main, exhausted } => wind_down(
-                conversations,
-                reply_to,
-                main,
-                Ending::Delivered { name, receipts, stopped: Failure::Budget(exhausted) },
-                out,
-            ),
-            State::Winding { reply_to, ending } => {
-                let stopped = match ending {
-                    Ending::Failed(stopped) => stopped,
-                    Ending::Parked | Ending::Accepted(_) | Ending::Delivered { .. } => {
-                        unreachable!("one exclusive mid delivery precedes shutdown")
-                    }
-                };
-                State::Winding { reply_to, ending: Ending::Delivered { name, receipts, stopped } }
+            State::Over { reply_to, main, exhausted } => {
+                wind_down(conversations, reply_to, main, Ending::Failed(Failure::Budget(exhausted)), out)
             }
+            State::Winding { reply_to, ending } => State::Winding { reply_to, ending },
             State::Preparing { .. } | State::Stopping { .. } | State::Waiting { .. } | State::Closed => {
                 unreachable!("delivery starts after main")
             }
@@ -1659,7 +1645,6 @@ fn ending(end: End, spent: Spend, turns: u32) -> Answer {
 fn finished(ending: Ending, spent: Spend, turns: u32) -> Answer {
     match ending {
         Ending::Parked => Answer::Parked { spent, turns },
-        Ending::Delivered { name, receipts, stopped } => Answer::Delivered { name, receipts, stopped, spent, turns },
         Ending::Accepted(outcome) => Answer::Accepted { outcome, spent, turns },
         Ending::Failed(failure) => Answer::Failed { failure, spent, turns },
     }

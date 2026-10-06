@@ -28,13 +28,6 @@ pub enum Seen {
         /// One-based activation output number. Contract: domain/run.md, section 13.
         number: u32,
     },
-    /// Public host shutdown observation, independent of private run state.
-    /// Contract: domain/run.md, sections 10 and 13; testing-strategy.md, section 7.
-    Stopped {
-        /// The already-decided typed stop whose evidence interrupted delivery preserves.
-        /// Contract: domain/run.md, sections 8.4 and 10.
-        failure: smith_domain::run::Failure,
-    },
     /// IO snapshots checkout bytes at the check request, before its terminal.
     /// Contract: domain/run.md, sections 8.1 and 13; testing-strategy.md, section 7.
     Checking {
@@ -181,11 +174,8 @@ pub struct Meeting {
     outcome_bytes: u64,
     checks: bool,
     delivery: bool,
-    stopped: Option<smith_domain::run::Failure>,
     checking: std::collections::BTreeMap<Token, Vec<u8>>,
     names: BTreeSet<(u32, u32)>,
-    interrupted: BTreeSet<Token>,
-    required_delivery: Option<(smith_domain::run::CallName, smith_domain::run::Delivered, smith_domain::run::Failure)>,
     completing: BTreeSet<Token>,
     spent: Spend,
     passed: std::collections::BTreeMap<Token, Vec<u8>>,
@@ -203,11 +193,8 @@ impl Default for Meeting {
             outcome_bytes: 0,
             checks: false,
             delivery: false,
-            stopped: None,
             checking: std::collections::BTreeMap::new(),
             names: BTreeSet::new(),
-            interrupted: BTreeSet::new(),
-            required_delivery: None,
             completing: BTreeSet::new(),
             spent: Spend::ZERO,
             passed: std::collections::BTreeMap::new(),
@@ -233,16 +220,6 @@ impl Expectations for Meeting {
                     "actual turn output numbers form an exact prefix",
                 );
                 self.turns = number;
-            }
-            Seen::Stopped { failure } => {
-                if self.stopped.is_none() {
-                    self.stopped = Some(failure);
-                    for (owner, (_, _, finishing)) in &self.pushing {
-                        if !finishing {
-                            self.interrupted.insert(*owner);
-                        }
-                    }
-                }
             }
             Seen::Checking { owner, tree } => {
                 judge.check(self.checking.insert(owner, tree).is_none(), "one check request per pending owner");
@@ -303,36 +280,30 @@ impl Expectations for Meeting {
                     "one push in flight per owner",
                 );
             }
-            Seen::Delivered { owner, push, tree } => self.delivered(owner, push, &tree, judge),
+            Seen::Delivered { owner, push, tree } => self.delivered(owner, &push, &tree, judge),
             Seen::Answered { answer, pending } => self.answer(&answer, pending, judge),
         }
     }
 }
 
 impl Meeting {
-    /// Check one actual delivery terminal against its observed submission and
-    /// retain successful interrupted evidence for the final answer check.
+    /// Check one delivery terminal against its observed submission.
     /// Contract: domain/run.md, sections 8.2 and 8.4; testing-strategy.md, section 7.
-    fn delivered(&mut self, owner: Token, push: Delivery, tree: &[u8], judge: &mut Judge<&'static str, ()>) {
+    fn delivered(&mut self, owner: Token, push: &Delivery, tree: &[u8], judge: &mut Judge<&'static str, ()>) {
         let asked = self.pushing.remove(&owner);
         judge.check(asked.is_some(), "a host push terminal names a pending push");
         match push {
-            Delivery::Delivered(receipts) => {
+            Delivery::Delivered(_) => {
                 judge.check(
                     asked.as_ref().map(|(_, snapshot, _)| snapshot.as_slice()) == Some(tree),
                     "the host lands exactly the tree the agent left",
                 );
-                if let Some((name, _, finishing)) = &asked {
-                    if *finishing {
-                        self.final_landed += 1;
-                    } else if self.interrupted.remove(&owner) {
-                        self.required_delivery = Some((*name, receipts, self.stopped.expect("interruption observed")));
-                    }
+                if let Some((_, _, true)) = &asked {
+                    self.final_landed += 1;
                 }
                 self.landed += 1;
             }
             Delivery::Stale | Delivery::Failed(_) | Delivery::Refused(_) | Delivery::Nothing => {
-                self.interrupted.remove(&owner);
                 judge.check(tree.is_empty(), "an unsuccessful push lands nothing");
             }
         }
@@ -348,37 +319,16 @@ impl Meeting {
             "an answer waits for every request terminal",
         );
         let (spent, change) = match answer {
-            Answer::Delivered { spent, name, receipts, stopped, .. } => {
-                judge.check(
-                    self.delivery
-                        && self.required_delivery.as_ref().is_some_and(|(actual_name, actual_receipts, _)| {
-                            actual_name == name && actual_receipts == receipts
-                        }),
-                    "interrupted mid delivery preserves its actual name and receipts",
-                );
-                judge.check(
-                    self.required_delivery.as_ref().map(|(_, _, actual_stop)| *actual_stop) == Some(*stopped),
-                    "interrupted delivery preserves the already observed stop",
-                );
-                (*spent, false)
-            }
             Answer::Refused(_) => (Spend::ZERO, false),
             Answer::Accepted { spent, outcome, .. } => (*spent, matches!(outcome, Declared::Change(_))),
             Answer::Parked { spent, .. } | Answer::Failed { spent, .. } => (*spent, false),
         };
         match answer {
-            Answer::Parked { turns, .. }
-            | Answer::Accepted { turns, .. }
-            | Answer::Delivered { turns, .. }
-            | Answer::Failed { turns, .. } => {
+            Answer::Parked { turns, .. } | Answer::Accepted { turns, .. } | Answer::Failed { turns, .. } => {
                 judge.check(*turns == self.turns, "final turn count follows every actual root output");
             }
             Answer::Refused(_) => judge.check(self.turns == 0, "refused start invented no turns"),
         }
-        judge.check(
-            self.required_delivery.is_none() || matches!(answer, Answer::Delivered { .. }),
-            "an interrupted landing requires its delivered answer",
-        );
         judge.check(spent == self.spent, "the answer accounts for every accepted provider turn exactly once");
         if let Answer::Accepted { outcome, .. } = answer {
             judge.check(

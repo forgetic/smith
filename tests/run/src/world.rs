@@ -1145,7 +1145,6 @@ impl World {
         let turns = match &answer {
             run::Answer::Accepted { turns, .. }
             | run::Answer::Failed { turns, .. }
-            | run::Answer::Delivered { turns, .. }
             | run::Answer::Parked { turns, .. } => *turns,
             run::Answer::Refused(_) => 0,
         };
@@ -1623,7 +1622,6 @@ impl World {
             let answer = start.answer.as_ref().unwrap_or_else(|| panic!("start {owner:?} was answered"));
             match answer {
                 run::Answer::Parked { spent, .. }
-                | run::Answer::Delivered { spent, .. }
                 | run::Answer::Failed { spent, .. }
                 | run::Answer::Accepted { spent, .. } => {
                     answered = answered.accumulate(*spent);
@@ -1719,10 +1717,8 @@ impl RunView {
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 fn assert_within(budget: &run::Budget, answer: &run::Answer, turn: run::Spend, peak: u32) {
-    let (run::Answer::Parked { spent, .. }
-    | run::Answer::Delivered { spent, .. }
-    | run::Answer::Failed { spent, .. }
-    | run::Answer::Accepted { spent, .. }) = answer
+    let (run::Answer::Parked { spent, .. } | run::Answer::Failed { spent, .. } | run::Answer::Accepted { spent, .. }) =
+        answer
     else {
         return;
     };

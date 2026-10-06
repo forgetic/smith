@@ -164,8 +164,7 @@ fn host_cancellation_at_many_moments_closes_the_whole_tree() {
                     usize::from(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { depth: 1, .. })) > 0);
             }
             Answer::Accepted { .. } => done += 1,
-            answer
-            @ (Answer::Parked { .. } | Answer::Refused(_) | Answer::Failed { .. } | Answer::Delivered { .. }) => {
+            answer @ (Answer::Parked { .. } | Answer::Refused(_) | Answer::Failed { .. }) => {
                 panic!("seed {seed}: expected cancelled or already finished, got {answer:?}")
             }
         }
@@ -330,11 +329,9 @@ fn mid_landing_during_explicit_shutdown_preserves_actual_receipts_and_spend() {
         cancel_at: Some(submitted.saturating_since(skein_lib::Time::ZERO).saturating_add(Duration::from_nanos(1))),
         ..base
     });
-    let Answer::Delivered { name, receipts, stopped: Failure::Cancelled, .. } = world.answer() else {
-        panic!("interrupted Report-only delivery retains its actual terminal")
-    };
-    assert_eq!(*name, world.delivery_names()[0].0);
-    assert_eq!(receipts.receipts()[0].text(), b"scripted receipt");
+    assert!(matches!(world.answer(), Answer::Failed { failure: Failure::Cancelled, .. }));
+    assert_eq!(world.delivery_names()[0].0.completion, 2);
+    assert_eq!(world.pushes(), [smith_agent_world::delivered()]);
     assert_eq!(world.landed(), FIXED);
 }
 

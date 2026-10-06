@@ -486,10 +486,8 @@ fn delivery_memory_step(
                 assert_eq!(receipts.owned_bytes(), smith_domain_run::Delivered::worst_case());
             }
             Request::Answer {
-                answer: Answer::Delivered { receipts, stopped: smith_domain_run::Failure::Cancelled, .. },
-                ..
+                answer: Answer::Failed { failure: smith_domain_run::Failure::Cancelled, .. }, ..
             } => {
-                assert_eq!(receipts.owned_bytes(), smith_domain_run::Delivered::worst_case());
                 answered = true;
             }
             Request::Turn { .. }
@@ -511,7 +509,7 @@ fn delivery_memory_step(
 }
 
 #[test]
-fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
+fn full_receipt_delivery_settles_before_a_cancelled_answer() {
     let limits = Limits {
         directories: smith_domain_run::MAX_DIRECTORIES,
         directory_name_bytes: 256,
@@ -588,10 +586,6 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
         &meter,
         Event::Delivered { owner, push: smith_domain_run::Delivery::Delivered(terminal) },
     );
-    assert!(
-        meter.held() >= limits.run_bytes + smith_domain_run::Delivered::worst_case(),
-        "actual run retains a full charter and all actual receipts"
-    );
     let (_, answered) = delivery_memory_step(
         &mut domain,
         &env,
@@ -599,7 +593,7 @@ fn actual_interrupted_delivery_and_final_answer_fill_all_receipt_caps() {
         &meter,
         Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO },
     );
-    assert!(answered, "one typed interrupted-landing answer carries every receipt");
+    assert!(answered, "the pending delivery settles before the cancelled answer");
 }
 
 /// Complete caller-owned charter at the aggregate cap, with all directories

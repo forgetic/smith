@@ -5,7 +5,7 @@ use skein_lib::{Duration, Time, Token};
 use skein_world::domain::{Referee, Verdict};
 use smith_agent_world::referee::{Meeting, Seen};
 use smith_domain::run::{
-    Answer, Delivery, Exit, Refusal, Spend,
+    Answer, Exit, Refusal, Spend,
     outcome::{Change, ChangeSpec, Declared, DeclaredFailure, Field, FieldRule, OutcomeSpec, Report, TextSpec},
 };
 
@@ -216,7 +216,7 @@ fn extra_field_storage_cannot_be_omitted_from_the_referees_byte_charge() {
     );
 }
 
-fn mid_history(stopped: bool) -> Referee<Meeting> {
+fn mid_history() -> Referee<Meeting> {
     let mut referee = Referee::new(Meeting::default());
     let owner = Token::new(70);
     let name = smith_domain::run::CallName { activation: 1, completion: 2, position: 1 };
@@ -240,9 +240,6 @@ fn mid_history(stopped: bool) -> Referee<Meeting> {
     for observation in observations {
         referee.observe(Time::ZERO, observation, &mut Vec::new());
     }
-    if stopped {
-        referee.observe(Time::ZERO, Seen::Stopped { failure: smith_domain::run::Failure::Cancelled }, &mut Vec::new());
-    }
     referee.observe(
         Time::ZERO,
         Seen::Delivered { owner, push: smith_agent_world::delivered(), tree: b"checked".to_vec() },
@@ -260,23 +257,12 @@ fn pending_host_answer(referee: &Referee<Meeting>) {
     assert!(pending[0].contains("host answer"));
 }
 
-fn interrupted_answer() -> Answer {
-    let Delivery::Delivered(receipts) = smith_agent_world::delivered() else { unreachable!("fixture delivered") };
-    Answer::Delivered {
-        name: smith_domain::run::CallName { activation: 1, completion: 2, position: 1 },
-        receipts,
-        stopped: smith_domain::run::Failure::Cancelled,
-        spent: Spend::ZERO,
-        turns: 0,
-    }
-}
-
 #[test]
 fn both_ordinary_and_interrupted_mid_delivery_histories_are_valid() {
     for interrupted in [false, true] {
-        let mut referee = mid_history(interrupted);
+        let mut referee = mid_history();
         let answer = if interrupted {
-            interrupted_answer()
+            Answer::Failed { failure: smith_domain::run::Failure::Cancelled, spent: Spend::ZERO, turns: 0 }
         } else {
             Answer::Accepted {
                 outcome: Declared::Report(Report { text: b"continued".as_slice().into(), fields: Box::new([]) }),
@@ -291,44 +277,9 @@ fn both_ordinary_and_interrupted_mid_delivery_histories_are_valid() {
 }
 
 #[test]
-fn an_interrupted_mid_answer_cannot_invent_receipts_names_or_a_stop() {
-    for corruption in 0..3 {
-        let mut answer = interrupted_answer();
-        let Answer::Delivered { name, receipts, stopped, .. } = &mut answer else { unreachable!("typed fixture") };
-        match corruption {
-            0 => name.position = 9,
-            1 => {
-                *receipts = smith_domain::run::Delivered::new(Box::new([smith_domain::run::Receipt::new(
-                    0,
-                    b"invented".as_slice().into(),
-                )
-                .expect("bounded")]))
-                .expect("one directory");
-            }
-            2 => *stopped = smith_domain::run::Failure::Stale,
-            _ => unreachable!("three corruptions"),
-        }
-        broken(
-            mid_history(true),
-            Seen::Answered { answer, pending: 0 },
-            if corruption == 2 {
-                "interrupted delivery preserves the already observed stop"
-            } else {
-                "interrupted mid delivery preserves its actual name and receipts"
-            },
-        );
-    }
-    broken(
-        mid_history(false),
-        Seen::Answered { answer: interrupted_answer(), pending: 0 },
-        "interrupted mid delivery preserves its actual name and receipts",
-    );
-}
-
-#[test]
 fn an_ordinary_mid_report_cannot_invent_a_forbidden_final_change() {
     broken(
-        mid_history(false),
+        mid_history(),
         Seen::Answered {
             pending: 0,
             answer: Answer::Accepted {
@@ -344,11 +295,11 @@ fn an_ordinary_mid_report_cannot_invent_a_forbidden_final_change() {
 #[test]
 fn duplicate_actual_terminal_and_reused_durable_name_are_rejected_after_positive_prefix() {
     broken(
-        mid_history(false),
+        mid_history(),
         Seen::Delivered { owner: Token::new(70), push: smith_agent_world::delivered(), tree: b"checked".to_vec() },
         "a host push terminal names a pending push",
     );
-    let mut referee = mid_history(false);
+    let mut referee = mid_history();
     let owner = Token::new(71);
     referee.observe(Time::ZERO, Seen::Checking { owner, tree: b"checked".to_vec() }, &mut Vec::new());
     referee.observe(Time::ZERO, Seen::Checked { owner, exit: Exit::Code { code: 0 } }, &mut Vec::new());
@@ -381,45 +332,4 @@ fn changed_bytes_between_check_and_submission_are_rejected_after_positive_check(
         },
         "delivery is the exclusive checked snapshot",
     );
-}
-
-#[test]
-fn an_interrupted_landing_cannot_be_erased_by_failed_or_report_answers() {
-    for answer in [
-        Answer::Failed { failure: smith_domain::run::Failure::Cancelled, spent: Spend::ZERO, turns: 0 },
-        Answer::Accepted {
-            outcome: Declared::Report(Report { text: b"continued".as_slice().into(), fields: Box::new([]) }),
-            spent: Spend::ZERO,
-            turns: 0,
-        },
-    ] {
-        broken(
-            mid_history(true),
-            Seen::Answered { answer, pending: 0 },
-            "an interrupted landing requires its delivered answer",
-        );
-    }
-}
-
-#[test]
-fn a_later_stop_after_ordinary_landing_cannot_reclassify_it_as_interrupted() {
-    let mut referee = mid_history(false);
-    referee.observe(Time::ZERO, Seen::Stopped { failure: smith_domain::run::Failure::Cancelled }, &mut Vec::new());
-    broken(
-        referee,
-        Seen::Answered { answer: interrupted_answer(), pending: 0 },
-        "interrupted mid delivery preserves its actual name and receipts",
-    );
-    let mut referee = mid_history(false);
-    referee.observe(Time::ZERO, Seen::Stopped { failure: smith_domain::run::Failure::Cancelled }, &mut Vec::new());
-    referee.observe(
-        Time::ZERO,
-        Seen::Answered {
-            answer: Answer::Failed { failure: smith_domain::run::Failure::Cancelled, spent: Spend::ZERO, turns: 0 },
-            pending: 0,
-        },
-        &mut Vec::new(),
-    );
-    assert_eq!(referee.verdict(), Verdict::Passed, "ordinary later shutdown has no pending landing evidence");
-    assert_eq!(referee.judged().1, 1);
 }

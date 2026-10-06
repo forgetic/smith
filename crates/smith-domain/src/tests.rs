@@ -248,8 +248,7 @@ impl Harness {
                     match &answer {
                         run::Answer::Parked { turns, .. }
                         | run::Answer::Accepted { turns, .. }
-                        | run::Answer::Failed { turns, .. }
-                        | run::Answer::Delivered { turns, .. } => {
+                        | run::Answer::Failed { turns, .. } => {
                             assert_eq!(*turns, self.turns.len(), "terminal follows every actual Turn");
                         }
                         run::Answer::Refused(_) => assert!(self.turns.is_empty()),
