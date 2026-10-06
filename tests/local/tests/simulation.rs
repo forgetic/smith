@@ -100,7 +100,10 @@ fn a_change_is_checked_and_committed_in_place() {
     world.drive(500);
     let (content, _) = world.disk().load(1, b"src/lib.rs", 4096).expect("committed source remains present");
     assert_eq!(content, b"pub fn answer() -> u32 { 43 }\n");
-    assert_eq!(world.commit_message(), Some(b"Make the answer 43\n\nThe answer is 43 now.".as_slice()));
+    assert_eq!(
+        world.commit_message(),
+        Some(b"Make the answer 43\n\nThe answer is 43 now.\n\nSmith-Delivery: 1/3/0".as_slice())
+    );
     assert!(world.shown().iter().any(|text| text.as_ref() == b"Change delivered"));
 }
 
@@ -129,7 +132,10 @@ fn a_crash_after_a_commit_before_its_turn_is_saved_tells_the_next_run_what_was_c
     let mut first = World::with_git_change(201);
     first.line(b"Make the answer 43");
     assert!(first.drive_to_cut(600, Cut::AfterSaveDelivery), "the commit and its decision become durable");
-    assert_eq!(first.commit_message(), Some(b"Make the answer 43\n\nThe answer is 43 now.".as_slice()));
+    assert_eq!(
+        first.commit_message(),
+        Some(b"Make the answer 43\n\nThe answer is 43 now.\n\nSmith-Delivery: 1/3/0".as_slice())
+    );
     let store = first.into_store();
     let mut second = World::with_git_change_store(202, store);
     second.line(b"What happened before the crash?");
@@ -138,6 +144,75 @@ fn a_crash_after_a_commit_before_its_turn_is_saved_tells_the_next_run_what_was_c
         text.windows(b"Earlier delivery committed:".len()).any(|part| part == b"Earlier delivery committed:")
     }));
     assert!(second.prompt_texts().iter().any(|text| text.windows(b"commit 2".len()).any(|part| part == b"commit 2")));
+}
+
+#[test]
+fn an_intent_saved_before_the_first_commit_reconciles_as_interrupted() {
+    let mut first = World::with_mid_report(207);
+    first.line(b"Make the answer 43");
+    assert!(first.drive_to_cut(600, Cut::AfterIntent));
+    assert_eq!(first.delivery_commits(), 0);
+    let mut second = World::with_mid_report_store(208, first.into_store());
+    second.drive(100);
+    let Some(smith_domain::run::Delivery::Failed(failure)) = second.delivery() else { panic!("interruption saved") };
+    assert_eq!(failure.directory, 0);
+    assert_eq!(failure.reason, smith_domain::run::DeliveryReason::Broken);
+    assert_eq!(failure.diagnostic.output(), b"delivery interrupted; committed: none");
+    assert_eq!(second.delivery_commits(), 0);
+    second.line(b"What happened before the crash?");
+    second.drive(600);
+    assert!(second.trace().iter().any(|line| line.contains("Message")), "the next run received its waking message");
+}
+
+#[test]
+fn an_intent_after_the_first_of_two_commits_reports_only_that_commit() {
+    let mut first = World::with_second_commit_failure(209);
+    first.line(b"Deliver both repositories");
+    assert!(first.drive_to_cut(600, Cut::AfterCommit(0)));
+    assert_eq!(first.delivery_commits(), 1);
+    let mut second = World::with_second_commit_failure_store(210, first.into_store());
+    second.drive(100);
+    let Some(smith_domain::run::Delivery::Failed(failure)) = second.delivery() else {
+        panic!("partial delivery saved")
+    };
+    assert_eq!(failure.directory, 1);
+    assert_eq!(failure.reason, smith_domain::run::DeliveryReason::Broken);
+    assert!(
+        failure
+            .diagnostic
+            .output()
+            .windows(b"directory 0: commit 2".len())
+            .any(|part| part == b"directory 0: commit 2")
+    );
+    assert_eq!(second.delivery_commits(), 1, "recovery did not commit again");
+    second.line(b"What landed?");
+    second.drive(600);
+    assert!(
+        second
+            .prompt_texts()
+            .iter()
+            .any(|text| text.windows(b"directory 0: commit 2".len()).any(|part| part == b"directory 0: commit 2"))
+    );
+}
+
+#[test]
+fn an_intent_after_every_commit_reconciles_to_delivered() {
+    let mut first = World::with_git_change(211);
+    first.line(b"Make the answer 43");
+    assert!(first.drive_to_cut(600, Cut::AfterCommit(0)));
+    assert_eq!(first.delivery_commits(), 1);
+    let mut second = World::with_git_change_store(212, first.into_store());
+    second.drive(100);
+    assert!(matches!(second.delivery(), Some(smith_domain::run::Delivery::Delivered(_))));
+    assert_eq!(second.delivery_commits(), 1);
+    second.line(b"What landed?");
+    second.drive(600);
+    assert!(
+        second
+            .prompt_texts()
+            .iter()
+            .any(|text| text.windows(b"directory 0: commit 2".len()).any(|part| part == b"directory 0: commit 2"))
+    );
 }
 
 #[test]
@@ -317,6 +392,21 @@ fn a_chat_replays_the_same_boundary_trace_from_its_seed() {
         (world.trace().to_vec(), (world.saved_turns(), world.shown().to_vec()))
     });
     assert!(trace.iter().any(|line| line.contains("TurnSaved")));
+}
+
+#[test]
+fn an_interrupted_delivery_replays_the_same_reconciliation() {
+    let trace = assert_replays(213, 214, |seed| {
+        let mut first = World::with_git_change(seed);
+        first.line(b"Make the answer 43");
+        assert!(first.drive_to_cut(600, Cut::AfterCommit(0)));
+        let mut trace = first.trace().to_vec();
+        let mut second = World::with_git_change_store(seed + 1, first.into_store());
+        second.drive(100);
+        trace.extend(second.trace().iter().cloned());
+        (trace, (second.delivery().cloned(), second.delivery_commits()))
+    });
+    assert!(trace.iter().any(|line| line.contains("DeliveryRecorded")));
 }
 
 #[test]

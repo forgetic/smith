@@ -7,13 +7,43 @@ use alloc::boxed::Box;
 use skein_lib::Token;
 use smith_domain::{self as agent, run, tools};
 
-/// One durable decision for an agent delivery call name.
+/// One writable directory recorded before a delivery can commit.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct IntentDirectory {
+    /// Position in workspace order.
+    pub directory: u32,
+    /// Whether the checked tree differs from its starting state.
+    pub changed: bool,
+    /// Git head before delivery; absent for a plain directory.
+    pub head: Option<Box<[u8]>>,
+}
+
+/// The durable pre-effect record for a delivery.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DeliveryIntent {
+    /// All writable directories in workspace order.
+    pub directories: Box<[IntentDirectory]>,
+}
+
+/// An intent awaiting reconciliation, or its final answer.
+#[derive(Clone, PartialEq, Eq, Debug)]
+#[expect(clippy::large_enum_variant, reason = "the sealed delivery diagnostic is held inline in the durable record")]
+pub enum DeliveryState {
+    /// The effect may have begun, and must be found before the next run.
+    Intent(DeliveryIntent),
+    /// The answer to replay for this call name.
+    Answer(run::Delivery),
+}
+
+/// One durable intent or decision for an agent delivery call name.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct DeliveryRecord {
     /// Transcript-derived name decided once by this host.
     pub name: run::CallName,
-    /// Terminal to replay when the agent asks again.
-    pub delivery: run::Delivery,
+    /// Pre-effect intent or terminal to replay when the agent asks again.
+    pub state: DeliveryState,
+    /// Effects found or observed before the saved answer, in workspace order.
+    pub landed: Box<[run::Receipt]>,
     /// Latest turn told before this decision; a later durable turn contains its answer.
     pub after_turn: u32,
     /// Whether a later turn carrying the answer became durable.
@@ -24,7 +54,13 @@ impl DeliveryRecord {
     /// Return the first saved terminal only for its original call name.
     #[must_use]
     pub fn answer(&self, name: run::CallName) -> Option<run::Delivery> {
-        if self.name == name { Some(self.delivery.clone()) } else { None }
+        if self.name != name {
+            return None;
+        }
+        match &self.state {
+            DeliveryState::Intent(_) => None,
+            DeliveryState::Answer(delivery) => Some(delivery.clone()),
+        }
     }
 }
 
@@ -33,6 +69,8 @@ impl DeliveryRecord {
 pub enum GitOp {
     /// Discover changes and merge-conflicted paths.
     Status,
+    /// Inspect the current head and whether its commit carries this delivery's name.
+    Inspect { name: run::CallName },
     /// Check original conflict paths for markers still present.
     Markers { paths: Box<[Box<[u8]>]> },
     /// Commit the checked tree with the configured result message.
@@ -45,7 +83,9 @@ pub enum GitOp {
 #[derive(Debug)]
 pub enum GitResult {
     /// Current working-tree state and any original merge conflicts.
-    Status { changed: bool, merging: Option<Box<[Box<[u8]>]>> },
+    Status { changed: bool, merging: Option<Box<[Box<[u8]>]>>, head: Box<[u8]> },
+    /// Current head and whether its commit message has the call-name trailer.
+    Inspected { head: Box<[u8]>, named: bool },
     /// First original conflict file still holding a marker, if any.
     Markers { first: Option<Box<[u8]>> },
     /// The new commit identity to show the agent and person.
@@ -178,7 +218,7 @@ pub enum Request {
     SaveState { state: ChatState, fresh: bool },
     /// Append one numbered concrete turn and its read fence atomically; answered by `TurnSaved` or `StoreFailed`.
     SaveTurn { number: u32, read: Option<Token>, turn: agent::Turn },
-    /// Save a delivery's terminal before the child hears it.
+    /// Save a pre-effect intent or terminal; the child hears only the terminal.
     SaveDelivery { record: Box<DeliveryRecord> },
     /// Operate on one git directory within the delivery deadline.
     Git { owner: Token, directory: u32, op: GitOp, deadline: skein_lib::Time },

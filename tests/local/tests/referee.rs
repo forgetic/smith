@@ -26,7 +26,7 @@ fn broken_with(meeting: Meeting, mut history: Vec<Seen>, reason: &str) {
 fn a_delivery_returned_before_its_record_is_durable_is_rejected() {
     let name = CallName { activation: 1, completion: 1, position: 0 };
     broken(
-        vec![Seen::DeliveryRecorded { name }, Seen::DeliveryReturned { name }],
+        vec![Seen::DeliveryRecorded { name, intent: false, receipts: Vec::new() }, Seen::DeliveryReturned { name }],
         "delivery is recorded before the child hears it",
     );
 }
@@ -35,8 +35,26 @@ fn a_delivery_returned_before_its_record_is_durable_is_rejected() {
 fn two_decisions_for_one_delivery_name_are_rejected() {
     let name = CallName { activation: 1, completion: 1, position: 0 };
     broken(
-        vec![Seen::DeliveryRecorded { name }, Seen::DeliveryRecorded { name }],
+        vec![
+            Seen::DeliveryRecorded { name, intent: false, receipts: Vec::new() },
+            Seen::DeliveryRecorded { name, intent: false, receipts: Vec::new() },
+        ],
         "one durable decision per delivery name",
+    );
+}
+
+#[test]
+fn a_named_commit_missing_from_the_saved_answer_is_rejected() {
+    let name = CallName { activation: 1, completion: 1, position: 0 };
+    broken_with(
+        Meeting::default().writable(&[0], &[1]),
+        vec![
+            Seen::DeliveryRecorded { name, intent: true, receipts: Vec::new() },
+            Seen::DeliverySaved { name, intent: true },
+            Seen::Committed { name, directory: 0, tree: std::collections::BTreeMap::default() },
+            Seen::DeliveryRecorded { name, intent: false, receipts: Vec::new() },
+        ],
+        "every named commit is in the saved delivery answer",
     );
 }
 
@@ -46,7 +64,20 @@ fn a_commit_of_a_tree_changed_after_checks_is_rejected() {
     let changed = std::collections::BTreeMap::from([(b"answer".to_vec(), b"44".to_vec())]);
     broken_with(
         Meeting::default().writable(&[0], &[1]),
-        vec![Seen::Checked { directory: 0, tree: checked }, Seen::Committed { directory: 0, tree: changed }],
+        vec![
+            Seen::DeliveryRecorded {
+                name: CallName { activation: 1, completion: 1, position: 0 },
+                intent: true,
+                receipts: Vec::new(),
+            },
+            Seen::DeliverySaved { name: CallName { activation: 1, completion: 1, position: 0 }, intent: true },
+            Seen::Checked { directory: 0, tree: checked },
+            Seen::Committed {
+                name: CallName { activation: 1, completion: 1, position: 0 },
+                directory: 0,
+                tree: changed,
+            },
+        ],
         "delivery commits exactly the checked tree",
     );
 }

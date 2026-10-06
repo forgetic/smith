@@ -11,8 +11,8 @@ use skein_world::domain::{Referee, Trace};
 use smith_agent_world::{self as agent_world, checkout_io, translate};
 use smith_domain::{self as agent, run, tools};
 use smith_local_domain::{
-    self as local, AgentIo, ChatState, Contract, DeliveryRecord, Event, ExitStatus, GitOp, GitResult, Request,
-    StoreFailure,
+    self as local, AgentIo, ChatState, Contract, DeliveryRecord, DeliveryState, Event, ExitStatus, GitOp, GitResult,
+    Request, StoreFailure,
 };
 
 use crate::git::History;
@@ -28,6 +28,7 @@ pub struct Store {
     disk: Option<Checkout>,
     history: Option<History>,
     git_head: Option<u64>,
+    commits: Vec<(run::CallName, u32)>,
 }
 
 impl Store {
@@ -97,6 +98,10 @@ pub enum Cut {
     AfterTurnSaved(u32),
     /// A commit and its delivery record are durable, but its child terminal is lost.
     AfterSaveDelivery,
+    /// An intent is durable and no commit has begun.
+    AfterIntent,
+    /// A commit landed, but its result has not reached the host domain.
+    AfterCommit(u32),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -154,6 +159,7 @@ pub struct World {
     history: Option<History>,
     git_head: Option<u64>,
     git_expected: Option<u64>,
+    commits: Vec<(run::CallName, u32)>,
     pending: BTreeMap<Token, (tools::Grants, Box<[agent::llm::Served]>)>,
     cancelled: BTreeSet<Token>,
     events: VecDeque<Event>,
@@ -253,10 +259,22 @@ impl World {
         Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::SecondFails)
     }
 
+    /// Resume the two-directory fixture after a crash cut.
+    #[must_use]
+    pub fn with_second_commit_failure_store(seed: u64, store: Store) -> World {
+        Self::with_capacity(seed, store, true, 2, 64, Scenario::SecondFails)
+    }
+
     /// A Report run separately granted checked mid-run delivery.
     #[must_use]
     pub fn with_mid_report(seed: u64) -> World {
         Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::MidReport)
+    }
+
+    /// Resume a mid-run delivery fixture after a crash cut.
+    #[must_use]
+    pub fn with_mid_report_store(seed: u64, store: Store) -> World {
+        Self::with_capacity(seed, store, true, 2, 64, Scenario::MidReport)
     }
 
     /// Resume over the same transcript, checkout, graph and delivery record.
@@ -298,7 +316,10 @@ impl World {
     /// The last durable delivery decision, if one was made.
     #[must_use]
     pub fn delivery(&self) -> Option<&run::Delivery> {
-        self.store.delivery.as_ref().map(|record| &record.delivery)
+        match &self.store.delivery.as_ref()?.state {
+            DeliveryState::Intent(_) => None,
+            DeliveryState::Answer(delivery) => Some(delivery),
+        }
     }
 
     /// Message stored by the fake git graph for its latest local commit.
@@ -307,6 +328,12 @@ impl World {
         let history = self.history.as_ref()?;
         let head = self.git_head?;
         Some(history.commit_message(head))
+    }
+
+    /// Number of commits made under delivery names across invocations.
+    #[must_use]
+    pub fn delivery_commits(&self) -> usize {
+        self.commits.len()
     }
 
     /// The fake disk observed after the agent has settled its file operations.
@@ -320,7 +347,8 @@ impl World {
         reason = "one constructor keeps scenario fixtures and their typed configuration together"
     )]
     fn with_capacity(seed: u64, mut store: Store, resume: bool, unsaved: u32, facts: u32, scenario: Scenario) -> World {
-        let meeting = Meeting::after(store.activation(), store.state.map_or(0, |state| state.next_message));
+        let meeting = Meeting::after(store.activation(), store.state.map_or(0, |state| state.next_message))
+            .prior_delivery(store.delivery.as_ref(), &store.commits);
         let meeting = match scenario {
             Scenario::Chat => meeting,
             Scenario::SecondFails => meeting.writable(&[0, 1], &[1, 2]),
@@ -536,6 +564,7 @@ impl World {
             history,
             git_head,
             git_expected,
+            commits: store.commits.clone(),
             pending: BTreeMap::new(),
             cancelled: BTreeSet::new(),
             events: VecDeque::new(),
@@ -569,6 +598,7 @@ impl World {
         self.store.disk = Some(self.disk);
         self.store.history = self.history;
         self.store.git_head = self.git_head;
+        self.store.commits = self.commits;
         self.store
     }
 
@@ -732,7 +762,11 @@ impl World {
                         Some(*number)
                     }
                     Event::DeliverySaved { name } => {
-                        self.observe(Seen::DeliverySaved { name: *name });
+                        let intent = matches!(
+                            self.store.delivery.as_ref().map(|record| &record.state),
+                            Some(DeliveryState::Intent(_))
+                        );
+                        self.observe(Seen::DeliverySaved { name: *name, intent });
                         None
                     }
                     Event::Agent(
@@ -903,10 +937,25 @@ impl World {
             }
             Request::SaveDelivery { record } => {
                 let name = record.name;
-                self.observe(Seen::DeliveryRecorded { name });
+                let intent = matches!(record.state, DeliveryState::Intent(_));
+                let receipts = record.landed.iter().map(run::Receipt::directory).collect();
+                self.observe(Seen::DeliveryRecorded { name, intent, receipts });
                 self.store.delivery = Some(*record);
                 self.events.push_back(Event::DeliverySaved { name });
-                if self.cut == Some(Cut::AfterSaveDelivery) {
+                if self.cut == Some(Cut::AfterIntent)
+                    && matches!(
+                        self.store.delivery.as_ref().map(|record| &record.state),
+                        Some(DeliveryState::Intent(_))
+                    )
+                {
+                    self.reached.insert(Goal::Cut);
+                }
+                if self.cut == Some(Cut::AfterSaveDelivery)
+                    && matches!(
+                        self.store.delivery.as_ref().map(|record| &record.state),
+                        Some(DeliveryState::Answer(_))
+                    )
+                {
                     self.reached.insert(Goal::Cut);
                 }
             }
@@ -923,7 +972,10 @@ impl World {
                     }
                 } else if directory == 1 {
                     match op {
-                        GitOp::Status => GitResult::Status { changed: true, merging: None },
+                        GitOp::Status => {
+                            GitResult::Status { changed: true, merging: None, head: b"1".as_slice().into() }
+                        }
+                        GitOp::Inspect { .. } => GitResult::Inspected { head: b"1".as_slice().into(), named: false },
                         GitOp::Commit { .. } => GitResult::Failed {
                             reason: run::DeliveryReason::Broken,
                             diagnostic: Box::new(run::Diagnostic::new(b"simulated git commit failure", 0)),
@@ -937,7 +989,12 @@ impl World {
                 if matches!(result, GitResult::Committed { .. }) {
                     let mut tree = self.disk.tree(b"work");
                     tree.retain(|path, _| !skein_fake_checkout::in_git(path));
-                    self.observe(Seen::Committed { directory, tree });
+                    let name = self.store.delivery.as_ref().expect("intent saved before commit").name;
+                    self.commits.push((name, directory));
+                    self.observe(Seen::Committed { name, directory, tree });
+                    if self.cut == Some(Cut::AfterCommit(directory)) {
+                        self.reached.insert(Goal::Cut);
+                    }
                 }
                 if self.slow_git {
                     self.held_git.push_back((owner, result));
@@ -966,7 +1023,18 @@ impl World {
                 } else {
                     None
                 };
-                GitResult::Status { changed: tree != history.tree(head), merging }
+                GitResult::Status {
+                    changed: tree != history.tree(head),
+                    merging,
+                    head: head.to_string().into_bytes().into(),
+                }
+            }
+            GitOp::Inspect { name } => {
+                let trailer = format!("Smith-Delivery: {}/{}/{}", name.activation, name.completion, name.position);
+                GitResult::Inspected {
+                    head: head.to_string().into_bytes().into(),
+                    named: history.commit_message(head).ends_with(trailer.as_bytes()),
+                }
             }
             GitOp::Markers { paths } => {
                 let mut first = None;

@@ -11,10 +11,12 @@
 //! ```text
 //! state     event or child request       next       emits
 //! Loading   Loaded                       Idle       start queued line
+//! Loading   intent Loaded                Loading   inspect git heads, save reconciled answer
 //! Idle      Line                         Starting   SaveState, Credential
 //! Starting  StateSaved + all grants      Running    agent Start
 //! Running   Line                         Running    SaveState, then Message
 //! Running   agent Turn                   Running    SaveTurn, Show
+//! Running   agent Deliver                Running    survey, save intent, commit, save answer
 //! Running   TurnSaved                    Running    release held answer
 //! Running   Interrupt                    Ending     agent Cancel
 //! Running   agent Answer                 Loading    Show after saves, Load
@@ -42,7 +44,8 @@ mod turns;
 mod tests;
 
 pub use boundary::{
-    AgentIo, ChatState, CredentialFailure, DeliveryRecord, Event, ExitStatus, GitOp, GitResult, Request, StoreFailure,
+    AgentIo, ChatState, CredentialFailure, DeliveryIntent, DeliveryRecord, DeliveryState, Event, ExitStatus, GitOp,
+    GitResult, IntentDirectory, Request, StoreFailure,
 };
 pub use config::{Config, Contract, Invalid, PushTarget, charter};
 pub use domain::{Domain, fire, max_out, resume, step};

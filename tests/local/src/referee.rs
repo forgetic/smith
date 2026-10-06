@@ -7,6 +7,7 @@ use skein_fake_checkout::git::Tree;
 use skein_lib::Token;
 use skein_world::domain::{Expectations, Judge};
 use smith_domain::run::CallName;
+use smith_local_domain::{DeliveryRecord, DeliveryState};
 
 /// A boundary observation made by the scripted person, store or provider.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,15 +31,15 @@ pub enum Seen {
     /// One provider terminal was delivered to the host.
     Completed { owner: Token },
     /// One delivery answer reached the typed store.
-    DeliveryRecorded { name: CallName },
+    DeliveryRecorded { name: CallName, intent: bool, receipts: Vec<u32> },
     /// The store confirmed the record is durable.
-    DeliverySaved { name: CallName },
+    DeliverySaved { name: CallName, intent: bool },
     /// The local domain then returned that answer to the child.
     DeliveryReturned { name: CallName },
     /// A writable directory's check passed with this working tree.
     Checked { directory: u32, tree: Tree },
     /// The host committed this working tree in the named directory.
-    Committed { directory: u32, tree: Tree },
+    Committed { name: CallName, directory: u32, tree: Tree },
     /// The agent successfully stored a file beneath this root.
     Wrote { root: u64 },
 }
@@ -60,7 +61,11 @@ pub struct Meeting {
     answered: BTreeMap<u64, u32>,
     shown: BTreeSet<u64>,
     recorded: BTreeSet<(u64, u32, u32)>,
+    intents: BTreeSet<(u64, u32, u32)>,
+    pending_intents: BTreeSet<(u64, u32, u32)>,
+    pending_answers: BTreeSet<(u64, u32, u32)>,
     saved_deliveries: BTreeSet<(u64, u32, u32)>,
+    commits: BTreeMap<(u64, u32, u32), BTreeSet<u32>>,
     checked: BTreeMap<u32, Tree>,
     writable: BTreeSet<u32>,
     writable_roots: BTreeSet<u64>,
@@ -80,6 +85,27 @@ impl Meeting {
         self.writable_roots.extend(roots);
         self
     }
+
+    /// Seed independent observations that survived an earlier invocation.
+    #[must_use]
+    pub fn prior_delivery(mut self, record: Option<&DeliveryRecord>, commits: &[(CallName, u32)]) -> Self {
+        if let Some(record) = record {
+            let key = call_key(record.name);
+            match &record.state {
+                DeliveryState::Intent(_) => {
+                    self.intents.insert(key);
+                }
+                DeliveryState::Answer(_) => {
+                    self.recorded.insert(key);
+                    self.saved_deliveries.insert(key);
+                }
+            }
+        }
+        for (name, directory) in commits {
+            self.commits.entry(call_key(*name)).or_default().insert(*directory);
+        }
+        self
+    }
 }
 
 impl Expectations for Meeting {
@@ -87,6 +113,7 @@ impl Expectations for Meeting {
     type Name = &'static str;
     type Stimulus = ();
 
+    #[expect(clippy::too_many_lines, reason = "one referee keeps every local boundary event in order")]
     fn observe(&mut self, seen: Seen, judge: &mut Judge<Self::Name, Self::Stimulus>) {
         match seen {
             Seen::Activation { number, message } => {
@@ -152,12 +179,27 @@ impl Expectations for Meeting {
             Seen::Completed { owner } => {
                 judge.check(self.completions.remove(&owner), "one terminal per completion request");
             }
-            Seen::DeliveryRecorded { name } => {
-                judge.check(self.recorded.insert(call_key(name)), "one durable decision per delivery name");
+            Seen::DeliveryRecorded { name, intent, receipts } => {
+                let key = call_key(name);
+                if intent {
+                    judge.check(self.intents.insert(key), "one durable intent per delivery name");
+                    self.pending_intents.insert(key);
+                } else {
+                    judge.check(self.recorded.insert(key), "one durable decision per delivery name");
+                    let included: BTreeSet<u32> = receipts.into_iter().collect();
+                    let committed = self.commits.get(&key).cloned().unwrap_or_default();
+                    judge.check(committed.is_subset(&included), "every named commit is in the saved delivery answer");
+                    self.pending_answers.insert(key);
+                }
             }
-            Seen::DeliverySaved { name } => {
-                judge.check(self.recorded.contains(&call_key(name)), "a delivery save has a decision");
-                judge.check(self.saved_deliveries.insert(call_key(name)), "one store terminal per delivery record");
+            Seen::DeliverySaved { name, intent } => {
+                let key = call_key(name);
+                if intent {
+                    judge.check(self.pending_intents.remove(&key), "a delivery intent has one store terminal");
+                } else {
+                    judge.check(self.pending_answers.remove(&key), "a delivery answer has one store terminal");
+                    judge.check(self.saved_deliveries.insert(key), "one store terminal per delivery record");
+                }
             }
             Seen::DeliveryReturned { name } => {
                 judge.check(
@@ -168,7 +210,14 @@ impl Expectations for Meeting {
             Seen::Checked { directory, tree } => {
                 self.checked.insert(directory, tree);
             }
-            Seen::Committed { directory, tree } => {
+            Seen::Committed { name, directory, tree } => {
+                let key = call_key(name);
+                judge.check(
+                    self.intents.contains(&key) && !self.pending_intents.contains(&key),
+                    "a named commit follows its durable intent",
+                );
+                judge
+                    .check(self.commits.entry(key).or_default().insert(directory), "one commit per delivery directory");
                 judge.check(self.writable.contains(&directory), "delivery writes only writable directories");
                 if let Some(checked) = self.checked.get(&directory) {
                     judge.check(&tree == checked, "delivery commits exactly the checked tree");
