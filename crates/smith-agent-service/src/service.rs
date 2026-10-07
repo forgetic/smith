@@ -16,6 +16,8 @@ use smith_protocol_channel as channel;
 use smith_protocol_llm as llm;
 use smith_protocol_machine as machine;
 
+const TRACE_PROMPT_BYTES: u32 = 65_536;
+
 /// Fixed limits for one agent process and every stage it owns.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
@@ -47,6 +49,8 @@ pub struct Config {
     pub llm_endpoints: llm::Endpoints,
     pub environment: Box<[tools::Var]>,
     pub stream_mode: StreamMode,
+    /// Capture bounded typed prompts for an everything trace.
+    pub capture_prompts: bool,
 }
 
 /// Why startup cannot build a bounded agent service.
@@ -64,6 +68,19 @@ pub enum ConfigError {
     Channel(channel::Error),
     /// The LLM pool cannot retain these endpoints or limits.
     Llm(llm::ComponentError),
+}
+
+/// The first failure that prevented an answer from crossing the channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Failure {
+    /// The channel ended before the answer.
+    ChannelEnded,
+    /// The channel's output side failed.
+    WriteFailed,
+    /// A host grant could not be installed below the domain.
+    Credential,
+    /// A required host record could not be encoded or queued.
+    Send,
 }
 
 /// A lower owner belongs to exactly one protocol component.
@@ -96,6 +113,9 @@ pub struct Service {
     machine_env: Env<machine::Limits>,
     io_env: Env<io::Limits>,
     channel_events: Queue<channel::OpenEvent>,
+    trace_facts: Queue<domain::Fact>,
+    trace_prompt: Option<(Token, Box<[u8]>)>,
+    capture_prompts: bool,
     pending_messages: Queue<(Token, Box<[u8]>)>,
     channel_below: Queue<ChannelLower>,
     llm_events: Queue<llm::ToDomain>,
@@ -119,9 +139,13 @@ pub struct Service {
     output: Option<Token>,
     signals: Option<Token>,
     admitted: Option<Token>,
+    cancel_pending: bool,
     answer_sent: bool,
     channel_ended: bool,
     failed: bool,
+    failure: Option<Failure>,
+    lost_trace_facts: u64,
+    lost_trace_prompts: u64,
     outcome: Option<run::outcome::OutcomeSpec>,
     delivery: Option<run::outcome::ChangeSpec>,
     pending_start: Option<Box<channel::DecodedStart>>,
@@ -140,6 +164,8 @@ pub struct Service {
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     let queue = limits.queue;
     let stages = Queue::<channel::OpenEvent>::worst_case(queue)?
+        .checked_add(Queue::<domain::Fact>::worst_case(queue)?)?
+        .checked_add(List::<u8>::worst_case(TRACE_PROMPT_BYTES)?.checked_mul(2)?)?
         .checked_add(Queue::<ChannelLower>::worst_case(queue)?)?
         .checked_add(Queue::<(Token, Box<[u8]>)>::worst_case(queue)?)?
         .checked_add(Queue::<llm::ToDomain>::worst_case(queue)?)?
@@ -229,6 +255,9 @@ impl Service {
             machine_env: Env { now: start, wall, limits: limits.machine },
             io_env: Env { now: start, wall, limits: limits.io },
             channel_events: Queue::with_capacity(limits.queue),
+            trace_facts: Queue::with_capacity(limits.queue),
+            trace_prompt: None,
+            capture_prompts: config.capture_prompts,
             pending_messages: Queue::with_capacity(limits.queue),
             channel_below: Queue::with_capacity(limits.queue),
             llm_events: Queue::with_capacity(limits.queue),
@@ -252,9 +281,13 @@ impl Service {
             output: None,
             signals: None,
             admitted: None,
+            cancel_pending: false,
             answer_sent: false,
             channel_ended: false,
             failed: false,
+            failure: None,
+            lost_trace_facts: 0,
+            lost_trace_prompts: 0,
             outcome: None,
             delivery: None,
             pending_start: None,
@@ -276,6 +309,39 @@ impl Service {
     /// Submissions to hand to the kernel after an iteration.
     pub const fn submissions(&mut self) -> &mut Queue<kernel::Submit> {
         &mut self.submissions
+    }
+
+    /// One content-free fact offered to a local trace, independent of the channel.
+    pub fn pop_trace_fact(&mut self) -> Option<domain::Fact> {
+        self.trace_facts.pop()
+    }
+
+    /// One owned content observation for local capture, never sent to the host.
+    pub fn pop_trace_content(&mut self) -> Option<domain::Content> {
+        self.domain.pop_content()
+    }
+
+    /// One bounded typed prompt, captured before its ownership passes to LLM.
+    pub fn pop_trace_prompt(&mut self) -> Option<(Token, Box<[u8]>)> {
+        self.trace_prompt.take()
+    }
+
+    /// Number of local trace facts lost to its bounded service queue.
+    #[must_use]
+    pub const fn lost_trace_facts(&self) -> u64 {
+        self.lost_trace_facts
+    }
+
+    /// Prompt records that could not be retained by the local trace slot.
+    #[must_use]
+    pub const fn lost_trace_prompts(&self) -> u64 {
+        self.lost_trace_prompts
+    }
+
+    /// Number of projected host facts dropped at the channel's output reserve.
+    #[must_use]
+    pub fn lost_channel_facts(&self) -> u64 {
+        self.channel.lost_facts()
     }
 
     /// Give Skein IO the inherited channel and termination descriptors. The
@@ -345,12 +411,19 @@ impl Service {
         token
     }
 
+    fn mark_failed(&mut self, reason: Failure) {
+        self.failed = true;
+        if self.failure.is_none() {
+            self.failure = Some(reason);
+        }
+    }
+
     fn refuse_start(&mut self) {
         self.pending_start = None;
         let token = self.next_send();
         let answer = run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Workspace));
         if self.channel.send_answer(answer, token, &mut self.channel_events, &mut self.channel_below).is_err() {
-            self.failed = true;
+            self.mark_failed(Failure::Send);
         } else {
             self.answer_sent = true;
         }
@@ -421,6 +494,95 @@ fn credential(value: &[u8]) -> Option<skein_llm::Credential> {
         return None;
     }
     Some(skein_llm::Credential { access_token: Box::from(bearer), account_id: Box::from(account_id) })
+}
+
+/// A bounded local projection of the typed prompt. The trace writer decides
+/// whether to retain it. If it exceeds the trace cap, the record is dropped
+/// whole rather than holding the provider request back.
+fn capture_prompt(prompt: &domain::llm::Prompt) -> Option<Box<[u8]>> {
+    let mut bytes = List::with_capacity(TRACE_PROMPT_BYTES);
+    if !append(&mut bytes, b"model:")
+        || !append(&mut bytes, &prompt.model)
+        || !append(&mut bytes, b"\nsystem:")
+        || !append(&mut bytes, &prompt.system)
+    {
+        return None;
+    }
+    for message in &prompt.messages {
+        let role = match message.role {
+            domain::llm::Role::User => b"\nuser:".as_slice(),
+            domain::llm::Role::Assistant => b"\nassistant:".as_slice(),
+        };
+        if !append(&mut bytes, role) {
+            return None;
+        }
+        for block in &message.content {
+            let kept = match block {
+                domain::llm::Block::Opaque { bytes: opaque } => {
+                    append(&mut bytes, b"\nopaque:") && append(&mut bytes, opaque)
+                }
+                domain::llm::Block::Refusal { text, replay } => {
+                    append(&mut bytes, b"\nrefusal:")
+                        && append(&mut bytes, text)
+                        && append_replay(&mut bytes, replay.as_ref())
+                }
+                domain::llm::Block::Text { text, replay } => {
+                    append(&mut bytes, b"\ntext:")
+                        && append(&mut bytes, text)
+                        && append_replay(&mut bytes, replay.as_ref())
+                }
+                domain::llm::Block::ToolCall { id, name, input, replay } => {
+                    append(&mut bytes, b"\ncall:")
+                        && append(&mut bytes, id)
+                        && append(&mut bytes, b":")
+                        && append(&mut bytes, name)
+                        && append(&mut bytes, b":")
+                        && append(&mut bytes, input)
+                        && append_replay(&mut bytes, replay.as_ref())
+                }
+                domain::llm::Block::ToolResult { id, result } => {
+                    append(&mut bytes, b"\nresult:") && append(&mut bytes, id) && append_result(&mut bytes, result)
+                }
+            };
+            if !kept {
+                return None;
+            }
+        }
+    }
+    Some(bytes.into_boxed())
+}
+
+fn append_replay(bytes: &mut List<u8>, replay: Option<&domain::llm::Replay>) -> bool {
+    match replay {
+        Some(replay) => append(bytes, b"\nreplay:") && append(bytes, &replay.bytes),
+        None => true,
+    }
+}
+
+fn append_result(bytes: &mut List<u8>, result: &domain::llm::Returned) -> bool {
+    match result {
+        domain::llm::Returned::Text { text, error: _, replay } => {
+            append(bytes, b":text:") && append(bytes, text) && append_replay(bytes, replay.as_ref())
+        }
+        domain::llm::Returned::Withdrawn => append(bytes, b":withdrawn"),
+        domain::llm::Returned::Owned { outcome: _ } => append(bytes, b":owned"),
+        domain::llm::Returned::Served { returned: _, error: _ } => append(bytes, b":served"),
+        domain::llm::Returned::Invalid { problem: _ } => append(bytes, b":invalid"),
+        domain::llm::Returned::NotRun => append(bytes, b":not-run"),
+    }
+}
+
+fn append(bytes: &mut List<u8>, part: &[u8]) -> bool {
+    let Ok(count) = u32::try_from(part.len()) else {
+        return false;
+    };
+    if count > bytes.room() {
+        return false;
+    }
+    for byte in part {
+        bytes.push(*byte).expect("checked room before append");
+    }
+    true
 }
 
 /// Advance io, the components, and the domain once at injected clocks.
@@ -574,6 +736,8 @@ fn route_io_event(service: &mut Service, event: io::Event) {
         io::Event::Shutdown { signal: _ } => {
             if let Some(run) = service.admitted {
                 service.domain_events.push(domain::Event::Cancel { run });
+            } else {
+                service.cancel_pending = true;
             }
         }
         io::Event::Stream { owner, up } if Some(owner) == service.input => {
@@ -755,7 +919,10 @@ fn component_up(service: &mut Service) {
         channel_event(service, event);
     }
     for _ in 0..service.llm_events.capacity() {
-        if service.domain_events.room() == 0 {
+        if service.domain_events.room() == 0
+            || service.channel_events.room() < channel::max_out(&service.limits.channel).to_domain
+            || service.channel_below.room() < channel::max_out(&service.limits.channel).below
+        {
             break;
         }
         let event = match service.llm_events.pop() {
@@ -783,7 +950,7 @@ fn component_up(service: &mut Service) {
                     )
                     .is_err()
                 {
-                    service.failed = true;
+                    service.mark_failed(Failure::Send);
                 }
             }
         }
@@ -859,23 +1026,25 @@ fn channel_event(service: &mut Service, event: channel::OpenEvent) {
                     if service.llm.grant(grant.name, value, lapses).is_ok() {
                         service.domain_events.push(domain::Event::Grant { grant });
                     } else {
-                        service.failed = true;
+                        service.mark_failed(Failure::Credential);
                     }
                 }
-                None => service.failed = true,
+                None => service.mark_failed(Failure::Credential),
             },
-            None => service.failed = true,
+            None => service.mark_failed(Failure::Credential),
         },
         channel::OpenEvent::Cancel => {
             if let Some(run) = service.admitted {
                 service.domain_events.push(domain::Event::Cancel { run });
+            } else {
+                service.cancel_pending = true;
             }
         }
-        channel::OpenEvent::WriteFailed => service.failed = true,
+        channel::OpenEvent::WriteFailed => service.mark_failed(Failure::WriteFailed),
         channel::OpenEvent::Ended { why: _ } => {
             service.channel_ended = true;
             if !service.answer_sent {
-                service.failed = true;
+                service.mark_failed(Failure::ChannelEnded);
                 if let Some(run) = service.admitted {
                     service.domain_events.push(domain::Event::Cancel { run });
                 }
@@ -938,7 +1107,14 @@ fn domain_down(service: &mut Service) {
         };
         domain_request(service, request);
     }
-    if service.admitted.is_some() {
+    match service.admitted {
+        Some(run) if service.cancel_pending && service.domain_events.room() > 0 => {
+            service.domain_events.push(domain::Event::Cancel { run });
+            service.cancel_pending = false;
+        }
+        Some(_) | None => {}
+    }
+    if service.admitted.is_some() && !service.answer_sent && !service.channel_ended {
         for _ in 0..service.limits.queue {
             if service.channel_events.room() < channel_max.to_domain || service.channel_below.room() < channel_max.below
             {
@@ -948,6 +1124,11 @@ fn domain_down(service: &mut Service) {
                 Some(fact) => fact,
                 None => break,
             };
+            if service.trace_facts.room() > 0 {
+                service.trace_facts.push(fact);
+            } else {
+                service.lost_trace_facts = service.lost_trace_facts.saturating_add(1);
+            }
             let token = service.next_send();
             if service
                 .channel
@@ -960,14 +1141,8 @@ fn domain_down(service: &mut Service) {
                 )
                 .is_err()
             {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
-        }
-    }
-    for _ in 0..service.limits.queue {
-        match service.domain.pop_content() {
-            Some(_) => {}
-            None => break,
         }
     }
 }
@@ -982,7 +1157,7 @@ fn domain_request(service: &mut Service, request: domain::Request) {
                 .send_waiting(read, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
         }
         domain::Request::Turn { host_run: _, number, position: _, read, spent, turn } => {
@@ -992,7 +1167,7 @@ fn domain_request(service: &mut Service, request: domain::Request) {
                 .send_turn(number, read, spent, &turn, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
         }
         domain::Request::HostCall { host_run: _, relay, name, tool, effect, input, deadline } => {
@@ -1013,7 +1188,7 @@ fn domain_request(service: &mut Service, request: domain::Request) {
                 )
                 .is_err()
             {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
         }
         domain::Request::WithdrawHost { relay } => {
@@ -1023,14 +1198,14 @@ fn domain_request(service: &mut Service, request: domain::Request) {
                 .send_withdraw(relay, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
         }
         domain::Request::Admitted { host_run: _, run } => {
             service.admitted = Some(run);
             let token = service.next_send();
             if service.channel.send_admitted(token, &mut service.channel_events, &mut service.channel_below).is_err() {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
         }
         domain::Request::Answer { to, answer } => {
@@ -1041,7 +1216,7 @@ fn domain_request(service: &mut Service, request: domain::Request) {
                 .send_answer(answer, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             } else {
                 service.answer_sent = true;
             }
@@ -1051,13 +1226,13 @@ fn domain_request(service: &mut Service, request: domain::Request) {
             let span = deadline.saturating_since(service.domain_env.now);
             if service.channel.send_long(span, token, &mut service.channel_events, &mut service.channel_below).is_err()
             {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
         }
         domain::Request::ChecksEnded { host_run: _ } => {
             let token = service.next_send();
             if service.channel.send_long_done(token, &mut service.channel_events, &mut service.channel_below).is_err() {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
         }
         domain::Request::Deliver { name, deadline, host_run: _, owner, change } => {
@@ -1076,7 +1251,7 @@ fn domain_request(service: &mut Service, request: domain::Request) {
                 )
                 .is_err()
             {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
         }
         domain::Request::Complete {
@@ -1089,6 +1264,19 @@ fn domain_request(service: &mut Service, request: domain::Request) {
             max_failure_bytes,
             decoded_call_bytes,
         } => {
+            if service.capture_prompts {
+                if service.trace_prompt.is_some() {
+                    service.lost_trace_prompts = service.lost_trace_prompts.saturating_add(1);
+                } else {
+                    service.trace_prompt = match capture_prompt(&prompt) {
+                        Some(captured) => Some((owner, captured)),
+                        None => {
+                            service.lost_trace_prompts = service.lost_trace_prompts.saturating_add(1);
+                            None
+                        }
+                    };
+                }
+            }
             let outcome = service.outcome.clone().expect("an admitted Start retains its result contract");
             let request = llm::FromDomain::Complete {
                 owner,
@@ -1113,7 +1301,7 @@ fn domain_request(service: &mut Service, request: domain::Request) {
                 .send_rejected(grant, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
         }
         domain::Request::Exhausted { account, retry_after } => {
@@ -1123,7 +1311,7 @@ fn domain_request(service: &mut Service, request: domain::Request) {
                 .send_exhausted(account, retry_after, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
-                service.failed = true;
+                service.mark_failed(Failure::Send);
             }
         }
         domain::Request::Cancel { owner } => {
@@ -1405,6 +1593,20 @@ pub fn work_pending(service: &Service, now: Time) -> bool {
 #[must_use]
 pub fn done(service: &Service) -> Option<bool> {
     if service.channel_ended
+        && service.channel_events.is_empty()
+        && service.channel_below.is_empty()
+        && service.llm_events.is_empty()
+        && service.llm_below.is_empty()
+        && service.machine_events.is_empty()
+        && service.machine_below.is_empty()
+        && service.domain_events.is_empty()
+        && service.domain_requests.is_empty()
+        && service.io_events.is_empty()
+        && service.io_requests.is_empty()
+        && service.file_events.is_empty()
+        && service.io_submissions.is_empty()
+        && service.file_submissions.is_empty()
+        && service.completions.is_empty()
         && service.io.is_empty()
         && service.files.takes()
         && service.files.open_files() == 0
@@ -1418,6 +1620,12 @@ pub fn done(service: &Service) -> Option<bool> {
     } else {
         None
     }
+}
+
+/// The first concrete failure, retained for the shell's final stderr line.
+#[must_use]
+pub const fn failure(service: &Service) -> Option<Failure> {
+    service.failure
 }
 
 #[cfg(test)]
@@ -1535,6 +1743,7 @@ mod tests {
                 llm_endpoints,
                 environment: Box::new([]),
                 stream_mode: StreamMode::Two,
+                capture_prompts: false,
             },
             1,
         )
@@ -1559,6 +1768,7 @@ mod tests {
                 llm_endpoints,
                 environment: Box::new([]),
                 stream_mode: StreamMode::Two,
+                capture_prompts: false,
             },
             1,
         );
@@ -1660,5 +1870,76 @@ mod tests {
         let cancel = service.submissions.pop().expect("file cancel");
         assert_ne!(io.op, file.op);
         assert_eq!(cancel.kind, kernel::Op::Cancel { target: file.op });
+    }
+
+    #[test]
+    fn termination_signal_cancels_the_admitted_run() {
+        let mut service = service();
+        service.admitted = Some(Token::new(91));
+        route_io_event(&mut service, io::Event::Shutdown { signal: kernel::ServiceSignal::Terminate });
+        match service.domain_events.pop().expect("cancel event") {
+            domain::Event::Cancel { run } => assert_eq!(run, Token::new(91)),
+            other => panic!("unexpected signal result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn signal_during_opening_waits_for_the_admitted_run_handle() {
+        let mut service = service();
+        route_io_event(&mut service, io::Event::Shutdown { signal: kernel::ServiceSignal::Interrupt });
+        assert!(service.cancel_pending);
+        service.admitted = Some(Token::new(19));
+        domain_down(&mut service);
+        match service.domain_events.pop().expect("deferred cancel") {
+            domain::Event::Cancel { run } => assert_eq!(run, Token::new(19)),
+            other => panic!("unexpected deferred result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn channel_loss_before_answer_keeps_a_concrete_failure_reason() {
+        let mut service = service();
+        channel_event(&mut service, channel::OpenEvent::Ended { why: skein_channel::Closed::Truncated });
+        assert_eq!(failure(&service), Some(Failure::ChannelEnded));
+        assert!(service.channel_ended);
+        assert!(!service.answer_sent);
+    }
+
+    #[test]
+    fn success_requires_a_sent_answer_and_every_lower_route_settled() {
+        let mut service = service();
+        service.channel_ended = true;
+        service.answer_sent = true;
+        assert_eq!(done(&service), Some(true));
+        service.operations.insert(Token::new(77), Operation::Io(Token::new(4))).expect("one route");
+        assert_eq!(done(&service), None);
+        service.operations.remove(&Token::new(77));
+        assert_eq!(done(&service), Some(true));
+    }
+
+    #[test]
+    fn typed_prompt_capture_preserves_text_and_tool_input_without_a_credential() {
+        let prompt = domain::llm::Prompt {
+            endpoint: domain::llm::Endpoint(1),
+            model: Box::from(&b"model"[..]),
+            system: Box::from(&b"system instructions"[..]),
+            tools: tools::Grants { inspect: false, modify: false, shell: false },
+            served: Box::new([]),
+            messages: Box::new([domain::llm::Message {
+                role: domain::llm::Role::User,
+                content: Box::new([
+                    domain::llm::Block::Text { text: Box::from(&b"request"[..]), replay: None },
+                    domain::llm::Block::ToolCall {
+                        id: Box::from(&b"id"[..]),
+                        name: Box::from(&b"inspect"[..]),
+                        input: Box::from(&b"input"[..]),
+                        replay: None,
+                    },
+                ]),
+            }]),
+            max_tokens: 10,
+        };
+        let captured = capture_prompt(&prompt).expect("bounded prompt");
+        assert_eq!(&*captured, b"model:model\nsystem:system instructions\nuser:\ntext:request\ncall:id:inspect:input");
     }
 }

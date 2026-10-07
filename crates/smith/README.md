@@ -23,7 +23,8 @@ startup with a reason on standard error.
   ],
   "environment": [
     { "name": "PATH", "value": "/usr/bin:/bin" }
-  ]
+  ],
+  "trace": { "path": "/tmp/smith-agent.jsonl", "capture": "calls" }
 }
 ```
 
@@ -35,3 +36,12 @@ of each contained tree stop step. An endpoint may additionally set `authority`,
 path to one DER root certificate; without it, the system trust store is loaded.
 Addresses are resolved before the channel opens. The file contains no bearer
 tokens; the host sends grant values over the channel.
+
+The optional trace appends JSON lines on a bounded writer thread. `none`
+records content-free facts, `calls` also records tool-call names and inputs and
+tool-result byte counts, and `everything` additionally records typed prompts,
+completion text and usage. Prompt and call bytes use hex encoding so opaque bytes
+survive. A prompt above 64 KiB or a call field above 16 KiB is dropped as a
+whole. A full writer queue drops records and increments the count reported on
+standard error when the run ends.
+The trace never receives grant values.

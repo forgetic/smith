@@ -22,6 +22,7 @@ use smith_protocol_llm as llm;
 use smith_protocol_machine as machine;
 
 use crate::limits;
+use crate::trace::{Capture, TraceConfig};
 
 const CONFIG_BYTES: u64 = 1 << 20;
 const ENDPOINTS: u32 = 3;
@@ -31,6 +32,7 @@ const ACCOUNTS: u32 = 4;
 pub struct Configuration {
     pub service: service::Config,
     pub memory: u64,
+    pub trace: Option<TraceConfig>,
 }
 
 #[derive(Deserialize)]
@@ -41,6 +43,15 @@ struct Document {
     grace_ms: u64,
     endpoints: Vec<Endpoint>,
     environment: Vec<Variable>,
+    #[serde(default)]
+    trace: Option<TraceDocument>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TraceDocument {
+    path: String,
+    capture: String,
 }
 
 #[derive(Deserialize)]
@@ -108,6 +119,21 @@ fn build(document: Document) -> Result<Configuration, String> {
     if document.grace_ms == 0 {
         return Err("grace_ms must be positive".into());
     }
+    let trace = match document.trace {
+        Some(trace) => {
+            if trace.path.is_empty() {
+                return Err("trace path is empty".into());
+            }
+            let capture = match trace.capture.as_str() {
+                "none" => Capture::None,
+                "calls" => Capture::Calls,
+                "everything" => Capture::Everything,
+                _ => return Err("trace capture must be none, calls or everything".into()),
+            };
+            Some(TraceConfig { path: trace.path.into(), capture })
+        }
+        None => None,
+    };
     let mut limits = standard_limits(document.memory_bytes)?;
     limits.machine.stop_grace = Duration::from_millis(document.grace_ms);
     let mut domain_endpoints = Vec::with_capacity(document.endpoints.len());
@@ -202,8 +228,19 @@ fn build(document: Document) -> Result<Configuration, String> {
         llm_endpoints,
         environment: environment.into_boxed_slice(),
         stream_mode: StreamMode::Two,
+        capture_prompts: match &trace {
+            Some(trace) => trace.capture == Capture::Everything,
+            None => false,
+        },
     };
-    Ok(Configuration { service: config, memory: document.memory_bytes })
+    let reserve = if trace.is_some() { crate::trace::MEMORY_RESERVE } else { 0 };
+    let complete = service::worst_case(&config.limits)
+        .and_then(|bytes| bytes.checked_add(reserve))
+        .ok_or("agent plus trace memory calculation overflowed")?;
+    if complete > document.memory_bytes {
+        return Err("agent plus trace exceeds memory_bytes".into());
+    }
+    Ok(Configuration { service: config, memory: document.memory_bytes, trace })
 }
 
 fn resolve(address: &str) -> Result<SocketAddr, String> {
@@ -356,6 +393,7 @@ mod tests {
             grace_ms: 250,
             endpoints: vec![],
             environment: vec![],
+            trace: None,
         }
     }
 

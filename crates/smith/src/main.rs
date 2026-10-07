@@ -6,6 +6,7 @@
 
 mod config;
 mod limits;
+mod trace;
 
 use std::env;
 use std::path::Path;
@@ -36,6 +37,10 @@ fn run(path: &Path) -> Result<(), String> {
     let configuration = config::read(path)?;
     let worst = service::worst_case(&configuration.service.limits).ok_or("agent memory calculation overflowed")?;
     let operations = configuration.service.limits.routes;
+    let mut trace = match configuration.trace {
+        Some(config) => Some(trace::Trace::open(config)?),
+        None => None,
+    };
     let seed = skein_shell::seed().map_err(|errno| format!("kernel seed failed (errno {errno})"))?;
     let mut service = service::Service::new(configuration.service, seed)
         .map_err(|error| format!("agent configuration cannot start: {error:?}"))?;
@@ -52,6 +57,21 @@ fn run(path: &Path) -> Result<(), String> {
         kernel.reap(service.completions());
         let Now { now, wall } = clock.now();
         service::iterate(&mut service, now, wall);
+        while let Some(fact) = service.pop_trace_fact() {
+            if let Some(trace) = &mut trace {
+                trace.fact(fact, now.as_nanos());
+            }
+        }
+        while let Some(content) = service.pop_trace_content() {
+            if let Some(trace) = &mut trace {
+                trace.content(content, now.as_nanos());
+            }
+        }
+        if let Some((owner, prompt)) = service.pop_trace_prompt()
+            && let Some(trace) = &mut trace
+        {
+            trace.prompt(owner, &prompt, now.as_nanos());
+        }
         while let Some(path) = service.root_to_open() {
             let root = match std::str::from_utf8(path) {
                 Ok(path) => skein_shell::open_root(Path::new(path)).map_err(|_| ()),
@@ -60,7 +80,23 @@ fn run(path: &Path) -> Result<(), String> {
             service.root_opened(root);
         }
         if let Some(answered) = service::done(&service) {
-            return if answered { Ok(()) } else { Err("the run could not answer".into()) };
+            let trace_dropped = match &trace {
+                Some(trace) => trace.dropped(),
+                None => 0,
+            };
+            let lost = service
+                .lost_channel_facts()
+                .saturating_add(service.lost_trace_facts())
+                .saturating_add(service.lost_trace_prompts())
+                .saturating_add(trace_dropped);
+            if lost > 0 {
+                eprintln!("smith: {lost} observations were dropped");
+            }
+            return if answered {
+                Ok(())
+            } else {
+                Err(format!("the run could not answer: {:?}", service::failure(&service)))
+            };
         }
         let wait = if service::work_pending(&service, now) {
             Wait::No
