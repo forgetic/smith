@@ -1059,6 +1059,9 @@ impl World {
             Request::Checking { host_run, .. } => {
                 assert_eq!(host_run, Token::new(1), "checking notice echoes the host identity");
             }
+            Request::ChecksEnded { host_run } => {
+                assert_eq!(host_run, Token::new(1), "ended notice echoes the host identity");
+            }
             Request::Complete {
                 owner,
                 prompt,

@@ -48,6 +48,19 @@ fn a_coding_run_fails_checks_then_fixes_and_lands_the_exact_tree() {
 }
 
 #[test]
+fn checks_said_to_start_and_end_bracket_the_long_operation() {
+    let world = settled(&Settings::calm(1011));
+    assert_eq!(world.checked(), [false, true]);
+    assert_eq!(world.check_notices().len(), world.check_terminals().len() * 2);
+    for (span, terminal) in world.check_notices().chunks_exact(2).zip(world.check_terminals()) {
+        let (started, begin) = span[0];
+        let (ended, finish) = span[1];
+        assert!(begin && !finish, "every check has one start and one end notice");
+        assert!(started <= *terminal && *terminal <= ended, "the actual terminal is inside its notice span");
+    }
+}
+
+#[test]
 fn a_review_retries_the_verdict_its_charter_rejected() {
     let world = settled(&Settings { job: Job::Review, writable: false, ..Settings::calm(2) });
     let Answer::Accepted { outcome: Declared::Verdict(verdict), .. } = world.answer() else {

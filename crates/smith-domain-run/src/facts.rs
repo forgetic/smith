@@ -235,6 +235,7 @@ pub(crate) fn tell(
             | Request::Probe { .. }
             | Request::Abort { .. }
             | Request::Checking { .. }
+            | Request::ChecksEnded { .. }
             | Request::Deliver { .. } => continue,
         };
         facts.push(fact);

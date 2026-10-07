@@ -241,6 +241,7 @@ fn observed_request(request: Request, selected: Option<&smith_domain_run::Conven
         | Request::Close { .. }
         | Request::Abort { .. }
         | Request::Checking { .. }
+        | Request::ChecksEnded { .. }
         | Request::Deliver { .. }
         | Request::Return { .. } => Asked::Other,
     }
@@ -357,7 +358,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
             panic!("the change is being checked");
         };
         let ran = Ran { exit: Exit::Code { code: 0 }, output: bytes(0), cut: 0 };
-        assert_eq!(step(Event::Checked { owner, ran }), [Asked::Other], "checked, it is pushed");
+        assert_eq!(step(Event::Checked { owner, ran }), [Asked::Other, Asked::Other], "checked, it is pushed");
         assert_eq!(step(Event::Delivered { owner, delivery: delivered() }), [Asked::Other, Asked::Other], "accepted");
     }
     let held = meter.held();
@@ -486,6 +487,7 @@ fn delivery_memory_step(
             | Request::Waiting { .. }
             | Request::Admitted { .. }
             | Request::Checking { .. }
+            | Request::ChecksEnded { .. }
             | Request::Close { .. } => {}
             unexpected @ (Request::HostCall { .. }
             | Request::WithdrawHost { .. }
@@ -687,6 +689,7 @@ fn host_memory_take(
             | Request::Abort { .. }
             | Request::Check { .. }
             | Request::Checking { .. }
+            | Request::ChecksEnded { .. }
             | Request::Deliver { .. }) => panic!("unexpected host memory output {unexpected:?}"),
         }
     }

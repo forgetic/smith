@@ -901,6 +901,7 @@ impl Counted {
                 Request::HostCall { .. }
                 | Request::WithdrawHost { .. }
                 | Request::Checking { .. }
+                | Request::ChecksEnded { .. }
                 | Request::Deliver { .. }
                 | Request::Rejected { .. }
                 | Request::Exhausted { .. }

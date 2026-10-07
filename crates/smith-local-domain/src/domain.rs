@@ -650,6 +650,9 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
             agent::Request::Checking { host_run: _, deadline: _ } => {
                 out.push(Request::Show { text: Box::from(&b"Running checks"[..]) });
             }
+            agent::Request::ChecksEnded { host_run: _ } => {
+                out.push(Request::Show { text: Box::from(&b"Checks finished"[..]) });
+            }
             agent::Request::Rejected { grant } => out.push(Request::Credential { account: grant.account }),
             agent::Request::Exhausted { account: _, retry_after: _ } => {
                 out.push(Request::Show { text: Box::from(&b"A model account is exhausted"[..]) });

@@ -332,6 +332,8 @@ pub enum Request {
     /// because the watchdog decides on it, and nothing may depend on whether
     /// a fact is kept.
     Checking { host_run: Token, deadline: Time },
+    /// To the host: the previously announced check has ended, including after an abort race.
+    ChecksEnded { host_run: Token },
     /// To the host, deliver the exact checked writable-directory state under
     /// the logical run named `host_run`. The host interprets the unchanged
     /// generic fields and returns its bounded host terminal. Final Change

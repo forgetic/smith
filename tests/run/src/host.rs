@@ -379,6 +379,12 @@ impl Host {
         self.tally.notices += 1;
     }
 
+    /// A previously announced check ended before another starts or the run answers.
+    pub fn checks_ended(&mut self, job: Token) {
+        self.assert_running(job, "a check ends while the run is admitted");
+        self.tally.notices += 1;
+    }
+
     /// A push from the run of `job`, which names it `owner`: answered later.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.

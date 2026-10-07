@@ -411,7 +411,7 @@ fn changes_land_after_their_checks_pass_and_their_push_goes_through() {
     assert_eq!(stats.partner.accepted, 4, "{stats:?}");
     assert!(stats.partner.checks_failed > 0, "{stats:?}");
     assert!(world.trace().iter().any(|line| line.contains("Checking {")), "the run tells the host of its checks");
-    assert_eq!(stats.host.notices, stats.checks, "the host hears of each check");
+    assert_eq!(stats.host.notices, stats.checks * 2, "the host hears each check start and end");
 }
 
 #[test]
@@ -688,18 +688,23 @@ fn sub_agents_with_a_small_share_come_back_unanswered_when_it_runs_out() {
 
 #[test]
 fn a_cancelled_run_closes_its_sub_agents_down_the_tree() {
-    let settings = asking(33);
-    let host = host::Script { cancels: 1000, cancel: Span::millis(5_000, 60_000), ..settings.host };
-    let partner = Script { turn: Span::millis(1_000, 10_000), ..settings.partner };
-    let world = settled(&Settings { host, partner, ..settings });
-    let stats = world.stats();
-    assert!(stats.children > 0 && stats.partner.withdrawn > 0, "{stats:?}");
-    for answer in answers(&world) {
-        assert!(
-            matches!(answer, Answer::Failed { failure: Failure::Cancelled, .. } | Answer::Accepted { .. }),
-            "{answer:?}"
-        );
+    for seed in 0..128 {
+        let settings = asking(seed);
+        let host = host::Script { cancels: 1000, cancel: Span::millis(5_000, 15_000), ..settings.host };
+        let partner = Script { turn: Span::millis(1_000, 10_000), ..settings.partner };
+        let world = settled(&Settings { host, partner, ..settings });
+        let stats = world.stats();
+        if stats.children > 0 && stats.partner.withdrawn > 0 {
+            for answer in answers(&world) {
+                assert!(
+                    matches!(answer, Answer::Failed { failure: Failure::Cancelled, .. } | Answer::Accepted { .. }),
+                    "{answer:?}"
+                );
+            }
+            return;
+        }
     }
+    panic!("no cancellation found a live child");
 }
 
 /// The facts a run tells say what it did, and whether they are kept changes

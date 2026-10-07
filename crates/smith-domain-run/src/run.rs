@@ -909,6 +909,7 @@ pub(crate) fn checked(domain: &mut Domain, env: &Env<Limits>, owner: Token, ran:
     let run = domain.runs.get(call.run).expect("a run lives until its calls have returned");
     domain.facts.about(call.run.token());
     domain.facts.push(Fact::CheckFinished { run: call.run.token(), exit: ran.exit });
+    out.push(Request::ChecksEnded { host_run: run.host_name });
     let settled = match &mut call.work {
         Work::Landing(landing) => land::checked(landing, id, call.owner, run, may_finish(&run.state), ran, env, out),
         Work::Child(_) | Work::Host(_) => unreachable!("io and the host answer only a landing's requests"),
@@ -919,7 +920,9 @@ pub(crate) fn checked(domain: &mut Domain, env: &Env<Limits>, owner: Token, ran:
 pub(crate) fn aborted(domain: &mut Domain, owner: Token, out: &mut Queue<Request>) {
     let id = Id::<Call>::from_token(owner);
     let call = domain.calls.get_mut(id).expect("a call lives until it returns");
+    let run = domain.runs.get(call.run).expect("a run outlives its checks");
     domain.facts.about(call.run.token());
+    out.push(Request::ChecksEnded { host_run: run.host_name });
     let settled = match &mut call.work {
         Work::Landing(landing) => land::aborted(landing, call.owner, out),
         Work::Child(_) | Work::Host(_) => unreachable!("io and the host answer only a landing's requests"),

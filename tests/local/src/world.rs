@@ -1397,6 +1397,7 @@ impl World {
             | agent::Request::Admitted { .. }
             | agent::Request::Answer { .. }
             | agent::Request::Checking { .. }
+            | agent::Request::ChecksEnded { .. }
             | agent::Request::Rejected { .. }
             | agent::Request::Exhausted { .. }
             | agent::Request::HostCall { .. }

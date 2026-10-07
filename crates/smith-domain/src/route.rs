@@ -470,6 +470,7 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
             return out.push(Request::Turn { host_run, number, position, read, spent, turn });
         }
         run::Request::Checking { host_run, deadline } => return out.push(Request::Checking { host_run, deadline }),
+        run::Request::ChecksEnded { host_run } => return out.push(Request::ChecksEnded { host_run }),
         run::Request::Deliver { host_run, owner, change, name, deadline } => {
             return out.push(Request::Deliver { host_run, owner, change, name, deadline });
         }

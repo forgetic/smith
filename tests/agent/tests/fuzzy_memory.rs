@@ -274,6 +274,7 @@ impl Driver {
                 Request::Turn { .. }
                 | Request::Waiting { .. }
                 | Request::Checking { .. }
+                | Request::ChecksEnded { .. }
                 | Request::Rejected { .. }
                 | Request::Exhausted { .. } => {}
                 Request::Deliver { owner, host_run, .. } => {

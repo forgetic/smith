@@ -63,6 +63,7 @@ struct Harness {
     env: Env<Limits>,
     out: Queue<Request>,
     prices: alloc::collections::BTreeMap<Token, u64>,
+    checks_ended: u32,
 }
 
 impl Harness {
@@ -72,6 +73,7 @@ impl Harness {
             env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits },
             out: Queue::with_capacity(MAX_OUT),
             prices: alloc::collections::BTreeMap::new(),
+            checks_ended: 0,
         }
     }
 
@@ -102,7 +104,27 @@ impl Harness {
         let mut requests = List::with_capacity(MAX_OUT);
         for _ in 0..MAX_OUT {
             let Some(request) = self.out.pop() else { break };
-            requests.push(request).expect("room for MAX_OUT");
+            match request {
+                Request::ChecksEnded { .. } => {
+                    self.checks_ended = self.checks_ended.checked_add(1).expect("bounded checks");
+                }
+                request @ (Request::Waiting { .. }
+                | Request::Turn { .. }
+                | Request::HostCall { .. }
+                | Request::WithdrawHost { .. }
+                | Request::Admitted { .. }
+                | Request::Answer { .. }
+                | Request::Open { .. }
+                | Request::Say { .. }
+                | Request::Close { .. }
+                | Request::Read { .. }
+                | Request::Probe { .. }
+                | Request::Check { .. }
+                | Request::Abort { .. }
+                | Request::Checking { .. }
+                | Request::Deliver { .. }
+                | Request::Return { .. }) => requests.push(request).expect("room for MAX_OUT"),
+            }
         }
         assert!(self.out.is_empty(), "a step emits at most MAX_OUT");
         requests.into_boxed()
@@ -983,6 +1005,7 @@ fn a_withdrawn_landing_stops_what_is_in_flight_and_returns_once_it_has() {
     assert!(h.step(Event::Withdraw { conversation, call: Token::new(6) }).is_empty(), "not the landing call");
     assert_eq!(&*h.step(Event::Withdraw { conversation, call: Token::new(7) }), &[Request::Abort { owner }]);
     assert_eq!(&*h.step(Event::Aborted { owner }), &[returned(7, Returned::Cancelled)]);
+    assert_eq!(h.checks_ended, 1, "abort terminal closes the check span");
     assert!(h.step(Event::Withdraw { conversation, call: Token::new(7) }).is_empty(), "returned already");
     h.domain.reclaim();
 
@@ -1142,6 +1165,7 @@ fn a_cancel_while_a_change_is_checked_stops_the_checks_once_main_withdraws_its_c
     assert_eq!(&*h.step(Event::Withdraw { conversation, call: Token::new(7) }), &[Request::Abort { owner }]);
     // The checks pass before the abort lands: nothing is pushed.
     assert_eq!(&*h.step(Event::Checked { owner, ran: ran(0, b"") }), &[returned(7, Returned::Cancelled)]);
+    assert_eq!(h.checks_ended, 1, "the losing abort still closes the check span");
     // A finish that crossed the close is cancelled too.
     let crossed = finish(conversation, 8, verdict(b"approve", Box::new([])));
     assert_eq!(&*h.step(crossed), &[returned(8, Returned::Cancelled)]);

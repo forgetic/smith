@@ -12,7 +12,8 @@
 //!   ended by exactly one [`Event::Delivered`]. After submission the
 //!   host operation is never abandoned; its deadline bounds the host terminal.
 //!   Duplicate or stale callback owners are inert (domain/run.md, sections 8 and 10).
-//!   [`Request::Checking`] is a notice, with no terminal.
+//!   [`Request::Checking`] and [`Request::ChecksEnded`] bracket a check,
+//!   each a notice with no terminal.
 //! - LLM providers, for the sessions: a [`Request::Complete`] is ended by one
 //!   of [`Event::Completed`], [`Event::Failed`] or, after a
 //!   [`Request::Cancel`] that won its race, [`Event::Cancelled`]. Its prompt
@@ -287,6 +288,8 @@ pub enum Request {
     /// To the host: checks of the run it names `host_run` are running until
     /// `deadline` at the latest, so its watchdog waits that long.
     Checking { host_run: Token, deadline: Time },
+    /// To the host: the previously announced check has ended.
+    ChecksEnded { host_run: Token },
     /// To the host, deliver the exact checked writable-directory state under
     /// the logical run named `host_run`. The host interprets the unchanged
     /// generic fields and returns its bounded host terminal. Final Change

@@ -330,6 +330,9 @@ enum Delivery {
     Checking {
         host_run: Token,
     },
+    ChecksEnded {
+        host_run: Token,
+    },
     Submit {
         host_run: Token,
         owner: Token,
@@ -890,6 +893,7 @@ impl World {
                 self.check(owner, &program, deadline, tail);
             }
             run::Request::Checking { host_run, deadline: _ } => self.send(Lane::Host, Delivery::Checking { host_run }),
+            run::Request::ChecksEnded { host_run } => self.send(Lane::Host, Delivery::ChecksEnded { host_run }),
             run::Request::Deliver { host_run, owner, change: _, name: _, deadline } => {
                 let run = current.expect("a push is made in a step about its run");
                 self.assert_alone(run);
@@ -1044,6 +1048,7 @@ impl World {
             | run::Request::Return { .. }
             | run::Request::Check { .. }
             | run::Request::Checking { .. }
+            | run::Request::ChecksEnded { .. }
             | run::Request::Deliver { .. } => unreachable!("not one of io's requests"),
         }
     }
@@ -1386,6 +1391,7 @@ impl World {
                 Delivery::Admitted { host_run, run } => self.host.admitted(self.now, host_run, run),
                 Delivery::Answered { host_run } => self.host.answered(self.now, host_run),
                 Delivery::Checking { host_run } => self.host.checking(host_run),
+                Delivery::ChecksEnded { host_run } => self.host.checks_ended(host_run),
                 Delivery::Submit { host_run, owner, deadline } => self.host.push(self.now, host_run, owner, deadline),
                 Delivery::Open { conversation, opening } => {
                     let mut out = Vec::new();

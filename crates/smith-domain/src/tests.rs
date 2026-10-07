@@ -260,6 +260,7 @@ impl Harness {
                 | Request::WithdrawHost { .. }
                 | Request::Admitted { .. }
                 | Request::Checking { .. }
+                | Request::ChecksEnded { .. }
                 | Request::Deliver { .. }
                 | Request::Complete { .. }
                 | Request::Rejected { .. }
@@ -737,7 +738,7 @@ fn the_limits_fit_and_a_session_must_take_what_the_run_asks() {
 
 #[test]
 fn what_an_entry_point_may_emit_grows_with_the_tools_cancels_only_once() {
-    assert_eq!(max_out(&LIMITS), 573);
+    assert_eq!(max_out(&LIMITS), 1065);
     // A kit's close cancels as many operations as the tools run, which go out
     // to io and lead nowhere else: what the run is sent does not grow with
     // them.
@@ -745,12 +746,12 @@ fn what_an_entry_point_may_emit_grows_with_the_tools_cancels_only_once() {
     let wide = Limits { session: session::Limits { parallel_tools: 8, tools, ..LIMITS.session }, ..LIMITS };
     // Four session records plus eight delegated calls may reach the run;
     // each can open/say at most MAX_OUT sessions. The kit's io cancels do not.
-    assert_eq!(limits::session_steps(&wide), 50);
-    assert_eq!(max_out(&wide), 14601);
+    assert_eq!(limits::session_steps(&wide), 74);
+    assert_eq!(max_out(&wide), 22497);
     let wider =
         Limits { session: session::Limits { tools: tools::Limits { calls: 512, ..tools }, ..wide.session }, ..wide };
     assert_eq!(limits::run_out(&wider), limits::run_out(&wide), "io cancels never multiply run hand-offs");
-    assert_eq!(max_out(&wider) - max_out(&wide), 50 * 256, "one additional kit cancel per session step");
+    assert_eq!(max_out(&wider) - max_out(&wide), 74 * 256, "one additional kit cancel per session step");
 }
 
 #[test]
@@ -1042,6 +1043,7 @@ fn assert_no_provider_completion(emitted: &[Request]) {
             | Request::Admitted { .. }
             | Request::Answer { .. }
             | Request::Checking { .. }
+            | Request::ChecksEnded { .. }
             | Request::Deliver { .. }
             | Request::Rejected { .. }
             | Request::Exhausted { .. }
@@ -1447,9 +1449,14 @@ fn caller_conventions_select_default_custom_and_explicit_legacy_check_delivery_p
             owner,
             ran: run::Ran { exit: run::Exit::Code { code: 0 }, output: bytes(b"check passed"), cut: 0 },
         });
-        let [Request::Deliver { owner: delivered_owner, change: delivered_change, .. }] = emitted.as_ref() else {
+        let [
+            Request::ChecksEnded { host_run },
+            Request::Deliver { owner: delivered_owner, change: delivered_change, .. },
+        ] = emitted.as_ref()
+        else {
             panic!("only actual successful writable Check admits host delivery: {emitted:?}");
         };
+        assert_eq!(*host_run, Token::new(77));
         assert_eq!(*delivered_owner, owner);
         assert_eq!(delivered_change, &change);
         assert!(harness.step(Event::Delivered { owner, delivery: delivered() }).is_empty());
@@ -1488,7 +1495,7 @@ fn custom_check_cancellation_waits_for_the_abort_terminal() {
     };
     assert_eq!(*aborted, owner);
     assert!(harness.next().is_empty(), "cancel requests no settlement or delivery");
-    assert!(harness.step(Event::Aborted { owner }).is_empty());
+    assert_eq!(harness.step(Event::Aborted { owner }).as_ref(), &[Request::ChecksEnded { host_run: Token::new(77) }]);
     let emitted = harness.next();
     let [Request::Answer { answer: run::Answer::Failed { failure: run::Failure::Cancelled, .. }, .. }] =
         emitted.as_ref()

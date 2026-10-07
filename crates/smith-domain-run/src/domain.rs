@@ -17,7 +17,7 @@ use crate::run::{self, Alarm, Conversation, Run};
 /// the run and opens its main conversation or asks io for its first look; a
 /// check goes with its notice to the host; a call returns as main is
 /// closed. The parent reserves this much room in `out` before calling it.
-pub const MAX_OUT: u32 = 2;
+pub const MAX_OUT: u32 = 3;
 
 /// The run child domain's state.
 #[derive(Debug)]

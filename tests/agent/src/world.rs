@@ -385,6 +385,8 @@ pub struct World {
     answer: Option<run::Answer>,
     answered: Option<Time>,
     checked: Vec<bool>,
+    check_notices: Vec<(Time, bool)>,
+    check_terminals: Vec<Time>,
     pushes: Vec<run::Delivery>,
     delivery_names: Vec<(run::CallName, Time)>,
     host_history: crate::host_referee::History,
@@ -637,6 +639,8 @@ impl World {
             answer: None,
             answered: None,
             checked: Vec::new(),
+            check_notices: Vec::new(),
+            check_terminals: Vec::new(),
             pushes: Vec::new(),
             delivery_names: Vec::new(),
             host_history: crate::host_referee::History::with_reply_cap(settings.limits.run.host_reply_bytes),
@@ -1114,6 +1118,11 @@ impl World {
             }
             Request::Checking { host_run, .. } => {
                 assert_eq!(host_run, self.host_run, "checking notice echoes the host identity");
+                self.check_notices.push((self.now, true));
+            }
+            Request::ChecksEnded { host_run } => {
+                assert_eq!(host_run, self.host_run, "ended notice echoes the host identity");
+                self.check_notices.push((self.now, false));
             }
             Request::Complete { owner, prompt, .. } => {
                 self.host_history.prompt(&prompt).expect("exact feedback for observed provider host call");
@@ -1582,6 +1591,7 @@ impl World {
             Event::Failed { .. } | Event::Cancelled { .. } => self.observe(Seen::CompletionEnded { owner }),
             Event::Checked { ran, .. } => {
                 self.checked.push(ran.exit == (run::Exit::Code { code: 0 }));
+                self.check_terminals.push(self.now);
                 self.observe(Seen::Checked { owner, exit: ran.exit });
             }
             Event::Delivered { delivery: push, .. } => {
@@ -1593,7 +1603,10 @@ impl World {
                 }
                 self.observe(Seen::Delivered { owner, push: push.clone(), tree: landed });
             }
-            Event::Aborted { .. } => self.observe(Seen::Checked { owner, exit: run::Exit::Signalled }),
+            Event::Aborted { .. } => {
+                self.check_terminals.push(self.now);
+                self.observe(Seen::Checked { owner, exit: run::Exit::Signalled });
+            }
             Event::HostReturned { .. }
             | Event::Message { .. }
             | Event::Acknowledge { .. }
@@ -1746,6 +1759,18 @@ impl World {
     #[must_use]
     pub fn checked(&self) -> &[bool] {
         &self.checked
+    }
+
+    /// Time-ordered host check notices; true starts a span and false ends it.
+    #[must_use]
+    pub fn check_notices(&self) -> &[(Time, bool)] {
+        &self.check_notices
+    }
+
+    /// Actual check and abort terminal times, for outside span checks.
+    #[must_use]
+    pub fn check_terminals(&self) -> &[Time] {
+        &self.check_terminals
     }
 
     /// Typed push replies actually delivered by the scripted host.
