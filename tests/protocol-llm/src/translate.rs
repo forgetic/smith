@@ -8,24 +8,15 @@
 
 use skein_fake_llm_domain::api as provider;
 use smith_domain::{llm as agent, run, tools};
+use smith_protocol_llm as adapter;
 
 pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
     let mut tools = Vec::new();
-    let mut names = Vec::new();
-    if prompt.tools.inspect {
-        names.extend([b"read".as_slice(), b"list", b"search"]);
-    }
-    if prompt.tools.modify {
-        names.extend([b"write".as_slice(), b"edit"]);
-    }
-    if prompt.tools.shell {
-        names.push(b"shell");
-    }
-    for name in names {
+    for specification in adapter::schemas(&prompt) {
         tools.push(provider::ToolSpec {
-            name: name.into(),
-            description: b"Scripted domain tool.".as_slice().into(),
-            parameters: b"{}".as_slice().into(),
+            name: specification.name,
+            description: specification.description,
+            parameters: specification.schema,
         });
     }
     for served in prompt.served {
@@ -33,10 +24,9 @@ pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
             agent::Served::Host(tool) => {
                 provider::ToolSpec { name: tool.name, description: tool.description, parameters: tool.schema }
             }
-            agent::Served::Deliver => fixed(b"deliver"),
-            agent::Served::Finish => fixed(b"finish"),
-            agent::Served::SubAgent => fixed(b"sub_agent"),
-            agent::Served::Wait => fixed(b"wait"),
+            agent::Served::Deliver | agent::Served::Finish | agent::Served::SubAgent | agent::Served::Wait => {
+                continue;
+            }
         };
         tools.push(specification);
     }
@@ -57,14 +47,6 @@ pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
         tools: tools.into(),
         messages,
         max_tokens: prompt.max_tokens,
-    }
-}
-
-fn fixed(name: &[u8]) -> provider::ToolSpec {
-    provider::ToolSpec {
-        name: name.into(),
-        description: b"Scripted domain tool.".as_slice().into(),
-        parameters: b"{}".as_slice().into(),
     }
 }
 
@@ -193,28 +175,8 @@ pub(crate) fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, serve
             ask: run::Ask::SubAgent { brief, families, llm: field(arguments, b"llm"), share: None },
         };
     }
-    let (session_name, granted): (&[u8], bool) = match name {
-        b"read" => (b"read", grants.inspect),
-        b"list" => (b"list", grants.inspect),
-        b"search" => (b"search", grants.inspect),
-        b"write" => (b"write", grants.modify),
-        b"edit" => (b"edit", grants.modify),
-        b"shell" => (b"shell", grants.shell),
-        _ => return invalid(),
-    };
-    if !granted {
-        return invalid();
-    }
-    match smith_session_world::translate::decode(session_name, arguments) {
-        smith_domain::session::llm::Decoded::Owned { call } => agent::Decoded::Owned { call },
-        smith_domain::session::llm::Decoded::Invalid { problem } => agent::Decoded::Invalid { problem },
-        smith_domain::session::llm::Decoded::Delegated { .. } => {
-            unreachable!("the component fixture decoder owns only checkout tools")
-        }
-        smith_domain::session::llm::Decoded::Historical => {
-            unreachable!("the live fixture decoder never produces a concrete-history replay marker")
-        }
-    }
+    let limits = adapter::Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 };
+    adapter::decode(name, arguments, grants, served, &limits)
 }
 
 fn finish(arguments: &[u8]) -> Option<run::outcome::Declared> {

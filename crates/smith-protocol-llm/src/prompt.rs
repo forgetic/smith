@@ -238,7 +238,14 @@ fn has(kind: ToolKind, application: &[ToolSchema]) -> bool {
 
 fn fixed_name(descriptor: &ToolSchema) -> bool {
     match descriptor.kind {
-        ToolKind::Owned(_) => true,
+        ToolKind::Owned(tool) => match tool {
+            tools::Tool::Read => descriptor.name.as_ref() == b"read",
+            tools::Tool::List => descriptor.name.as_ref() == b"list",
+            tools::Tool::Search => descriptor.name.as_ref() == b"search",
+            tools::Tool::Write => descriptor.name.as_ref() == b"write",
+            tools::Tool::Edit => descriptor.name.as_ref() == b"edit",
+            tools::Tool::Shell => descriptor.name.as_ref() == b"shell",
+        },
         ToolKind::Finish => descriptor.name.as_ref() == b"finish",
         ToolKind::Deliver => descriptor.name.as_ref() == b"deliver",
         ToolKind::SubAgent => descriptor.name.as_ref() == b"sub_agent",

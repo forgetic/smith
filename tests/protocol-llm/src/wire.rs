@@ -12,8 +12,10 @@ use std::collections::BTreeMap;
 use skein_lib::{Time, Token, Wall};
 use skein_llm::{self as shared, client};
 use skein_llm_world::fake::Exchange;
-use smith_domain::{Event, llm, tools};
-use smith_protocol_llm::{self as adapter, Context, Limits, Receiving, ResolvedCall, ToolKind, ToolSchema};
+use smith_domain::{Event, llm};
+use smith_protocol_llm::{self as adapter, Context, Limits, Receiving, ResolvedCall};
+
+pub use smith_protocol_llm::schemas;
 
 /// Caller-supplied endpoint and credential data for the wire fixture.
 /// Caller owns this finite configuration; admission and terminals belong to Wire.
@@ -455,7 +457,12 @@ fn resolutions(context: &Context, completion: &shared::Completion) -> Box<[Resol
                     position: u32::try_from(position).expect("bounded actual assistant position"),
                     name: name.clone(),
                     input: arguments.clone(),
-                    call: crate::translate::decode(name, arguments, context.grants(), context.served()),
+                    call: match name.as_ref() {
+                        b"finish" | b"deliver" => {
+                            crate::translate::decode(name, arguments, context.grants(), context.served())
+                        }
+                        _ => adapter::decode(name, arguments, context.grants(), context.served(), &context.limits()),
+                    },
                 })
             }
             shared::Block::Text { .. }
@@ -464,48 +471,4 @@ fn resolutions(context: &Context, completion: &shared::Completion) -> Box<[Resol
             | shared::Block::ToolResult { .. } => None,
         })
         .collect()
-}
-
-/// Explicit whole schemas for this world's finite application fixture language.
-/// These are caller data, not provider grammar or production schema policy.
-/// Caller gets one descriptor per offered fixture capability; root/adapter
-/// admission bounds the whole inventory. Contract: scratch/client.md, sections 1 and 3.
-#[must_use]
-pub fn schemas(prompt: &llm::Prompt) -> Box<[ToolSchema]> {
-    let mut descriptors = Vec::new();
-    if prompt.tools.inspect {
-        descriptors.extend([
-            descriptor(ToolKind::Owned(tools::Tool::Read), b"read", br#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}"#),
-            descriptor(ToolKind::Owned(tools::Tool::List), b"list", br#"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}"#),
-            descriptor(ToolKind::Owned(tools::Tool::Search), b"search", br#"{"type":"object","properties":{"path":{"type":"string"},"pattern":{"type":"string"}},"required":["path","pattern"],"additionalProperties":false}"#),
-        ]);
-    }
-    if prompt.tools.modify {
-        descriptors.extend([
-            descriptor(ToolKind::Owned(tools::Tool::Write), b"write", br#"{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}"#),
-            descriptor(ToolKind::Owned(tools::Tool::Edit), b"edit", br#"{"type":"object","properties":{"path":{"type":"string"},"old":{"type":"string"},"new":{"type":"string"}},"required":["path","old","new"],"additionalProperties":false}"#),
-        ]);
-    }
-    if prompt.tools.shell {
-        descriptors.push(descriptor(ToolKind::Owned(tools::Tool::Shell), b"shell", br#"{"type":"object","properties":{"command":{"type":"string"}},"required":["command"],"additionalProperties":false}"#));
-    }
-    for served in &prompt.served {
-        match served {
-            llm::Served::Host(_) => {}
-            llm::Served::Wait => descriptors.push(descriptor(ToolKind::Wait, b"wait", br#"{"type":"object","properties":{},"additionalProperties":false}"#)),
-            llm::Served::Deliver => descriptors.push(descriptor(ToolKind::Deliver, b"deliver", br#"{"type":"object","properties":{"ticket":{"type":"string"}},"required":["ticket"],"additionalProperties":false}"#)),
-            llm::Served::Finish => descriptors.push(descriptor(ToolKind::Finish, b"finish", br#"{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"report":{"type":"string"},"source":{"type":"string"},"failure":{"type":"string"},"cause":{"type":"string"},"verdict":{"type":"string"},"children":{"type":"array","items":{"type":"object","properties":{"kind":{"type":"string"},"path":{"type":"string"}},"required":["kind","path"],"additionalProperties":false}}},"anyOf":[{"required":["title","body"]},{"required":["report"]},{"required":["failure"]},{"required":["verdict","body"]}],"additionalProperties":false}"#)),
-            llm::Served::SubAgent => descriptors.push(descriptor(ToolKind::SubAgent, b"sub_agent", br#"{"type":"object","properties":{"brief":{"type":"string"},"tools":{"type":"array","items":{"type":"string","enum":["inspect","modify","shell"]}},"agents":{"type":"boolean"},"llm":{"type":"string"}},"required":["brief","tools"],"additionalProperties":false}"#)),
-        }
-    }
-    descriptors.into()
-}
-
-fn descriptor(kind: ToolKind, name: &[u8], schema: &[u8]) -> ToolSchema {
-    ToolSchema {
-        kind,
-        name: name.into(),
-        description: b"Finite application world tool.".as_slice().into(),
-        schema: schema.into(),
-    }
 }

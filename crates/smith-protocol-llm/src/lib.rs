@@ -22,14 +22,18 @@
 extern crate alloc;
 
 mod completion;
+mod decode;
 mod failure;
 mod limits;
 mod prompt;
+mod tools;
 mod types;
 
 pub use completion::completion;
+pub use decode::decode;
 pub use failure::{cancelled, failed, refusal};
 pub use limits::{Limits, Receiving, completion_worst_case, worst_case};
 pub use prompt::{prepare, prompt};
 pub use skein_llm::Error;
+pub use tools::schemas;
 pub use types::{Context, Input, Prepared, ResolvedCall, ResultText, ToolKind, ToolSchema};

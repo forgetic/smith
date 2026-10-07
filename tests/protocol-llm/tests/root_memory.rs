@@ -1000,9 +1000,9 @@ impl Counted {
         self.meter.start();
         let schemas = wire::schemas(prompt);
         let owned = schemas_bytes(&schemas);
-        // Two descriptors collect into a four-cell Vec before the final
-        // two-cell boxed slice. Price both arrays if reboxing overlaps them.
-        let constructor = sum([owned, cells::<ToolSchema>(4)]);
+        // The production inventory uses a ten-cell bounded List before the
+        // final boxed slice. Price both arrays if reboxing overlaps them.
+        let constructor = sum([owned, cells::<ToolSchema>(10)]);
         let built = self.meter.end();
         assert_eq!(
             built.held(),

@@ -147,6 +147,12 @@ pub struct Context {
 }
 
 impl Context {
+    /// Limits used for the admitted call and its application decoder.
+    #[must_use]
+    pub const fn limits(&self) -> Limits {
+        self.limits
+    }
+
     /// Exact admitted checkout grants for a caller's static application decoder.
     /// This is immutable preparation data, not an authority to run an effect.
     #[must_use]
