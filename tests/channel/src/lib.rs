@@ -10,9 +10,17 @@ use skein_lib::stream::{self, OutputOutcome};
 use smith_host_protocol as host;
 use smith_protocol_channel as agent;
 
+pub mod referee;
+
 /// An opening observation independent of which half emitted it.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Observation {
+    /// The scripted host domain submitted this run's one Start.
+    HostStarted,
+    /// The scripted agent domain issued one durable operation name.
+    AgentIssuedCall { name: smith_host_domain::channel::CallName },
+    /// The scripted host domain supplied one terminal for a live call.
+    HostSettledCall { call: skein_lib::Token },
     /// Host completed the opening.
     HostOpened(u16),
     /// Agent completed the opening.
@@ -80,6 +88,8 @@ pub enum Observation {
     HostAdmitted,
     /// Host received the agent's parked last word.
     HostParked { turns: u32, spent: u64 },
+    /// The host received the agent's one final answer envelope.
+    HostAnswer { turns: u32, spent: u64 },
     /// Agent translated a saved turn into concrete session history.
     AgentHistory { turns: usize, place: u32 },
     /// A saved turn could not enter the domain as concrete history.
@@ -235,6 +245,7 @@ impl Peer {
                 }
                 host::OpenEvent::Withdraw { call } => output.push(Observation::HostWithdraw { call }),
                 host::OpenEvent::Answer { answer } => {
+                    output.push(Observation::HostAnswer { turns: answer.turns(), spent: answer.spent() });
                     if let smith_channel::RunResult::Refused(refused) = answer.result()
                         && let smith_channel::StartRefusal::Invalid(invalid) = refused.reason()
                     {
@@ -379,6 +390,7 @@ impl World {
 
     /// Send a Start carrying saved turn bytes, if present.
     pub fn send_start_with_turns(&mut self, charter: Box<[u8]>, transcript: Option<Box<[Box<[u8]>]>>) {
+        self.observed.push(Observation::HostStarted);
         let start = smith_host_domain::channel::Start {
             logical_run: skein_lib::Token::new(1),
             activation: 1,
@@ -414,6 +426,7 @@ impl World {
         reply: smith_host_domain::SavedReply,
         transcript: Option<Box<[Box<[u8]>]>>,
     ) {
+        self.observed.push(Observation::HostStarted);
         let start = smith_host_domain::channel::Start {
             logical_run: skein_lib::Token::new(1),
             activation: 7,
@@ -695,6 +708,13 @@ impl World {
                     &mut self.agent.below,
                 )
                 .expect("bounded host call");
+            self.observed.push(Observation::AgentIssuedCall {
+                name: smith_host_domain::channel::CallName {
+                    activation: name.activation,
+                    completion: name.completion,
+                    position: name.position,
+                },
+            });
         }
     }
 
@@ -718,6 +738,13 @@ impl World {
                     &mut self.agent.below,
                 )
                 .expect("bounded delivery call");
+            self.observed.push(Observation::AgentIssuedCall {
+                name: smith_host_domain::channel::CallName {
+                    activation: name.activation,
+                    completion: name.completion,
+                    position: name.position,
+                },
+            });
         }
     }
 
@@ -735,6 +762,7 @@ impl World {
         if let Half::Host(host) = &mut self.host.half {
             host.send_reply(call, reply, skein_lib::Token::new(22), &mut self.host.host_events, &mut self.host.below)
                 .expect("bounded host answer");
+            self.observed.push(Observation::HostSettledCall { call });
         }
     }
 
