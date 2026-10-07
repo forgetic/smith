@@ -9,6 +9,7 @@ fn the_agent_demands_the_open_before_the_domain_hears_anything() {
     let limits = Limits {
         bodies: smith_channel::CEILINGS,
         charter: smith_charter::CEILINGS,
+        transcript: smith_transcript::CEILINGS,
         endpoints: 0,
         channel: skein_channel::Limits {
             chunk: 8,

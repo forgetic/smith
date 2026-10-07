@@ -6,8 +6,10 @@ use skein_channel::{
 use skein_lib::{Queue, Reader, Token, Writer};
 
 use crate::limits::{Error, Limits};
+use crate::transcript::decode_transcript;
 use crate::translate::{DecodedStart, Endpoints, answer_record, decode_charter, invalid_start, start_context};
 use smith_domain::run;
+use smith_domain_session::record;
 
 const RULES: u16 = 256;
 const UNAUTHORIZED: u16 = 258;
@@ -42,6 +44,7 @@ pub struct Component {
     ended: bool,
     bodies: smith_channel::Limits,
     charter: smith_charter::v1::Limits,
+    transcript: smith_transcript::v2::Limits,
     endpoints: Endpoints,
 }
 
@@ -67,6 +70,7 @@ impl Component {
             ended: false,
             bodies: limits.bodies,
             charter: limits.charter,
+            transcript: limits.transcript,
             endpoints,
         })
     }
@@ -187,10 +191,21 @@ impl Component {
                             Ok(start) => {
                                 self.phase = Phase::Started;
                                 match decode_charter(start.charter(), &self.charter, &self.endpoints) {
-                                    Ok(charter) => match start_context(start, charter) {
-                                        Ok(start) => to_service.push(OpenEvent::Start { start: Box::new(start) }),
-                                        Err(_) => self.refuse_rules(below),
-                                    },
+                                    Ok(charter) => {
+                                        match decode_transcript(
+                                            start.transcript().as_slice(),
+                                            &self.transcript,
+                                            &self.endpoints,
+                                        ) {
+                                            Ok(transcript) => match start_context(start, charter, transcript) {
+                                                Ok(start) => {
+                                                    to_service.push(OpenEvent::Start { start: Box::new(start) });
+                                                }
+                                                Err(_) => self.refuse_rules(below),
+                                            },
+                                            Err(reason) => self.transcript_refused(reason, to_service, below),
+                                        }
+                                    }
                                     Err(invalid) => self.invalid_start(invalid_start(invalid), below),
                                 }
                             }
@@ -240,6 +255,35 @@ impl Component {
                 self.machine.down(Request::Finish, &mut self.events, below);
             }
             None => self.refuse_rules(below),
+        }
+    }
+
+    fn transcript_refused(
+        &mut self,
+        reason: record::Refusal,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) {
+        let reason = match reason {
+            record::Refusal::Version => run::TranscriptRefusal::Version,
+            record::Refusal::Endpoint => run::TranscriptRefusal::Endpoint,
+            record::Refusal::Dialect => run::TranscriptRefusal::Dialect,
+            record::Refusal::Malformed => run::TranscriptRefusal::Malformed,
+            record::Refusal::Unresolved => run::TranscriptRefusal::Unresolved,
+            record::Refusal::TooLarge => run::TranscriptRefusal::TooLarge,
+        };
+        let admitted = self.send_admitted(Token::new(0), to_service, below);
+        let answered = match admitted {
+            Ok(()) => self.send_answer(
+                run::Answer::Failed { failure: run::Failure::Transcript(reason), spent: run::Spend::ZERO, turns: 0 },
+                Token::new(0),
+                to_service,
+                below,
+            ),
+            Err(error) => Err(error),
+        };
+        if answered.is_err() {
+            self.refuse_rules(below);
         }
     }
 }

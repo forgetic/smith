@@ -11,6 +11,8 @@ pub struct Limits {
     pub bodies: smith_channel::Limits,
     /// This agent's bounded charter decoder allowances.
     pub charter: smith_charter::v1::Limits,
+    /// This agent's bounded saved-turn decoder allowances.
+    pub transcript: smith_transcript::v2::Limits,
     pub channel: skein_channel::Limits,
     /// Maximum configured endpoint names kept by this component.
     pub endpoints: u32,
@@ -90,6 +92,10 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(u64::from(limits.endpoints).checked_mul(u64::from(smith_charter::CEILINGS.llm_endpoint))?)?
         .checked_add(smith_channel::Start::worst_case_bytes(&limits.bodies)?.checked_mul(2)?)?
         .checked_add(smith_charter::Charter::worst_case_bytes(&limits.charter)?.checked_mul(2)?)?
+        .checked_add(
+            smith_transcript::Turn::worst_case_heap(&limits.transcript)?
+                .checked_mul(u64::from(limits.bodies.start_transcript))?,
+        )?
         .checked_add(Queue::<skein_channel::Event>::worst_case(8)?)?
         .checked_add(Queue::<OpenEvent>::worst_case(1)?)?
         .checked_add(Queue::<Lower>::worst_case(6)?)?;

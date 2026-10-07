@@ -37,11 +37,15 @@ pub enum Observation {
     HostAdmitted,
     /// Host received the agent's parked last word.
     HostParked { turns: u32, spent: u64 },
+    /// Agent translated a saved turn into concrete session history.
+    AgentHistory { turns: usize, place: u32 },
+    /// A saved turn could not enter the domain as concrete history.
+    TranscriptFailed(smith_channel::TranscriptRefusal),
 }
 
 enum Half {
-    Host(host::Component),
-    Agent(agent::Component),
+    Host(Box<host::Component>),
+    Agent(Box<agent::Component>),
 }
 
 struct Peer {
@@ -56,7 +60,7 @@ struct Peer {
 impl Peer {
     fn host(limits: host::Limits, mode: StreamMode) -> Peer {
         let mut peer = Peer {
-            half: Half::Host(host::Component::new(&limits, mode).expect("checked host channel")),
+            half: Half::Host(Box::new(host::Component::new(&limits, mode).expect("checked host channel"))),
             below: Queue::with_capacity(64),
             host_events: Queue::with_capacity(16),
             agent_events: Queue::with_capacity(16),
@@ -69,9 +73,11 @@ impl Peer {
         peer
     }
 
-    fn agent(limits: agent::Limits, mode: StreamMode) -> Peer {
+    fn agent(limits: &agent::Limits, mode: StreamMode) -> Peer {
         Peer {
-            half: Half::Agent(agent::Component::new(&limits, mode, test_endpoints()).expect("checked agent channel")),
+            half: Half::Agent(Box::new(
+                agent::Component::new(limits, mode, test_endpoints()).expect("checked agent channel"),
+            )),
             below: Queue::with_capacity(64),
             host_events: Queue::with_capacity(16),
             agent_events: Queue::with_capacity(16),
@@ -151,6 +157,11 @@ impl Peer {
                     if let smith_channel::RunResult::Parked = answer.result() {
                         output.push(Observation::HostParked { turns: answer.turns(), spent: answer.spent() });
                     }
+                    if let smith_channel::RunResult::Failed(failed) = answer.result()
+                        && let smith_channel::RunFailure::Transcript(reason) = failed.reason()
+                    {
+                        output.push(Observation::TranscriptFailed(reason.value().clone()));
+                    }
                 }
             }
         }
@@ -159,6 +170,11 @@ impl Peer {
                 agent::OpenEvent::Opened { version } => output.push(Observation::AgentOpened(version)),
                 agent::OpenEvent::Start { start } => {
                     output.push(Observation::AgentStart);
+                    if let Some(transcript) = &start.transcript
+                        && let Some(turn) = transcript.turns.first()
+                    {
+                        output.push(Observation::AgentHistory { turns: transcript.turns.len(), place: turn.sequence });
+                    }
                     if start.answered.iter().any(|call| matches!(call.reply(), smith_channel::SavedReply::TooLarge)) {
                         output.push(Observation::AgentSavedTooLarge);
                     }
@@ -215,7 +231,13 @@ impl World {
         let channel = channel_limits(smith_channel::CEILINGS);
         let host = Peer::host(host::Limits { bodies: host_bodies, channel }, mode);
         let agent = Peer::agent(
-            agent::Limits { bodies: agent_bodies, charter: smith_charter::CEILINGS, channel, endpoints: 1 },
+            &agent::Limits {
+                bodies: agent_bodies,
+                charter: smith_charter::CEILINGS,
+                transcript: smith_transcript::CEILINGS,
+                channel,
+                endpoints: 1,
+            },
             mode,
         );
         World { host, agent, observed: Vec::new(), channel }
@@ -233,12 +255,17 @@ impl World {
 
     /// Send one Start with the supplied opaque charter bytes.
     pub fn send_start(&mut self, charter: Box<[u8]>) {
+        self.send_start_with_turns(charter, None);
+    }
+
+    /// Send a Start carrying saved turn bytes, if present.
+    pub fn send_start_with_turns(&mut self, charter: Box<[u8]>, transcript: Option<Box<[Box<[u8]>]>>) {
         let start = smith_host_domain::channel::Start {
             logical_run: skein_lib::Token::new(1),
             activation: 1,
             workspace: None,
             charter,
-            transcript: None,
+            transcript,
             answered: Box::default(),
             directories: Box::default(),
             grants: Box::default(),

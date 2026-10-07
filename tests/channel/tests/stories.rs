@@ -263,3 +263,52 @@ fn a_saved_oversized_answer_reaches_the_agent_as_a_settled_decision() {
     world.settle();
     assert!(world.observations().contains(&Observation::AgentSavedTooLarge));
 }
+
+fn saved_turn(place: u32, dialect: &[u8]) -> Box<[u8]> {
+    let limits = smith_transcript::CEILINGS;
+    let turn = smith_transcript::Turn::new(
+        &limits,
+        smith_transcript::TurnParts {
+            endpoint: Box::default(),
+            dialect: Box::from(dialect),
+            place,
+            usage: smith_transcript::Usage::new(
+                &limits,
+                smith_transcript::UsageParts { input: 1, output: 2, cache_read: 0, cache_write: 0 },
+            )
+            .expect("usage"),
+            spent: 3,
+            messages: skein_lib::List::with_capacity(0),
+        },
+    )
+    .expect("turn");
+    let mut writer = skein_lib::Writer::new(usize::try_from(turn.measure()).expect("turn length"));
+    turn.encode(&mut writer).expect("measured turn");
+    writer.finish()
+}
+
+#[test]
+fn a_saved_turn_reaches_the_agent_as_concrete_history() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start_with_turns(
+        Box::from(&include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..]),
+        Some(Box::from([saved_turn(1, b"00000000")])),
+    );
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentHistory { turns: 1, place: 1 }));
+}
+
+#[test]
+fn a_saved_turn_from_another_dialect_fails_as_transcript() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start_with_turns(
+        Box::from(&include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..]),
+        Some(Box::from([saved_turn(1, b"other")])),
+    );
+    world.settle();
+    assert!(world.observations().contains(&Observation::HostAdmitted));
+    assert!(world.observations().contains(&Observation::TranscriptFailed(smith_channel::TranscriptRefusal::Dialect)));
+    assert!(!world.observations().contains(&Observation::AgentStart));
+}

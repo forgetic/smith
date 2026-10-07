@@ -37,14 +37,18 @@ pub struct DecodedStart {
     pub activation: u64,
     pub charter: run::Charter,
     pub mounts: Option<Box<[Mount]>>,
-    pub transcript: Box<[Box<[u8]>]>,
+    pub transcript: Option<smith_domain_session::record::Transcript>,
     pub answered: Box<[channel::AnsweredCall]>,
     pub grants: Box<[Grant]>,
     pub window: smith_domain::Window,
 }
 
 /// Move decoded channel fields into bounded start context, keeping values below the domain.
-pub fn start_context(start: channel::Start, charter: run::Charter) -> Result<DecodedStart, Error> {
+pub fn start_context(
+    start: channel::Start,
+    charter: run::Charter,
+    transcript: Option<smith_domain_session::record::Transcript>,
+) -> Result<DecodedStart, Error> {
     let parts = start.into_parts();
     let mounts = match parts.workspace {
         Some(workspace) => {
@@ -80,7 +84,7 @@ pub fn start_context(start: channel::Start, charter: run::Charter) -> Result<Dec
         activation: parts.activation,
         charter,
         mounts,
-        transcript: parts.transcript.into_boxed(),
+        transcript,
         answered: parts.answered.into_boxed(),
         grants: grants.into_boxed(),
         window: smith_domain::Window { turns: parts.window.turns(), bytes: parts.window.bytes() },
