@@ -1,7 +1,9 @@
 //! Agent-side opening machine (protocol/channel.md, sections 2 and 5).
 use alloc::boxed::Box;
-use skein_channel::{Closed, Event, Lower, LowerEvent, Machine, Request, Role, Schema, StreamMode};
-use skein_lib::Queue;
+use skein_channel::{
+    Closed, Event, Frame, Lower, LowerEvent, Machine, Request, Role, Schema, StreamMode, frame_writer,
+};
+use skein_lib::{Queue, Reader, Token, Writer};
 
 use crate::limits::{Error, Limits};
 
@@ -9,10 +11,12 @@ const RULES: u16 = 256;
 const UNAUTHORIZED: u16 = 258;
 
 /// An opening result for the agent service; the domain is not entered yet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum OpenEvent {
     /// Framing and terms have been agreed at this version.
     Opened { version: u16 },
+    /// A structurally valid Start, before charter and transcript translation.
+    Start { start: smith_channel::Start },
     /// The channel ended before or after opening.
     Ended { why: Closed },
 }
@@ -25,6 +29,8 @@ pub struct Component {
     events: Queue<Event>,
     opened: bool,
     ended: bool,
+    started: bool,
+    bodies: smith_channel::Limits,
 }
 
 impl Component {
@@ -38,7 +44,15 @@ impl Component {
             Ok(machine) => machine,
             Err(error) => return Err(Error::Channel(error)),
         };
-        Ok(Component { machine, schema, events: Queue::with_capacity(8), opened: false, ended: false })
+        Ok(Component {
+            machine,
+            schema,
+            events: Queue::with_capacity(8),
+            opened: false,
+            ended: false,
+            started: false,
+            bodies: limits.bodies,
+        })
     }
 
     /// Consume one stream event and progress the opening.
@@ -87,15 +101,25 @@ impl Component {
                         None => {
                             self.opened = true;
                             to_service.push(OpenEvent::Opened { version });
+                            self.machine.down(Request::Read, &mut self.events, below);
                         }
                     }
                 }
-                Some(Event::Body { .. }) => {
-                    self.machine.down(
-                        Request::Refuse { reason: RULES, text: Box::from(*b"body before start") },
-                        &mut self.events,
-                        below,
-                    );
+                Some(Event::Body { kind, body }) => {
+                    if !self.opened || self.started || kind != 0x0100 {
+                        self.refuse_rules(below);
+                    } else {
+                        match smith_channel::Start::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(start) => {
+                                self.started = true;
+                                match charter_problem(start.charter()) {
+                                    Some(invalid) => self.invalid_start(invalid, below),
+                                    None => to_service.push(OpenEvent::Start { start }),
+                                }
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
                 }
                 Some(Event::Closed { why }) => {
                     if !self.ended {
@@ -122,6 +146,58 @@ impl Component {
             }
         }
     }
+
+    fn refuse_rules(&mut self, below: &mut Queue<Lower>) {
+        self.machine.down(
+            Request::Refuse { reason: RULES, text: Box::from(*b"invalid Start") },
+            &mut self.events,
+            below,
+        );
+    }
+
+    fn invalid_start(&mut self, invalid: smith_channel::InvalidStart, below: &mut Queue<Lower>) {
+        match invalid_answer(&self.bodies, invalid) {
+            Some(frame) => {
+                self.machine.down(Request::Send { token: Token::new(0), frame }, &mut self.events, below);
+                self.machine.down(Request::Finish, &mut self.events, below);
+            }
+            None => self.refuse_rules(below),
+        }
+    }
+}
+
+fn charter_problem(bytes: &[u8]) -> Option<smith_channel::InvalidStart> {
+    if bytes.len() < 2 {
+        return Some(smith_channel::InvalidStart::MalformedCharter);
+    }
+    if bytes.get(..2) != Some(&[0, 1][..]) {
+        return Some(smith_channel::InvalidStart::CharterVersion);
+    }
+    match smith_charter::Charter::decode(&smith_charter::CEILINGS, &mut Reader::new(bytes)) {
+        Ok(_) => None,
+        Err(_) => Some(smith_channel::InvalidStart::MalformedCharter),
+    }
+}
+
+fn invalid_answer(limits: &smith_channel::Limits, invalid: smith_channel::InvalidStart) -> Option<Frame> {
+    let reason =
+        smith_channel::InvalidStartValue::new(limits, smith_channel::InvalidStartValueParts { value: invalid }).ok()?;
+    let refused = smith_channel::Refused::new(
+        limits,
+        smith_channel::RefusedParts { reason: smith_channel::StartRefusal::Invalid(reason) },
+    )
+    .ok()?;
+    let record = smith_channel::Answer::new(
+        limits,
+        smith_channel::AnswerParts { turns: 0, spent: 0, result: smith_channel::RunResult::Refused(refused) },
+    )
+    .ok()?;
+    let body_len = usize::try_from(record.measure()).ok()?;
+    let mut body = Writer::new(body_len);
+    record.encode(&mut body).ok()?;
+    let mut frame = frame_writer(0x0110, record.measure()).ok()?;
+    frame.put(&body.finish()).ok()?;
+    frame.finish().ok()
 }
 
 fn kind_text(kind: u16) -> Box<[u8]> {

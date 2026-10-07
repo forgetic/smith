@@ -11,7 +11,7 @@ use smith_host_protocol as host;
 use smith_protocol_channel as agent;
 
 /// An opening observation independent of which half emitted it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Observation {
     /// Host completed the opening.
     HostOpened(u16),
@@ -25,6 +25,10 @@ pub enum Observation {
     HostUnsent(skein_lib::Token, skein_channel::Unsent),
     /// Agent's channel ended.
     AgentEnded(Closed),
+    /// Agent received a valid Start body.
+    AgentStart,
+    /// Host received an invalid Start answer.
+    InvalidStart { why: smith_channel::InvalidStart, turns: u32, spent: u64 },
 }
 
 enum Half {
@@ -125,11 +129,23 @@ impl Peer {
                 host::OpenEvent::Hangup { why } => output.push(Observation::HostEnded(why)),
                 host::OpenEvent::Sent { token } => output.push(Observation::HostSent(token)),
                 host::OpenEvent::Unsent { token, why } => output.push(Observation::HostUnsent(token, why)),
+                host::OpenEvent::Answer { answer } => {
+                    if let smith_channel::RunResult::Refused(refused) = answer.result()
+                        && let smith_channel::StartRefusal::Invalid(invalid) = refused.reason()
+                    {
+                        output.push(Observation::InvalidStart {
+                            why: invalid.value().clone(),
+                            turns: answer.turns(),
+                            spent: answer.spent(),
+                        });
+                    }
+                }
             }
         }
         while let Some(event) = self.agent_events.pop() {
             match event {
                 agent::OpenEvent::Opened { version } => output.push(Observation::AgentOpened(version)),
+                agent::OpenEvent::Start { .. } => output.push(Observation::AgentStart),
                 agent::OpenEvent::Ended { why } => output.push(Observation::AgentEnded(why)),
             }
         }
@@ -176,6 +192,39 @@ impl World {
             self.host.observations(&mut self.observed);
             self.agent.observations(&mut self.observed);
         }
+    }
+
+    /// Send one Start with the supplied opaque charter bytes.
+    pub fn send_start(&mut self, charter: Box<[u8]>) {
+        let start = smith_host_domain::channel::Start {
+            logical_run: skein_lib::Token::new(1),
+            activation: 1,
+            workspace: None,
+            charter,
+            transcript: None,
+            answered: Box::default(),
+            directories: Box::default(),
+            grants: Box::default(),
+        };
+        if let Half::Host(host) = &mut self.host.half {
+            host.send_start(
+                start,
+                smith_host_domain::channel::Window { turns: 1, bytes: 1_000_000_000 },
+                smith_host_protocol::Values { paths: Box::default(), credentials: Box::default() },
+                skein_lib::Token::new(2),
+                &mut self.host.host_events,
+                &mut self.host.below,
+            )
+            .expect("bounded Start");
+        }
+    }
+
+    /// Supply a truncated Start body inside a valid channel frame.
+    pub fn agent_hears_malformed_start(&mut self) {
+        let mut frame = skein_channel::frame_writer(0x0100, 2).expect("bounded Start frame");
+        frame.put(&[0, 1]).expect("measured body");
+        let frame = frame.finish().expect("complete frame");
+        self.agent.incoming.extend(frame.bytes().iter().copied());
     }
 
     /// Inject an Open from a later version to exercise version refusal.

@@ -10,6 +10,7 @@ publish.workspace = true
 skein-lib.workspace = true
 skein-channel.workspace = true
 smith-channel.workspace = true
+smith-charter.workspace = true
 smith-domain.workspace = true
 
 [lints]

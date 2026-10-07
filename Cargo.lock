@@ -339,6 +339,7 @@ dependencies = [
  "skein-channel",
  "skein-lib",
  "smith-channel",
+ "smith-charter",
  "smith-domain",
 ]
 

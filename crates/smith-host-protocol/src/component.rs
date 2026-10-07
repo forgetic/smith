@@ -1,7 +1,7 @@
 //! Host-side opening machine (protocol/channel.md, sections 2 and 5).
 use alloc::boxed::Box;
 use skein_channel::{Closed, Event, Lower, LowerEvent, Machine, Request, Role, Schema, StreamMode};
-use skein_lib::{Queue, Token};
+use skein_lib::{Queue, Reader, Token};
 use smith_host_domain::channel;
 
 use crate::limits::{Error, Limits};
@@ -9,8 +9,16 @@ use crate::translate::{Values, encode_start};
 
 const RULES: u16 = 256;
 
-/// An opening result for the host service.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    Opening,
+    Opened,
+    Started,
+    Answered,
+}
+
+/// An opening result for the host service.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum OpenEvent {
     /// Framing and terms have been agreed at this version.
     Opened { version: u16 },
@@ -20,6 +28,8 @@ pub enum OpenEvent {
     Sent { token: Token },
     /// The Start did not enter the channel's output queue.
     Unsent { token: Token, why: skein_channel::Unsent },
+    /// The agent's last word, decoded before the host domain interprets it.
+    Answer { answer: smith_channel::Answer },
 }
 
 /// The initiator's framed channel and checked sending terms.
@@ -29,7 +39,7 @@ pub struct Component {
     schema: Schema,
     bodies: smith_channel::Limits,
     events: Queue<Event>,
-    opened: bool,
+    phase: Phase,
     ended: bool,
 }
 
@@ -49,7 +59,7 @@ impl Component {
             schema,
             bodies: limits.bodies,
             events: Queue::with_capacity(8),
-            opened: false,
+            phase: Phase::Opening,
             ended: false,
         })
     }
@@ -71,6 +81,10 @@ impl Component {
         below: &mut Queue<Lower>,
     ) -> Result<(), Error> {
         let frame = encode_start(start, window, values, &self.bodies)?;
+        if self.phase != Phase::Opened {
+            return Err(Error::MissingValue);
+        }
+        self.phase = Phase::Started;
         self.machine.down(Request::Send { token, frame }, &mut self.events, below);
         self.drain(to_service, below);
         self.fire(to_service, below);
@@ -92,8 +106,8 @@ impl Component {
 
     /// Whether the channel can take application records.
     #[must_use]
-    pub const fn opened(&self) -> bool {
-        self.opened
+    pub fn opened(&self) -> bool {
+        self.phase != Phase::Opening
     }
 
     fn drain(&mut self, to_service: &mut Queue<OpenEvent>, below: &mut Queue<Lower>) {
@@ -117,17 +131,25 @@ impl Component {
                             );
                         }
                         None => {
-                            self.opened = true;
+                            self.phase = Phase::Opened;
                             to_service.push(OpenEvent::Opened { version });
+                            self.machine.down(Request::Read, &mut self.events, below);
                         }
                     }
                 }
-                Some(Event::Body { .. }) => {
-                    self.machine.down(
-                        Request::Refuse { reason: RULES, text: Box::from(*b"body before start") },
-                        &mut self.events,
-                        below,
-                    );
+                Some(Event::Body { kind, body }) => {
+                    if kind != 0x0110 || self.phase != Phase::Started {
+                        self.refuse_rules(below);
+                    } else {
+                        match smith_channel::Answer::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(answer) => {
+                                self.phase = Phase::Answered;
+                                to_service.push(OpenEvent::Answer { answer });
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
                 }
                 Some(Event::Closed { why }) => {
                     if !self.ended {
@@ -157,6 +179,14 @@ impl Component {
                 | None => {}
             }
         }
+    }
+
+    fn refuse_rules(&mut self, below: &mut Queue<Lower>) {
+        self.machine.down(
+            Request::Refuse { reason: RULES, text: Box::from(*b"invalid answer") },
+            &mut self.events,
+            below,
+        );
     }
 }
 
