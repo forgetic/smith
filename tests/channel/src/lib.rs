@@ -297,12 +297,22 @@ impl World {
 
     /// Send one Start with a mount, a saved host decision and a grant value.
     pub fn send_start_with_context(&mut self, charter: Box<[u8]>, reply: smith_host_domain::SavedReply) {
+        self.send_start_with_context_and_turns(charter, reply, None);
+    }
+
+    /// Send one resumed Start with saved turns and a later host decision.
+    pub fn send_start_with_context_and_turns(
+        &mut self,
+        charter: Box<[u8]>,
+        reply: smith_host_domain::SavedReply,
+        transcript: Option<Box<[Box<[u8]>]>>,
+    ) {
         let start = smith_host_domain::channel::Start {
             logical_run: skein_lib::Token::new(1),
             activation: 7,
             workspace: Some(skein_lib::Token::new(2)),
             charter,
-            transcript: None,
+            transcript,
             answered: Box::from([smith_host_domain::channel::AnsweredCall {
                 name: smith_host_domain::channel::CallName { activation: 6, completion: 1, position: 0 },
                 tool: Box::from(*b"check"),

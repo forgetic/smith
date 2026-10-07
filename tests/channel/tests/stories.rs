@@ -318,3 +318,22 @@ fn a_saved_turn_from_another_dialect_fails_as_transcript() {
     assert!(world.observations().contains(&Observation::TranscriptFailed(smith_channel::TranscriptRefusal::Dialect)));
     assert!(!world.observations().contains(&Observation::AgentStart));
 }
+
+#[test]
+fn a_run_resumed_from_a_transcript_restores_the_calls_answered_after_its_last_turn() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start_with_context_and_turns(
+        Box::from(&include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..]),
+        smith_host_domain::SavedReply::Host { error: true, body: Box::from(*b"retry") },
+        Some(Box::from([saved_turn(1, b"00000000")])),
+    );
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentHistory { turns: 1, place: 1 }));
+    assert!(world.observations().contains(&Observation::AgentSavedHost {
+        activation: 6,
+        tool: Box::from(*b"check"),
+        text: Box::from(*b"retry"),
+        error: true,
+    }));
+}
