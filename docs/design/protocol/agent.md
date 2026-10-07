@@ -19,7 +19,7 @@ Its channel and its LLM calls are channel.md's and llm.md's.
   - searches and commands run as contained trees;
   - checks run and guides read.
 - **Everything runs in a view.** Each command, search and check is a
-  contained tree (skein's `process.md`). It sees the workspace's
+  contained tree (skein's `draft/process.md`). It sees the workspace's
   directories side by side, writable as the start says, with every git
   directory read-only.
 - **Configuration is given at startup.** It gives:
@@ -152,7 +152,7 @@ machines. The local host writes its agent's from its own settings
   command's exit and output, a tree proved empty after a deadline.
 - **skein owes:**
   - io's files and roots;
-  - contained trees (skein's `process.md`);
+  - contained trees (skein's `draft/process.md`);
   - the shell's startup (skein's `shell.md`).
 
 ## 8. The world

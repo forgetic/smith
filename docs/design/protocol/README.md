@@ -297,7 +297,7 @@ temper's channel between its engine and its workers is to be built on.
   - stopped politely, then terminated, then killed, and proved empty
     (domain/tools.md, section 5; domain/host.md, section 4).
 
-  Designed in skein's `process.md`.
+  Drafted in skein's `draft/process.md`.
 - **Connections for LLM calls,** as a component: connecting, TLS, and the
   deadlines skein's LLM client leaves to its owner. Designed in skein's
   `llm-connection.md`.
