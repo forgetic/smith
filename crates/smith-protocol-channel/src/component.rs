@@ -6,6 +6,7 @@ use skein_channel::{
 use skein_lib::{Duration, Map, Queue, Reader, Time, Token, Writer};
 
 use crate::calls;
+use crate::facts;
 use crate::limits::{Error, Limits};
 use crate::transcript::decode_transcript;
 use crate::translate::{
@@ -92,6 +93,9 @@ pub struct Component {
     turns: Map<u32, u64>,
     last_sent_turn: u32,
     held_turn_bytes: u64,
+    fact_reserve_frames: u32,
+    fact_reserve_bytes: u32,
+    lost_facts: u64,
 }
 
 impl Component {
@@ -123,6 +127,9 @@ impl Component {
             turns: Map::with_capacity(limits.turns),
             last_sent_turn: 0,
             held_turn_bytes: 0,
+            fact_reserve_frames: limits.fact_reserve_frames,
+            fact_reserve_bytes: limits.fact_reserve_bytes,
+            lost_facts: 0,
         })
     }
 
@@ -327,6 +334,76 @@ impl Component {
         self.drain(to_service, below);
         self.fire(to_service, below);
         Ok(())
+    }
+
+    /// Offer a content-free domain observation without spending reserved output room.
+    pub fn send_fact(
+        &mut self,
+        fact: smith_domain::Fact,
+        elapsed: Duration,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<bool, Error> {
+        match facts::project(fact) {
+            Some((kind, count)) => self.offer_fact(kind, elapsed, count, token, to_service, below),
+            None => Ok(false),
+        }
+    }
+
+    /// Count text observed from the LLM without putting its bytes on the host channel.
+    pub fn send_text_arrived(
+        &mut self,
+        elapsed: Duration,
+        count: u64,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<bool, Error> {
+        self.offer_fact(smith_channel::FactKind::TextArrived, elapsed, count, token, to_service, below)
+    }
+
+    /// Number of projected facts the output reserve has dropped.
+    #[must_use]
+    pub fn lost_facts(&self) -> u64 {
+        self.lost_facts
+    }
+
+    fn offer_fact(
+        &mut self,
+        kind: smith_channel::FactKind,
+        elapsed: Duration,
+        count: u64,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<bool, Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let record = smith_channel::Fact::new(&self.bodies, smith_channel::FactParts { kind, elapsed, count })?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::ResultCapacity);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x010f, record.measure())?;
+        frame.put(&body.finish())?;
+        let frame = frame.finish()?;
+        let room = self.machine.room();
+        let reserve = self.fact_reserve_bytes.checked_add(frame.wire_len());
+        let bytes_fit = match reserve {
+            Some(needed) => room.bytes >= needed,
+            None => false,
+        };
+        if room.frames <= self.fact_reserve_frames || !bytes_fit {
+            self.lost_facts = self.lost_facts.saturating_add(1);
+            return Ok(false);
+        }
+        self.machine.down(Request::Send { token, frame }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(true)
     }
 
     /// Relay one declared host tool under its durable name and live attempt.

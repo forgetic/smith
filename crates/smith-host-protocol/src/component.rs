@@ -58,6 +58,8 @@ pub enum OpenEvent {
     LongDone,
     /// One concrete turn's opaque transcript bytes and checked envelope.
     Turn { turn: channel::Turn },
+    /// One content-free, best-effort fact kept in its bounded wire body.
+    Fact { body: Box<[u8]> },
     /// A named operation whose one host terminal remains owed.
     Call { call: Token, name: channel::CallName, deadline: Time, ask: channel::Ask },
     /// The agent withdrew a call; its terminal still remains owed.
@@ -344,6 +346,15 @@ impl Component {
                                         body: Box::from(turn.body()),
                                     },
                                 });
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
+                    0x010f if self.phase == Phase::Admitted => {
+                        match smith_channel::Fact::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(_) => {
+                                to_service.push(OpenEvent::Fact { body });
                                 self.machine.down(Request::Read, &mut self.events, below);
                             }
                             Err(_) => self.refuse_rules(below),

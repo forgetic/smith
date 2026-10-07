@@ -13,6 +13,8 @@ fn the_agent_demands_the_open_before_the_domain_hears_anything() {
         endpoints: 0,
         calls: 0,
         turns: 0,
+        fact_reserve_frames: 1,
+        fact_reserve_bytes: 128,
         channel: skein_channel::Limits {
             chunk: 8,
             credential: 0,

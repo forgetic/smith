@@ -43,6 +43,8 @@ pub enum Observation {
     HostLongDone,
     /// The host received a numbered durable transcript body.
     HostTurn { number: u32, spent: u64, read: Option<skein_lib::Token>, body: Box<[u8]> },
+    /// A best-effort content-free fact reached the host.
+    HostFact { kind: smith_channel::FactKind, elapsed: skein_lib::Duration, count: u64 },
     /// The agent received exact durable commitment for one turn.
     AgentAcknowledged { turn: u32 },
     /// The host received one named call with its deadline and metadata.
@@ -182,6 +184,16 @@ impl Peer {
                     read: turn.read,
                     body: turn.body,
                 }),
+                host::OpenEvent::Fact { body } => {
+                    let fact =
+                        smith_channel::Fact::decode(&smith_channel::CEILINGS, &mut skein_lib::Reader::new(&body))
+                            .expect("validated fact");
+                    output.push(Observation::HostFact {
+                        kind: fact.kind().clone(),
+                        elapsed: fact.elapsed(),
+                        count: fact.count(),
+                    });
+                }
                 host::OpenEvent::Call { call, name, deadline, ask } => {
                     output.push(Observation::HostCall { call, name, deadline, ask: Box::new(ask) });
                 }
@@ -300,6 +312,8 @@ impl World {
                 endpoints: 1,
                 calls: 8,
                 turns: 8,
+                fact_reserve_frames: 1,
+                fact_reserve_bytes: 128,
             },
             mode,
         );
@@ -471,6 +485,31 @@ impl World {
                 .send_long_done(skein_lib::Token::new(27), &mut self.agent.agent_events, &mut self.agent.below)
                 .expect("bounded long end");
         }
+    }
+
+    /// Offer one content-free domain fact through the agent's bounded output.
+    pub fn agent_sends_fact(&mut self, fact: smith_domain::Fact, elapsed: skein_lib::Duration) -> bool {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            return agent
+                .send_fact(
+                    fact,
+                    elapsed,
+                    skein_lib::Token::new(30),
+                    &mut self.agent.agent_events,
+                    &mut self.agent.below,
+                )
+                .expect("bounded fact");
+        }
+        false
+    }
+
+    /// Facts dropped by the agent half because output room was reserved.
+    #[must_use]
+    pub fn lost_facts(&self) -> u64 {
+        if let Half::Agent(agent) = &self.agent.half {
+            return agent.lost_facts();
+        }
+        0
     }
 
     /// Have the scripted domain tell one concrete turn to the host.

@@ -451,6 +451,45 @@ fn a_concrete_turn_reaches_the_host_and_its_acknowledgement_returns() {
 }
 
 #[test]
+fn facts_are_dropped_under_pressure_and_waiting_still_passes() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    let elapsed = skein_lib::Duration::from_nanos(7);
+    let mut kept = 0_u64;
+    for _ in 0..12 {
+        let fact = smith_domain::Fact::Run {
+            fact: smith_domain::run::facts::Fact::Admitted { run: skein_lib::Token::new(1) },
+        };
+        if world.agent_sends_fact(fact, elapsed) {
+            kept += 1;
+        }
+    }
+    assert!(kept > 0);
+    assert_eq!(world.lost_facts(), 12 - kept);
+    assert!(world.lost_facts() > 0);
+    world.agent_waits(None);
+    world.settle();
+    assert!(world.observations().contains(&Observation::HostWaiting { read: None }));
+    assert_eq!(
+        world
+            .observations()
+            .iter()
+            .filter(|observation| matches!(
+                observation, Observation::HostFact { kind: smith_channel::FactKind::Admitted, elapsed: seen, count: 1 }
+                    if *seen == elapsed
+            ))
+            .count(),
+        usize::try_from(kept).expect("small fact count")
+    );
+}
+
+#[test]
 fn host_tools_answered_busy_are_asked_again_under_their_names() {
     let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
     world.settle();

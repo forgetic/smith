@@ -20,6 +20,10 @@ pub struct Limits {
     pub calls: u32,
     /// Maximum turns retained while durable host acknowledgement is pending.
     pub turns: u32,
+    /// Output frame slots kept free when a best-effort fact is considered.
+    pub fact_reserve_frames: u32,
+    /// Output bytes kept free when a best-effort fact is considered.
+    pub fact_reserve_bytes: u32,
 }
 
 /// A checked channel cannot be built from the supplied limits.
