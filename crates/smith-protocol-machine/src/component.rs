@@ -293,7 +293,8 @@ impl Component {
             | io::Event::Accepted { .. }
             | io::Event::Connecting { .. }
             | io::Event::Connected { .. }
-            | io::Event::Output { .. } => unreachable!("no sockets or output grants requested"),
+            | io::Event::Output { .. }
+            | io::Event::Shutdown { .. } => unreachable!("no sockets, output grants or signal source requested"),
         };
         let process_owner = match self.routes.get(&owner) {
             Some(route) => *route,
@@ -323,7 +324,8 @@ impl Component {
             | io::Event::Accepted { .. }
             | io::Event::Connecting { .. }
             | io::Event::Connected { .. }
-            | io::Event::Output { .. } => unreachable!("no sockets requested"),
+            | io::Event::Output { .. }
+            | io::Event::Shutdown { .. } => unreachable!("no sockets or signal source requested"),
         }
         if process.ready() {
             let process = self.processes.remove(&process_owner).expect("ready process");
