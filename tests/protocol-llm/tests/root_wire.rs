@@ -18,12 +18,12 @@ const BODY: &[u8] = br#"{ "opaque" : {"future":[1,true,null]}, "extra":"unchange
 const ID: &[u8] = b"call_0000000000000001";
 const FEEDBACK: &[u8] = b"opaque host answer: first decision";
 
-fn scripts() -> Box<[Script]> {
+fn scripts(tool_name: &[u8]) -> Box<[Script]> {
     Box::new([Script {
         cue: b"@hosttools".as_slice().into(),
         turns: Box::new([
             Turn {
-                lines: Box::new([Line::Call { name: b"host_action".as_slice().into(), arguments: BODY.into() }]),
+                lines: Box::new([Line::Call { name: tool_name.into(), arguments: BODY.into() }]),
                 finish: Finish::ToolCalls,
                 tokens: 8,
             },
@@ -36,19 +36,19 @@ fn scripts() -> Box<[Script]> {
     }])
 }
 
-fn feedback(query: &Query, arguments: &[u8]) -> bool {
+fn feedback(query: &Query, arguments: &[u8], tool_name: &[u8]) -> bool {
     let [_, assistant, user] = query.messages.as_ref() else { return false };
     let [Part::ToolCall { id, name, arguments: actual }] = assistant.parts.as_ref() else { return false };
     let [Part::ToolOutput { id: returned, output, is_error }] = user.parts.as_ref() else { return false };
     id.as_ref() == ID
         && returned.as_ref() == ID
-        && name.as_ref() == b"host_action"
+        && name.as_ref() == tool_name
         && actual.as_ref() == arguments
         && output.as_ref() == FEEDBACK
         && !is_error
 }
 
-fn host_boundary(world: &World, expected_arguments: &[u8]) {
+fn host_boundary(world: &World, expected_arguments: &[u8], tool_name: &[u8]) {
     let first = &world.prompts()[0];
     assert!(first.system.windows(b"@hosttools".len()).any(|bytes| bytes == b"@hosttools"));
     assert!(
@@ -72,27 +72,27 @@ fn host_boundary(world: &World, expected_arguments: &[u8]) {
         "original discovery request and terminal precede actual Complete: {:?}",
         world.trace()
     );
-    let host = first.tools.iter().find(|tool| tool.name.as_ref() == b"host_action").expect("declared opaque host tool");
+    let host = first.tools.iter().find(|tool| tool.name.as_ref() == tool_name).expect("declared opaque host tool");
     assert_eq!(host.description.as_ref(), b"Opaque host write");
     assert_eq!(host.parameters.as_ref(), br#"{"type":"object"}"#);
     let [submission] = world.host_submissions() else { panic!("one actual host submission") };
-    assert_eq!(submission.tool.as_ref(), b"host_action");
+    assert_eq!(submission.tool.as_ref(), tool_name);
     assert_eq!(submission.effect, run::HostEffect::Write);
     assert_eq!(submission.input.bytes(), BODY);
     let [(_, _, run::HostReply::Answered(answer))] = world.host_terminals() else { panic!("one actual host answer") };
     assert_eq!(answer.text(), FEEDBACK);
     assert!(!answer.error());
-    assert!(feedback(&world.prompts()[1], expected_arguments));
+    assert!(feedback(&world.prompts()[1], expected_arguments, tool_name));
     let mut missing = world.prompts()[1].clone();
     missing.messages[2].parts = Box::new([]);
-    assert!(!feedback(&missing, expected_arguments));
+    assert!(!feedback(&missing, expected_arguments, tool_name));
     let mut rewritten = world.prompts()[1].clone();
     rewritten.messages[2].parts =
         Box::new([Part::ToolOutput { id: ID.into(), output: b"rewritten".as_slice().into(), is_error: false }]);
-    assert!(!feedback(&rewritten, expected_arguments));
+    assert!(!feedback(&rewritten, expected_arguments, tool_name));
 }
 
-fn retired_boundary(world: &World) {
+fn retired_boundary(world: &World, tool_name: &[u8]) {
     assert!(matches!(world.answer(), run::Answer::Failed { failure: run::Failure::Cancelled, .. }));
     let [first_binding, second_binding] = world.wire_bindings() else { panic!("retired outside bindings") };
     let owner = first_binding.owner;
@@ -108,23 +108,24 @@ fn retired_boundary(world: &World) {
     assert_eq!(second_binding.retired.expect("actual lower Closed").1, Wall::from_nanos(3000));
     assert!(second_binding.observed.iter().all(|(_, wall, _)| *wall == Wall::from_nanos(3000)));
     assert!(world.turns().iter().flat_map(|turn| &turn.messages).flat_map(|message| &message.content).any(|block| {
-        matches!(block, llm::Block::ToolCall { id, name, input, .. } if id.as_ref() == ID && name.as_ref() == b"host_action" && input.as_ref() == BODY)
+        matches!(block, llm::Block::ToolCall { id, name, input, .. } if id.as_ref() == ID && name.as_ref() == tool_name && input.as_ref() == BODY)
     }), "root-owned concrete Turn retains the incoming delta bytes");
 }
 
-fn root_story(configuration: Configuration) {
+fn root_story(configuration: Configuration, tool_name: &'static [u8]) {
     let expected_arguments = configuration.continuation_arguments.clone();
     let mut bounds = Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 };
     bounds.client.http.request = 16384;
     bounds.client.dialect.request_bytes = 16384;
     let mut settings =
         Settings { job: Job::HostTools, writable: false, network: Span::millis(1, 1), ..Settings::calm(71) };
+    settings.host_tool_name = tool_name;
     settings.limits.session.completion_bytes =
         adapter::completion_worst_case(&bounds.client, settings.limits.decoded_call_bytes)
             .expect("complete actual translated reservation");
     settings.limits.session.completion_blocks = bounds.client.dialect.parts;
     let expected_receiving = settings.limits;
-    let mut world = World::with_wire(settings, None, configuration, bounds, scripts());
+    let mut world = World::with_wire(settings, None, configuration, bounds, scripts(tool_name));
     world.wall_at(Wall::from_nanos(9000));
     for _ in 0..100_000 {
         assert!(!world.drive(1), "continued query precedes parent cancellation");
@@ -134,7 +135,7 @@ fn root_story(configuration: Configuration) {
     }
     assert_eq!(world.prompts().len(), 2, "both queries were parsed by actual byte peers");
     assert!(world.now() < Time::from_nanos(1_000_000_000), "queued wire bytes prevent jumping to the run deadline");
-    host_boundary(&world, &expected_arguments);
+    host_boundary(&world, &expected_arguments, tool_name);
     let [first_binding, second_binding] = world.wire_bindings() else { panic!("two actual physical bindings") };
     assert_eq!(first_binding.owner, second_binding.owner, "the root reuses the logical callback");
     assert_eq!(second_binding.retained_at_start, 1, "new call starts while the old physical Close is owed");
@@ -147,9 +148,9 @@ fn root_story(configuration: Configuration) {
     world.wall_at(Wall::from_nanos(3000));
     world.cancel_run();
     world.run(100_000);
-    retired_boundary(&world);
+    retired_boundary(&world, tool_name);
     assert!(
-        feedback(&world.prompts()[1], &expected_arguments),
+        feedback(&world.prompts()[1], &expected_arguments, tool_name),
         "settlement preserves the positive outside observation"
     );
 }
@@ -157,6 +158,13 @@ fn root_story(configuration: Configuration) {
 #[test]
 fn root_wire_host_feedback_and_reused_owner_close_survive_parent_cancel() {
     for configuration in wire::configurations() {
-        root_story(configuration);
+        root_story(configuration, b"host_action");
+    }
+}
+
+#[test]
+fn root_wire_message_host_feedback_reaches_continuation() {
+    for configuration in wire::configurations() {
+        root_story(configuration, b"message");
     }
 }

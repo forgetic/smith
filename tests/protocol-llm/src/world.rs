@@ -118,6 +118,9 @@ pub struct Settings {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub job: Job,
+    /// Host tool name declared for the `HostTools` fixture.
+    /// Contract: domain/run.md, section 5.2.
+    pub host_tool_name: &'static [u8],
     /// The agent's immutable admission and ownership limits.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
@@ -172,6 +175,7 @@ impl Settings {
             waiting: Duration::from_secs(30),
             seed,
             job: Job::Coding,
+            host_tool_name: b"host_action",
             limits: LIMITS,
             budget: BUDGET,
             writable: true,
@@ -1412,7 +1416,7 @@ impl World {
                     input,
                     call: llm::Decoded::Served { ask: run::Ask::Host { .. } },
                     ..
-                } if completion.stop == llm::Stop::ToolUse && name.as_ref() == b"host_action" => {
+                } if completion.stop == llm::Stop::ToolUse => {
                     self.host_history
                         .called(
                             message.expect("actual completion flight retains its prompt origin"),
@@ -1829,7 +1833,7 @@ fn charter(settings: &Settings) -> run::Charter {
             agents: true,
             host_tools: if settings.job == Job::HostTools {
                 Box::new([run::HostTool {
-                    name: b"host_action".as_slice().into(),
+                    name: settings.host_tool_name.into(),
                     description: b"Opaque host write".as_slice().into(),
                     schema: br#"{"type":"object"}"#.as_slice().into(),
                     effect: run::HostEffect::Write,
