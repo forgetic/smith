@@ -365,7 +365,26 @@ fn owned_result_renderings_admit_first_then_refuse_missing_duplicate_unused_or_m
 
         let mut missing = result_input(configuration);
         missing.results = Box::new([]);
-        assert!(matches!(adapter::prepare(missing, &limits()), Err(adapter::Error::Invalid)));
+        let rendered = adapter::prepare(missing, &limits()).expect("production renderer handles owned history");
+        let mut rendered_peer = Exchange::prepared(
+            rendered.client,
+            configuration.endpoint.clone(),
+            shared::Credential {
+                access_token: configuration.credential.access_token.clone(),
+                account_id: configuration.credential.account_id.clone(),
+            },
+            limits().client,
+            scripts(false),
+        );
+        rendered_peer.start();
+        rendered_peer.run();
+        let [query] = rendered_peer.queries.as_slice() else { panic!("one rendered history query") };
+        let [_, user] = query.messages.as_ref() else { panic!("original ordered history") };
+        let [api::Part::ToolOutput { output, is_error, .. }] = user.parts.as_ref() else {
+            panic!("production rendered result crossed the byte peer");
+        };
+        assert!(output.starts_with(b"exit code 0\nprior"));
+        assert!(!*is_error);
         let mut duplicate = result_input(configuration);
         duplicate.results = Box::new([result_text(), result_text()]);
         assert!(matches!(adapter::prepare(duplicate, &limits()), Err(adapter::Error::Invalid)));

@@ -358,7 +358,10 @@ fn result_text(
             }
             Ok((value.text, value.error))
         }
-        llm::Returned::Owned { outcome: _ } => {
+        llm::Returned::Owned { outcome } => {
+            if results.is_empty() {
+                return crate::render::render_outcome(&outcome, limits.client.dialect.string_bytes);
+            }
             for (index, result) in results.iter().enumerate() {
                 if result.message == message && result.block == block {
                     if result.id.as_ref() != id {
