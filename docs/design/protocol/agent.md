@@ -22,8 +22,7 @@ Its channel and its LLM calls are channel.md's and llm.md's.
   contained tree (skein's `process.md`). It sees the workspace's
   directories side by side, writable as the start says, with every git
   directory read-only.
-- **Configuration is a file,** named on the command line and read at
-  startup. It gives:
+- **Configuration is given at startup.** It gives:
   - the endpoints;
   - the limits;
   - the commands' environment;
@@ -77,8 +76,10 @@ Its channel and its LLM calls are channel.md's and llm.md's.
 
 ## 4. Configuration
 
-A JSON file, versioned (README.md, section 8), named on the command line.
-It is read once, at startup, before the loop.
+What the agent is given at startup, before the loop. Charters,
+transcripts and the channel's terms refer to what it holds, so that is
+this document's concern. How it is given (a file, its format, where it is
+kept) is the binary's, decided when the binary is built.
 
 - **Endpoints,** each:
   - its name, which charters and transcripts use;
@@ -98,16 +99,17 @@ It is read once, at startup, before the loop.
 - **The commands' environment,** and the graces of a tree's three steps.
 - **The trace:** a file to append to, if any, and its capture policy.
 
-Under a host, the host decides the file: temper's worker ships one with
-its machines. The local host writes its own (hosts.md).
+Under a host, the host provides it, as temper's worker would with its
+machines. The local host writes its agent's from its own settings
+(hosts.md).
 
 ## 5. Facts and traces
 
 - **Facts** are pushed by the domains into a bounded queue
   (domain/run.md, section 11). This process sends them on the channel while
   there is room, and counts those it drops.
-- **A trace** is appended to its file as JSON lines, one record per fact,
-  with the content its capture policy allows:
+- **A trace** is written where the configuration says, one record per
+  fact, with the content its capture policy allows:
   - **none:** facts only;
   - **calls:** with each tool call's name and input, and each result's
     size;
@@ -151,7 +153,6 @@ its machines. The local host writes its own (hosts.md).
 - **skein owes:**
   - io's files and roots;
   - contained trees (skein's `process.md`);
-  - its JSON tokenizer, for the configuration (skein's `json.md`);
   - the shell's startup (skein's `shell.md`).
 
 ## 8. The world
@@ -169,8 +170,7 @@ its machines. The local host writes its own (hosts.md).
   scripted host on its channel and a fake LLM peer. It covers startup
   refusals, a run from start to answer, a termination signal mid-turn, and
   standard error's last line.
-- **Configuration:** every refusal of a malformed or oversized file, and a
-  file of an older version read.
+- **Configuration:** every refusal of a malformed or oversized one.
 
 ## 9. From temper
 
@@ -180,7 +180,7 @@ its machines. The local host writes its own (hosts.md).
   - views with read-only git directories;
   - contained trees for searches and checks as well as commands;
   - the commands' environment in configuration;
-  - traces to a file.
+  - traces.
 
 ## 10. Open questions
 
@@ -188,4 +188,5 @@ its machines. The local host writes its own (hosts.md).
   waits on the domain (README.md, section 11).
 - **The network for commands:** whether a command's tree has a network,
   which a build may need and a review may not.
-- **Rotating traces,** and how long they are kept.
+- **Traces kept:** their format, rotation, and how long they are kept, as
+  the binary is built.

@@ -258,8 +258,8 @@ a host (temper's worker, smith's local host, ...)
   long as it likes, and a later agent resumes from them (domain/session.md,
   section 3). A transcript in a version the agent does not read fails the
   run as transient (domain/run.md, section 6).
-- **What is kept in files carries its own version:** the agent's
-  configuration, and the local host's files.
+- **What a host keeps in files carries its own version,** as the local
+  host's transcripts do.
 - **A reader keeps a range of versions; a writer writes one.**
 - **Where each starts:**
   - transcripts at the conversation vocabulary's second version

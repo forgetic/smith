@@ -62,15 +62,16 @@ The contract is domain/host.md's.
 When `smith-host-domain` asks for an agent process, the host's protocol
 layer spawns a contained tree:
 
-- **the program:** the `smith` binary, with its configuration file
-  (agent.md, section 4);
+- **the program:** the `smith` binary, with its configuration (agent.md,
+  section 4);
 - **an environment** given whole, holding no credential;
 - **the view:** at least the workspace's directories, writable as the start
   says, the binary and its configuration. The rest is the host's choice;
 - **the pipes:** standard input and output for the channel, and standard
   error, whose tail the half keeps for the domain's report of how the agent
   ended (domain/host.md, section 4);
-- **the cgroup,** delegated to the agent, so its own trees sit beneath it.
+- **room for the agent's own trees** inside its tree, so they are held,
+  stopped and proved empty with it (skein's `process.md`).
 
 The spawn's deadline covers the opening. A tree that does not start, or
 whose channel does not reach ready in time, is reported as an agent that
@@ -111,7 +112,7 @@ For a connected agent (README.md, section 4):
 
 ### 5.2 Configuration
 
-- **A JSON file in the user's configuration directory:**
+- **The local host's settings:**
   - endpoints and their accounts;
   - prices;
   - a budget;
@@ -119,8 +120,8 @@ For a connected agent (README.md, section 4):
   - conventions;
   - a result contract, a report by default;
   - the commands' environment.
-- **A file in the workspace's state directory** may override it for that
-  workspace.
+- **A workspace may override them** for itself. Where settings are kept,
+  and in which format, is the binary's, decided when it is built.
 - **The local host writes the agent's configuration** from these
   (agent.md, section 4), and the charter of each run.
 
