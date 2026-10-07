@@ -124,7 +124,13 @@ of domain/host.md, section 2.
   - failed carries its reason, and the tail of the host's diagnostic
     output with the bytes dropped before it;
 - **busy:** the host has no room to decide it now;
-- **unavailable:** the host cannot say what became of it.
+- **unavailable:** the host cannot say what became of it;
+- **withdrawn:** the host settled a call the run withdrew, without giving
+  its answer. Whatever the host did stands, and the run asks again under
+  the same name to learn it (domain/run.md, 5.2);
+- **too large:** the host's answer is larger than the run takes. The run
+  tells the LLM so, as an error, and does not ask again, since the host
+  would answer the same.
 
 ## 4. Up, from the run
 

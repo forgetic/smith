@@ -37,7 +37,8 @@ Down, from the host:
   activation number;
 - **messages,** named, in order (run.md, section 6);
 - **answers** to the run's calls: host tools' (text, as a result or an
-  error), deliveries' (run.md, 8.2), busy, unavailable;
+  error), deliveries' (run.md, 8.2), busy, unavailable, withdrawn, too
+  large;
 - **credential grants,** refreshed (section 7);
 - **acknowledgements** of turns, when the host keeps them (section 6);
 - **a cancel,** at most one.
