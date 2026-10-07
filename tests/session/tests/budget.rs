@@ -103,3 +103,43 @@ fn zero_price_unit_is_rejected_before_a_request() {
     assert!(world.prompts.is_empty() && world.spend.is_empty() && world.turns.is_empty());
     world.domain.reclaim();
 }
+
+fn maximum(world: &World) -> u64 {
+    let prompt = world.prompts.last().expect("one completion is pending");
+    session::preview_reservation(
+        &world.domain,
+        world.completing.expect("the completion owns its reservation"),
+        prompt.input_bytes().expect("bounded prompt"),
+        world.env.limits.protocol_allowance,
+        prompt.max_tokens,
+    )
+    .expect("maximum fits the session budget")
+}
+
+#[test]
+fn a_completion_that_costs_less_than_its_maximum_returns_the_rest() {
+    let usage = llm::Usage { output_tokens: 1, ..llm::Usage::ZERO };
+    let mut probe = World::new(47, 256);
+    probe.open(opening(None, u64::MAX));
+    let first_maximum = maximum(&probe);
+    probe.complete(called(), llm::Stop::ToolUse, usage);
+    let owner = probe.delegated[0];
+    probe.step(session::Event::Answered { owner, text: b"child".as_slice().into(), error: false, spent: 0 });
+    let second_maximum = maximum(&probe);
+    let actual = record::Prices { input: 7, cached: 3, output: 11, unit: 10 }.price(usage).expect("priced usage");
+    let budget = second_maximum.checked_add(actual).expect("small fixture budget");
+    assert!(first_maximum <= budget);
+    assert!(first_maximum.checked_add(second_maximum).expect("small fixture maximums") > budget);
+    probe.close();
+
+    let mut world = World::new(48, 256);
+    world.open(opening(None, budget));
+    assert_eq!(maximum(&world), first_maximum);
+    world.complete(called(), llm::Stop::ToolUse, usage);
+    assert_eq!(world.own_spend, [actual]);
+    let owner = world.delegated[0];
+    world.step(session::Event::Answered { owner, text: b"child".as_slice().into(), error: false, spent: 0 });
+    assert_eq!(maximum(&world), second_maximum, "unused maximum is available for the next completion");
+    assert_eq!(world.prompts.len(), 2);
+    world.close();
+}
