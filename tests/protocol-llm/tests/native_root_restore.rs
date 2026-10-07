@@ -8,7 +8,7 @@
 use skein_fake_llm_domain::api::{Finish, Line, Message, Part, Query, Role, Script, Turn};
 use skein_lib::Duration;
 use skein_world::domain::Span;
-use smith_domain::{Transcript, run, session::llm};
+use smith_domain::{Answered, AnsweredCall, Transcript, run, session::llm};
 use smith_protocol_llm::{self as adapter, Limits};
 use smith_protocol_llm_world::{
     Job, Settings, World,
@@ -34,7 +34,6 @@ struct Fixture {
     text_replay: Option<&'static [u8]>,
     seal: &'static [u8],
     cache_write: bool,
-    joined_tail: bool,
 }
 
 fn fixtures() -> [Fixture; 2] {
@@ -46,7 +45,6 @@ fn fixtures() -> [Fixture; 2] {
             text_replay: Some(TEXT_REPLAY),
             seal: b"encrypted-root",
             cache_write: false,
-            joined_tail: true,
         },
         Fixture {
             opaque: ANTHROPIC_OPAQUE,
@@ -55,7 +53,6 @@ fn fixtures() -> [Fixture; 2] {
             text_replay: None,
             seal: b"signed-root",
             cache_write: true,
-            joined_tail: false,
         },
     ]
 }
@@ -145,7 +142,7 @@ fn prefix(fixture: &Fixture) -> Vec<Message> {
 
 fn resumed_prefix(fixture: &Fixture, tail: bool) -> Vec<Message> {
     let mut messages = prefix(fixture);
-    if tail && fixture.joined_tail {
+    if tail {
         messages[2].parts = vec![feedback(), text(BEGIN)].into();
     } else {
         if !tail {
@@ -210,10 +207,13 @@ fn replay(actual: Option<&llm::Replay>, expected: Option<&[u8]>) -> bool {
 
 fn recorded_wait(turn: &smith_domain::Turn, fixture: &Fixture, opaque: bool) -> bool {
     let [wake, assistant, result] = turn.messages.as_ref() else { return false };
-    if wake.role != llm::Role::User
-        || assistant.role != llm::Role::Assistant
-        || !matches!(wake.content.as_ref(), [llm::Block::Text { text, replay: None }] if text.as_ref() == BEGIN)
-    {
+    let wake_matches = matches!(wake.content.as_ref(), [llm::Block::Text { text, replay: None }] if text.as_ref() == BEGIN)
+        || (!opaque
+            && matches!(wake.content.as_ref(), [llm::Block::ToolResult {
+            id, result: llm::Returned::Text { text, error: false, replay: None }
+        }, llm::Block::Text { text: prompt, replay: None }]
+            if id.as_ref() == ID && text.as_ref() == b"waiting" && prompt.as_ref() == BEGIN));
+    if wake.role != llm::Role::User || assistant.role != llm::Role::Assistant || !wake_matches {
         return false;
     }
     let [first, llm::Block::ToolCall { id, name, input, call: llm::Decoded::Historical, replay: metadata }] =
@@ -263,26 +263,26 @@ fn recorded_corruptions(turn: &smith_domain::Turn, fixture: &Fixture) {
 
 fn history(world: &World) -> Transcript {
     let first = world.turns().first().expect("actual root Turn");
-    Transcript {
-        version: first.version,
-        endpoint: first.endpoint,
-        dialect: first.dialect,
-        turns: world.turns().into(),
-        after: Box::new([]),
-    }
+    Transcript { version: first.version, endpoint: first.endpoint, dialect: first.dialect, turns: world.turns().into() }
 }
 
 // The parent retains an actual prefix and its concrete result separately;
 // no completion, application classification, feedback or usage is manufactured.
-fn post_tail(world: &World) -> Transcript {
+fn post_tail(world: &World) -> (Transcript, AnsweredCall) {
     let mut saved = history(world);
     let mut first = saved.turns[0].clone();
     let mut messages = first.messages.into_vec();
     let result = messages.pop().expect("actual saved Wait terminal");
     first.messages = messages.into();
     saved.turns = Box::new([first]);
-    saved.after = Box::new([result]);
-    saved
+    let llm::Block::ToolResult { result: llm::Returned::Text { text, error, .. }, .. } = &result.content[0] else {
+        panic!("saved host answer")
+    };
+    let answered = AnsweredCall {
+        name: run::CallName { activation: 1, completion: saved.turns[0].sequence, position: 1 },
+        answer: Answered::Host(run::HostAnswer::new(text.clone(), *error).expect("saved host answer fits")),
+    };
+    (saved, answered)
 }
 
 fn part_bytes(part: &Part) -> usize {
@@ -383,11 +383,17 @@ fn configuration(index: usize) -> Configuration {
 }
 
 fn resume(first: &World, fixture: &Fixture, index: usize, tail: bool) {
-    let saved = if tail { post_tail(first) } else { history(first) };
+    let (saved, answered) = if tail {
+        let (saved, answered) = post_tail(first);
+        (saved, Box::new([answered]) as Box<[_]>)
+    } else {
+        (history(first), Box::default())
+    };
     let sequence = saved.turns.last().expect("actual persisted prefix").sequence;
     let bounds = bounds();
     let settings = settings(920, true, &bounds);
-    let mut world = World::with_wire(settings, Some(saved), configuration(index), bounds, scripts(fixture, tail));
+    let mut world =
+        World::with_wire_answers(settings, Some(saved), answered, configuration(index), bounds, scripts(fixture, tail));
     world.run(100_000);
     let prefix = resumed_prefix(fixture, tail);
     prefix_corruptions(&world.prompts()[0], fixture, &prefix);

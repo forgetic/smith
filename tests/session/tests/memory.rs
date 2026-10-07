@@ -373,6 +373,7 @@ fn zero_opening(spec: Spec) -> Box<smith_domain_session::record::Opening> {
         prices: smith_domain_session::record::Prices { input: 0, cached: 0, output: 0, unit: 1 },
         budget: 1,
         transcript: None,
+        answered: Box::default(),
     })
 }
 
@@ -473,6 +474,7 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
             prices: record::Prices { input: 1, cached: 1, output: 1, unit: 1 },
             budget: 1,
             transcript: None,
+            answered: Box::default(),
         }),
     });
     let (_, delegate) = drive(Event::Completed {
@@ -560,7 +562,6 @@ fn restoring_a_maximum_recorded_history_stays_within_the_counted_bound() {
                 },
             ]),
         }]),
-        after: Box::default(),
     };
     meter.start();
     smith_domain_session::step(
@@ -574,6 +575,7 @@ fn restoring_a_maximum_recorded_history_stays_within_the_counted_bound() {
                 prices: record::Prices { input: 1, cached: 1, output: 1, unit: 1 },
                 budget: 1,
                 transcript: Some(history),
+                answered: Box::default(),
             }),
         },
         &mut out,
@@ -636,7 +638,6 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
                 Message { role: Role::Assistant, content: tail.into() },
             ]),
         }]),
-        after: Box::default(),
     };
     let spec = Spec {
         endpoint: Endpoint(7),
@@ -660,6 +661,7 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
                 prices: record::Prices { input: 1, cached: 1, output: 1, unit: 1 },
                 budget: 1,
                 transcript: Some(history),
+                answered: Box::default(),
             }),
         },
         &mut out,

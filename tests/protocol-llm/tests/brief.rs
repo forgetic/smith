@@ -543,7 +543,6 @@ fn structured_brief_native_wait_park_and_genuine_transcript_restore_in_both_wire
             endpoint: actual.endpoint,
             dialect: actual.dialect,
             turns: first.turns().into(),
-            after: Box::new([]),
         };
         assert_eq!(saved.turns.last().expect("actual persisted transcript tail").sequence, 2);
         settings.resume = true;

@@ -69,6 +69,17 @@ pub struct Opening {
     pub budget: u64,
     /// Optional concrete history whose version, endpoint and dialect must match.
     pub transcript: Option<Transcript>,
+    /// Results the host supplied for calls in the last saved turn.
+    pub answered: Box<[Answered]>,
+}
+
+/// One post-transcript result, keyed by the saved completion and block position.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Answered {
+    /// The call's position in the last saved assistant message.
+    pub origin: Origin,
+    /// The result rendered by the parent in the same form as a live result.
+    pub result: crate::llm::Returned,
 }
 
 /// A settled completion and its surrounding messages. Assistant call names,
@@ -99,8 +110,6 @@ pub struct Transcript {
     pub dialect: u32,
     /// Settled concrete turns, oldest first, validated within the transcript byte cap.
     pub turns: Box<[Turn]>,
-    /// Concrete user results committed after the last told turn.
-    pub after: Box<[Message]>,
 }
 
 /// Reason admission or transcript replay was rejected before unsupported history could run.
@@ -133,7 +142,7 @@ impl Transcript {
         for turn in &self.turns {
             bytes = bytes.checked_add(messages_bytes(&turn.messages)?)?;
         }
-        bytes.checked_add(messages_bytes(&self.after)?)
+        Some(bytes)
     }
 }
 

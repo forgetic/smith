@@ -1351,21 +1351,27 @@ fn resumed(
     if conversation.transcript.room() == 0 || !charge(conversation, cost, &env.limits) {
         return finish(End::TranscriptFull);
     }
-    let content = unrun(conversation, text);
+    let content = unrun(conversation, text, &mut []);
     conversation.transcript.push(Message { role: Role::User, content }).expect("checked for room above");
     call(conversation, id, 0, env, out)
 }
 
-/// The opener's message `text`, after a `NotRun` result for each tool call of
-/// the last message, the one the session yielded with.
-fn unrun(conversation: &Conversation, text: Box<[u8]>) -> Box<[Block]> {
+/// The opener's message after one result per call of the saved assistant tail.
+/// Unanswered calls become `NotRun`; host answers keep their original positions.
+fn unrun(conversation: &Conversation, text: Box<[u8]>, answered: &mut [crate::record::Answered]) -> Box<[Block]> {
     let message = conversation.transcript.last().expect("a yielded session's transcript ends with its answer");
     let (calls, _) = tally(&message.content);
     let mut content = List::with_capacity(calls.saturating_add(1));
-    for block in &message.content {
+    for (position, block) in message.content.iter().enumerate() {
         match block {
             Block::ToolCall { id, .. } => {
-                let result = Block::ToolResult { id: id.clone(), result: Returned::NotRun };
+                let mut result = Returned::NotRun;
+                for answer in answered.iter_mut() {
+                    if usize::try_from(answer.origin.position).expect("validated position") == position {
+                        result = mem::replace(&mut answer.result, Returned::NotRun);
+                    }
+                }
+                let result = Block::ToolResult { id: id.clone(), result };
                 content.push(result).expect("room for a result per call");
             }
             Block::Opaque { .. } | Block::Text { .. } | Block::Refusal { .. } | Block::ToolResult { .. } => {}
@@ -2064,7 +2070,7 @@ pub(crate) fn open(
         refuse(&mut domain.facts, opener, End::Busy, out);
         return;
     }
-    let crate::record::Opening { spec, dialect, prices, budget, transcript } = opening;
+    let crate::record::Opening { spec, dialect, prices, budget, transcript, answered } = opening;
     if prices.unit == 0 || budget > env.limits.spend {
         refuse(&mut domain.facts, opener, End::Invalid, out);
         return;
@@ -2077,8 +2083,18 @@ pub(crate) fn open(
     let mut sequence = 0;
     let mut told = 0;
     match transcript {
-        None => {}
-        Some(transcript) => match restore(&mut conversation, transcript, dialect, &env.limits) {
+        None => {
+            if !answered.is_empty() {
+                refuse(
+                    &mut domain.facts,
+                    opener,
+                    End::TranscriptRefused { reason: crate::record::Refusal::Malformed },
+                    out,
+                );
+                return;
+            }
+        }
+        Some(transcript) => match restore(&mut conversation, transcript, answered, dialect, &env.limits) {
             Ok(previous) => {
                 sequence = previous;
                 told = conversation.transcript.len().saturating_sub(1);
@@ -2101,6 +2117,7 @@ pub(crate) fn open(
 fn validate_transcript(
     conversation: &Conversation,
     transcript: &crate::record::Transcript,
+    answered: &[crate::record::Answered],
     dialect: u32,
     limits: &Limits,
 ) -> Result<(u32, u64), crate::record::Refusal> {
@@ -2115,9 +2132,7 @@ fn validate_transcript(
         return Err(Refusal::Dialect);
     }
     // Check sizes before cloning or allocating history into the bounded list.
-    if transcript.turns.len() > usize::try_from(limits.messages).expect("u32 fits")
-        || transcript.after.len() > usize::try_from(limits.messages).expect("u32 fits")
-    {
+    if transcript.turns.len() > usize::try_from(limits.messages).expect("u32 fits") {
         return Err(Refusal::TooLarge);
     }
     let mut count = 1_u32;
@@ -2164,19 +2179,35 @@ fn validate_transcript(
             return Err(Refusal::Malformed);
         }
     }
-    for message in &transcript.after {
-        recorded_shape(message, limits)?;
-        validate_recorded(message)?;
-        validate_link(previous, message)?;
-        previous = Some(message);
-        if message.role != Role::User {
-            return Err(Refusal::Malformed);
-        }
-        count = count.checked_add(1).ok_or(Refusal::TooLarge)?;
-        bytes = bytes.checked_add(content_cost(&message.content).ok_or(Refusal::TooLarge)?).ok_or(Refusal::TooLarge)?;
-    }
     if sequence == 0 {
         return Err(Refusal::Malformed);
+    }
+    let tail = previous.expect("validated nonempty turn");
+    for (index, answer) in answered.iter().enumerate() {
+        if tail.role != Role::Assistant || answer.origin.sequence != sequence {
+            return Err(Refusal::Malformed);
+        }
+        let Ok(position) = usize::try_from(answer.origin.position) else {
+            return Err(Refusal::Malformed);
+        };
+        match tail.content.get(position) {
+            Some(Block::ToolCall { .. }) => {}
+            Some(Block::Text { .. } | Block::Refusal { .. } | Block::Opaque { .. } | Block::ToolResult { .. })
+            | None => {
+                return Err(Refusal::Malformed);
+            }
+        }
+        for earlier in answered.iter().take(index) {
+            if earlier.origin == answer.origin {
+                return Err(Refusal::Malformed);
+            }
+        }
+        match answer.result {
+            Returned::Text { .. } => {}
+            Returned::Owned { .. } | Returned::Invalid { .. } | Returned::NotRun | Returned::Withdrawn => {
+                return Err(Refusal::Malformed);
+            }
+        }
     }
     if count.checked_add(3).ok_or(Refusal::TooLarge)? > limits.messages || bytes > limits.session_bytes {
         return Err(Refusal::TooLarge);
@@ -2187,28 +2218,21 @@ fn validate_transcript(
 fn restore(
     conversation: &mut Conversation,
     transcript: crate::record::Transcript,
+    mut answered: Box<[crate::record::Answered]>,
     dialect: u32,
     limits: &Limits,
 ) -> Result<u32, crate::record::Refusal> {
     use crate::record::Refusal;
-    let (sequence, mut bytes) = validate_transcript(conversation, &transcript, dialect, limits)?;
+    let (sequence, mut bytes) = validate_transcript(conversation, &transcript, &answered, dialect, limits)?;
     let prompt = conversation.transcript.get(0).expect("admission held the initial prompt");
     let prompt_charge = content_cost(&prompt.content).ok_or(Refusal::TooLarge)?;
-    let last = match transcript.after.last() {
-        Some(last) => last,
-        None => transcript
-            .turns
-            .last()
-            .expect("validated nonempty history")
-            .messages
-            .last()
-            .expect("validated nonempty turn"),
-    };
+    let last =
+        transcript.turns.last().expect("validated nonempty history").messages.last().expect("validated nonempty turn");
     let added = match last.role {
-        Role::Assistant => unrun_cost(&last.content, initial_text(prompt)).ok_or(Refusal::TooLarge)?,
+        Role::Assistant => unrun_cost(&last.content, initial_text(prompt), &answered).ok_or(Refusal::TooLarge)?,
         Role::User => prompt_charge,
     };
-    // An unanswered yielded tail needs concrete NotRun blocks and copied ids.
+    // The yielded tail needs one concrete result per call and copied ids.
     // Account all of them before moving history or allocating waking content.
     bytes = bytes.checked_sub(prompt_charge).ok_or(Refusal::TooLarge)?;
     bytes = bytes.checked_add(added).ok_or(Refusal::TooLarge)?;
@@ -2228,9 +2252,6 @@ fn restore(
             conversation.transcript.push(message).expect("history counted before allocation");
         }
     }
-    for message in transcript.after {
-        conversation.transcript.push(message).expect("history counted before allocation");
-    }
     let last = conversation.transcript.last().expect("nonempty history");
     let content = match last.role {
         Role::Assistant => {
@@ -2241,7 +2262,7 @@ fn restore(
                     unreachable!("admission constructs one text block")
                 }
             };
-            unrun(conversation, text)
+            unrun(conversation, text, &mut answered)
         }
         Role::User => prompt.content,
     };
@@ -2259,15 +2280,30 @@ fn initial_text(prompt: &Message) -> &[u8] {
     }
 }
 
-/// The waking user message plus a `NotRun` result for every unanswered call.
+/// The waking user message plus every saved call's result or `NotRun`.
 /// Counts the eventual concrete blocks and copied provider ids without owning
 /// any of them, so a refusal allocates no tail-sized scratch.
-fn unrun_cost(content: &[Block], text: &[u8]) -> Option<u64> {
+fn unrun_cost(content: &[Block], text: &[u8], answered: &[crate::record::Answered]) -> Option<u64> {
     let block = u64::try_from(size_of::<Block>()).ok()?;
     let mut cost = block.checked_add(len(text)?)?;
-    for part in content {
+    for (position, part) in content.iter().enumerate() {
         match part {
-            Block::ToolCall { id, .. } => cost = cost.checked_add(block)?.checked_add(len(id)?)?,
+            Block::ToolCall { id, .. } => {
+                cost = cost.checked_add(block)?.checked_add(len(id)?)?;
+                for answer in answered {
+                    if usize::try_from(answer.origin.position).ok()? == position {
+                        match &answer.result {
+                            Returned::Text { text, .. } => cost = cost.checked_add(len(text)?)?,
+                            Returned::Owned { .. }
+                            | Returned::Invalid { .. }
+                            | Returned::NotRun
+                            | Returned::Withdrawn => {
+                                return None;
+                            }
+                        }
+                    }
+                }
+            }
             Block::Opaque { .. } | Block::Text { .. } | Block::Refusal { .. } | Block::ToolResult { .. } => {}
         }
     }

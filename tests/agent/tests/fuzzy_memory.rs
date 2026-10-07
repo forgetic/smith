@@ -384,6 +384,7 @@ impl Driver {
             // Most charters as large as a run may hold, some a byte larger.
             let brief = limits.run.run_bytes - 900 + self.rng.below(901);
             return Some(Event::Start {
+                answered: Box::default(),
                 workspace: Some(workspace()),
                 grants: Box::new([smith_domain::Grant {
                     name: smith_domain::GrantName { account: 0, generation: 0 },

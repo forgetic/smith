@@ -210,17 +210,25 @@ fn committed_call_results_after_a_yield_are_restored_without_tickets() {
     world.open(opening(None, 100));
     world.complete(recorded::called(), llm::Stop::EndTurn, recorded::USAGE);
     world.close();
-    let mut history = transcript(&world);
-    history.after = Box::new([llm::Message {
-        role: llm::Role::User,
-        content: Box::new([llm::Block::ToolResult {
-            id: b"provider-call".as_slice().into(),
-            result: llm::Returned::Text { text: b"committed answer".as_slice().into(), error: false, replay: None },
-        }]),
+    let history = transcript(&world);
+    let tail = history.turns.last().expect("saved turn");
+    let position = tail
+        .messages
+        .last()
+        .expect("saved assistant")
+        .content
+        .iter()
+        .position(|block| matches!(block, llm::Block::ToolCall { id, .. } if id.as_ref() == b"provider-call"))
+        .expect("saved call");
+    let sequence = tail.sequence;
+    let mut opened = opening(Some(history), 100);
+    opened.answered = Box::new([session::record::Answered {
+        origin: session::record::Origin { sequence, position: u32::try_from(position).expect("position") },
+        result: llm::Returned::Text { text: b"committed answer".as_slice().into(), error: false, replay: None },
     }]);
     let mut resumed = World::new(7, 256);
-    resumed.open(opening(Some(history), 100));
-    assert_eq!(resumed.prompts[0].messages.len(), 4);
+    resumed.open(opened);
+    assert_eq!(resumed.prompts[0].messages.len(), 3);
     assert_eq!(
         resumed.prompts[0].messages[2].content[0],
         llm::Block::ToolResult {
@@ -229,6 +237,23 @@ fn committed_call_results_after_a_yield_are_restored_without_tickets() {
         }
     );
     resumed.close();
+}
+
+#[test]
+fn an_answer_name_outside_the_last_turn_is_malformed() {
+    let mut first = World::new(31, 256);
+    first.open(opening(None, 100));
+    first.complete(recorded::called(), llm::Stop::EndTurn, recorded::USAGE);
+    first.close();
+    let mut opened = opening(Some(transcript(&first)), 100);
+    opened.answered = Box::new([session::record::Answered {
+        origin: session::record::Origin { sequence: 1, position: 99 },
+        result: llm::Returned::Text { text: b"wrong call".as_slice().into(), error: false, replay: None },
+    }]);
+    let mut resumed = World::new(31, 256);
+    resumed.open(opened);
+    assert_eq!(resumed.end, Some(session::End::TranscriptRefused { reason: record::Refusal::Malformed }));
+    assert!(resumed.prompts.is_empty());
 }
 
 #[test]

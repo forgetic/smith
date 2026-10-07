@@ -438,15 +438,20 @@ impl World {
         Self::with_history(settings, None)
     }
 
-    /// Actual typed V2 entrance, including the committed post-transcript tail.
+    /// Typed V2 entrance from saved turns, with no later answers supplied.
     /// History is host-owned; root/session admission decides before provider work.
     /// Contract: domain/run.md, sections 3 and 13; domain/session.md, section 3.
     #[must_use]
     pub fn with_history(settings: Settings, transcript: Option<agent::Transcript>) -> World {
-        Self::with_backend(&settings, transcript, Backend::typed(&settings))
+        Self::with_backend(&settings, transcript, Box::default(), Backend::typed(&settings))
     }
 
-    fn with_backend(settings: &Settings, transcript: Option<agent::Transcript>, backend: Backend) -> World {
+    fn with_backend(
+        settings: &Settings,
+        transcript: Option<agent::Transcript>,
+        answered: Box<[agent::AnsweredCall]>,
+        backend: Backend,
+    ) -> World {
         let mut disk = Checkout::new();
         let root = fixture::seed(&mut disk);
         let workspace = Some(run::Workspace {
@@ -458,12 +463,13 @@ impl World {
                 conflicts: Box::new([]),
             }]),
         });
-        Self::with_selected_backend(settings, transcript, workspace, disk, backend, None)
+        Self::with_selected_backend(settings, transcript, answered, workspace, disk, backend, None)
     }
 
     fn with_selected_backend(
         settings: &Settings,
         transcript: Option<agent::Transcript>,
+        answered: Box<[agent::AnsweredCall]>,
         workspace: Option<run::Workspace>,
         disk: Checkout,
         backend: Backend,
@@ -483,6 +489,7 @@ impl World {
             model_prices.insert(model.model.clone(), model.prices);
         }
         stage.push(Event::Start {
+            answered,
             reply_to: ReplyTo::new(Token::new(1)),
             host_run: Token::new(1),
             activation: if settings.resume { 2 } else { 1 },
@@ -582,7 +589,30 @@ impl World {
         limits: WireLimits,
         scripts: Box<[provider::api::Script]>,
     ) -> World {
-        Self::with_backend(&settings, transcript, Backend::Wire(wire::Composition::new(configuration, limits, scripts)))
+        Self::with_backend(
+            &settings,
+            transcript,
+            Box::default(),
+            Backend::Wire(wire::Composition::new(configuration, limits, scripts)),
+        )
+    }
+
+    /// Native replay with calls answered by the host after its last saved turn.
+    #[must_use]
+    pub fn with_wire_answers(
+        settings: Settings,
+        transcript: Option<agent::Transcript>,
+        answered: Box<[agent::AnsweredCall]>,
+        configuration: wire::Configuration,
+        limits: WireLimits,
+        scripts: Box<[provider::api::Script]>,
+    ) -> World {
+        Self::with_backend(
+            &settings,
+            transcript,
+            answered,
+            Backend::Wire(wire::Composition::new(configuration, limits, scripts)),
+        )
     }
 
     /// Caller-selected workspace/disk and actual typed scripts; no default roots
@@ -609,7 +639,7 @@ impl World {
             }
             Backend::Wire(_) => unreachable!("typed constructor"),
         }
-        Self::with_selected_backend(&settings, transcript, workspace, disk, backend, None)
+        Self::with_selected_backend(&settings, transcript, Box::default(), workspace, disk, backend, None)
     }
 
     /// Caller-selected mounts and actual Client/byte-peer scripts, using the same
@@ -628,6 +658,7 @@ impl World {
         Self::with_selected_backend(
             &settings,
             transcript,
+            Box::default(),
             workspace,
             disk,
             Backend::Wire(wire::Composition::new(configuration, limits, scripts)),
@@ -662,7 +693,7 @@ impl World {
             }
             Backend::Wire(_) => unreachable!("typed constructor"),
         }
-        Self::with_selected_backend(&settings, transcript, workspace, disk, backend, Some(charter))
+        Self::with_selected_backend(&settings, transcript, Box::default(), workspace, disk, backend, Some(charter))
     }
 
     /// Caller-selected complete Charter, concrete saved history and native
@@ -685,6 +716,7 @@ impl World {
         Self::with_selected_backend(
             &settings,
             transcript,
+            Box::default(),
             workspace,
             disk,
             Backend::Wire(wire::Composition::new(configuration, limits, scripts)),

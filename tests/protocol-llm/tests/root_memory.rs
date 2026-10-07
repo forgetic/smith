@@ -551,7 +551,6 @@ fn turn_bytes(turn: &session::record::Turn) -> u64 {
 fn transcript_bytes(history: &root::Transcript) -> u64 {
     u64::try_from(history.turns.len()).expect("bounded turns") * size::<session::record::Turn>()
         + history.turns.iter().map(turn_bytes).sum::<u64>()
-        + messages_bytes(&history.after)
 }
 
 fn prompt_bytes(prompt: &llm::Prompt) -> u64 {
@@ -944,6 +943,7 @@ impl Counted {
 
     fn start(&mut self, history: Option<root::Transcript>, restoring: bool) {
         self.step(Event::Start {
+            answered: Box::default(),
             workspace: Some(workspace()),
             reply_to: ReplyTo::new(PARENT),
             host_run: WORKER,
@@ -1087,7 +1087,6 @@ impl Counted {
 
 fn assert_generated(history: &root::Transcript, messages: u32) {
     assert_eq!(history.turns.len(), usize::try_from((messages - 4) / 2).expect("reachable Turns"));
-    assert!(history.after.is_empty());
     let mut previous = None;
     let mut count = 0_u32;
     let mut large = 0;
@@ -1187,7 +1186,6 @@ fn generate_prefix(counted: &mut Counted, configuration: &Configuration, message
         endpoint: session::llm::Endpoint(0),
         dialect: 2,
         turns: counted.records.clone().into(),
-        after: Box::new([]),
     };
     let copied = copy_meter.end();
     let expected = transcript_bytes(&prefix);
@@ -1290,10 +1288,13 @@ fn refuse_one_over(counted: &mut Counted, configuration: &Configuration, cycles:
         counted.replace_root(&negative);
         let mut history = copy_transcript(counted.prefix.as_ref().expect("saved actual records"));
         if extra_message {
-            history.after = Box::new([session::llm::Message {
+            let last = history.turns.last_mut().expect("saved turns");
+            let mut messages = last.messages.to_vec();
+            messages.push(session::llm::Message {
                 role: session::llm::Role::User,
                 content: Box::new([session::llm::Block::Text { text: b"x".as_slice().into(), replay: None }]),
-            }]);
+            });
+            last.messages = messages.into();
         } else {
             let text = history
                 .turns
@@ -1512,6 +1513,7 @@ fn a_restored_run_keeps_full_brief_and_custom_paths_with_two_clients() {
     };
     counted.caller_charter = Some(caller);
     counted.step(Event::Start {
+        answered: Box::default(),
         reply_to: ReplyTo::new(PARENT),
         host_run: WORKER,
         activation: 1,

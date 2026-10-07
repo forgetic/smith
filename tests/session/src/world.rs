@@ -1776,6 +1776,7 @@ impl World {
                 prices: agent::record::Prices { input: 0, cached: 0, output: 0, unit: 1 },
                 budget: 1,
                 transcript: None,
+                answered: Box::default(),
             }),
         });
     }

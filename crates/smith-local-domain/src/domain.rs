@@ -388,6 +388,7 @@ fn maybe_start(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
         &mut domain.agent,
         &agent_env(env),
         agent::Event::Start {
+            answered: Box::default(),
             reply_to: ReplyTo::new(Token::new(domain.chat.state.activation)),
             host_run: Token::new(1),
             activation: domain.chat.state.activation,

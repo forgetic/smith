@@ -34,6 +34,7 @@
 //! what those emitted; [`max_out`] follows from the child domains' along that
 //! chain.
 
+use alloc::boxed::Box;
 use skein_lib::{Env, Id, Map, Queue, ReplyTo, Rng, Set, Slab, Time, Token};
 use smith_domain_run as run;
 use smith_domain_session::{self as session};
@@ -94,6 +95,7 @@ pub struct Domain {
 pub(crate) struct StartContext {
     pub(crate) reply_to: Option<ReplyTo>,
     pub(crate) transcript: Option<session::record::Transcript>,
+    pub(crate) answered: Box<[session::record::Answered]>,
     pub(crate) refused: Option<run::TranscriptRefusal>,
 }
 

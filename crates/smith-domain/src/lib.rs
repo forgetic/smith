@@ -42,7 +42,7 @@ mod translate;
 #[cfg(test)]
 mod translation_tests;
 
-pub use boundary::{Event, Grant, GrantName, Request};
+pub use boundary::{Answered, AnsweredCall, Event, Grant, GrantName, Request};
 pub use config::Config;
 pub use domain::{Domain, fire, max_out, resume, step};
 pub use facts::{Content, Fact};

@@ -54,7 +54,6 @@ impl Store {
             endpoint: first.endpoint,
             dialect: first.dialect,
             turns: self.turns.clone().into_boxed_slice(),
-            after: Box::new([]),
         })
     }
 
@@ -83,7 +82,6 @@ impl Store {
             endpoint: agent::session::llm::Endpoint(0),
             dialect: 1,
             turns: Box::new([]),
-            after: Box::new([]),
         });
     }
 }

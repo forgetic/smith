@@ -46,6 +46,7 @@ pub fn opening(transcript: Option<record::Transcript>, budget: u64) -> record::O
         dialect: 23,
         prices: PRICES,
         budget,
+        answered: Box::default(),
         transcript,
     }
 }
@@ -349,6 +350,5 @@ pub fn transcript(world: &World) -> record::Transcript {
         endpoint: llm::Endpoint(7),
         dialect: 23,
         turns: world.turns.clone().into(),
-        after: Box::default(),
     }
 }

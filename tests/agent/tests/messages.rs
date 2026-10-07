@@ -6,7 +6,7 @@ use skein_fake_llm_domain::api::Part;
 use skein_lib::{Duration, Time, Token};
 use skein_world::domain::Span;
 use smith_agent_world::{Job, Settings, World};
-use smith_domain::{run, session};
+use smith_domain::{Answered, AnsweredCall, run, session};
 
 fn waiting(seed: u64) -> Settings {
     let calm = Settings::calm(seed);
@@ -30,7 +30,6 @@ fn history(world: &World) -> smith_domain::Transcript {
         endpoint: first.endpoint,
         dialect: first.dialect,
         turns: world.turns().into(),
-        after: Box::new([]),
     }
 }
 
@@ -113,25 +112,62 @@ fn parked_transcript_resumes_without_recharging_history_or_reusing_activation_nu
 }
 
 #[test]
-fn host_result_committed_after_last_transcript_restores_before_wake_without_repeating_effect() {
+fn a_resumed_run_hears_each_call_answered_after_its_last_turn_as_its_result() {
     let mut first = World::new(Settings { job: Job::HostTools, ..Settings::calm(905) });
     first.run(2000);
     let mut turn = first.turns()[0].clone();
     let mut messages = turn.messages.into_vec();
     let actual_result = messages.pop().expect("actual terminal user message");
+    let session::llm::Block::ToolResult { id, result: session::llm::Returned::Text { text, error, .. } } =
+        &actual_result.content[0]
+    else {
+        panic!("host result")
+    };
+    let position = messages
+        .last()
+        .expect("assistant call")
+        .content
+        .iter()
+        .position(|block| matches!(block, session::llm::Block::ToolCall { id: call_id, .. } if call_id == id))
+        .expect("matching call");
+    let answered = AnsweredCall {
+        name: run::CallName {
+            activation: 1,
+            completion: turn.sequence,
+            position: u32::try_from(position).expect("position"),
+        },
+        answer: Answered::Host(run::HostAnswer::new(text.clone(), *error).expect("saved result fits")),
+    };
     assert!(actual_result.content.iter().any(|block| matches!(block, session::llm::Block::ToolResult {
         result: session::llm::Returned::Text { text, error: false, .. }, ..
     } if text.as_ref() == b"opaque host answer: first decision")));
+    let assistant = messages.last_mut().expect("assistant call");
+    let mut blocks = assistant.content.to_vec();
+    let second_position = u32::try_from(blocks.len()).expect("bounded assistant blocks");
+    let mut second = blocks[position].clone();
+    let session::llm::Block::ToolCall { id, name, .. } = &mut second else { panic!("saved host call") };
+    *id = b"delivery-after".as_slice().into();
+    *name = b"deliver".as_slice().into();
+    blocks.push(second);
+    assistant.content = blocks.into();
     turn.messages = messages.into();
     let saved = smith_domain::Transcript {
         version: turn.version,
         endpoint: turn.endpoint,
         dialect: turn.dialect,
         turns: Box::new([turn]),
-        after: Box::new([actual_result.clone()]),
     };
-    let mut next =
-        World::with_history(Settings { job: Job::HostTools, resume: true, ..Settings::calm(906) }, Some(saved));
+    let mut next = World::with_history_answers(
+        Settings { job: Job::HostTools, resume: true, ..Settings::calm(906) },
+        Some(saved),
+        Box::new([
+            answered,
+            AnsweredCall {
+                name: run::CallName { activation: 1, completion: 1, position: second_position },
+                answer: Answered::Delivery(Box::new(run::Delivery::Nothing)),
+            },
+        ]),
+    );
     next.run(2000);
     assert!(matches!(
         next.answer(),
@@ -142,6 +178,12 @@ fn host_result_committed_after_last_transcript_restores_before_wake_without_repe
         message.parts.iter().any(|part| {
             matches!(part,
         Part::ToolOutput { output, is_error: false, .. } if output.as_ref() == b"opaque host answer: first decision")
+        })
+    }));
+    assert!(next.prompts()[0].messages.iter().any(|message| {
+        message.parts.iter().any(|part| {
+            matches!(part, Part::ToolOutput { id, output, is_error: true }
+                if id.as_ref() == b"delivery-after" && output.as_ref() == b"nothing")
         })
     }));
     assert_eq!(next.turns()[0].sequence, 2);
@@ -184,18 +226,23 @@ fn every_transient_history_refusal_is_exact_and_starts_no_provider_or_tool_effec
                 }
             }
             run::TranscriptRefusal::TooLarge => {
-                saved.after = vec![session::llm::Message {
-                    role: session::llm::Role::User,
-                    content: Box::new([session::llm::Block::Text {
-                        text: vec![
-                            b'x';
-                            usize::try_from(waiting(907).limits.session.session_bytes + 1)
-                                .expect("bounded fixture")
-                        ]
-                        .into(),
-                        replay: None,
-                    }]),
-                }]
+                let text = saved
+                    .turns
+                    .iter_mut()
+                    .flat_map(|turn| &mut turn.messages)
+                    .flat_map(|message| &mut message.content)
+                    .find_map(|block| match block {
+                        session::llm::Block::Text { text, .. } => Some(text),
+                        session::llm::Block::Refusal { .. }
+                        | session::llm::Block::Opaque { .. }
+                        | session::llm::Block::ToolCall { .. }
+                        | session::llm::Block::ToolResult { .. } => None,
+                    })
+                    .expect("saved text");
+                *text = vec![
+                    b'x';
+                    usize::try_from(waiting(907).limits.session.session_bytes + 1).expect("bounded fixture")
+                ]
                 .into();
             }
         }

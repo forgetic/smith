@@ -410,12 +410,13 @@ pub struct World {
 fn choose_start(
     settings: &Settings,
     transcript: Option<agent::Transcript>,
+    answered: Box<[agent::AnsweredCall]>,
     workspace: Option<run::Workspace>,
     selected_charter: Option<run::Charter>,
     selected_start: Option<Event>,
 ) -> (Event, Token) {
     match selected_start {
-        Some(Event::Start { reply_to, host_run, activation, charter, workspace, grants, transcript }) => {
+        Some(Event::Start { reply_to, host_run, activation, charter, workspace, grants, transcript, answered }) => {
             let token = reply_to.into_token();
             (
                 Event::Start {
@@ -426,6 +427,7 @@ fn choose_start(
                     workspace,
                     grants,
                     transcript,
+                    answered,
                 },
                 token,
             )
@@ -443,6 +445,7 @@ fn choose_start(
                     valid: Duration::from_secs(7200),
                 }]),
                 transcript,
+                answered,
             },
             Token::new(1),
         ),
@@ -459,12 +462,22 @@ impl World {
         Self::with_history(settings, None)
     }
 
-    /// Actual typed V2 entrance, including the committed post-transcript tail.
+    /// Typed V2 entrance from saved turns, with no later answers supplied.
     /// History is host-owned; root/session admission decides before provider work.
     /// Contract: domain/run.md, sections 3 and 13; domain/session.md, section 3.
     #[must_use]
     pub fn with_history(settings: Settings, transcript: Option<agent::Transcript>) -> World {
-        Self::with_backend(&settings, transcript, Backend::typed(&settings))
+        Self::with_backend(&settings, transcript, Box::default(), Backend::typed(&settings))
+    }
+
+    /// Starts from saved turns and host decisions made after their last turn.
+    #[must_use]
+    pub fn with_history_answers(
+        settings: Settings,
+        transcript: Option<agent::Transcript>,
+        answered: Box<[agent::AnsweredCall]>,
+    ) -> World {
+        Self::with_backend(&settings, transcript, answered, Backend::typed(&settings))
     }
 
     /// Starts with the caller's complete host event and the usual fixture
@@ -475,10 +488,24 @@ impl World {
     pub fn with_start(settings: Settings, start: Event) -> World {
         let mut disk = Checkout::new();
         fixture::seed(&mut disk);
-        Self::with_selected_backend(&settings, None, None, disk, Backend::typed(&settings), None, Some(start))
+        Self::with_selected_backend(
+            &settings,
+            None,
+            Box::default(),
+            None,
+            disk,
+            Backend::typed(&settings),
+            None,
+            Some(start),
+        )
     }
 
-    fn with_backend(settings: &Settings, transcript: Option<agent::Transcript>, backend: Backend) -> World {
+    fn with_backend(
+        settings: &Settings,
+        transcript: Option<agent::Transcript>,
+        answered: Box<[agent::AnsweredCall]>,
+        backend: Backend,
+    ) -> World {
         let mut disk = Checkout::new();
         let root = fixture::seed(&mut disk);
         let workspace = Some(run::Workspace {
@@ -490,12 +517,17 @@ impl World {
                 conflicts: Box::new([]),
             }]),
         });
-        Self::with_selected_backend(settings, transcript, workspace, disk, backend, None, None)
+        Self::with_selected_backend(settings, transcript, answered, workspace, disk, backend, None, None)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the scripted world accepts each independent Start and backend fixture"
+    )]
     fn with_selected_backend(
         settings: &Settings,
         transcript: Option<agent::Transcript>,
+        answered: Box<[agent::AnsweredCall]>,
         workspace: Option<run::Workspace>,
         disk: Checkout,
         backend: Backend,
@@ -505,7 +537,8 @@ impl World {
         let max_out = agent::max_out(&settings.limits);
         let mut stage = Stage::new(settings.limits, max_out, max_out + 3);
         let supplied_start = selected_start.is_some();
-        let (start, reply_to) = choose_start(settings, transcript, workspace, selected_charter, selected_start);
+        let (start, reply_to) =
+            choose_start(settings, transcript, answered, workspace, selected_charter, selected_start);
         let Event::Start { host_run, charter, workspace, .. } = &start else {
             unreachable!("the selected event is Start")
         };
@@ -617,7 +650,7 @@ impl World {
                 .expect("caller scripts obey provider admission");
             }
         }
-        Self::with_selected_backend(&settings, transcript, workspace, disk, backend, None, None)
+        Self::with_selected_backend(&settings, transcript, Box::default(), workspace, disk, backend, None, None)
     }
 
     /// Caller supplies the complete typed Charter before the original Start;
@@ -646,7 +679,16 @@ impl World {
                 .expect("caller scripts obey provider admission");
             }
         }
-        Self::with_selected_backend(&settings, transcript, workspace, disk, backend, Some(charter), None)
+        Self::with_selected_backend(
+            &settings,
+            transcript,
+            Box::default(),
+            workspace,
+            disk,
+            backend,
+            Some(charter),
+            None,
+        )
     }
 
     /// Starts with the caller's complete host event, checkout and provider
@@ -671,7 +713,7 @@ impl World {
                 .expect("caller scripts obey provider admission");
             }
         }
-        Self::with_selected_backend(&settings, None, None, disk, backend, None, Some(start))
+        Self::with_selected_backend(&settings, None, Box::default(), None, disk, backend, None, Some(start))
     }
 
     /// Route subsequent checked submissions to the outside parent.
@@ -1915,6 +1957,7 @@ mod bridge_tests {
     fn a_caller_start_and_host_reply_cross_the_parent_bridge() {
         let settings = Settings { job: Job::HostTools, ..Settings::calm(811) };
         let start = Event::Start {
+            answered: Box::default(),
             reply_to: ReplyTo::new(Token::new(71)),
             host_run: Token::new(73),
             activation: 4,
@@ -1957,6 +2000,7 @@ mod bridge_tests {
         let mut charter = charter(&settings);
         charter.grants.host_tools[0].name = b"message".as_slice().into();
         let start = Event::Start {
+            answered: Box::default(),
             reply_to: ReplyTo::new(Token::new(71)),
             host_run: Token::new(73),
             activation: 4,

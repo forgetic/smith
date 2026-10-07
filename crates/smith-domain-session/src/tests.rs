@@ -407,6 +407,7 @@ fn opening(spec: Spec) -> Box<crate::record::Opening> {
         prices: crate::record::Prices { input: 0, cached: 0, output: 0, unit: 1 },
         budget: 100,
         transcript: None,
+        answered: Box::default(),
     })
 }
 
@@ -1713,6 +1714,7 @@ fn reserved_recorded_call(harness: &mut Harness) -> Token {
                 prices: crate::record::Prices { input: 0, cached: 0, output: 0, unit: 1 },
                 budget: 100,
                 transcript: None,
+                answered: Box::default(),
             }),
         },
         &mut harness.out,

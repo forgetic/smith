@@ -45,6 +45,24 @@ use smith_domain_tools as tools;
 use crate::llm::{Completion, Failure, Prompt};
 use alloc::boxed::Box;
 
+/// One durable host decision made after the last saved turn.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AnsweredCall {
+    /// The call's stable name in the last saved turn.
+    pub name: run::CallName,
+    /// The host's answer, in the same vocabulary as a live terminal.
+    pub answer: Answered,
+}
+
+/// A host decision restored as the result of its original call.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Answered {
+    /// The host answered a tool with result or error text.
+    Host(run::HostAnswer),
+    /// The host answered a delivery in smith's delivery vocabulary.
+    Delivery(Box<run::Delivery>),
+}
+
 /// A credential name, never its value.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct GrantName {
@@ -89,10 +107,12 @@ pub enum Event {
         charter: run::Charter,
         /// Optional immutable host mounts and initial conflicts, moved to run admission.
         workspace: Option<run::Workspace>,
-        /// Typed V2 history including committed post-transcript results.
+        /// Typed V2 turns, kept without assembling provider messages.
         /// False charter.resume ignores it; semantic refusal never starts fresh.
         /// Receiving record/count caps are checked before root retention.
         transcript: Option<smith_domain_session::record::Transcript>,
+        /// Calls answered by the host since the last saved turn.
+        answered: Box<[AnsweredCall]>,
         /// Host credential-name and remaining-validity notices, bounded by `Limits.accounts`.
         /// These select a usable credential generation; they grant no checkout or tool authority.
         grants: Box<[Grant]>,

@@ -642,13 +642,7 @@ fn positive_history_controls(query: &Query, expected: &[Message]) {
 }
 
 fn saved(world: &World) -> Transcript {
-    Transcript {
-        version: 2,
-        endpoint: llm::Endpoint(0),
-        dialect: 1,
-        turns: world.turns().to_vec().into(),
-        after: Box::new([]),
-    }
+    Transcript { version: 2, endpoint: llm::Endpoint(0), dialect: 1, turns: world.turns().to_vec().into() }
 }
 
 fn parked_accounting(world: &World, rates: &[Rate], prior_sequence: u32) -> run::Spend {

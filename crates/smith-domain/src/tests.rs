@@ -282,6 +282,7 @@ impl Harness {
     /// the run's token, and main's first call to its LLM.
     fn admit(&mut self, call: u64, charter: Charter) -> (Token, Token, Prompt) {
         let emitted = self.step(Event::Start {
+            answered: Box::default(),
             workspace: Some(workspace()),
             grants: Box::new([crate::Grant {
                 name: crate::GrantName { account: 0, generation: 0 },
@@ -376,6 +377,7 @@ fn charter() -> Charter {
 fn root_refuses_invalid_grants_before_admission() {
     let mut h = Harness::new();
     let emitted = h.step(Event::Start {
+        answered: Box::default(),
         workspace: Some(workspace()),
         grants: Box::new(
             [crate::Grant { name: crate::GrantName { account: 0, generation: 0 }, valid: Duration::from_secs(60) }; 5],
@@ -398,6 +400,7 @@ fn root_refuses_unconfigured_main_and_sub_agent_endpoints_before_admission() {
         requested.llm.endpoint = main;
         requested.models = Box::new([Llm { endpoint: child, model: bytes(b"model-b"), ..requested.llm.clone() }]);
         let emitted = h.step(Event::Start {
+            answered: Box::default(),
             workspace: None,
             grants: Box::new([]),
             reply_to: ReplyTo::new(Token::new(7)),
@@ -419,6 +422,7 @@ fn root_refuses_unconfigured_main_and_sub_agent_endpoints_before_admission() {
     let mut requested = charter();
     requested.models = Box::new([Llm { endpoint: Endpoint(2), model: bytes(b"model-b"), ..requested.llm.clone() }]);
     let emitted = h.step(Event::Start {
+        answered: Box::default(),
         workspace: None,
         grants: Box::new([]),
         reply_to: ReplyTo::new(Token::new(7)),
@@ -437,6 +441,7 @@ fn root_refuses_incompatible_conversation_limits_before_admission() {
     let limits = Limits { run: run::Limits { directories: 3, ..LIMITS.run }, ..LIMITS };
     let mut h = Harness::with(&limits);
     let emitted = h.step(Event::Start {
+        answered: Box::default(),
         workspace: Some(workspace()),
         grants: Box::new([]),
         reply_to: ReplyTo::new(Token::new(7)),
@@ -452,20 +457,28 @@ fn root_refuses_incompatible_conversation_limits_before_admission() {
 #[test]
 fn oversized_resume_history_is_refused_when_the_conversation_opens() {
     let mut h = Harness::new();
-    let mut after = List::with_capacity(17);
-    for _ in 0..17_u32 {
-        after
-            .push(session::llm::Message { role: Role::User, content: Box::new([]) })
-            .expect("room for each oversized history message");
+    let mut turns = List::with_capacity(17);
+    for sequence in 1..=17_u32 {
+        turns
+            .push(session::record::Turn {
+                version: session::record::VERSION,
+                endpoint: session::llm::Endpoint(1),
+                dialect: 1,
+                sequence,
+                usage: Usage::ZERO,
+                spent: 0,
+                messages: Box::new([session::llm::Message { role: Role::User, content: Box::new([]) }]),
+            })
+            .expect("room for each oversized turn");
     }
     let transcript = session::record::Transcript {
         version: session::record::VERSION,
         endpoint: session::llm::Endpoint(1),
         dialect: 1,
-        turns: Box::new([]),
-        after: after.into_boxed(),
+        turns: turns.into_boxed(),
     };
     let emitted = h.step(Event::Start {
+        answered: Box::default(),
         workspace: Some(workspace()),
         grants: Box::new([]),
         reply_to: ReplyTo::new(Token::new(7)),
@@ -655,6 +668,7 @@ fn no_grant_fails_locally_and_exhaustion_reports_the_account() {
     let mut ungranted = charter();
     ungranted.llm.account = 9;
     let emitted = h.step(Event::Start {
+        answered: Box::default(),
         workspace: Some(workspace()),
         reply_to: ReplyTo::new(Token::new(7)),
         host_run: Token::new(7),
@@ -780,6 +794,7 @@ fn an_unsafe_workspace_mount_refuses_start_before_discovery() {
         }]),
     };
     let emitted = h.step(Event::Start {
+        answered: Box::default(),
         grants: Box::new([crate::Grant {
             name: crate::GrantName { account: 0, generation: 0 },
             valid: Duration::from_secs(100_000),
@@ -820,6 +835,7 @@ fn an_opening_larger_than_a_session_holds_refuses_main_as_invalid() {
     let mut h = Harness::with(&limits);
     let brief = filler(10_240);
     let emitted = h.step(Event::Start {
+        answered: Box::default(),
         workspace: Some(workspace()),
         grants: Box::new([crate::Grant {
             name: crate::GrantName { account: 0, generation: 0 },
@@ -1309,6 +1325,7 @@ fn convention_main(harness: &mut Harness, selected: Option<run::Conventions>) ->
         ..charter()
     };
     let emitted = harness.step(Event::Start {
+        answered: Box::default(),
         reply_to: ReplyTo::new(Token::new(77)),
         host_run: Token::new(77),
         activation: 1,
@@ -1495,6 +1512,7 @@ fn invalid_conventions_are_refused_at_original_root_start_before_any_effect() {
                 run::Conventions { guide: bytes(b"docs/GUIDE"), checks: bytes(path) }
             };
             let emitted = harness.step(Event::Start {
+                answered: Box::default(),
                 workspace: Some(workspace()),
                 reply_to: ReplyTo::new(Token::new(77)),
                 host_run: Token::new(77),
@@ -1567,6 +1585,7 @@ fn maximum_custom_guide_headings_obey_the_session_receiving_limit_after_discover
             None
         };
         let emitted = harness.step(Event::Start {
+            answered: Box::default(),
             reply_to: ReplyTo::new(Token::new(7)),
             host_run: Token::new(7),
             activation: 1,

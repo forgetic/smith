@@ -191,7 +191,6 @@ fn no_workspace_host_answer_wait_park_and_native_transcript_resume() {
             endpoint: actual.endpoint,
             dialect: actual.dialect,
             turns: first.turns().into(),
-            after: Box::new([]),
         };
         assert_eq!(saved.turns.last().expect("persisted actual tail").sequence, 3);
         settings.resume = true;
