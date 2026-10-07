@@ -296,6 +296,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-agent-service"
+version = "0.0.0"
+dependencies = [
+ "skein-channel",
+ "skein-io",
+ "skein-lib",
+ "skein-llm",
+ "skein-llm-connection",
+ "skein-llm-world",
+ "skein-tls",
+ "smith-agent-world",
+ "smith-channel",
+ "smith-charter",
+ "smith-domain",
+ "smith-protocol-channel",
+ "smith-protocol-llm",
+ "smith-protocol-machine",
+ "smith-transcript",
+]
+
+[[package]]
 name = "smith-agent-world"
 version = "0.0.0"
 dependencies = [
