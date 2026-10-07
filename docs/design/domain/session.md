@@ -62,10 +62,10 @@ What is still open is listed in section 11.
   before a completion starts: version, endpoint and dialect; contiguous
   turns; message and block bounds; roles and call and result ids; and no
   unresolved ticket. It must fit the message and byte limits with the
-  waking prompt and room for a completion. An unanswered call in a
-  yielded tail gets the same not-run result as an ordinary continuation;
-  answers the history does not hold go to the LLM as text in the waking
-  prompt (run.md, section 6).
+  waking prompt and room for a completion. Results the opener gives for
+  calls made after the last turn are restored before the waking prompt;
+  an unanswered call in a yielded tail gets the same not-run result as an
+  ordinary continuation.
 - **Refused transcripts.** Another version, endpoint or dialect, a
   malformed, unresolved or oversized history are distinct refusals; the
   run treats every one as a transient failure (run.md, section 6).
