@@ -1409,7 +1409,7 @@ impl World {
                     input,
                     call: llm::Decoded::Served { ask: run::Ask::Host { .. } },
                     ..
-                } if completion.stop == llm::Stop::ToolUse && name.as_ref() == b"host_action" => {
+                } if completion.stop == llm::Stop::ToolUse => {
                     self.host_history
                         .called(
                             message.expect("actual completion flight retains its prompt origin"),
@@ -1909,6 +1909,7 @@ fn observed_price(prices: run::Prices, usage: llm::Usage) -> Option<u64> {
 #[cfg(test)]
 mod bridge_tests {
     use super::*;
+    use provider::api::{Finish, Line, Script, Turn};
 
     #[test]
     fn a_caller_start_and_host_reply_cross_the_parent_bridge() {
@@ -1947,6 +1948,58 @@ mod bridge_tests {
         assert!(world.drive(20_000));
         assert!(matches!(world.answer(), run::Answer::Accepted { .. }));
         assert_eq!(world.host_terminals().len(), 1);
+        assert_eq!(world.host_terminals()[0].2, run::HostReply::Answered(answer));
+    }
+
+    #[test]
+    fn a_caller_named_message_host_tool_keeps_its_feedback() {
+        let settings = Settings { job: Job::HostTools, ..Settings::calm(819) };
+        let mut charter = charter(&settings);
+        charter.grants.host_tools[0].name = b"message".as_slice().into();
+        let start = Event::Start {
+            reply_to: ReplyTo::new(Token::new(71)),
+            host_run: Token::new(73),
+            activation: 4,
+            charter,
+            workspace: None,
+            grants: Box::new([Grant {
+                name: GrantName { account: 0, generation: 1 },
+                valid: Duration::from_secs(7200),
+            }]),
+            transcript: None,
+        };
+        let scripts = Box::new([Script {
+            cue: b"@hosttools".as_slice().into(),
+            turns: Box::new([
+                Turn {
+                    lines: Box::new([Line::Call {
+                        name: b"message".as_slice().into(),
+                        arguments: b"{}".as_slice().into(),
+                    }]),
+                    finish: Finish::ToolCalls,
+                    tokens: 8,
+                },
+                Turn {
+                    lines: Box::new([Line::Call {
+                        name: b"finish".as_slice().into(),
+                        arguments: br#"{"report":"Host completed.","source":"host"}"#.as_slice().into(),
+                    }]),
+                    finish: Finish::ToolCalls,
+                    tokens: 8,
+                },
+            ]),
+        }]);
+        let mut world = World::with_workspace_scripts_start(settings, Checkout::new(), scripts, start);
+        world.enable_parent_host_calls();
+        assert!(!world.drive(20_000), "the world yields before answering the host call");
+        let pending = world.pending_host_calls();
+        let [call] = pending.as_slice() else { panic!("one pending host call") };
+        assert_eq!(call.tool.as_ref(), b"message");
+        let relay = call.relay;
+        let answer = run::HostAnswer::new(b"parent decision".as_slice().into(), false).expect("bounded answer");
+        world.return_host_reply(relay, run::HostReply::Answered(answer.clone())).expect("pending relay");
+        assert!(world.drive(20_000));
+        assert!(matches!(world.answer(), run::Answer::Accepted { .. }));
         assert_eq!(world.host_terminals()[0].2, run::HostReply::Answered(answer));
     }
 }
