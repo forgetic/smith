@@ -11,7 +11,10 @@ skein-lib.workspace = true
 skein-channel.workspace = true
 smith-channel.workspace = true
 smith-charter.workspace = true
+smith-transcript.workspace = true
 smith-domain.workspace = true
+smith-domain-session.workspace = true
+smith-domain-tools.workspace = true
 
 [lints]
 workspace = true
