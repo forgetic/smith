@@ -397,6 +397,91 @@ fn a_run_resumed_from_a_transcript_restores_the_calls_answered_after_its_last_tu
 }
 
 #[test]
+#[expect(clippy::wildcard_enum_match_arm, reason = "the story selects each activation's one forwarded turn")]
+fn a_run_parked_resumed_and_parked_again_numbers_turns_per_activation() {
+    use smith_domain_session::{llm, record};
+
+    let charter: Box<[u8]> =
+        Box::from(&include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..]);
+    let first = record::Turn {
+        version: record::VERSION,
+        endpoint: llm::Endpoint(0),
+        dialect: 0,
+        sequence: 1,
+        usage: llm::Usage { input_tokens: 1, output_tokens: 2, cache_read_tokens: 0, cache_write_tokens: 0 },
+        spent: 3,
+        messages: Box::default(),
+    };
+    let mut one = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    one.settle();
+    one.send_start(charter.clone());
+    one.settle();
+    one.agent_admits();
+    one.settle();
+    one.agent_tells_turn(1, None, &first);
+    one.settle();
+    let saved = one
+        .observations()
+        .iter()
+        .find_map(|event| match event {
+            Observation::HostTurn { number: 1, body, .. } => Some(body.clone()),
+            _ => None,
+        })
+        .expect("first activation's durable body");
+    one.host_acknowledges(1);
+    one.settle();
+    let mut spent = smith_domain::run::Spend::ZERO;
+    spent.units = 3;
+    one.agent_answers(smith_domain::run::Answer::Parked { spent, turns: 1 });
+    one.settle();
+    assert!(one.observations().contains(&Observation::HostParked { turns: 1, spent: 3 }));
+
+    let mut two = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    two.settle();
+    two.send_domain_start(
+        smith_host_domain::Start {
+            logical_run: skein_lib::Token::new(1),
+            activation: 2,
+            workspace: None,
+            charter,
+            transcript: Some(Box::from([saved])),
+            answered: Box::default(),
+            directories: Box::default(),
+            grants: Box::default(),
+        },
+        smith_host_domain::Window { turns: 1, bytes: 1_000_000_000 },
+        smith_host_protocol::Values { paths: Box::default(), credentials: Box::default() },
+    );
+    two.settle();
+    assert!(two.observations().contains(&Observation::AgentHistory { turns: 1, place: 1 }));
+    two.agent_admits();
+    two.settle();
+    let mut next = first;
+    next.sequence = 2;
+    next.spent = 4;
+    two.agent_tells_turn(1, None, &next);
+    two.settle();
+    let body = two
+        .observations()
+        .iter()
+        .find_map(|event| match event {
+            Observation::HostTurn { number: 1, body, .. } => Some(body.as_ref()),
+            _ => None,
+        })
+        .expect("new activation's first output turn");
+    let received = smith_transcript::Turn::decode(&smith_transcript::CEILINGS, &mut skein_lib::Reader::new(body))
+        .expect("bounded output turn");
+    assert_eq!(received.place(), 2, "conversation sequence continues after saved history");
+    two.host_acknowledges(1);
+    two.settle();
+    let mut spent = smith_domain::run::Spend::ZERO;
+    spent.units = 4;
+    two.agent_answers(smith_domain::run::Answer::Parked { spent, turns: 1 });
+    two.settle();
+    assert!(two.observations().contains(&Observation::HostParked { turns: 1, spent: 4 }));
+}
+
+#[test]
 fn a_message_reaches_the_llm_with_its_senders_label() {
     let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
     world.settle();
@@ -707,6 +792,72 @@ fn host_tools_answered_busy_are_asked_again_under_their_names() {
         relay: second,
         reply: smith_domain::run::HostReply::Answered(
             smith_domain::run::HostAnswer::new(Box::from(*b"ok"), false).expect("bounded answer"),
+        ),
+    }));
+}
+
+#[test]
+fn a_host_tool_answered_as_the_channel_is_lost_is_asked_again_under_its_name() {
+    let charter: Box<[u8]> =
+        Box::from(&include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..]);
+    let name = smith_domain::run::CallName { activation: 1, completion: 1, position: 0 };
+    let first_relay = smith_domain::run::RelayName { owner: skein_lib::Token::new(40), attempt: 1 };
+    let mut first = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    first.settle();
+    first.send_start(charter.clone());
+    first.settle();
+    first.agent_admits();
+    first.settle();
+    first.agent_calls_host(name, first_relay);
+    first.settle();
+    assert!(first.observations().iter().any(|event| matches!(event,
+        Observation::HostCall { name: received, .. }
+            if *received == smith_host_domain::CallName { activation: 1, completion: 1, position: 0 }
+    )));
+    first.cut_agent_input_after(0);
+    first.settle();
+    first.host_answers(
+        skein_lib::Token::new(1),
+        smith_host_domain::Reply::Host { error: false, body: Box::from(*b"settled during loss") },
+    );
+    first.settle();
+    assert!(!first.observations().iter().any(|event| matches!(event, Observation::AgentHostReturned { .. })));
+
+    let second_relay = smith_domain::run::RelayName { owner: skein_lib::Token::new(41), attempt: 1 };
+    let mut second = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    second.settle();
+    second.send_domain_start(
+        smith_host_domain::Start {
+            logical_run: skein_lib::Token::new(1),
+            activation: 2,
+            workspace: None,
+            charter,
+            transcript: None,
+            answered: Box::default(),
+            directories: Box::default(),
+            grants: Box::default(),
+        },
+        smith_host_domain::Window { turns: 1, bytes: 1_000_000_000 },
+        smith_host_protocol::Values { paths: Box::default(), credentials: Box::default() },
+    );
+    second.settle();
+    second.agent_admits();
+    second.settle();
+    second.agent_calls_host(name, second_relay);
+    second.settle();
+    assert!(second.observations().iter().any(|event| matches!(event,
+        Observation::HostCall { name: received, .. }
+            if *received == smith_host_domain::CallName { activation: 1, completion: 1, position: 0 }
+    )));
+    second.host_answers(
+        skein_lib::Token::new(1),
+        smith_host_domain::Reply::Host { error: false, body: Box::from(*b"settled again") },
+    );
+    second.settle();
+    assert!(second.observations().contains(&Observation::AgentHostReturned {
+        relay: second_relay,
+        reply: smith_domain::run::HostReply::Answered(
+            smith_domain::run::HostAnswer::new(Box::from(*b"settled again"), false).expect("bounded answer"),
         ),
     }));
 }

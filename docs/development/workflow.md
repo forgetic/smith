@@ -289,8 +289,9 @@ the channel referee and random stream cuts land. The one-second focused
 share and workspace budgets remain unchanged.
 
 The completed protocol channel world was measured serially on 2026-10-07
-with the `measure -j 1` profile on an idle machine. Its 36 focused tests,
-including one run routed through both real domains and both channel halves,
-passed in 0.155 seconds. Its one fuzzy test, sweeping seeded cuts on both
+with the `measure -j 1` profile on an idle machine. Its 38 focused tests,
+including a run routed through both real domains and both channel halves,
+restart numbering, and an answer lost before a named call's retry,
+passed in 0.160 seconds. Its one fuzzy test, sweeping seeded cuts on both
 stream shapes, passed in 0.205 seconds. The one-second focused and five-second
 fuzzy world shares, and workspace budgets, remain unchanged.
