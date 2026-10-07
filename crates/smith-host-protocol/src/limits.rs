@@ -33,6 +33,8 @@ pub enum Error {
     Frame(skein_channel::FrameError),
     /// A measured body could not be written into its allocation.
     Write(skein_lib::Overflow),
+    /// An answer's decoded fields do not form a typed host-domain result.
+    InvalidAnswer,
 }
 
 impl From<smith_channel::v1::Problem> for Error {

@@ -113,6 +113,7 @@ struct Peer {
     pending: Option<usize>,
     cut_after: Option<usize>,
     received_bytes: usize,
+    host_answer: Option<smith_host_domain::channel::Answer>,
 }
 
 impl Peer {
@@ -129,6 +130,7 @@ impl Peer {
             pending: None,
             cut_after: None,
             received_bytes: 0,
+            host_answer: None,
         };
         if let Half::Host(host) = &mut peer.half {
             host.open(&mut peer.host_events, &mut peer.below);
@@ -151,6 +153,7 @@ impl Peer {
             pending: None,
             cut_after: None,
             received_bytes: 0,
+            host_answer: None,
         }
     }
 
@@ -263,25 +266,27 @@ impl Peer {
                     output.push(Observation::HostCall { call, name, deadline, ask: Box::new(ask) });
                 }
                 host::OpenEvent::Withdraw { call } => output.push(Observation::HostWithdraw { call }),
-                host::OpenEvent::Answer { answer } => {
-                    output.push(Observation::HostAnswer { turns: answer.turns(), spent: answer.spent() });
-                    if let smith_channel::RunResult::Refused(refused) = answer.result()
+                host::OpenEvent::Answer { answer, record } => {
+                    assert_eq!((answer.turns, answer.spent), (record.turns(), record.spent()));
+                    output.push(Observation::HostAnswer { turns: answer.turns, spent: answer.spent });
+                    if let smith_channel::RunResult::Refused(refused) = record.result()
                         && let smith_channel::StartRefusal::Invalid(invalid) = refused.reason()
                     {
                         output.push(Observation::InvalidStart {
                             why: invalid.value().clone(),
-                            turns: answer.turns(),
-                            spent: answer.spent(),
+                            turns: answer.turns,
+                            spent: answer.spent,
                         });
                     }
-                    if let smith_channel::RunResult::Parked = answer.result() {
-                        output.push(Observation::HostParked { turns: answer.turns(), spent: answer.spent() });
+                    if let smith_channel::RunResult::Parked = record.result() {
+                        output.push(Observation::HostParked { turns: answer.turns, spent: answer.spent });
                     }
-                    if let smith_channel::RunResult::Failed(failed) = answer.result()
+                    if let smith_channel::RunResult::Failed(failed) = record.result()
                         && let smith_channel::RunFailure::Transcript(reason) = failed.reason()
                     {
                         output.push(Observation::TranscriptFailed(reason.value().clone()));
                     }
+                    assert!(self.host_answer.replace(answer).is_none(), "one typed host last word");
                 }
             }
         }
@@ -534,14 +539,14 @@ impl World {
 
     /// Have the admitted scripted domain park after its effects settle.
     pub fn agent_parks(&mut self) {
+        self.agent_answers(smith_domain::run::Answer::Parked { spent: smith_domain::run::Spend::ZERO, turns: 0 });
+    }
+
+    /// Send one actual typed domain answer through the agent half.
+    pub fn agent_answers(&mut self, answer: smith_domain::run::Answer) {
         if let Half::Agent(agent) = &mut self.agent.half {
             agent
-                .send_answer(
-                    smith_domain::run::Answer::Parked { spent: smith_domain::run::Spend::ZERO, turns: 0 },
-                    skein_lib::Token::new(33),
-                    &mut self.agent.agent_events,
-                    &mut self.agent.below,
-                )
+                .send_answer(answer, skein_lib::Token::new(33), &mut self.agent.agent_events, &mut self.agent.below)
                 .expect("bounded parked answer");
         }
     }
@@ -821,5 +826,10 @@ impl World {
     #[must_use]
     pub fn observations(&self) -> &[Observation] {
         &self.observed
+    }
+
+    /// Take the typed last word for a real host domain or a boundary assertion.
+    pub fn take_host_answer(&mut self) -> Option<smith_host_domain::channel::Answer> {
+        self.host.host_answer.take()
     }
 }

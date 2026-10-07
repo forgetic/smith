@@ -4,6 +4,7 @@ use skein_channel::{Closed, Event, Lower, LowerEvent, Machine, Request, Role, Sc
 use skein_lib::{Duration, Map, Queue, Reader, Time, Token, Writer};
 use smith_host_domain::channel;
 
+use crate::answer::decode_answer;
 use crate::limits::{Error, Limits};
 use crate::translate::{Values, decode_ask, encode_reply, encode_start};
 
@@ -46,8 +47,8 @@ pub enum OpenEvent {
     Sent { token: Token },
     /// The Start did not enter the channel's output queue.
     Unsent { token: Token, why: skein_channel::Unsent },
-    /// The agent's last word, decoded before the host domain interprets it.
-    Answer { answer: smith_channel::Answer },
+    /// The agent's last word in host-domain vocabulary, with its wire record for audit.
+    Answer { answer: channel::Answer, record: smith_channel::Answer },
     /// The agent admitted the Start before its later final answer.
     Admitted,
     /// The run is waiting after reading the named message, if any.
@@ -482,17 +483,22 @@ impl Component {
                         }
                     }
                     0x0110 => match smith_channel::Answer::decode(&self.bodies, &mut Reader::new(&body)) {
-                        Ok(answer) => {
-                            let permitted = match answer.result() {
+                        Ok(record) => {
+                            let permitted = match record.result() {
                                 smith_channel::RunResult::Refused(_) => self.phase == Phase::Started,
                                 smith_channel::RunResult::Accepted(_)
                                 | smith_channel::RunResult::Parked
                                 | smith_channel::RunResult::Failed(_) => self.phase == Phase::Admitted,
                             };
                             if permitted {
-                                self.phase = Phase::Answered;
-                                to_service.push(OpenEvent::Answer { answer });
-                                self.machine.down(Request::Read, &mut self.events, below);
+                                match decode_answer(&record) {
+                                    Ok(answer) => {
+                                        self.phase = Phase::Answered;
+                                        to_service.push(OpenEvent::Answer { answer, record });
+                                        self.machine.down(Request::Read, &mut self.events, below);
+                                    }
+                                    Err(_) => self.refuse_rules(below),
+                                }
                             } else {
                                 self.refuse_rules(below);
                             }

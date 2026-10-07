@@ -54,6 +54,18 @@ fn a_charter_in_an_unread_version_is_refused_as_invalid_with_no_turns() {
         spent: 0,
     }));
     assert!(!world.observations().contains(&Observation::AgentStart));
+    assert_eq!(
+        world.take_host_answer(),
+        Some(smith_host_domain::channel::Answer {
+            turns: 0,
+            spent: 0,
+            result: smith_host_domain::channel::RunResult::Refused {
+                refusal: smith_host_domain::channel::Refusal::Invalid(
+                    smith_host_domain::channel::RunInvalid::CharterVersion,
+                ),
+            },
+        }),
+    );
 }
 
 #[test]
@@ -205,6 +217,14 @@ fn a_run_goes_from_start_to_answer() {
     assert!(world.observations().contains(&Observation::HostAdmitted));
     assert!(world.observations().contains(&Observation::HostParked { turns: 0, spent: 0 }));
     assert!(world.observations().contains(&Observation::HostEnded(Closed::Stream)));
+    assert_eq!(
+        world.take_host_answer(),
+        Some(smith_host_domain::channel::Answer {
+            turns: 0,
+            spent: 0,
+            result: smith_host_domain::channel::RunResult::Parked
+        }),
+    );
 }
 
 #[test]
@@ -234,6 +254,43 @@ fn a_model_failure_keeps_transport_evidence_and_cooldown() {
     assert!(matches!(fault.failure(), smith_channel::CompletionFailure::RateLimited));
     assert!(matches!(fault.evidence(), smith_channel::CompletionEvidence::Response));
     assert_eq!(fault.retry_after(), &Some(skein_lib::Duration::from_nanos(42)));
+}
+
+#[test]
+fn a_model_failure_reaches_the_host_domain_in_its_typed_vocabulary() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    let retry_after = skein_lib::Duration::from_nanos(42);
+    world.agent_answers(smith_domain::run::Answer::Failed {
+        failure: smith_domain::run::Failure::Model(smith_domain::run::Fault::Completion {
+            failure: smith_domain::run::CompletionFailure::RateLimited { retry_after },
+            evidence: smith_domain::run::CompletionEvidence::Response,
+        }),
+        spent: smith_domain::run::Spend::ZERO,
+        turns: 0,
+    });
+    world.settle();
+    assert_eq!(
+        world.take_host_answer(),
+        Some(smith_host_domain::channel::Answer {
+            turns: 0,
+            spent: 0,
+            result: smith_host_domain::channel::RunResult::Failed {
+                failure: smith_host_domain::channel::RunFailure::Model(
+                    smith_host_domain::channel::ModelFault::Completion {
+                        failure: smith_host_domain::channel::CompletionFailure::RateLimited { retry_after },
+                        evidence: smith_host_domain::channel::CompletionEvidence::Response,
+                    },
+                ),
+            },
+        }),
+    );
 }
 
 #[test]
