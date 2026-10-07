@@ -10,6 +10,7 @@ publish.workspace = true
 skein-lib.workspace = true
 skein-json.workspace = true
 skein-llm.workspace = true
+skein-llm-connection.workspace = true
 smith-domain.workspace = true
 
 [lints]

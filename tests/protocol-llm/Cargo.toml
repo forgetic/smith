@@ -19,6 +19,8 @@ smith-tools-world.workspace = true
 skein-fake-checkout.workspace = true
 skein-fake-llm-domain.workspace = true
 skein-llm.workspace = true
+skein-llm-connection.workspace = true
+skein-tls.workspace = true
 skein-llm-world.workspace = true
 skein-world.workspace = true
 
