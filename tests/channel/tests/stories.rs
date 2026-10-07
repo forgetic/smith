@@ -358,6 +358,25 @@ fn a_message_reaches_the_llm_with_its_senders_label() {
 }
 
 #[test]
+fn a_long_operation_stretches_progress_until_its_end() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    let span = skein_lib::Duration::from_nanos(42);
+    world.agent_starts_long(span);
+    world.settle();
+    world.agent_ends_long();
+    world.settle();
+    assert!(world.observations().contains(&Observation::HostLong { span }));
+    assert!(world.observations().contains(&Observation::HostLongDone));
+}
+
+#[test]
 fn host_tools_answered_busy_are_asked_again_under_their_names() {
     let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
     world.settle();

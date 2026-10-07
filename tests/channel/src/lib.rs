@@ -37,6 +37,10 @@ pub enum Observation {
     AgentMessage { name: skein_lib::Token, text: Box<[u8]> },
     /// The host saw the run wait after reading a named message.
     HostWaiting { read: Option<skein_lib::Token> },
+    /// The host received a long operation's bounded span.
+    HostLong { span: skein_lib::Duration },
+    /// The host received the end of the long operation.
+    HostLongDone,
     /// The host received one named call with its deadline and metadata.
     HostCall {
         call: skein_lib::Token,
@@ -166,6 +170,8 @@ impl Peer {
                 host::OpenEvent::Unsent { token, why } => output.push(Observation::HostUnsent(token, why)),
                 host::OpenEvent::Admitted => output.push(Observation::HostAdmitted),
                 host::OpenEvent::Waiting { read } => output.push(Observation::HostWaiting { read }),
+                host::OpenEvent::Long { span } => output.push(Observation::HostLong { span }),
+                host::OpenEvent::LongDone => output.push(Observation::HostLongDone),
                 host::OpenEvent::Call { call, name, deadline, ask } => {
                     output.push(Observation::HostCall { call, name, deadline, ask: Box::new(ask) });
                 }
@@ -434,6 +440,24 @@ impl World {
             agent
                 .send_waiting(read, skein_lib::Token::new(6), &mut self.agent.agent_events, &mut self.agent.below)
                 .expect("bounded waiting");
+        }
+    }
+
+    /// Tell the host that checks begin with this progress extension.
+    pub fn agent_starts_long(&mut self, span: skein_lib::Duration) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_long(span, skein_lib::Token::new(26), &mut self.agent.agent_events, &mut self.agent.below)
+                .expect("bounded long span");
+        }
+    }
+
+    /// Tell the host that the checks ended.
+    pub fn agent_ends_long(&mut self) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_long_done(skein_lib::Token::new(27), &mut self.agent.agent_events, &mut self.agent.below)
+                .expect("bounded long end");
         }
     }
 

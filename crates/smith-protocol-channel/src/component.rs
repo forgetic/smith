@@ -3,7 +3,7 @@ use alloc::boxed::Box;
 use skein_channel::{
     Closed, Event, Frame, Lower, LowerEvent, Machine, Request, Role, Schema, StreamMode, frame_writer,
 };
-use skein_lib::{Map, Queue, Reader, Time, Token, Writer};
+use skein_lib::{Duration, Map, Queue, Reader, Time, Token, Writer};
 
 use crate::calls;
 use crate::limits::{Error, Limits};
@@ -209,6 +209,55 @@ impl Component {
         let mut body = Writer::new(length);
         record.encode(&mut body)?;
         let mut frame = frame_writer(0x010a, record.measure())?;
+        frame.put(&body.finish())?;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
+    /// Announce the bounded span of a check or other long operation.
+    pub fn send_long(
+        &mut self,
+        span: Duration,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let record = smith_channel::Long::new(&self.bodies, smith_channel::LongParts { span })?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::ResultCapacity);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x010b, record.measure())?;
+        frame.put(&body.finish())?;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
+    /// End the announced long operation when its checks finish.
+    pub fn send_long_done(
+        &mut self,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let record = smith_channel::LongDone::new(&self.bodies, smith_channel::LongDoneParts {})?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::ResultCapacity);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x010c, record.measure())?;
         frame.put(&body.finish())?;
         self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
         self.drain(to_service, below);

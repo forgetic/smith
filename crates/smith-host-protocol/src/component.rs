@@ -1,7 +1,7 @@
 //! Host-side opening machine (protocol/channel.md, sections 2 and 5).
 use alloc::boxed::Box;
 use skein_channel::{Closed, Event, Lower, LowerEvent, Machine, Request, Role, Schema, StreamMode, frame_writer};
-use skein_lib::{Map, Queue, Reader, Time, Token, Writer};
+use skein_lib::{Duration, Map, Queue, Reader, Time, Token, Writer};
 use smith_host_domain::channel;
 
 use crate::limits::{Error, Limits};
@@ -52,6 +52,10 @@ pub enum OpenEvent {
     Admitted,
     /// The run is waiting after reading the named message, if any.
     Waiting { read: Option<Token> },
+    /// The run announced a long operation with a bounded progress extension.
+    Long { span: Duration },
+    /// The run ended its previously announced long operation.
+    LongDone,
     /// A named operation whose one host terminal remains owed.
     Call { call: Token, name: channel::CallName, deadline: Time, ask: channel::Ask },
     /// The agent withdrew a call; its terminal still remains owed.
@@ -294,6 +298,24 @@ impl Component {
                                     None => None,
                                 };
                                 to_service.push(OpenEvent::Waiting { read });
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
+                    0x010b if self.phase == Phase::Admitted => {
+                        match smith_channel::Long::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(long) => {
+                                to_service.push(OpenEvent::Long { span: long.span() });
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
+                    0x010c if self.phase == Phase::Admitted => {
+                        match smith_channel::LongDone::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(_) => {
+                                to_service.push(OpenEvent::LongDone);
                                 self.machine.down(Request::Read, &mut self.events, below);
                             }
                             Err(_) => self.refuse_rules(below),
