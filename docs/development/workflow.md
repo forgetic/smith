@@ -274,3 +274,10 @@ version conflict, git and symbolic-link refusals, bounded output flood,
 child deadline, three check outcomes, and write-authority referee. There is
 no fuzzy test until increment 04.4. Its one-second focused share and the
 workspace budgets remain unchanged.
+
+After increment 04.4, the protocol machine world was measured serially on
+2026-10-07 with the `measure -j 1` profile on an idle machine. Seven focused
+tests, including its saturated memory bound, passed in 0.029 seconds. Its
+128-seed fuzzy replay sweep passed in 0.037 seconds. The world's one-second
+focused and five-second fuzzy shares, and the workspace budgets, remain
+unchanged.

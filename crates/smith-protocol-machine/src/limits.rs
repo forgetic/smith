@@ -2,7 +2,9 @@
 //! protocol/agent.md, section 2).
 
 use core::mem::size_of;
-use skein_lib::{Duration, List, Map, Token};
+use skein_json::tokenizer;
+use skein_lib::stream::Down;
+use skein_lib::{Duration, List, Map, Queue, Stack, Token};
 
 use crate::component::{Pending, Root};
 use crate::process::Process;
@@ -54,30 +56,54 @@ pub const fn max_out(limits: &Limits) -> MaxOut {
     MaxOut { to_domain: 1, below }
 }
 
-/// Memory retained by the component and one translating scan.
+/// Heap retained by the component, plus its largest transient translation.
+/// Caller-owned request buffers handed below are accounted by their owner.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
-    let roots = List::<Root>::worst_case(limits.roots)?;
+    // Installing a new workspace temporarily coexists with the old root list.
+    let roots = List::<Root>::worst_case(limits.roots)?.checked_mul(2)?;
     let operations = Map::<Token, Pending>::worst_case(limits.operations)?;
     let scan = u64::from(limits.entries).checked_mul(u64::try_from(size_of::<smith_domain::tools::Entry>()).ok()?)?;
+    let guides = Map::<Token, crate::guide::Guide>::worst_case(limits.operations)?
+        .checked_add(u64::from(limits.file_bytes).checked_mul(u64::from(limits.operations))?)?;
     let processes = Map::<Token, Process>::worst_case(limits.processes)?;
-    let guides = Map::<Token, crate::guide::Guide>::worst_case(limits.operations)?;
     let pipes = Map::<Token, Token>::worst_case(limits.processes.checked_mul(2)?)?;
-    let output = u64::from(limits.output_bytes).checked_mul(2)?.checked_mul(u64::from(limits.processes))?;
+    let window = limits.output_bytes.max(limits.search_bytes);
+    let output = u64::from(window).checked_mul(2)?.checked_mul(u64::from(limits.processes))?;
     let search = u64::from(limits.search_bytes)
         .checked_add(u64::from(limits.search_line_bytes))?
         .checked_add(
             u64::from(limits.search_hits).checked_mul(u64::try_from(size_of::<smith_domain::tools::Hit>()).ok()?)?,
         )?
         .checked_mul(u64::from(limits.processes))?;
+    let variables =
+        u64::from(limits.env_bytes / 2).checked_mul(u64::try_from(size_of::<smith_domain::tools::Var>()).ok()?)?;
+    let environment = variables.checked_add(u64::from(limits.env_bytes))?;
+    let tokenizer_limits = tokenizer::Limits {
+        depth: 8,
+        string: limits.search_line_bytes.max(1),
+        number: 20,
+        chunk: 64,
+        length: limits.search_line_bytes.max(1),
+    };
+    // One JSON line parses at a time. Its token payloads and a sorting swap
+    // can overlap the retained line and hit buffers at their largest size.
+    let parse = tokenizer::worst_case(&tokenizer_limits)?
+        .checked_add(Queue::<tokenizer::Event>::worst_case(1)?)?
+        .checked_add(Queue::<Down>::worst_case(1)?)?
+        .checked_add(Stack::<u8>::worst_case(8)?)?
+        .checked_add(u64::from(limits.search_line_bytes).checked_mul(2)?)?
+        .checked_add(u64::from(limits.search_bytes).checked_mul(2)?)?;
+    let scratch = List::<Token>::worst_case(limits.processes)?.checked_add(u64::from(window))?.checked_add(parse)?;
     roots
         .checked_add(operations)?
         .checked_add(scan)?
         .checked_add(limits.entry_bytes)?
-        .checked_add(processes)?
         .checked_add(guides)?
+        .checked_add(processes)?
         .checked_add(pipes)?
         .checked_add(output)?
         .checked_add(search)?
-        .checked_add(u64::from(limits.env_bytes))
+        .checked_add(environment)?
+        .checked_add(scratch)
 }

@@ -11,6 +11,7 @@ skein-lib.workspace = true
 skein-io.workspace = true
 skein-sim.workspace = true
 skein-fake-machine.workspace = true
+skein-world.workspace = true
 smith-domain.workspace = true
 smith-protocol-machine.workspace = true
 
