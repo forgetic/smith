@@ -1,9 +1,11 @@
 //! Host-side opening machine (protocol/channel.md, sections 2 and 5).
 use alloc::boxed::Box;
 use skein_channel::{Closed, Event, Lower, LowerEvent, Machine, Request, Role, Schema, StreamMode};
-use skein_lib::Queue;
+use skein_lib::{Queue, Token};
+use smith_host_domain::channel;
 
 use crate::limits::{Error, Limits};
+use crate::translate::{Values, encode_start};
 
 const RULES: u16 = 256;
 
@@ -14,6 +16,10 @@ pub enum OpenEvent {
     Opened { version: u16 },
     /// The channel ended before or after opening.
     Hangup { why: Closed },
+    /// The framed Start entered the channel's bounded output queue.
+    Sent { token: Token },
+    /// The Start did not enter the channel's output queue.
+    Unsent { token: Token, why: skein_channel::Unsent },
 }
 
 /// The initiator's framed channel and checked sending terms.
@@ -21,6 +27,7 @@ pub enum OpenEvent {
 pub struct Component {
     machine: Machine,
     schema: Schema,
+    bodies: smith_channel::Limits,
     events: Queue<Event>,
     opened: bool,
     ended: bool,
@@ -37,13 +44,37 @@ impl Component {
             Ok(machine) => machine,
             Err(error) => return Err(Error::Channel(error)),
         };
-        Ok(Component { machine, schema, events: Queue::with_capacity(8), opened: false, ended: false })
+        Ok(Component {
+            machine,
+            schema,
+            bodies: limits.bodies,
+            events: Queue::with_capacity(8),
+            opened: false,
+            ended: false,
+        })
     }
 
     /// Start the pipe opening with its empty credential.
     pub fn open(&mut self, to_service: &mut Queue<OpenEvent>, below: &mut Queue<Lower>) {
         self.machine.down(Request::Open { credential: Box::default() }, &mut self.events, below);
         self.fire(to_service, below);
+    }
+
+    /// Submit the first application record after opening, with host service values.
+    pub fn send_start(
+        &mut self,
+        start: channel::Start,
+        window: channel::Window,
+        values: Values,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        let frame = encode_start(start, window, values, &self.bodies)?;
+        self.machine.down(Request::Send { token, frame }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
     }
 
     /// Consume one stream event and progress the opening.
@@ -110,12 +141,16 @@ impl Component {
                         to_service.push(OpenEvent::Hangup { why: Closed::Stream });
                     }
                 }
+                Some(Event::Sent { token }) => {
+                    to_service.push(OpenEvent::Sent { token });
+                }
+                Some(Event::Unsent { token, why }) => {
+                    to_service.push(OpenEvent::Unsent { token, why });
+                }
                 Some(
                     Event::Ping
                     | Event::Unsupported { .. }
                     | Event::Refused { .. }
-                    | Event::Sent { .. }
-                    | Event::Unsent { .. }
                     | Event::Drained
                     | Event::OutputFailed,
                 )

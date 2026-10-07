@@ -19,6 +19,32 @@ pub enum Error {
     Codec(smith_channel::Overflow),
     /// Skein rejected the schema or framing limits.
     Channel(SchemaError),
+    /// A service omitted a workspace path or credential value.
+    MissingValue,
+    /// A host record does not fit the configured channel body limits.
+    Body(smith_channel::v1::Problem),
+    /// The measured frame could not be written.
+    Frame(skein_channel::FrameError),
+    /// A measured body could not be written into its allocation.
+    Write(skein_lib::Overflow),
+}
+
+impl From<smith_channel::v1::Problem> for Error {
+    fn from(problem: smith_channel::v1::Problem) -> Error {
+        Error::Body(problem)
+    }
+}
+
+impl From<skein_channel::FrameError> for Error {
+    fn from(problem: skein_channel::FrameError) -> Error {
+        Error::Frame(problem)
+    }
+}
+
+impl From<skein_lib::Overflow> for Error {
+    fn from(problem: skein_lib::Overflow) -> Error {
+        Error::Write(problem)
+    }
 }
 
 /// Slots reserved by the caller at each entry point during opening.

@@ -19,6 +19,10 @@ pub enum Observation {
     AgentOpened(u16),
     /// Host's channel ended.
     HostEnded(Closed),
+    /// Host's Start was admitted to the output queue.
+    HostSent(skein_lib::Token),
+    /// Host's Start could not enter the output queue.
+    HostUnsent(skein_lib::Token, skein_channel::Unsent),
     /// Agent's channel ended.
     AgentEnded(Closed),
 }
@@ -119,6 +123,8 @@ impl Peer {
             match event {
                 host::OpenEvent::Opened { version } => output.push(Observation::HostOpened(version)),
                 host::OpenEvent::Hangup { why } => output.push(Observation::HostEnded(why)),
+                host::OpenEvent::Sent { token } => output.push(Observation::HostSent(token)),
+                host::OpenEvent::Unsent { token, why } => output.push(Observation::HostUnsent(token, why)),
             }
         }
         while let Some(event) = self.agent_events.pop() {
