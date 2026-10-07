@@ -83,7 +83,8 @@ modify (`write`, `edit`), shell.
   is to complement it, as a tool source of its own (run.md, 5.1).
 - **Shell** runs in a contained process tree (io), with a deadline, the
   head and tail of its output captured, and an environment without
-  credentials. The tree's view of the workspace is the confinement: a
+  credentials, which the agent's configuration gives
+  (`protocol/agent.md`, section 3). The tree's view of the workspace is the confinement: a
   command writes only the writable directories, and every git directory
   is read-only to it, since the host commits the checked tree, merges in
   progress included, and the LLM needs no git writes.
@@ -107,9 +108,6 @@ of a version not read; every call answered once.
 
 ## 8. Open questions
 
-- **The environment commands run with:** empty today, so no `PATH`; what
-  a command needs to build and test, without credentials, and whether a
-  charter names it.
 - **A code graph:** indexing a workspace for codebase-memory-mcp, served
   as an MCP tool source, and who keeps the index.
 - **Workspaces beyond directories** (README.md, section 8).

@@ -281,14 +281,15 @@ temper's channel between its engine and its workers is to be built on.
   - a last word;
   - keepalive frames, scheduled by its owner.
 
-  skein's channel today is temper's first version, extracted as it was. It
-  is to be designed again as a generic channel.
+  Designed in skein's `channel.md`.
 - **Codecs generated from schemas:**
   - bounded records with versions;
   - measured encoding;
   - bounded decoding with typed problems;
   - each record's worst case;
   - golden bytes.
+
+  Designed in skein's `codec.md`.
 - **Contained process trees:**
   - spawned within a deadline;
   - with an environment given whole and a view of the file system in
@@ -296,9 +297,10 @@ temper's channel between its engine and its workers is to be built on.
   - stopped politely, then terminated, then killed, and proved empty
     (domain/tools.md, section 5; domain/host.md, section 4).
 
-  io spawns and signals one child today (skein's `io.md`, section 6).
+  Designed in skein's `process.md`.
 - **Connections for LLM calls,** as a component: connecting, TLS, and the
-  deadlines skein's LLM client leaves to its owner.
+  deadlines skein's LLM client leaves to its owner. Designed in skein's
+  `llm-connection.md`.
 - **Sockets and TLS** for a connected agent, and **OAuth** for the local
   host's sign-in, as skein has them.
 - **Fakes:**
