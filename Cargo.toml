@@ -18,6 +18,7 @@ skein-channel = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-heap = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-io = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-shell = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-sim = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-fake-machine = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-http = { git = "https://git.ekanayaka.io/ai/skein.git" }
@@ -47,6 +48,7 @@ smith-channel = { path = "crates/smith-channel" }
 smith-protocol-channel = { path = "crates/smith-protocol-channel" }
 smith-host-protocol = { path = "crates/smith-host-protocol" }
 smith-agent-service = { path = "crates/smith-agent-service" }
+smith = { path = "crates/smith" }
 smith-run-world = { path = "tests/run" }
 smith-session-world = { path = "tests/session" }
 smith-tools-world = { path = "tests/tools" }
