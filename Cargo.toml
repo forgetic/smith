@@ -2,7 +2,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs"]
+members = ["crates/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine"]
 
 [workspace.package]
 version = "0.0.0"
@@ -18,6 +18,8 @@ skein-channel = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-heap = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-io = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-sim = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-fake-machine = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-http = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-json = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-fake-checkout = { git = "https://git.ekanayaka.io/ai/skein.git" }

@@ -78,6 +78,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "skein-fake-machine"
+version = "0.0.0"
+source = "git+https://git.ekanayaka.io/ai/skein.git#17b221b8423352d5c1d30128837ccbf5cd8025c2"
+dependencies = [
+ "skein-io",
+ "skein-lib",
+ "skein-sim",
+]
+
+[[package]]
 name = "skein-heap"
 version = "0.0.0"
 source = "git+https://git.ekanayaka.io/ai/skein.git#17b221b8423352d5c1d30128837ccbf5cd8025c2"
@@ -283,6 +293,18 @@ dependencies = [
  "smith-domain",
  "smith-local-domain",
  "smith-session-world",
+]
+
+[[package]]
+name = "smith-machine-world"
+version = "0.0.0"
+dependencies = [
+ "skein-fake-machine",
+ "skein-io",
+ "skein-lib",
+ "skein-sim",
+ "smith-domain",
+ "smith-protocol-machine",
 ]
 
 [[package]]

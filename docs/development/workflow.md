@@ -266,3 +266,11 @@ drift, version and kind tables, and bounded charter and turn decoding. The
 fuzzy test drives all 20 top-level records with arbitrary and mutated bytes.
 The world's one-second focused and five-second fuzzy shares, and workspace
 budgets, are unchanged.
+
+The protocol machine world was measured serially on 2026-10-07 with
+`cargo nextest run -p smith-machine-world --profile measure -j 1` on an idle
+machine. Its six focused stories passed in 0.025 seconds, including the file
+version conflict, git and symbolic-link refusals, bounded output flood,
+child deadline, three check outcomes, and write-authority referee. There is
+no fuzzy test until increment 04.4. Its one-second focused share and the
+workspace budgets remain unchanged.
