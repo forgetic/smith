@@ -204,6 +204,7 @@ fn a_run_goes_from_start_to_answer() {
     world.settle();
     assert!(world.observations().contains(&Observation::HostAdmitted));
     assert!(world.observations().contains(&Observation::HostParked { turns: 0, spent: 0 }));
+    assert!(world.observations().contains(&Observation::HostEnded(Closed::Stream)));
 }
 
 #[test]
@@ -569,6 +570,30 @@ fn a_cancel_with_a_host_call_in_flight_keeps_its_terminal_and_one_answer() {
     assert_eq!(
         world.observations().iter().filter(|observation| matches!(observation, Observation::HostParked { .. })).count(),
         1
+    );
+}
+
+#[test]
+fn a_failed_agent_write_does_not_end_its_read_stream() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    world.agent_next_write_fails();
+    world.agent_waits(None);
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentWriteFailed));
+    world.send_message(skein_lib::Token::new(44), Box::from(*b"Ada"), Box::from(*b"continue"));
+    world.settle();
+    assert!(
+        world.observations().contains(&Observation::AgentMessage {
+            name: skein_lib::Token::new(44),
+            text: Box::from(*b"Ada: continue"),
+        })
     );
 }
 

@@ -53,6 +53,10 @@ pub enum Observation {
     HostExhausted { account: u32, retry_after: skein_lib::Duration },
     /// The agent received the host's one polite cancellation.
     AgentCancel,
+    /// The agent's write stream failed while its read side may continue.
+    AgentWriteFailed,
+    /// The host's write stream failed while its read side may continue.
+    HostWriteFailed,
     /// The agent received exact durable commitment for one turn.
     AgentAcknowledged { turn: u32 },
     /// The host received one named call with its deadline and metadata.
@@ -93,6 +97,9 @@ struct Peer {
     host_events: Queue<host::OpenEvent>,
     agent_events: Queue<agent::OpenEvent>,
     incoming: VecDeque<u8>,
+    incoming_ended: bool,
+    end_reported: bool,
+    fail_next_write: bool,
     pending: Option<usize>,
 }
 
@@ -104,6 +111,9 @@ impl Peer {
             host_events: Queue::with_capacity(16),
             agent_events: Queue::with_capacity(16),
             incoming: VecDeque::new(),
+            incoming_ended: false,
+            end_reported: false,
+            fail_next_write: false,
             pending: None,
         };
         if let Half::Host(host) = &mut peer.half {
@@ -121,6 +131,9 @@ impl Peer {
             host_events: Queue::with_capacity(16),
             agent_events: Queue::with_capacity(16),
             incoming: VecDeque::new(),
+            incoming_ended: false,
+            end_reported: false,
+            fail_next_write: false,
             pending: None,
         }
     }
@@ -147,15 +160,17 @@ impl Peer {
                     self.pending = Some(usize::try_from(count).expect("bounded read"));
                 }
                 Lower::Read(stream::Down::Demand { read: stream::Read::Nothing, room: 0 }) => self.pending = None,
-                Lower::Read(stream::Down::Finish)
-                | Lower::FinishWrite
-                | Lower::Write(stream::OutputDown::Release { .. }) => {}
+                Lower::Read(stream::Down::Finish) | Lower::Write(stream::OutputDown::Release { .. }) => {}
+                Lower::FinishWrite => other.incoming_ended = true,
                 Lower::Read(other) => panic!("unexpected read demand: {other:?}"),
                 Lower::Write(stream::OutputDown::Room { right, .. }) => {
-                    self.receive(LowerEvent::Write(stream::OutputUp::Settled {
-                        right,
-                        outcome: OutputOutcome::Granted,
-                    }));
+                    let outcome = if self.fail_next_write {
+                        self.fail_next_write = false;
+                        OutputOutcome::Failed(stream::Fault::Other)
+                    } else {
+                        OutputOutcome::Granted
+                    };
+                    self.receive(LowerEvent::Write(stream::OutputUp::Settled { right, outcome }));
                 }
                 Lower::Write(stream::OutputDown::Send { bytes, .. }) => other.incoming.extend(bytes.iter().copied()),
                 Lower::Write(stream::OutputDown::Cancel { right }) => {
@@ -172,6 +187,11 @@ impl Peer {
             let bytes: Box<[u8]> = (0..count).map(|_| self.incoming.pop_front().expect("enough input")).collect();
             self.pending = None;
             self.receive(LowerEvent::Read(stream::Up::Bytes(bytes)));
+        }
+        if self.pending.is_some() && self.incoming_ended && self.incoming.is_empty() && !self.end_reported {
+            self.pending = None;
+            self.end_reported = true;
+            self.receive(LowerEvent::Read(stream::Up::End));
         }
     }
 
@@ -209,7 +229,7 @@ impl Peer {
                 host::OpenEvent::Exhausted { account, retry_after } => {
                     output.push(Observation::HostExhausted { account, retry_after });
                 }
-                host::OpenEvent::WriteFailed => {}
+                host::OpenEvent::WriteFailed => output.push(Observation::HostWriteFailed),
                 host::OpenEvent::Call { call, name, deadline, ask } => {
                     output.push(Observation::HostCall { call, name, deadline, ask: Box::new(ask) });
                 }
@@ -284,7 +304,7 @@ impl Peer {
                     valid: grant.valid,
                 }),
                 agent::OpenEvent::Cancel => output.push(Observation::AgentCancel),
-                agent::OpenEvent::WriteFailed => {}
+                agent::OpenEvent::WriteFailed => output.push(Observation::AgentWriteFailed),
             }
         }
     }
@@ -651,6 +671,11 @@ impl World {
             host.send_cancel(skein_lib::Token::new(36), &mut self.host.host_events, &mut self.host.below)
                 .expect("one cancel");
         }
+    }
+
+    /// Make the agent's next output-room operation fail without ending input.
+    pub fn agent_next_write_fails(&mut self) {
+        self.agent.fail_next_write = true;
     }
 
     /// Have the scripted domain relay a declared host tool under a durable name.
