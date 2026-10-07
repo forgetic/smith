@@ -68,6 +68,9 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let answered = Map::<run::CallName, DeliveryRecord>::worst_case(limits.agent.run.answered_calls)?.checked_add(
         u64::from(limits.agent.run.answered_calls).checked_mul(run::Delivered::worst_case().max(intent))?,
     )?;
+    let heads = Map::<u32, Box<[u8]>>::worst_case(limits.agent.run.directories)?
+        .checked_add(u64::from(limits.agent.run.directories).checked_mul(u64::try_from(run::Receipt::CAPACITY).ok()?)?)?
+        .checked_mul(2)?;
     let delivery = skein_lib::List::<run::Receipt>::worst_case(run::MAX_DIRECTORIES)?
         .checked_add(run::Delivered::worst_case().checked_mul(4)?)?
         .checked_add(limits.agent.run.outcome_bytes.checked_mul(2)?)?
@@ -86,5 +89,6 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(held)?
         .checked_add(delivery)?
         .checked_add(answered)?
+        .checked_add(heads)?
         .checked_add(Queue::<Fact>::worst_case(limits.facts)?)
 }

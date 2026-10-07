@@ -153,6 +153,12 @@ enum PushFault {
     Next,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HeadChange {
+    None,
+    BeforeDelivery,
+}
+
 /// Which store request should fail once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StoreFault {
@@ -197,6 +203,7 @@ pub struct World {
     delayed_turns: VecDeque<u32>,
     slow_git: bool,
     push_fault: PushFault,
+    head_change: HeadChange,
     held_git: VecDeque<(Token, GitResult)>,
     first_failure: FirstFailure,
     credential_requests: u32,
@@ -634,6 +641,7 @@ impl World {
             delayed_turns: VecDeque::new(),
             slow_git: false,
             push_fault: PushFault::None,
+            head_change: HeadChange::None,
             held_git: VecDeque::new(),
             first_failure: FirstFailure::None,
             credential_requests: 0,
@@ -679,6 +687,11 @@ impl World {
     /// Fail the next typed push operation.
     pub fn fail_next_push(&mut self) {
         self.push_fault = PushFault::Next;
+    }
+
+    /// Make an outside local commit after the run starts, before delivery surveys it.
+    pub fn commit_meanwhile(&mut self) {
+        self.head_change = HeadChange::BeforeDelivery;
     }
 
     /// Release one git terminal already computed by the fake checkout.
@@ -1064,6 +1077,21 @@ impl World {
                 self.events.push_back(Event::PlainStatus { owner, changed });
             }
             Request::Git { owner, directory, op, deadline } => {
+                if self.head_change == HeadChange::BeforeDelivery && directory == 0 && matches!(&op, GitOp::Status) {
+                    self.disk.write(b"work/outside.txt", b"outside commit\n");
+                    let head = self.git_head.expect("local head exists");
+                    let moved = git::commit(
+                        self.history.as_mut().expect("git graph exists"),
+                        &mut self.disk,
+                        b"work",
+                        head,
+                        b"outside",
+                    )
+                    .expect("outside commit can be made")
+                    .expect("outside tree changed");
+                    self.git_head = Some(moved);
+                    self.head_change = HeadChange::None;
+                }
                 let pushing = matches!(op, GitOp::Push { .. });
                 let result = if self.env.now > deadline {
                     GitResult::Failed {
@@ -1078,6 +1106,7 @@ impl World {
                     }
                 } else if directory == 1 {
                     match op {
+                        GitOp::Head => GitResult::Head { head: b"1".as_slice().into() },
                         GitOp::Status => {
                             GitResult::Status { changed: true, merging: None, head: b"1".as_slice().into() }
                         }
@@ -1111,7 +1140,7 @@ impl World {
                 if pushing && matches!(result, GitResult::Pushed) && self.cut == Some(Cut::BeforePushTerminal) {
                     self.reached.insert(Goal::Cut);
                 }
-                if self.slow_git {
+                if self.slow_git && !matches!(result, GitResult::Head { .. }) {
                     self.held_git.push_back((owner, result));
                 } else {
                     self.events.push_back(Event::Git { owner, result });
@@ -1126,6 +1155,7 @@ impl World {
         let head = self.git_head.expect("git operation has a checkout head");
         let history = self.history.as_mut().expect("git operation has a graph");
         match op {
+            GitOp::Head => GitResult::Head { head: head.to_string().into_bytes().into() },
             GitOp::Status => {
                 let mut tree = self.disk.tree(b"work");
                 tree.retain(|path, _| !skein_fake_checkout::in_git(path));
@@ -1172,7 +1202,10 @@ impl World {
                 match committed {
                     Some(Some(commit)) => {
                         self.git_head = Some(commit);
-                        GitResult::Committed { receipt: format!("commit {commit}").into_bytes().into() }
+                        GitResult::Committed {
+                            receipt: format!("commit {commit}").into_bytes().into(),
+                            head: commit.to_string().into_bytes().into(),
+                        }
                     }
                     Some(None) => GitResult::Failed {
                         reason: run::DeliveryReason::Broken,

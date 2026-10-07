@@ -128,6 +128,30 @@ fn a_moved_remote_makes_a_configured_push_stale() {
 }
 
 #[test]
+fn a_commit_made_meanwhile_in_the_repository_makes_the_delivery_stale() {
+    let mut world = World::with_git_change(234);
+    world.commit_meanwhile();
+    world.line(b"Make the answer 43");
+    world.drive(600);
+    assert!(
+        matches!(world.delivery(), Some(smith_domain::run::Delivery::Stale)),
+        "delivery: {:?}; trace: {:?}",
+        world.delivery(),
+        world.trace()
+    );
+    assert_eq!(world.delivery_commits(), 0, "the host made no delivery commit");
+}
+
+#[test]
+fn a_second_delivery_after_the_hosts_own_commit_is_not_stale() {
+    let mut world = World::with_two_deliveries(235);
+    world.line(b"Deliver twice");
+    world.drive(600);
+    assert_eq!(world.delivery_commits(), 1);
+    assert!(matches!(world.delivery(), Some(smith_domain::run::Delivery::Nothing)));
+}
+
+#[test]
 fn a_commit_before_push_is_recovered_to_the_recorded_target() {
     let mut first = World::with_push(224);
     first.line(b"Make the answer 43 and push");

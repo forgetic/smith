@@ -65,6 +65,8 @@ impl DeliveryRecord {
 /// A typed operation on one configured git working tree.
 #[derive(Debug)]
 pub enum GitOp {
+    /// Read the current local head before the run starts.
+    Head,
     /// Discover changes and merge-conflicted paths.
     Status,
     /// Inspect the current head and whether its commit carries this delivery's name.
@@ -80,6 +82,8 @@ pub enum GitOp {
 /// One terminal for a typed git operation.
 #[derive(Debug)]
 pub enum GitResult {
+    /// Current local head before the run starts.
+    Head { head: Box<[u8]> },
     /// Current working-tree state and any original merge conflicts.
     Status { changed: bool, merging: Option<Box<[Box<[u8]>]>>, head: Box<[u8]> },
     /// Current head and whether its commit message has the call-name trailer.
@@ -87,7 +91,7 @@ pub enum GitResult {
     /// First original conflict file still holding a marker, if any.
     Markers { first: Option<Box<[u8]>> },
     /// The new commit identity to show the agent and person.
-    Committed { receipt: Box<[u8]> },
+    Committed { receipt: Box<[u8]>, head: Box<[u8]> },
     /// The configured branch now names the commit.
     Pushed,
     /// The remote branch moved since this checkout began.
