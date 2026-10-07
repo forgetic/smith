@@ -1,0 +1,17 @@
+[package]
+name = "smith-charter"
+description = "Versioned charter and result codecs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+skein-lib.workspace = true
+skein-codec.workspace = true
+
+[dev-dependencies]
+skein-codegen.workspace = true
+
+[lints]
+workspace = true

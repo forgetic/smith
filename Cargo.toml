@@ -2,7 +2,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local"]
+members = ["crates/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs"]
 
 [workspace.package]
 version = "0.0.0"
@@ -12,6 +12,8 @@ publish = false
 
 [workspace.dependencies]
 skein-lib = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-codec = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-codegen = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-io = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-http = { git = "https://git.ekanayaka.io/ai/skein.git" }
@@ -31,6 +33,7 @@ smith-domain-run = { path = "crates/smith-domain-run" }
 smith-domain-session = { path = "crates/smith-domain-session" }
 smith-domain-tools = { path = "crates/smith-domain-tools" }
 smith-protocol-llm = { path = "crates/smith-protocol-llm" }
+smith-charter = { path = "crates/smith-charter" }
 smith-run-world = { path = "tests/run" }
 smith-session-world = { path = "tests/session" }
 smith-tools-world = { path = "tests/tools" }

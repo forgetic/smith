@@ -1,0 +1,76 @@
+family smith-charter 1
+
+# Section bounds cover host brief text; admission also applies Limits.run_bytes.
+record Section { title: text 1024 body: text 262144 }
+record Families { inspect: bool modify: bool shell: bool agents: bool }
+enum Effect { read, write }
+
+# Schema bytes match HostInput::CAPACITY (65536); host tool names and text
+# are included in the run's aggregate ownership cap.
+record HostTool {
+    name: text 64
+    description: text 8192
+    input: bytes 65536
+    effect: Effect
+    deadline: duration
+}
+
+# Counts and text ceilings bound one declaration; run admission checks the
+# complete contract against Limits.run_bytes and Limits.verdicts.
+record FieldRule { name: text 64 max: u32 }
+record TextRule { max: u32 fields: list 32 FieldRule }
+record ItemKind { kind: text 64 fields: list 32 FieldRule }
+record VerdictRule {
+    label: text 64
+    text_max: u32
+    fields: list 32 FieldRule
+    least: u32
+    most: u32
+    kinds: list 32 ItemKind
+}
+record ChangeRule { checks_must_pass: bool fields: list 32 FieldRule }
+record Contract {
+    report: option TextRule
+    verdicts: list 32 VerdictRule
+    change: option ChangeRule
+    failure: option TextRule
+}
+
+# The host-tool count covers the current configured maximum; the domain
+# checks it again at the entrance against Limits.host_tools.
+record Tools {
+    families: Families
+    wait: bool
+    deliver: option ChangeRule
+    host: list 128 HostTool
+}
+record Conventions { guide: text 1024 checks: text 1024 }
+record Prices { input: u64 cached: u64 output: u64 unit: u32 }
+record Llm { endpoint: text 64 model: text 128 max_tokens: u32 prices: Prices }
+record Budget { turns: u32 spend: u64 time: duration }
+
+# The complete charter is also bounded by the receiving run's Limits.run_bytes.
+versioned record Charter {
+    instructions: text 262144
+    brief: list 64 Section
+    tools: Tools
+    contract: Contract
+    conventions: option Conventions
+    budget: Budget
+    main: Llm
+    models: list 16 Llm
+    waiting: duration
+    resume: bool
+}
+
+# Result ownership is checked against Limits.outcome_bytes before judgement.
+record Field { name: text 64 text: text 262144 }
+record Item { kind: text 64 fields: list 32 Field }
+enum Form { report, verdict, change, failure }
+versioned record RunResult {
+    form: Form
+    label: option text 64
+    text: text 262144
+    fields: list 32 Field
+    items: list 256 Item
+}
