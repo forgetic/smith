@@ -247,9 +247,9 @@ fn the_start_keeps_workspace_paths_saved_answers_and_grant_values_below_the_doma
     assert!(world.observations().contains(&Observation::AgentContext {
         path: Box::from(*b"/tmp/src"),
         answered: 1,
-        credential: Box::from(*b"secret"),
         window: 2,
     }));
+    assert_eq!(world.agent_grant_value(3, 4), Some(Box::from(*b"secret")));
     assert!(world.observations().contains(&Observation::AgentSavedHost {
         activation: 6,
         tool: Box::from(*b"check"),
@@ -487,6 +487,38 @@ fn facts_are_dropped_under_pressure_and_waiting_still_passes() {
             .count(),
         usize::try_from(kept).expect("small fact count")
     );
+}
+
+#[test]
+fn grants_refreshed_while_a_call_is_in_flight_reach_the_table() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start_with_context(
+        Box::from(&include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..]),
+        smith_host_domain::SavedReply::TooLarge,
+    );
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    world.agent_calls_host(
+        smith_domain::run::CallName { activation: 7, completion: 1, position: 0 },
+        smith_domain::run::RelayName { owner: skein_lib::Token::new(10), attempt: 1 },
+    );
+    world.settle();
+    world.host_refreshes_grant(3, 5, Box::from(*b"new-secret"));
+    world.settle();
+    assert_eq!(world.agent_grant_value(3, 4), Some(Box::from(*b"secret")));
+    assert_eq!(world.agent_grant_value(3, 5), Some(Box::from(*b"new-secret")));
+    assert!(world.observations().contains(&Observation::AgentGrant {
+        account: 3,
+        generation: 5,
+        valid: skein_lib::Duration::from_nanos(50),
+    }));
+    world.host_refreshes_grant(3, 6, Box::from(*b"latest"));
+    world.settle();
+    assert_eq!(world.agent_grant_value(3, 4), None);
+    assert_eq!(world.agent_grant_value(3, 5), Some(Box::from(*b"new-secret")));
+    assert_eq!(world.agent_grant_value(3, 6), Some(Box::from(*b"latest")));
 }
 
 #[test]

@@ -213,6 +213,42 @@ impl Component {
         Ok(())
     }
 
+    /// Refresh one named grant with the service-owned credential value.
+    pub fn send_grant(
+        &mut self,
+        grant: channel::Grant,
+        credential: Box<[u8]>,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let value = smith_channel::GrantValue::new(&self.bodies, smith_channel::GrantValueParts { credential })?;
+        let grant = smith_channel::Grant::new(
+            &self.bodies,
+            smith_channel::GrantParts {
+                account: grant.account,
+                generation: grant.generation,
+                valid: grant.valid,
+                value,
+            },
+        )?;
+        let record = smith_channel::GrantRefresh::new(&self.bodies, smith_channel::GrantRefreshParts { grant })?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::MissingValue);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x0104, record.measure())?;
+        frame.put(&body.finish())?;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
     /// Consume one stream event and progress the opening.
     pub fn from_below(&mut self, event: LowerEvent, to_service: &mut Queue<OpenEvent>, below: &mut Queue<Lower>) {
         self.machine.up(event, &mut self.events, below);

@@ -28,7 +28,9 @@ pub enum Observation {
     /// Agent received a valid Start body.
     AgentStart,
     /// Agent Start kept mount paths, post-transcript answers and credential values below the domain.
-    AgentContext { path: Box<[u8]>, answered: usize, credential: Box<[u8]>, window: u32 },
+    AgentContext { path: Box<[u8]>, answered: usize, window: u32 },
+    /// The agent received a grant name and relative validity without its value.
+    AgentGrant { account: u32, generation: u64, valid: skein_lib::Duration },
     /// A settled oversized answer survived Start translation.
     AgentSavedTooLarge,
     /// A saved host decision reached the domain vocabulary with its stable name.
@@ -167,6 +169,7 @@ impl Peer {
         }
     }
 
+    #[expect(clippy::too_many_lines, reason = "the world collects both channel halves' ordered events")]
     fn observations(&mut self, output: &mut Vec<Observation>) {
         while let Some(event) = self.host_events.pop() {
             match event {
@@ -244,12 +247,10 @@ impl Peer {
                     }
                     if let Some(mounts) = &start.mounts
                         && let Some(mount) = mounts.first()
-                        && let Some(grant) = start.grants.first()
                     {
                         output.push(Observation::AgentContext {
                             path: mount.path.clone(),
                             answered: start.answered.len(),
-                            credential: grant.credential.clone(),
                             window: start.window.turns,
                         });
                     }
@@ -264,6 +265,11 @@ impl Peer {
                 }
                 agent::OpenEvent::DeliveryUnsent { owner } => output.push(Observation::AgentDeliveryUnsent { owner }),
                 agent::OpenEvent::Acknowledged { turn } => output.push(Observation::AgentAcknowledged { turn }),
+                agent::OpenEvent::Grant { grant } => output.push(Observation::AgentGrant {
+                    account: grant.name.account,
+                    generation: grant.name.generation,
+                    valid: grant.valid,
+                }),
             }
         }
     }
@@ -314,6 +320,7 @@ impl World {
                 turns: 8,
                 fact_reserve_frames: 1,
                 fact_reserve_bytes: 128,
+                grants: 8,
             },
             mode,
         );
@@ -554,6 +561,30 @@ impl World {
             host.send_acknowledge(turn, skein_lib::Token::new(29), &mut self.host.host_events, &mut self.host.below)
                 .expect("bounded acknowledgement");
         }
+    }
+
+    /// Refresh one service-owned credential under a new generation.
+    pub fn host_refreshes_grant(&mut self, account: u32, generation: u64, credential: Box<[u8]>) {
+        if let Half::Host(host) = &mut self.host.half {
+            host.send_grant(
+                smith_host_domain::channel::Grant { account, generation, valid: skein_lib::Duration::from_nanos(50) },
+                credential,
+                skein_lib::Token::new(32),
+                &mut self.host.host_events,
+                &mut self.host.below,
+            )
+            .expect("bounded grant");
+        }
+    }
+
+    /// Read the agent half's credential table as a service would during LLM preparation.
+    #[must_use]
+    pub fn agent_grant_value(&self, account: u32, generation: u64) -> Option<Box<[u8]>> {
+        if let Half::Agent(agent) = &self.agent.half {
+            let name = smith_domain::GrantName { account, generation };
+            return agent.grant_value(name).map(Box::from);
+        }
+        None
     }
 
     /// Have the scripted domain relay a declared host tool under a durable name.

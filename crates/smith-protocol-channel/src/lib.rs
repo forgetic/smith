@@ -22,6 +22,7 @@ extern crate alloc;
 
 mod calls;
 mod component;
+mod credentials;
 mod facts;
 mod limits;
 mod transcript;

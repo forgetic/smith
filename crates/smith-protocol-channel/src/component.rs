@@ -6,6 +6,7 @@ use skein_channel::{
 use skein_lib::{Duration, Map, Queue, Reader, Time, Token, Writer};
 
 use crate::calls;
+use crate::credentials::Credentials;
 use crate::facts;
 use crate::limits::{Error, Limits};
 use crate::transcript::decode_transcript;
@@ -72,6 +73,8 @@ pub enum OpenEvent {
     DeliveryUnsent { owner: Token },
     /// The host durably kept this numbered turn and its preceding prefix.
     Acknowledged { turn: u32 },
+    /// A refreshed credential name and validity, without its value.
+    Grant { grant: smith_domain::Grant },
     /// The channel ended before or after opening.
     Ended { why: Closed },
 }
@@ -96,6 +99,7 @@ pub struct Component {
     fact_reserve_frames: u32,
     fact_reserve_bytes: u32,
     lost_facts: u64,
+    credentials: Credentials,
 }
 
 impl Component {
@@ -130,6 +134,7 @@ impl Component {
             fact_reserve_frames: limits.fact_reserve_frames,
             fact_reserve_bytes: limits.fact_reserve_bytes,
             lost_facts: 0,
+            credentials: Credentials::new(limits.grants),
         })
     }
 
@@ -367,6 +372,12 @@ impl Component {
     #[must_use]
     pub fn lost_facts(&self) -> u64 {
         self.lost_facts
+    }
+
+    /// Read a retained credential only below the domain when preparing its LLM call.
+    #[must_use]
+    pub fn grant_value(&self, name: smith_domain::GrantName) -> Option<&[u8]> {
+        self.credentials.value(name.account, name.generation)
     }
 
     fn offer_fact(
@@ -621,6 +632,26 @@ impl Component {
                         Err(_) => self.refuse_rules(below),
                     }
                 }
+                Some(Event::Body { kind: 0x0104, body }) if self.phase == Phase::Admitted => {
+                    match smith_channel::GrantRefresh::decode(&self.bodies, &mut Reader::new(&body)) {
+                        Ok(refresh) => {
+                            let grant = refresh.grant();
+                            let name =
+                                smith_domain::GrantName { account: grant.account(), generation: grant.generation() };
+                            let value = Box::from(grant.value().credential());
+                            match self.credentials.keep(name.account, name.generation, value) {
+                                Ok(()) => {
+                                    to_service.push(OpenEvent::Grant {
+                                        grant: smith_domain::Grant { name, valid: grant.valid() },
+                                    });
+                                    self.machine.down(Request::Read, &mut self.events, below);
+                                }
+                                Err(_) => self.refuse_rules(below),
+                            }
+                        }
+                        Err(_) => self.refuse_rules(below),
+                    }
+                }
                 Some(Event::Body { kind, body }) => {
                     if self.phase != Phase::Opened || kind != 0x0100 {
                         self.refuse_rules(below);
@@ -635,13 +666,17 @@ impl Component {
                                             &self.transcript,
                                             &self.endpoints,
                                         ) {
-                                            Ok(transcript) => match start_context(start, charter, transcript) {
-                                                Ok(mut start) => {
-                                                    start.window.turns = start.window.turns.min(self.turns.capacity());
-                                                    self.window = Some(start.window);
-                                                    to_service.push(OpenEvent::Start { start: Box::new(start) });
-                                                    self.machine.down(Request::Read, &mut self.events, below);
-                                                }
+                                            Ok(transcript) => match self.stash_initial_grants(&start) {
+                                                Ok(()) => match start_context(start, charter, transcript) {
+                                                    Ok(mut start) => {
+                                                        start.window.turns =
+                                                            start.window.turns.min(self.turns.capacity());
+                                                        self.window = Some(start.window);
+                                                        to_service.push(OpenEvent::Start { start: Box::new(start) });
+                                                        self.machine.down(Request::Read, &mut self.events, below);
+                                                    }
+                                                    Err(_) => self.refuse_rules(below),
+                                                },
                                                 Err(_) => self.refuse_rules(below),
                                             },
                                             Err(reason) => self.transcript_refused(reason, to_service, below),
@@ -710,6 +745,13 @@ impl Component {
             &mut self.events,
             below,
         );
+    }
+
+    fn stash_initial_grants(&mut self, start: &smith_channel::Start) -> Result<(), Error> {
+        for grant in start.grants() {
+            self.credentials.keep(grant.account(), grant.generation(), Box::from(grant.value().credential()))?;
+        }
+        Ok(())
     }
 
     fn invalid_start(&mut self, invalid: smith_channel::InvalidStart, below: &mut Queue<Lower>) {

@@ -24,6 +24,8 @@ pub struct Limits {
     pub fact_reserve_frames: u32,
     /// Output bytes kept free when a best-effort fact is considered.
     pub fact_reserve_bytes: u32,
+    /// Credential generations retained below the domain; budget two per account.
+    pub grants: u32,
 }
 
 /// A checked channel cannot be built from the supplied limits.
@@ -51,6 +53,8 @@ pub enum Error {
     Calls,
     /// The host's outstanding turn or byte window has no remaining credit.
     Window,
+    /// A credential generation is stale, repeated, or exceeds the table.
+    Grants,
     /// The measured result did not fit its output writer.
     ResultWrite(skein_lib::Overflow),
     /// A domain answer exceeds the configured channel body limits.
@@ -129,5 +133,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         )?)?
         .checked_add(skein_lib::Map::<u32, u64>::worst_case(limits.turns)?)?
         .checked_add(List::<u32>::worst_case(limits.turns)?)?
+        .checked_add(skein_lib::Map::<(u32, u64), crate::credentials::Secret>::worst_case(limits.grants)?)?
+        .checked_add(u64::from(limits.grants).checked_mul(u64::from(limits.bodies.grant_value_credential))?)?
         .checked_add(u64::try_from(size_of::<Component>()).ok()?)
 }

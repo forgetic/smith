@@ -23,12 +23,11 @@ pub struct Mount {
     pub conflicts: Box<[Box<[u8]>]>,
 }
 
-/// One grant name and value; the service routes the value to the LLM table.
+/// One grant name and validity; the agent channel keeps its credential value.
 #[derive(Debug)]
 pub struct Grant {
     pub name: smith_domain::GrantName,
     pub valid: skein_lib::Duration,
-    pub credential: Box<[u8]>,
 }
 
 /// Start context after channel and charter decoding, before io root attachment.
@@ -74,7 +73,6 @@ pub fn start_context(
         let item = Grant {
             name: smith_domain::GrantName { account: grant.account(), generation: grant.generation() },
             valid: grant.valid(),
-            credential: Box::from(grant.value().credential()),
         };
         if grants.push(item).is_err() {
             return Err(Error::ResultCapacity);
