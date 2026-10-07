@@ -29,6 +29,10 @@ pub enum Observation {
     AgentStart,
     /// Host received an invalid Start answer.
     InvalidStart { why: smith_channel::InvalidStart, turns: u32, spent: u64 },
+    /// Host received admission before the final answer.
+    HostAdmitted,
+    /// Host received the agent's parked last word.
+    HostParked { turns: u32, spent: u64 },
 }
 
 enum Half {
@@ -129,6 +133,7 @@ impl Peer {
                 host::OpenEvent::Hangup { why } => output.push(Observation::HostEnded(why)),
                 host::OpenEvent::Sent { token } => output.push(Observation::HostSent(token)),
                 host::OpenEvent::Unsent { token, why } => output.push(Observation::HostUnsent(token, why)),
+                host::OpenEvent::Admitted => output.push(Observation::HostAdmitted),
                 host::OpenEvent::Answer { answer } => {
                     if let smith_channel::RunResult::Refused(refused) = answer.result()
                         && let smith_channel::StartRefusal::Invalid(invalid) = refused.reason()
@@ -138,6 +143,9 @@ impl Peer {
                             turns: answer.turns(),
                             spent: answer.spent(),
                         });
+                    }
+                    if let smith_channel::RunResult::Parked = answer.result() {
+                        output.push(Observation::HostParked { turns: answer.turns(), spent: answer.spent() });
                     }
                 }
             }
@@ -234,6 +242,23 @@ impl World {
         frame.put(&[0, 1]).expect("measured body");
         let frame = frame.finish().expect("complete frame");
         self.agent.incoming.extend(frame.bytes().iter().copied());
+    }
+
+    /// Have the scripted domain admit the Start and park without a turn.
+    pub fn agent_admits_and_parks(&mut self) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_admitted(skein_lib::Token::new(3), &mut self.agent.agent_events, &mut self.agent.below)
+                .expect("bounded admitted");
+            agent
+                .send_answer(
+                    smith_domain::run::Answer::Parked { spent: smith_domain::run::Spend::ZERO, turns: 0 },
+                    skein_lib::Token::new(4),
+                    &mut self.agent.agent_events,
+                    &mut self.agent.below,
+                )
+                .expect("bounded answer");
+        }
     }
 
     /// Inject an Open from a later version to exercise version refusal.

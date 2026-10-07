@@ -6,11 +6,20 @@ use skein_channel::{
 use skein_lib::{Queue, Reader, Token, Writer};
 
 use crate::limits::{Error, Limits};
-use crate::translate::{Endpoints, decode_charter};
+use crate::translate::{Endpoints, answer_record, decode_charter, invalid_start};
 use smith_domain::run;
 
 const RULES: u16 = 256;
 const UNAUTHORIZED: u16 = 258;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    Opening,
+    Opened,
+    Started,
+    Admitted,
+    Answered,
+}
 
 /// One channel event for the agent service.
 #[derive(Debug)]
@@ -29,9 +38,8 @@ pub struct Component {
     machine: Machine,
     schema: Schema,
     events: Queue<Event>,
-    opened: bool,
+    phase: Phase,
     ended: bool,
-    started: bool,
     bodies: smith_channel::Limits,
     charter: smith_charter::v1::Limits,
     endpoints: Endpoints,
@@ -55,9 +63,8 @@ impl Component {
             machine,
             schema,
             events: Queue::with_capacity(8),
-            opened: false,
+            phase: Phase::Opening,
             ended: false,
-            started: false,
             bodies: limits.bodies,
             charter: limits.charter,
             endpoints,
@@ -77,10 +84,68 @@ impl Component {
         self.drain(to_service, below);
     }
 
+    /// Send the domain's admission notice once the Start has entered it.
+    pub fn send_admitted(
+        &mut self,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Started {
+            return Err(Error::Order);
+        }
+        let record = smith_channel::Admitted::new(&self.bodies, smith_channel::AdmittedParts {})?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::ResultCapacity);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x0106, record.measure())?;
+        frame.put(&body.finish())?;
+        self.phase = Phase::Admitted;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
+    /// Send the domain's final answer and finish the write stream after it.
+    pub fn send_answer(
+        &mut self,
+        answer: run::Answer,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        let permitted = match &answer {
+            run::Answer::Refused(_) => self.phase == Phase::Started,
+            run::Answer::Parked { .. } | run::Answer::Accepted { .. } | run::Answer::Failed { .. } => {
+                self.phase == Phase::Admitted
+            }
+        };
+        if !permitted {
+            return Err(Error::Order);
+        }
+        let record = answer_record(answer, &self.bodies, &self.charter)?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::ResultCapacity);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x0110, record.measure())?;
+        frame.put(&body.finish())?;
+        self.phase = Phase::Answered;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.machine.down(Request::Finish, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
     /// Whether the channel can take application records.
     #[must_use]
-    pub const fn opened(&self) -> bool {
-        self.opened
+    pub fn opened(&self) -> bool {
+        self.phase != Phase::Opening
     }
 
     fn drain(&mut self, to_service: &mut Queue<OpenEvent>, below: &mut Queue<Lower>) {
@@ -108,23 +173,23 @@ impl Component {
                             );
                         }
                         None => {
-                            self.opened = true;
+                            self.phase = Phase::Opened;
                             to_service.push(OpenEvent::Opened { version });
                             self.machine.down(Request::Read, &mut self.events, below);
                         }
                     }
                 }
                 Some(Event::Body { kind, body }) => {
-                    if !self.opened || self.started || kind != 0x0100 {
+                    if self.phase != Phase::Opened || kind != 0x0100 {
                         self.refuse_rules(below);
                     } else {
                         match smith_channel::Start::decode(&self.bodies, &mut Reader::new(&body)) {
                             Ok(start) => {
-                                self.started = true;
+                                self.phase = Phase::Started;
                                 match decode_charter(start.charter(), &self.charter, &self.endpoints) {
                                     Ok(charter) => to_service
                                         .push(OpenEvent::Start { start: Box::new(start), charter: Box::new(charter) }),
-                                    Err(invalid) => self.invalid_start(wire_invalid(invalid), below),
+                                    Err(invalid) => self.invalid_start(invalid_start(invalid), below),
                                 }
                             }
                             Err(_) => self.refuse_rules(below),
@@ -168,29 +233,12 @@ impl Component {
     fn invalid_start(&mut self, invalid: smith_channel::InvalidStart, below: &mut Queue<Lower>) {
         match invalid_answer(&self.bodies, invalid) {
             Some(frame) => {
+                self.phase = Phase::Answered;
                 self.machine.down(Request::Send { token: Token::new(0), frame }, &mut self.events, below);
                 self.machine.down(Request::Finish, &mut self.events, below);
             }
             None => self.refuse_rules(below),
         }
-    }
-}
-
-fn wire_invalid(invalid: run::Invalid) -> smith_channel::InvalidStart {
-    match invalid {
-        run::Invalid::CharterVersion => smith_channel::InvalidStart::CharterVersion,
-        run::Invalid::MalformedCharter => smith_channel::InvalidStart::MalformedCharter,
-        run::Invalid::Endpoint => smith_channel::InvalidStart::Endpoint,
-        run::Invalid::Activation => smith_channel::InvalidStart::Activation,
-        run::Invalid::Window => smith_channel::InvalidStart::Window,
-        run::Invalid::Conventions => smith_channel::InvalidStart::Conventions,
-        run::Invalid::TooLarge => smith_channel::InvalidStart::TooLarge,
-        run::Invalid::Workspace => smith_channel::InvalidStart::Workspace,
-        run::Invalid::Grants => smith_channel::InvalidStart::Grants,
-        run::Invalid::Outcome => smith_channel::InvalidStart::Outcome,
-        run::Invalid::Budget => smith_channel::InvalidStart::Budget,
-        run::Invalid::Llm => smith_channel::InvalidStart::Llm,
-        run::Invalid::Conversation => smith_channel::InvalidStart::Conversation,
     }
 }
 

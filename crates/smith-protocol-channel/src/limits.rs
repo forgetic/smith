@@ -25,6 +25,42 @@ pub enum Error {
     Channel(SchemaError),
     /// Configured endpoint names exceed their count or byte allowance.
     Endpoints,
+    /// The accepted result is outside the configured charter codec limits.
+    Result(smith_charter::v1::Problem),
+    /// A bounded result list had no room for a field or item.
+    ResultCapacity,
+    /// The service sent admission or an answer out of order.
+    Order,
+    /// The measured result did not fit its output writer.
+    ResultWrite(skein_lib::Overflow),
+    /// A domain answer exceeds the configured channel body limits.
+    Answer(smith_channel::v1::Problem),
+    /// A measured application frame could not be built.
+    Frame(skein_channel::FrameError),
+}
+
+impl From<smith_channel::v1::Problem> for Error {
+    fn from(problem: smith_channel::v1::Problem) -> Error {
+        Error::Answer(problem)
+    }
+}
+
+impl From<skein_channel::FrameError> for Error {
+    fn from(problem: skein_channel::FrameError) -> Error {
+        Error::Frame(problem)
+    }
+}
+
+impl From<smith_charter::v1::Problem> for Error {
+    fn from(problem: smith_charter::v1::Problem) -> Error {
+        Error::Result(problem)
+    }
+}
+
+impl From<skein_lib::Overflow> for Error {
+    fn from(problem: skein_lib::Overflow) -> Error {
+        Error::ResultWrite(problem)
+    }
 }
 
 /// Slots reserved by the caller at each entry point during opening.

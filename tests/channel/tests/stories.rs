@@ -149,3 +149,88 @@ fn the_full_charter_keeps_contracts_tools_and_model_prices() {
     assert_eq!(charter.budget.spend, wire.budget().spend());
     assert_eq!(charter.budget.time, wire.budget().time());
 }
+
+#[test]
+fn an_accepted_report_keeps_its_fields_in_charter_v1() {
+    let result = smith_domain::run::outcome::Declared::Report(smith_domain::run::outcome::Report {
+        text: Box::from(*b"done"),
+        fields: Box::from([smith_domain::run::outcome::Field {
+            name: Box::from(*b"source"),
+            value: Box::from(*b"agent"),
+        }]),
+    });
+    let bytes = smith_protocol_channel::encode_result(&result, &smith_charter::CEILINGS).expect("bounded result");
+    let record = smith_charter::RunResult::decode(&smith_charter::CEILINGS, &mut skein_lib::Reader::new(&bytes))
+        .expect("result decodes");
+    assert!(matches!(record.form(), smith_charter::Form::Report));
+    assert_eq!(record.text(), b"done");
+    assert_eq!(record.fields().get(0).expect("one field").name(), b"source");
+    assert_eq!(record.fields().get(0).expect("one field").text(), b"agent");
+}
+
+#[test]
+fn an_accepted_verdict_keeps_its_label_and_items() {
+    let result = smith_domain::run::outcome::Declared::Verdict(smith_domain::run::outcome::Verdict {
+        name: Box::from(*b"ready"),
+        text: Box::from(*b"reviewed"),
+        fields: Box::default(),
+        items: Box::from([smith_domain::run::outcome::Item {
+            kind: Box::from(*b"path"),
+            fields: Box::from([smith_domain::run::outcome::Field {
+                name: Box::from(*b"name"),
+                value: Box::from(*b"file"),
+            }]),
+        }]),
+    });
+    let bytes = smith_protocol_channel::encode_result(&result, &smith_charter::CEILINGS).expect("bounded result");
+    let record = smith_charter::RunResult::decode(&smith_charter::CEILINGS, &mut skein_lib::Reader::new(&bytes))
+        .expect("result decodes");
+    assert!(matches!(record.form(), smith_charter::Form::Verdict));
+    assert_eq!(record.label().as_deref(), Some(&b"ready"[..]));
+    assert_eq!(record.items().get(0).expect("one item").kind(), b"path");
+    assert_eq!(record.items().get(0).expect("one item").fields().get(0).expect("one field").text(), b"file");
+}
+
+#[test]
+fn a_run_goes_from_start_to_answer() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentStart));
+    world.agent_admits_and_parks();
+    world.settle();
+    assert!(world.observations().contains(&Observation::HostAdmitted));
+    assert!(world.observations().contains(&Observation::HostParked { turns: 0, spent: 0 }));
+}
+
+#[test]
+fn a_model_failure_keeps_transport_evidence_and_cooldown() {
+    let answer = smith_domain::run::Answer::Failed {
+        failure: smith_domain::run::Failure::Model(smith_domain::run::Fault::Completion {
+            failure: smith_domain::run::CompletionFailure::RateLimited {
+                retry_after: skein_lib::Duration::from_nanos(42),
+            },
+            evidence: smith_domain::run::CompletionEvidence::Response,
+        }),
+        spent: smith_domain::run::Spend::ZERO,
+        turns: 2,
+    };
+    let record =
+        smith_protocol_channel::answer_record(answer, &CEILINGS, &smith_charter::CEILINGS).expect("bounded failure");
+    assert_eq!(record.turns(), 2);
+    let smith_channel::RunResult::Failed(failed) = record.result() else {
+        panic!("expected failure");
+    };
+    let smith_channel::RunFailure::Model(model) = failed.reason() else {
+        panic!("expected model failure");
+    };
+    let smith_channel::ModelFault::Completion(fault) = model.value() else {
+        panic!("expected completion");
+    };
+    assert!(matches!(fault.failure(), smith_channel::CompletionFailure::RateLimited));
+    assert!(matches!(fault.evidence(), smith_channel::CompletionEvidence::Response));
+    assert_eq!(fault.retry_after(), &Some(skein_lib::Duration::from_nanos(42)));
+}

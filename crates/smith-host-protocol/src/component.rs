@@ -14,6 +14,7 @@ enum Phase {
     Opening,
     Opened,
     Started,
+    Admitted,
     Answered,
 }
 
@@ -30,6 +31,8 @@ pub enum OpenEvent {
     Unsent { token: Token, why: skein_channel::Unsent },
     /// The agent's last word, decoded before the host domain interprets it.
     Answer { answer: smith_channel::Answer },
+    /// The agent admitted the Start before its later final answer.
+    Admitted,
 }
 
 /// The initiator's framed channel and checked sending terms.
@@ -137,20 +140,37 @@ impl Component {
                         }
                     }
                 }
-                Some(Event::Body { kind, body }) => {
-                    if kind != 0x0110 || self.phase != Phase::Started {
-                        self.refuse_rules(below);
-                    } else {
-                        match smith_channel::Answer::decode(&self.bodies, &mut Reader::new(&body)) {
-                            Ok(answer) => {
-                                self.phase = Phase::Answered;
-                                to_service.push(OpenEvent::Answer { answer });
+                Some(Event::Body { kind, body }) => match kind {
+                    0x0106 if self.phase == Phase::Started => {
+                        match smith_channel::Admitted::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(_) => {
+                                self.phase = Phase::Admitted;
+                                to_service.push(OpenEvent::Admitted);
                                 self.machine.down(Request::Read, &mut self.events, below);
                             }
                             Err(_) => self.refuse_rules(below),
                         }
                     }
-                }
+                    0x0110 => match smith_channel::Answer::decode(&self.bodies, &mut Reader::new(&body)) {
+                        Ok(answer) => {
+                            let permitted = match answer.result() {
+                                smith_channel::RunResult::Refused(_) => self.phase == Phase::Started,
+                                smith_channel::RunResult::Accepted(_)
+                                | smith_channel::RunResult::Parked
+                                | smith_channel::RunResult::Failed(_) => self.phase == Phase::Admitted,
+                            };
+                            if permitted {
+                                self.phase = Phase::Answered;
+                                to_service.push(OpenEvent::Answer { answer });
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            } else {
+                                self.refuse_rules(below);
+                            }
+                        }
+                        Err(_) => self.refuse_rules(below),
+                    },
+                    _ => self.refuse_rules(below),
+                },
                 Some(Event::Closed { why }) => {
                     if !self.ended {
                         self.ended = true;

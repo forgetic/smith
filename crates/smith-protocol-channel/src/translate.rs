@@ -6,9 +6,12 @@
 //! returns either owned domain policy or a typed invalid-start reason.
 
 use alloc::boxed::Box;
-use skein_lib::{List, Reader};
+use skein_lib::{List, Reader, Writer};
+use smith_channel as channel;
 use smith_charter as wire;
 use smith_domain::run;
+
+use crate::Error;
 
 /// One configured endpoint name and its domain-visible identities.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -233,4 +236,212 @@ fn field_rules(value: &List<wire::FieldRule>) -> Result<Box<[run::outcome::Field
         }
     }
     Ok(fields.into_boxed())
+}
+
+/// Write an accepted domain result in the version-one charter family.
+pub fn encode_result(result: &run::outcome::Declared, limits: &wire::v1::Limits) -> Result<Box<[u8]>, Error> {
+    let mut fields = List::with_capacity(limits.run_result_fields);
+    let mut items = List::with_capacity(limits.run_result_items);
+    let (form, label, text, values) = match result {
+        run::outcome::Declared::Change(change) => (wire::Form::Change, None, &[][..], &change.fields[..]),
+        run::outcome::Declared::Verdict(verdict) => {
+            for item in &verdict.items {
+                let mut item_fields = List::with_capacity(limits.item_fields);
+                copy_fields(&item.fields, &mut item_fields, limits)?;
+                let item = wire::Item::new(limits, wire::ItemParts { kind: item.kind.clone(), fields: item_fields })?;
+                if items.push(item).is_err() {
+                    return Err(Error::ResultCapacity);
+                }
+            }
+            (wire::Form::Verdict, Some(verdict.name.clone()), &verdict.text[..], &verdict.fields[..])
+        }
+        run::outcome::Declared::Report(report) => (wire::Form::Report, None, &report.text[..], &report.fields[..]),
+        run::outcome::Declared::Failure(failure) => {
+            (wire::Form::Failure, None, &failure.reason[..], &failure.fields[..])
+        }
+    };
+    copy_fields(values, &mut fields, limits)?;
+    let record =
+        wire::RunResult::new(limits, wire::RunResultParts { form, label, text: Box::from(text), fields, items })?;
+    let Ok(length) = usize::try_from(record.measure()) else {
+        return Err(Error::ResultCapacity);
+    };
+    let mut writer = Writer::new(length);
+    record.encode(&mut writer)?;
+    Ok(writer.finish())
+}
+
+fn copy_fields(
+    values: &[run::outcome::Field],
+    target: &mut List<wire::Field>,
+    limits: &wire::v1::Limits,
+) -> Result<(), Error> {
+    for field in values {
+        let value = wire::Field::new(limits, wire::FieldParts { name: field.name.clone(), text: field.value.clone() })?;
+        if target.push(value).is_err() {
+            return Err(Error::ResultCapacity);
+        }
+    }
+    Ok(())
+}
+
+/// Translate the domain's single Start terminal into the channel's last word.
+pub fn answer_record(
+    answer: run::Answer,
+    bodies: &channel::Limits,
+    charter: &wire::v1::Limits,
+) -> Result<channel::Answer, Error> {
+    let (turns, spent, result) = match answer {
+        run::Answer::Refused(refusal) => {
+            let reason = match refusal {
+                run::Refusal::Busy => channel::StartRefusal::Busy,
+                run::Refusal::Invalid(invalid) => {
+                    let value = channel::InvalidStartValue::new(
+                        bodies,
+                        channel::InvalidStartValueParts { value: invalid_start(invalid) },
+                    )?;
+                    channel::StartRefusal::Invalid(value)
+                }
+            };
+            let refused = channel::Refused::new(bodies, channel::RefusedParts { reason })?;
+            (0, 0, channel::RunResult::Refused(refused))
+        }
+        run::Answer::Parked { spent, turns } => (turns, spent.units, channel::RunResult::Parked),
+        run::Answer::Accepted { outcome, spent, turns } => {
+            let result = encode_result(&outcome, charter)?;
+            let accepted = channel::Accepted::new(bodies, channel::AcceptedParts { result })?;
+            (turns, spent.units, channel::RunResult::Accepted(accepted))
+        }
+        run::Answer::Failed { failure, spent, turns } => {
+            let reason = failure_record(failure, bodies)?;
+            let failed = channel::Failed::new(bodies, channel::FailedParts { reason })?;
+            (turns, spent.units, channel::RunResult::Failed(failed))
+        }
+    };
+    Ok(channel::Answer::new(bodies, channel::AnswerParts { turns, spent, result })?)
+}
+
+pub(crate) fn invalid_start(invalid: run::Invalid) -> channel::InvalidStart {
+    match invalid {
+        run::Invalid::CharterVersion => channel::InvalidStart::CharterVersion,
+        run::Invalid::MalformedCharter => channel::InvalidStart::MalformedCharter,
+        run::Invalid::Endpoint => channel::InvalidStart::Endpoint,
+        run::Invalid::Activation => channel::InvalidStart::Activation,
+        run::Invalid::Window => channel::InvalidStart::Window,
+        run::Invalid::Conventions => channel::InvalidStart::Conventions,
+        run::Invalid::TooLarge => channel::InvalidStart::TooLarge,
+        run::Invalid::Workspace => channel::InvalidStart::Workspace,
+        run::Invalid::Grants => channel::InvalidStart::Grants,
+        run::Invalid::Outcome => channel::InvalidStart::Outcome,
+        run::Invalid::Budget => channel::InvalidStart::Budget,
+        run::Invalid::Llm => channel::InvalidStart::Llm,
+        run::Invalid::Conversation => channel::InvalidStart::Conversation,
+    }
+}
+
+fn failure_record(failure: run::Failure, limits: &channel::Limits) -> Result<channel::RunFailure, Error> {
+    let record = match failure {
+        run::Failure::Transcript(refusal) => {
+            let value = match refusal {
+                run::TranscriptRefusal::Version => channel::TranscriptRefusal::Version,
+                run::TranscriptRefusal::Endpoint => channel::TranscriptRefusal::Endpoint,
+                run::TranscriptRefusal::Dialect => channel::TranscriptRefusal::Dialect,
+                run::TranscriptRefusal::Malformed => channel::TranscriptRefusal::Malformed,
+                run::TranscriptRefusal::Unresolved => channel::TranscriptRefusal::Unresolved,
+                run::TranscriptRefusal::TooLarge => channel::TranscriptRefusal::TooLarge,
+            };
+            channel::RunFailure::Transcript(channel::TranscriptRefusalValue::new(
+                limits,
+                channel::TranscriptRefusalValueParts { value },
+            )?)
+        }
+        run::Failure::Model(fault) => {
+            let value = model_fault(fault, limits)?;
+            channel::RunFailure::Model(channel::ModelFaultValue::new(limits, channel::ModelFaultValueParts { value })?)
+        }
+        run::Failure::Budget(exhausted) => {
+            let value = budget_failure(exhausted, limits)?;
+            channel::RunFailure::Budget(channel::BudgetFailureValue::new(
+                limits,
+                channel::BudgetFailureValueParts { value },
+            )?)
+        }
+        run::Failure::Policy(run::Policy::Unfinished { nudges, rejected }) => channel::RunFailure::Policy(
+            channel::PolicyFailure::new(limits, channel::PolicyFailureParts { nudges, rejected })?,
+        ),
+        run::Failure::Cancelled => channel::RunFailure::Cancelled,
+        run::Failure::Stale => channel::RunFailure::Stale,
+    };
+    Ok(record)
+}
+
+fn model_fault(fault: run::Fault, limits: &channel::Limits) -> Result<channel::ModelFault, Error> {
+    let value = match fault {
+        run::Fault::Completion { failure, evidence } => {
+            let (failure, retry_after) = match failure {
+                run::CompletionFailure::Limit => (channel::CompletionFailure::Limit, None),
+                run::CompletionFailure::Protocol => (channel::CompletionFailure::Protocol, None),
+                run::CompletionFailure::Cancelled => (channel::CompletionFailure::Cancelled, None),
+                run::CompletionFailure::Overloaded => (channel::CompletionFailure::Overloaded, None),
+                run::CompletionFailure::Unavailable => (channel::CompletionFailure::Unavailable, None),
+                run::CompletionFailure::TimedOut => (channel::CompletionFailure::TimedOut, None),
+                run::CompletionFailure::ContextTooLong => (channel::CompletionFailure::ContextTooLong, None),
+                run::CompletionFailure::Invalid => (channel::CompletionFailure::Invalid, None),
+                run::CompletionFailure::Unauthorized => (channel::CompletionFailure::Unauthorized, None),
+                run::CompletionFailure::RateLimited { retry_after } => {
+                    (channel::CompletionFailure::RateLimited, Some(retry_after))
+                }
+                run::CompletionFailure::Exhausted { retry_after } => {
+                    (channel::CompletionFailure::Exhausted, Some(retry_after))
+                }
+            };
+            let evidence = match evidence {
+                run::CompletionEvidence::Unsent => channel::CompletionEvidence::Unsent,
+                run::CompletionEvidence::Unknown => channel::CompletionEvidence::Unknown,
+                run::CompletionEvidence::Response => channel::CompletionEvidence::Response,
+            };
+            channel::ModelFault::Completion(channel::CompletionFault::new(
+                limits,
+                channel::CompletionFaultParts { failure, evidence, retry_after },
+            )?)
+        }
+        run::Fault::Exhausted => channel::ModelFault::Exhausted,
+        run::Fault::Provider => channel::ModelFault::Provider,
+        run::Fault::ContextFull => channel::ModelFault::ContextFull,
+        run::Fault::Refused => channel::ModelFault::Refused,
+        run::Fault::Truncated => channel::ModelFault::Truncated,
+        run::Fault::Malformed => channel::ModelFault::Malformed,
+    };
+    Ok(value)
+}
+
+fn budget_failure(exhausted: run::Exhausted, limits: &channel::Limits) -> Result<channel::BudgetFailure, Error> {
+    let value = match exhausted {
+        run::Exhausted::Turns => channel::BudgetFailure::Turns,
+        run::Exhausted::Spend => channel::BudgetFailure::Spend,
+        run::Exhausted::Time => channel::BudgetFailure::Time,
+        run::Exhausted::Tokens(receiving) => {
+            let value = match receiving {
+                run::ReceivingLimit::Input => channel::ReceivingLimit::Input,
+                run::ReceivingLimit::Output => channel::ReceivingLimit::Output,
+                run::ReceivingLimit::CacheRead => channel::ReceivingLimit::CacheRead,
+                run::ReceivingLimit::CacheWrite => channel::ReceivingLimit::CacheWrite,
+            };
+            channel::BudgetFailure::Tokens(channel::ReceivingLimitValue::new(
+                limits,
+                channel::ReceivingLimitValueParts { value },
+            )?)
+        }
+        run::Exhausted::Overflow(overflow) => {
+            let value = match overflow {
+                run::Overflow::Spend => channel::BudgetOverflow::Spend,
+                run::Overflow::Usage => channel::BudgetOverflow::Usage,
+            };
+            channel::BudgetFailure::Overflow(channel::OverflowValue::new(
+                limits,
+                channel::OverflowValueParts { value },
+            )?)
+        }
+    };
+    Ok(value)
 }

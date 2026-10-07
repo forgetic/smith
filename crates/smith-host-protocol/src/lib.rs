@@ -1,16 +1,18 @@
-//! Host's agent channel opening (protocol/channel.md, sections 2 and 5;
+//! Host's agent channel opening, Start and final answer (protocol/channel.md, sections 2, 3 and 5;
 //! domain/host.md, section 3).
 //!
-//! The component keeps Skein's framed channel and its opening state. It never
+//! The component keeps Skein's framed channel and its run phase. It never
 //! knows credentials' values, host policy or stream handles. `new`, `open`,
-//! `from_below` and `fire` accept stream events and return lower demands and
-//! host opening events. A service later attaches one component per agent.
+//! `send_start`, `from_below` and `fire` accept stream events and return lower
+//! demands, admission and a decoded last word. A service attaches one component per agent.
 //!
 //! | State | Input | Output |
 //! |---|---|---|
 //! | Idle | Open | Send Open with empty pipe credential |
 //! | Opening | Ready | Check agent receive terms, then Opened or Refuse limits |
 //! | Opened | End/Closed | Hangup |
+//! | Started | Admitted or refused Answer | Notify the host domain |
+//! | Admitted | Answer | Notify the host domain and read to end |
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
