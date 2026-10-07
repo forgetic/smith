@@ -371,6 +371,9 @@ pub struct World {
     stage: Stage<Limits, Event, Request>,
     backend: Backend,
     parent_deliveries: bool,
+    parent_host_calls: bool,
+    host_run: Token,
+    reply_to: Token,
     delivery_submissions: Vec<DeliverySubmission>,
     schedule: Schedule<Delivery>,
     flights: Ledger<(Family, Token), Flight>,
@@ -384,7 +387,7 @@ pub struct World {
     pushes: Vec<run::Delivery>,
     delivery_names: Vec<(run::CallName, Time)>,
     host_history: crate::host_referee::History,
-    host_pending: BTreeMap<(u64, u32), Key>,
+    host_pending: BTreeMap<(u64, u32), Option<Key>>,
     host_decision: Option<run::HostAnswer>,
     host_decisions: u32,
     host_terminals: Vec<(run::RelayName, Time, run::HostReply)>,
@@ -402,6 +405,48 @@ pub struct World {
     referee: Referee<Meeting>,
     stimuli: Vec<()>,
     terminals: u32,
+}
+
+fn choose_start(
+    settings: &Settings,
+    transcript: Option<agent::Transcript>,
+    workspace: Option<run::Workspace>,
+    selected_charter: Option<run::Charter>,
+    selected_start: Option<Event>,
+) -> (Event, Token) {
+    match selected_start {
+        Some(Event::Start { reply_to, host_run, activation, charter, workspace, grants, transcript }) => {
+            let token = reply_to.into_token();
+            (
+                Event::Start {
+                    reply_to: ReplyTo::new(token),
+                    host_run,
+                    activation,
+                    charter,
+                    workspace,
+                    grants,
+                    transcript,
+                },
+                token,
+            )
+        }
+        Some(_) => panic!("the caller supplies a complete Start event"),
+        None => (
+            Event::Start {
+                reply_to: ReplyTo::new(Token::new(1)),
+                host_run: Token::new(1),
+                activation: if settings.resume { 2 } else { 1 },
+                charter: selected_charter.unwrap_or_else(|| charter(settings)),
+                workspace,
+                grants: Box::new([Grant {
+                    name: GrantName { account: 0, generation: 1 },
+                    valid: Duration::from_secs(7200),
+                }]),
+                transcript,
+            },
+            Token::new(1),
+        ),
+    }
 }
 
 impl World {
@@ -422,6 +467,17 @@ impl World {
         Self::with_backend(&settings, transcript, Backend::typed(&settings))
     }
 
+    /// Starts with the caller's complete host event and the usual fixture
+    /// checkout and typed provider. The caller may enable the host-call bridge
+    /// before driving this world.
+    /// Contract: domain/run.md, sections 3.1, 5.2 and 14; domain/host.md, section 9.
+    #[must_use]
+    pub fn with_start(settings: Settings, start: Event) -> World {
+        let mut disk = Checkout::new();
+        fixture::seed(&mut disk);
+        Self::with_selected_backend(&settings, None, None, disk, Backend::typed(&settings), None, Some(start))
+    }
+
     fn with_backend(settings: &Settings, transcript: Option<agent::Transcript>, backend: Backend) -> World {
         let mut disk = Checkout::new();
         let root = fixture::seed(&mut disk);
@@ -434,7 +490,7 @@ impl World {
                 conflicts: Box::new([]),
             }]),
         });
-        Self::with_selected_backend(settings, transcript, workspace, disk, backend, None)
+        Self::with_selected_backend(settings, transcript, workspace, disk, backend, None, None)
     }
 
     fn with_selected_backend(
@@ -444,50 +500,48 @@ impl World {
         disk: Checkout,
         backend: Backend,
         selected_charter: Option<run::Charter>,
+        selected_start: Option<Event>,
     ) -> World {
+        let max_out = agent::max_out(&settings.limits);
+        let mut stage = Stage::new(settings.limits, max_out, max_out + 3);
+        let supplied_start = selected_start.is_some();
+        let (start, reply_to) = choose_start(settings, transcript, workspace, selected_charter, selected_start);
+        let Event::Start { host_run, charter, workspace, .. } = &start else {
+            unreachable!("the selected event is Start")
+        };
         let root = workspace
             .as_ref()
             .and_then(|workspace| workspace.directories.first())
             .map(|directory| directory.root.raw());
-        let max_out = agent::max_out(&settings.limits);
-        let mut stage = Stage::new(settings.limits, max_out, max_out + 3);
-        let charter = selected_charter.unwrap_or_else(|| charter(settings));
         let observed_contract = charter.outcome.clone();
+        let delivery = charter.grants.deliver.is_some();
+        let checks = !supplied_start
+            && matches!(
+                settings.job,
+                Job::Coding | Job::Delegating | Job::Wandering | Job::MidReport | Job::MidChange | Job::MarkerReport
+            );
+        let within = charter.budget.time.saturating_add(Duration::from_secs(120));
         let mut model_prices = BTreeMap::new();
         model_prices.insert(charter.llm.model.clone(), charter.llm.prices);
         for model in &charter.models {
             model_prices.insert(model.model.clone(), model.prices);
         }
-        stage.push(Event::Start {
-            reply_to: ReplyTo::new(Token::new(1)),
-            host_run: Token::new(1),
-            activation: if settings.resume { 2 } else { 1 },
-            charter,
-            workspace,
-            grants: Box::new([Grant {
-                name: GrantName { account: 0, generation: 1 },
-                valid: Duration::from_secs(7200),
-            }]),
-            transcript,
-        });
+        let host_run = *host_run;
+        stage.push(start);
         let mut schedule = Schedule::new();
         if let Some(after) = settings.cancel_at {
             schedule.send(Time::ZERO.saturating_add(after), Delivery::Cancel);
         }
         let mut referee = Referee::new(Meeting::default());
-        let change = matches!(
-            settings.job,
-            Job::Coding | Job::Delegating | Job::Wandering | Job::MidReport | Job::MidChange | Job::MarkerReport
-        );
         let mut stimuli = Vec::new();
         referee.observe(
             Time::ZERO,
             Seen::Started {
                 contract: observed_contract,
                 outcome_bytes: settings.limits.run.outcome_bytes,
-                checks: change,
-                delivery: matches!(settings.job, Job::MidReport | Job::MidChange | Job::MarkerReport),
-                within: settings.budget.time.saturating_add(Duration::from_secs(120)),
+                checks,
+                delivery,
+                within,
             },
             &mut stimuli,
         );
@@ -503,6 +557,9 @@ impl World {
             stage,
             backend,
             parent_deliveries: false,
+            parent_host_calls: false,
+            host_run,
+            reply_to,
             delivery_submissions: Vec::new(),
             schedule,
             flights: Ledger::new("agent request"),
@@ -560,7 +617,7 @@ impl World {
                 .expect("caller scripts obey provider admission");
             }
         }
-        Self::with_selected_backend(&settings, transcript, workspace, disk, backend, None)
+        Self::with_selected_backend(&settings, transcript, workspace, disk, backend, None, None)
     }
 
     /// Caller supplies the complete typed Charter before the original Start;
@@ -589,13 +646,77 @@ impl World {
                 .expect("caller scripts obey provider admission");
             }
         }
-        Self::with_selected_backend(&settings, transcript, workspace, disk, backend, Some(charter))
+        Self::with_selected_backend(&settings, transcript, workspace, disk, backend, Some(charter), None)
+    }
+
+    /// Starts with the caller's complete host event, checkout and provider
+    /// scripts. The world does not replace any Start field from the settings.
+    /// Contract: domain/run.md, sections 3.1, 5.2 and 14; domain/host.md, section 9.
+    #[must_use]
+    pub fn with_workspace_scripts_start(
+        settings: Settings,
+        disk: Checkout,
+        scripts: Box<[provider::api::Script]>,
+        start: Event,
+    ) -> World {
+        let mut backend = Backend::typed(&settings);
+        match &mut backend {
+            Backend::Typed { provider, .. } => {
+                *provider = provider::Domain::configured(
+                    &settings.provider,
+                    settings.seed ^ 0x25,
+                    scripts,
+                    smith_session_world::provider::menu(),
+                )
+                .expect("caller scripts obey provider admission");
+            }
+        }
+        Self::with_selected_backend(&settings, None, None, disk, backend, None, Some(start))
     }
 
     /// Route subsequent checked submissions to the outside parent.
     /// Contract: domain/run.md, sections 8.2 and 10.
     pub fn enable_parent_deliveries(&mut self) {
         self.parent_deliveries = true;
+    }
+
+    /// Hands host calls to the caller instead of the fixture's canned host.
+    /// Call before driving the world.
+    /// Contract: domain/run.md, sections 5.2 and 14; domain/host.md, section 9.
+    pub fn enable_parent_host_calls(&mut self) {
+        self.parent_host_calls = true;
+    }
+
+    /// Host calls awaiting a caller terminal, in submission order. Each record
+    /// contains the complete emitted call, including relay, input and deadline.
+    /// Contract: domain/run.md, sections 5.2 and 14; testing-strategy.md, section 2.3.
+    #[must_use]
+    pub fn pending_host_calls(&self) -> Vec<&crate::host_referee::Submission> {
+        self.host_history
+            .submissions()
+            .iter()
+            .filter(|call| self.host_pending.get(&(call.relay.owner.raw(), call.relay.attempt)) == Some(&None))
+            .collect()
+    }
+
+    /// Queues the caller's terminal for a pending host relay. Withdrawal keeps
+    /// this right alive; the scheduled terminal settles it in the next drive.
+    /// Contract: domain/run.md, sections 5.2 and 10; domain/host.md, section 9.
+    ///
+    /// # Errors
+    /// Refuses non-bridge worlds, unknown relays and duplicate replies.
+    pub fn return_host_reply(&mut self, relay: run::RelayName, reply: run::HostReply) -> Result<(), &'static str> {
+        if !self.parent_host_calls {
+            return Err("parent host-call bridge is disabled");
+        }
+        let Some(pending) = self.host_pending.get_mut(&(relay.owner.raw(), relay.attempt)) else {
+            return Err("no pending host relay");
+        };
+        if pending.is_some() {
+            return Err("host relay terminal is already queued");
+        }
+        *pending = Some(self.schedule.send(self.now, Delivery::Host { relay, reply }));
+        Ok(())
     }
 
     /// Actual fake filesystem state, with no domain-private authority inspection.
@@ -772,6 +893,9 @@ impl World {
                 self.settled();
                 return true;
             }
+            if self.parent_host_calls && self.host_pending.values().any(Option::is_none) {
+                return false;
+            }
             let immediate = (self.parent_deliveries
                 && self.flights.keys().any(|key| {
                     key.0 == Family::Delivery && self.flights.get(*key).is_some_and(|flight| flight.key.is_none())
@@ -854,7 +978,7 @@ impl World {
     fn request(&mut self, request: Request) {
         match request {
             Request::Turn { host_run, number, read, spent, turn } => {
-                assert_eq!(host_run, Token::new(1));
+                assert_eq!(host_run, self.host_run);
                 assert_eq!(usize::try_from(number).expect("bounded output number"), self.turns.len() + 1);
                 self.observe(Seen::Turn { number });
                 self.messages_seen
@@ -863,12 +987,12 @@ impl World {
                 self.turns.push(turn);
             }
             Request::Waiting { host_run, read } => {
-                assert_eq!(host_run, Token::new(1));
+                assert_eq!(host_run, self.host_run);
                 self.messages_seen.push((self.now, crate::messages_referee::Seen::Waiting { read }));
                 self.waiting.push((self.now, read));
             }
             Request::Admitted { host_run, run } => {
-                assert_eq!(host_run, Token::new(1), "the host's admitted identity is echoed");
+                assert_eq!(host_run, self.host_run, "the host's admitted identity is echoed");
                 assert!(self.admitted.replace(run).is_none(), "a start is admitted at most once");
                 self.messages_seen.push((self.now, crate::messages_referee::Seen::Admitted));
             }
@@ -876,7 +1000,7 @@ impl World {
                 if matches!(&answer, run::Answer::Failed { .. }) {
                     self.host_history.shutdown(self.now);
                 }
-                assert_eq!(to, ReplyTo::new(Token::new(1)), "the host receives its own answer");
+                assert_eq!(to, ReplyTo::new(self.reply_to), "the host receives its own answer");
                 self.observe(Seen::Answered {
                     answer: copy_answer(&answer),
                     pending: self.flights.keys().count() + self.host_pending.len(),
@@ -897,7 +1021,7 @@ impl World {
                 self.answered = Some(self.now);
             }
             Request::Checking { host_run, .. } => {
-                assert_eq!(host_run, Token::new(1), "checking notice echoes the host identity");
+                assert_eq!(host_run, self.host_run, "checking notice echoes the host identity");
             }
             Request::Complete { owner, prompt, .. } => {
                 self.host_history.prompt(&prompt).expect("exact feedback for observed provider host call");
@@ -1062,7 +1186,7 @@ impl World {
                         .expect("the scripted host requires this field");
                     assert!(!value.value.is_empty(), "the host receives the metadata its own contract required");
                 }
-                assert_eq!(host_run, Token::new(1), "the push names the scripted host's request");
+                assert_eq!(host_run, self.host_run, "the push names the scripted host's request");
                 self.delivery_names.push((name, self.now));
                 let tree = self.code();
                 let finishing = !change.fields.iter().any(|field| field.name.as_ref() == b"ticket");
@@ -1117,6 +1241,7 @@ impl World {
                 self.flights.get_mut((Family::Delivery, owner)).expect("submitted delivery").key = Some(key);
             }
             Request::HostCall { host_run, relay, name, tool, effect, input, deadline } => {
+                assert_eq!(host_run, self.host_run, "the host call keeps the caller's logical run scope");
                 self.host_history
                     .submit(crate::host_referee::Submission {
                         host_run,
@@ -1129,6 +1254,10 @@ impl World {
                         deadline,
                     })
                     .expect("valid recovery history");
+                if self.parent_host_calls {
+                    assert!(self.host_pending.insert((relay.owner.raw(), relay.attempt), None).is_none());
+                    return;
+                }
                 let answer = match self.settings.host {
                     HostSchedule::TooLarge => {
                         run::HostAnswer::new(vec![b'x'; 128].into(), false).expect("bounded oversized host text")
@@ -1180,7 +1309,7 @@ impl World {
                     self.now.saturating_add(self.settings.network.draw(&mut self.rng))
                 };
                 let key = self.schedule.send(at, Delivery::Host { relay, reply });
-                assert!(self.host_pending.insert((relay.owner.raw(), relay.attempt), key).is_none());
+                assert!(self.host_pending.insert((relay.owner.raw(), relay.attempt), Some(key)).is_none());
             }
             Request::WithdrawHost { relay } => {
                 self.host_history.withdraw(relay).expect("withdraw retains actual terminal");
@@ -1775,4 +1904,49 @@ fn observed_price(prices: run::Prices, usage: llm::Usage) -> Option<u64> {
         .checked_add(u128::from(usage.output_tokens).checked_mul(u128::from(prices.output))?)?;
     let rounded = (numerator / denominator).checked_add(u128::from(numerator % denominator != 0))?;
     u64::try_from(rounded).ok()
+}
+
+#[cfg(test)]
+mod bridge_tests {
+    use super::*;
+
+    #[test]
+    fn a_caller_start_and_host_reply_cross_the_parent_bridge() {
+        let settings = Settings { job: Job::HostTools, ..Settings::calm(811) };
+        let start = Event::Start {
+            reply_to: ReplyTo::new(Token::new(71)),
+            host_run: Token::new(73),
+            activation: 4,
+            charter: charter(&settings),
+            workspace: None,
+            grants: Box::new([Grant {
+                name: GrantName { account: 0, generation: 1 },
+                valid: Duration::from_secs(7200),
+            }]),
+            transcript: None,
+        };
+        let mut world = World::with_start(settings, start);
+        world.enable_parent_host_calls();
+        assert!(!world.drive(20_000), "the world yields before answering the host call");
+        let pending = world.pending_host_calls();
+        let [call] = pending.as_slice() else {
+            panic!("one pending host call");
+        };
+        assert_eq!(call.host_run, Token::new(73));
+        assert_eq!(call.name.activation, 4);
+        assert_eq!(world.host_submissions().len(), 1);
+        let relay = call.relay;
+        let answer = run::HostAnswer::new(b"parent decision".as_slice().into(), false).expect("bounded answer");
+        assert_eq!(
+            world.return_host_reply(run::RelayName { owner: Token::new(999), attempt: 1 }, run::HostReply::Busy),
+            Err("no pending host relay")
+        );
+        world.return_host_reply(relay, run::HostReply::Answered(answer.clone())).expect("pending relay");
+        assert_eq!(world.return_host_reply(relay, run::HostReply::Busy), Err("host relay terminal is already queued"));
+        assert!(world.pending_host_calls().is_empty());
+        assert!(world.drive(20_000));
+        assert!(matches!(world.answer(), run::Answer::Accepted { .. }));
+        assert_eq!(world.host_terminals().len(), 1);
+        assert_eq!(world.host_terminals()[0].2, run::HostReply::Answered(answer));
+    }
 }

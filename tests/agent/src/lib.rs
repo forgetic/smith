@@ -8,6 +8,9 @@
 //! bounded output pressure. The parent-delivery entrance exposes root requests
 //! and accepts one sealed terminal through the shared schedule and flight ledger
 //! (domain/run.md, section 8.2; domain/host.md, section 9).
+//! An opt-in host-call entrance accepts the caller's complete Start and yields
+//! each pending relay to its parent before the parent returns a `HostReply`
+//! (domain/run.md, section 5.2; domain/host.md, section 9).
 //!
 //! A fixture translator recognizes the copied scripts, not arbitrary provider
 //! documents. The independent referee sees only boundary observations. Facts
