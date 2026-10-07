@@ -95,7 +95,8 @@ of domain/host.md, section 2.
   - whether it may be written;
   - whether it is a git repository;
   - for a merge in progress, the files left in conflict;
-- **the transcript,** as bytes, if the run resumes (transcript.md);
+- **the transcript,** if the run resumes: its turns' bytes, in order, as
+  they were told (transcript.md);
 - **the calls answered after its last turn,** each a name and an answer;
 - **the grants** the charter's endpoints need;
 - **the window:** how many turns, and how many bytes of them, may be
