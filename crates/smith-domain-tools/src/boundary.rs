@@ -334,10 +334,9 @@ pub enum Done {
 }
 
 /// Which version of a file io found, or made by storing it. io makes versions
-/// so that a file changed in any way has a new one, and the domain compares
-/// them and never looks inside. In production a version is the file's device,
-/// inode, change time and size; every store renames a new file into place, so
-/// its inode changes.
+/// so that changed content has a new one; the domain compares versions and
+/// never looks inside. The machine uses a SHA-256 content digest, represented
+/// as four big-endian words (protocol/agent.md, section 2).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Version([u64; 4]);
 

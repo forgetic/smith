@@ -35,6 +35,7 @@ smith-domain-run = { path = "crates/smith-domain-run" }
 smith-domain-session = { path = "crates/smith-domain-session" }
 smith-domain-tools = { path = "crates/smith-domain-tools" }
 smith-protocol-llm = { path = "crates/smith-protocol-llm" }
+smith-protocol-machine = { path = "crates/smith-protocol-machine" }
 smith-charter = { path = "crates/smith-charter" }
 smith-transcript = { path = "crates/smith-transcript" }
 smith-channel = { path = "crates/smith-channel" }

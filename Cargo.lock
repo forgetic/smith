@@ -316,6 +316,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-protocol-machine"
+version = "0.0.0"
+dependencies = [
+ "skein-io",
+ "skein-lib",
+ "smith-domain",
+]
+
+[[package]]
 name = "smith-run-world"
 version = "0.0.0"
 dependencies = [

@@ -1,0 +1,15 @@
+[package]
+name = "smith-protocol-machine"
+description = "Smith workspace file and process translation over skein IO"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+skein-lib.workspace = true
+skein-io.workspace = true
+smith-domain.workspace = true
+
+[lints]
+workspace = true
