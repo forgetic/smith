@@ -1473,6 +1473,10 @@ pub enum Reply {
     Busy,
     /// `unavailable` without a payload.
     Unavailable,
+    /// `withdrawn` without a payload.
+    Withdrawn,
+    /// `too_large` without a payload.
+    TooLarge,
 }
 
 impl Reply {
@@ -1486,7 +1490,7 @@ impl Reply {
         match self {
             Self::Host(record) => HostReply::check(record, limits),
             Self::Delivery(record) => DeliveryReply::check(record, limits),
-            Self::Busy | Self::Unavailable => Ok(()),
+            Self::Busy | Self::Unavailable | Self::Withdrawn | Self::TooLarge => Ok(()),
         }?;
         if limits.directory_name > CEILINGS.directory_name { return Err(Problem { path: Path::DirectoryName, reason: skein_codec::Reason::Bound }); }
         if limits.directory_path > CEILINGS.directory_path { return Err(Problem { path: Path::DirectoryPath, reason: skein_codec::Reason::Bound }); }
@@ -5175,7 +5179,7 @@ impl Reply {
         match self {
             Self::Host(record) => 1_u32.checked_add(HostReply::measure(record)).expect("schema ceilings fit u32"),
             Self::Delivery(record) => 1_u32.checked_add(DeliveryReply::measure(record)).expect("schema ceilings fit u32"),
-            Self::Busy | Self::Unavailable => 1,
+            Self::Busy | Self::Unavailable | Self::Withdrawn | Self::TooLarge => 1,
         }
     }
 
@@ -5186,6 +5190,8 @@ impl Reply {
             Self::Delivery(record) => { writer.put(&[1_u8])?; record.encode(writer)?; }
             Self::Busy => writer.put(&[2_u8])?,
             Self::Unavailable => writer.put(&[3_u8])?,
+            Self::Withdrawn => writer.put(&[4_u8])?,
+            Self::TooLarge => writer.put(&[5_u8])?,
         }
         Ok(())
     }
@@ -5204,6 +5210,8 @@ impl Reply {
             1 => Self::Delivery(DeliveryReply::decode_from(limits, reader)?),
             2 => Self::Busy,
             3 => Self::Unavailable,
+            4 => Self::Withdrawn,
+            5 => Self::TooLarge,
             _ => return Err(Problem { path: Path::ReplyTag, reason: skein_codec::Reason::Tag }),
         };
         Self::new(limits, value)
@@ -9072,6 +9080,46 @@ mod golden_tests {
     fn enum_reply_unavailable_full() {
         let value = Reply::Unavailable;
         let golden: &[u8] = &[3];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(Reply::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_reply_withdrawn_smallest() {
+        let value = Reply::Withdrawn;
+        let golden: &[u8] = &[4];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(Reply::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_reply_withdrawn_full() {
+        let value = Reply::Withdrawn;
+        let golden: &[u8] = &[4];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(Reply::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_reply_too_large_smallest() {
+        let value = Reply::TooLarge;
+        let golden: &[u8] = &[5];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(Reply::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_reply_too_large_full() {
+        let value = Reply::TooLarge;
+        let golden: &[u8] = &[5];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);

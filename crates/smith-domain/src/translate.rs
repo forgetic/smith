@@ -220,6 +220,7 @@ pub(crate) const fn failed(returned: &run::Returned) -> bool {
         | run::Returned::Answered { .. } => false,
         run::Returned::HostUnknown
         | run::Returned::HostTooLarge { .. }
+        | run::Returned::HostReportedTooLarge
         | run::Returned::HostRejected(_)
         | run::Returned::Nothing
         | run::Returned::DeliveryRefused(_)

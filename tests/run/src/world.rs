@@ -1372,7 +1372,7 @@ impl World {
                         assert!(self.relays.remove(&(relay.owner, relay.attempt)), "relay returns once");
                         let run = self.relay_owner[&relay.owner];
                         match reply {
-                            run::HostReply::Answered(_) => {
+                            run::HostReply::Answered(_) | run::HostReply::TooLarge => {
                                 self.stats.relay_answered += 1;
                                 self.relay_stage.remove(&run);
                             }
@@ -1380,7 +1380,7 @@ impl World {
                                 self.stats.relay_busy += 1;
                                 self.relay_stage.insert(run, "relay backoff");
                             }
-                            run::HostReply::Unanswered(_) => {
+                            run::HostReply::Unanswered(_) | run::HostReply::Withdrawn => {
                                 self.stats.relay_lost += 1;
                                 self.relay_stage.insert(run, "relay backoff");
                             }

@@ -1935,10 +1935,11 @@ pub(crate) fn host_returned(
             let exhausted = if relay.unknown { Returned::HostUnknown } else { Returned::Busy };
             host_recover(relay, name.attempt, active, env, exhausted)
         }
-        HostReply::Unanswered(_) => {
+        HostReply::Withdrawn | HostReply::Unanswered(_) => {
             relay.unknown = true;
             host_recover(relay, name.attempt, active, env, Returned::HostUnknown)
         }
+        HostReply::TooLarge => Some(Returned::HostReportedTooLarge),
     };
     if let Some(result) = result {
         host_return(domain, id, result, out);

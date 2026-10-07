@@ -50,6 +50,7 @@ pub fn feedback(returned: Returned, max_bytes: u64) -> Result<Feedback, Feedback
         returned @ (Returned::Waiting
         | Returned::HostUnknown
         | Returned::HostTooLarge { .. }
+        | Returned::HostReportedTooLarge
         | Returned::HostRejected(_)
         | Returned::Delivered(_)
         | Returned::Nothing
@@ -124,6 +125,7 @@ fn render(text: &mut Text, returned: &Returned) {
             text.number(u64::from(*max));
             text.put(b" answer-not-shown");
         }
+        Returned::HostReportedTooLarge => text.put(b"host-decided answer-too-large answer-not-shown"),
         Returned::HostRejected(problem) => {
             text.put(b"host-rejected reason=");
             text.put(match problem {

@@ -162,6 +162,12 @@ pub enum HostReply {
     /// Predecision capacity refusal; eligible for retry after backoff.
     Busy,
 
+    /// The host settled a withdrawn relay without revealing its answer; retry the same name.
+    Withdrawn,
+
+    /// The host's answer exceeds the run's receiving allowance; report an error once.
+    TooLarge,
+
     /// The relay terminal carries no learnable outcome yet.
     Unanswered(
         /// Actual settled relay status, preserving possible committed effects.

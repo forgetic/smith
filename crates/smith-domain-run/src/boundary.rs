@@ -425,6 +425,8 @@ pub enum Returned {
     ),
     /// The host decided the call, but its answer exceeds the receiving text cap.
     HostTooLarge { bytes: u32, max: u32 },
+    /// Host reports an oversized answer without revealing its size; it is not retried.
+    HostReportedTooLarge,
     /// No permissible recovery remains after the earlier relay settled. This
     /// means outcome unknown, never evidence of failure or permission to decide twice.
     HostUnknown,

@@ -538,7 +538,9 @@ impl Partner {
         match result {
             Returned::HostAnswered(_) => self.tally.host_answered += 1,
             Returned::HostUnknown => self.tally.host_unknown += 1,
-            Returned::HostTooLarge { .. } | Returned::HostRejected(_) => self.tally.host_rejected += 1,
+            Returned::HostTooLarge { .. } | Returned::HostReportedTooLarge | Returned::HostRejected(_) => {
+                self.tally.host_rejected += 1;
+            }
             Returned::Waiting => self.tally.waiting += 1,
             Returned::Delivered(_) if mid_delivery => self.tally.delivered += 1,
             Returned::Accepted | Returned::Delivered(_) => self.tally.accepted += 1,

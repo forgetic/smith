@@ -28,6 +28,7 @@ fn every_run_call_terminal_has_canonical_feedback() {
             "host-decided answer-too-large bytes=9312 max=8192 answer-not-shown",
             true,
         ),
+        (run::Returned::HostReportedTooLarge, "host-decided answer-too-large answer-not-shown", true),
         (run::Returned::HostUnknown, "host-unknown", true),
         (run::Returned::HostRejected(run::HostProblem::Undeclared), "host-rejected reason=undeclared", true),
         (run::Returned::Delivered(delivered), "delivered\nreceipt directory=1 text=\"r\"", false),

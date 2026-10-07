@@ -40,6 +40,7 @@ pub struct History {
     previous_terminal: Option<Time>,
     answered: Option<run::HostAnswer>,
     uncertain: bool,
+    reported_too_large: bool,
     feedback: bool,
     provider_call: Option<ProviderCall>,
     shutdown: Option<Time>,
@@ -136,7 +137,8 @@ impl History {
                 self.answered = Some(answer.clone());
                 self.uncertain = false;
             }
-            run::HostReply::Unanswered(_) => self.uncertain = true,
+            run::HostReply::Unanswered(_) | run::HostReply::Withdrawn => self.uncertain = true,
+            run::HostReply::TooLarge => self.reported_too_large = true,
             run::HostReply::Busy => {}
         }
         self.live = None;
@@ -160,6 +162,7 @@ impl History {
                 .answered
                 .as_ref()
                 .is_some_and(|answer| u32::try_from(answer.text().len()).ok() == Some(*bytes) && bytes > max),
+            run::Returned::HostReportedTooLarge => self.reported_too_large,
             run::Returned::HostUnknown => self.answered.is_none() && self.uncertain,
             run::Returned::Busy | run::Returned::Cancelled | run::Returned::TimedOut => {
                 self.answered.is_none() && !self.uncertain
@@ -279,6 +282,13 @@ impl History {
                 if self.live.is_some() || replay.is_some() {
                     return Err("feedback precedes actual terminal or invents replay metadata");
                 }
+                if self.reported_too_large {
+                    if text.as_ref() != b"host-decided answer-too-large answer-not-shown" || !error {
+                        return Err("feedback erased or fabricated reported oversized host answer");
+                    }
+                    self.feedback = true;
+                    return Ok(());
+                }
                 let expected = match &self.answered {
                     Some(answer) => (answer.text(), answer.error()),
                     None if self.uncertain => (b"host-unknown".as_slice(), true),
@@ -294,6 +304,7 @@ impl History {
                 let expected_error = match returned {
                     run::Returned::HostAnswered(answer) => answer.error(),
                     run::Returned::HostTooLarge { .. }
+                    | run::Returned::HostReportedTooLarge
                     | run::Returned::HostUnknown
                     | run::Returned::Busy
                     | run::Returned::Cancelled

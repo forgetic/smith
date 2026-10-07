@@ -2196,6 +2196,22 @@ fn a_decided_host_answer_over_the_receiving_cap_is_not_unknown() {
 }
 
 #[test]
+fn a_host_reported_too_large_answer_is_an_error_and_is_not_retried() {
+    let mut h = Harness::new(LIMITS);
+    let (_, conversation) = h.running(71, 99);
+    let deadline = h.env.now.saturating_add(Duration::from_secs(30));
+    let relay = host_submission(&h.step(host_ask(conversation, 41, deadline)));
+    assert_eq!(
+        &*h.step(Event::HostReturned { relay, reply: crate::HostReply::TooLarge }),
+        &[Request::Return { spent: 0, call: Token::new(41), result: Returned::HostReportedTooLarge }]
+    );
+    assert!(
+        h.step(Event::HostReturned { relay, reply: crate::HostReply::TooLarge }).is_empty(),
+        "the settled reply cannot ask the host again"
+    );
+}
+
+#[test]
 fn host_uncertainty_survives_busy_until_withdrawal_or_caller_expiry() {
     enum Stop {
         Withdraw,

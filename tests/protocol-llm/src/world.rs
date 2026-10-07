@@ -1340,6 +1340,8 @@ impl World {
                         run::HostReply::Unanswered(run::Unanswered::Lost)
                     }
                     run::HostReply::Busy => run::HostReply::Busy,
+                    run::HostReply::Withdrawn => run::HostReply::Withdrawn,
+                    run::HostReply::TooLarge => run::HostReply::TooLarge,
                     run::HostReply::Unanswered(run::Unanswered::Withdrawn) => {
                         run::HostReply::Unanswered(run::Unanswered::Withdrawn)
                     }

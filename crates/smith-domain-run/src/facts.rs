@@ -246,7 +246,7 @@ fn result_of(result: &Returned) -> Return {
     match result {
         Returned::Waiting => Return::Waiting,
         Returned::HostAnswered(_) => Return::HostAnswered,
-        Returned::HostTooLarge { .. } => Return::HostTooLarge,
+        Returned::HostTooLarge { .. } | Returned::HostReportedTooLarge => Return::HostTooLarge,
         Returned::HostUnknown => Return::HostUnknown,
         Returned::HostRejected(_) => Return::HostRejected,
         Returned::Delivered(_) => Return::Delivered,
