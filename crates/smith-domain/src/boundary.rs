@@ -48,13 +48,15 @@ use alloc::boxed::Box;
 /// One durable host decision made after the last saved turn.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct AnsweredCall {
-    /// The call's stable name in the last saved turn.
+    /// The call's stable name across activations.
     pub name: run::CallName,
+    /// The host-declared tool the earlier call named.
+    pub tool: Box<[u8]>,
     /// The host's answer, in the same vocabulary as a live terminal.
     pub answer: Answered,
 }
 
-/// A host decision restored as the result of its original call.
+/// A host decision to describe to the resumed run.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Answered {
     /// The host answered a tool with result or error text.
@@ -111,7 +113,7 @@ pub enum Event {
         /// False charter.resume ignores it; semantic refusal never starts fresh.
         /// Receiving record/count caps are checked before root retention.
         transcript: Option<smith_domain_session::record::Transcript>,
-        /// Calls answered by the host since the last saved turn.
+        /// Host answers the saved transcript does not hold.
         answered: Box<[AnsweredCall]>,
         /// Host credential-name and remaining-validity notices, bounded by `Limits.accounts`.
         /// These select a usable credential generation; they grant no checkout or tool authority.

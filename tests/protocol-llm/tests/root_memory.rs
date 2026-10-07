@@ -106,6 +106,8 @@ fn bounds(messages: u32) -> Limits {
             host_tools: 0,
             host_input_bytes: 64,
             host_reply_bytes: 64,
+            answered_calls: 16,
+            answered_bytes: 4096,
             answer_bytes: 64,
             guide_bytes: 64,
             outcome_bytes: 256,

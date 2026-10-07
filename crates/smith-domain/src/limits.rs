@@ -68,6 +68,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         || run_limits.max_tokens > session_limits.max_tokens
         || run_limits.directories > session_limits.tools.repos
         || run_limits.directory_name_bytes > session_limits.tools.path_bytes
+        || u64::from(run_limits.answered_bytes) > session_limits.session_bytes
     {
         return None;
     }
@@ -146,13 +147,17 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         u64::from(session_out(limits))
             .checked_mul(record.max(prompt_payload(limits)?).max(u64::from(session_limits.failure_bytes)))?,
     )?;
-    let starts = Slab::<StartContext>::worst_case(run_limits.runs)?
-        .checked_add(u64::from(run_limits.runs).checked_mul(record)?)?;
+    let starts = Slab::<StartContext>::worst_case(run_limits.runs)?.checked_add(
+        u64::from(run_limits.runs).checked_mul(record.checked_add(u64::from(run_limits.answered_bytes))?)?,
+    )?;
     let turns = Slab::<TurnHandoff>::worst_case(session_out(limits))?
         .checked_add(u64::from(session_out(limits)).checked_mul(record)?)?;
     // Canonical rendering can temporarily retain the complete semantic result
     // beside the allocated text, before it moves into one flight.
-    let rendering = payload.checked_add(session_limits.delegated_result_bytes)?;
+    let answers = u64::from(run_limits.answered_calls)
+        .checked_mul(u64::try_from(size_of::<crate::AnsweredCall>()).ok()?)?
+        .checked_add(u64::from(run_limits.answered_bytes).checked_mul(2)?)?;
+    let rendering = payload.checked_add(session_limits.delegated_result_bytes)?.checked_add(answers)?;
     let facts = Queue::<Fact>::worst_case(facts(limits)?)?;
     let content = Queue::<crate::Content>::worst_case(limits.session.facts)?
         .checked_add(u64::from(limits.session.facts).checked_add(1)?.checked_mul(limits.session.session_bytes)?)?;

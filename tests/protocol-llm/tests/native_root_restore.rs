@@ -143,14 +143,22 @@ fn prefix(fixture: &Fixture) -> Vec<Message> {
 fn resumed_prefix(fixture: &Fixture, tail: bool) -> Vec<Message> {
     let mut messages = prefix(fixture);
     if tail {
-        messages[2].parts = vec![feedback(), text(BEGIN)].into();
-    } else {
-        if !tail {
-            messages.push(message(Role::Assistant, vec![text(FIRST)]));
+        if fixture.call_replay.is_some() {
+            messages[2].parts = vec![feedback(), text(&waking_prompt())].into();
+        } else {
+            messages.push(message(Role::User, vec![text(&waking_prompt())]));
         }
+    } else {
+        messages.push(message(Role::Assistant, vec![text(FIRST)]));
         messages.push(message(Role::User, vec![text(BEGIN)]));
     }
     messages
+}
+
+fn waking_prompt() -> Vec<u8> {
+    let mut text = b"Earlier host answers absent from the saved transcript:\ncall activation=1 completion=2 position=1 tool=wait result: waiting\n\n".to_vec();
+    text.extend_from_slice(BEGIN);
+    text
 }
 
 fn exact_prefix(query: &Query, expected: &[Message]) -> bool {
@@ -212,7 +220,7 @@ fn recorded_wait(turn: &smith_domain::Turn, fixture: &Fixture, opaque: bool) -> 
             && matches!(wake.content.as_ref(), [llm::Block::ToolResult {
             id, result: llm::Returned::Text { text, error: false, replay: None }
         }, llm::Block::Text { text: prompt, replay: None }]
-            if id.as_ref() == ID && text.as_ref() == b"waiting" && prompt.as_ref() == BEGIN));
+            if id.as_ref() == ID && text.as_ref() == b"waiting" && prompt.as_ref() == waking_prompt()));
     if wake.role != llm::Role::User || assistant.role != llm::Role::Assistant || !wake_matches {
         return false;
     }
@@ -270,16 +278,15 @@ fn history(world: &World) -> Transcript {
 // no completion, application classification, feedback or usage is manufactured.
 fn post_tail(world: &World) -> (Transcript, AnsweredCall) {
     let mut saved = history(world);
-    let mut first = saved.turns[0].clone();
-    let mut messages = first.messages.into_vec();
-    let result = messages.pop().expect("actual saved Wait terminal");
-    first.messages = messages.into();
+    let first = saved.turns[0].clone();
+    let result = first.messages.last().expect("actual saved Wait terminal").clone();
     saved.turns = Box::new([first]);
     let llm::Block::ToolResult { result: llm::Returned::Text { text, error, .. }, .. } = &result.content[0] else {
         panic!("saved host answer")
     };
     let answered = AnsweredCall {
-        name: run::CallName { activation: 1, completion: saved.turns[0].sequence, position: 1 },
+        tool: b"wait".as_slice().into(),
+        name: run::CallName { activation: 1, completion: saved.turns[0].sequence + 1, position: 1 },
         answer: Answered::Host(run::HostAnswer::new(text.clone(), *error).expect("saved host answer fits")),
     };
     (saved, answered)
@@ -401,7 +408,9 @@ fn resume(first: &World, fixture: &Fixture, index: usize, tail: bool) {
     second.push(message(Role::Assistant, vec![text(RESUMED), call()]));
     second.push(message(Role::User, vec![feedback()]));
     accounting(&world, fixture, &[prefix, second], &[11, 5], sequence);
-    assert!(recorded_wait(&world.turns()[0], fixture, false));
+    if !tail {
+        assert!(recorded_wait(&world.turns()[0], fixture, false));
+    }
     assert!(matches!(world.turns()[1].messages[0].content.as_ref(), [llm::Block::Text { text, replay: metadata }]
         if text.as_ref() == LAST && replay(metadata.as_ref(), fixture.text_replay)));
     settled(&world, &settings);

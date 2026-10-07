@@ -112,45 +112,10 @@ fn parked_transcript_resumes_without_recharging_history_or_reusing_activation_nu
 }
 
 #[test]
-fn a_resumed_run_hears_each_call_answered_after_its_last_turn_as_its_result() {
+fn a_resumed_run_is_told_of_each_answer_its_transcript_lacks() {
     let mut first = World::new(Settings { job: Job::HostTools, ..Settings::calm(905) });
     first.run(2000);
-    let mut turn = first.turns()[0].clone();
-    let mut messages = turn.messages.into_vec();
-    let actual_result = messages.pop().expect("actual terminal user message");
-    let session::llm::Block::ToolResult { id, result: session::llm::Returned::Text { text, error, .. } } =
-        &actual_result.content[0]
-    else {
-        panic!("host result")
-    };
-    let position = messages
-        .last()
-        .expect("assistant call")
-        .content
-        .iter()
-        .position(|block| matches!(block, session::llm::Block::ToolCall { id: call_id, .. } if call_id == id))
-        .expect("matching call");
-    let answered = AnsweredCall {
-        name: run::CallName {
-            activation: 1,
-            completion: turn.sequence,
-            position: u32::try_from(position).expect("position"),
-        },
-        answer: Answered::Host(run::HostAnswer::new(text.clone(), *error).expect("saved result fits")),
-    };
-    assert!(actual_result.content.iter().any(|block| matches!(block, session::llm::Block::ToolResult {
-        result: session::llm::Returned::Text { text, error: false, .. }, ..
-    } if text.as_ref() == b"opaque host answer: first decision")));
-    let assistant = messages.last_mut().expect("assistant call");
-    let mut blocks = assistant.content.to_vec();
-    let second_position = u32::try_from(blocks.len()).expect("bounded assistant blocks");
-    let mut second = blocks[position].clone();
-    let session::llm::Block::ToolCall { id, name, .. } = &mut second else { panic!("saved host call") };
-    *id = b"delivery-after".as_slice().into();
-    *name = b"deliver".as_slice().into();
-    blocks.push(second);
-    assistant.content = blocks.into();
-    turn.messages = messages.into();
+    let turn = first.turns()[0].clone();
     let saved = smith_domain::Transcript {
         version: turn.version,
         endpoint: turn.endpoint,
@@ -161,32 +126,55 @@ fn a_resumed_run_hears_each_call_answered_after_its_last_turn_as_its_result() {
         Settings { job: Job::HostTools, resume: true, ..Settings::calm(906) },
         Some(saved),
         Box::new([
-            answered,
             AnsweredCall {
-                name: run::CallName { activation: 1, completion: 1, position: second_position },
+                name: run::CallName { activation: 1, completion: 2, position: 0 },
+                tool: b"message".as_slice().into(),
+                answer: Answered::Host(
+                    run::HostAnswer::new(b"opaque host answer: first decision".as_slice().into(), false)
+                        .expect("saved result fits"),
+                ),
+            },
+            AnsweredCall {
+                name: run::CallName { activation: 1, completion: 3, position: 0 },
+                tool: b"deliver".as_slice().into(),
                 answer: Answered::Delivery(Box::new(run::Delivery::Nothing)),
             },
         ]),
     );
     next.run(2000);
-    assert!(matches!(
-        next.answer(),
-        run::Answer::Accepted { outcome: run::outcome::Declared::Report(_), turns: 1, .. }
-    ));
-    assert!(next.host_submissions().is_empty(), "restored answer prevents duplicate host effect");
-    assert!(next.prompts()[0].messages.iter().any(|message| {
-        message.parts.iter().any(|part| {
-            matches!(part,
-        Part::ToolOutput { output, is_error: false, .. } if output.as_ref() == b"opaque host answer: first decision")
-        })
-    }));
-    assert!(next.prompts()[0].messages.iter().any(|message| {
-        message.parts.iter().any(|part| {
-            matches!(part, Part::ToolOutput { id, output, is_error: true }
-                if id.as_ref() == b"delivery-after" && output.as_ref() == b"nothing")
-        })
-    }));
-    assert_eq!(next.turns()[0].sequence, 2);
+    let prompt = &next.prompts()[0];
+    assert!(next.host_submissions().is_empty(), "saved host calls are not decided again");
+    assert!(prompt.messages.iter().any(|message| message.parts.iter().any(|part| {
+        matches!(part, Part::Text { text } if text.windows(b"opaque host answer: first decision".len())
+            .any(|window| window == b"opaque host answer: first decision"))
+    })));
+    assert!(prompt.messages.iter().any(|message| message.parts.iter().any(|part| {
+        matches!(part, Part::Text { text } if text.windows(b"tool=deliver error: nothing".len())
+            .any(|window| window == b"tool=deliver error: nothing"))
+    })));
+}
+
+#[test]
+fn answers_too_many_or_too_long_are_refused_before_a_completion() {
+    let answer = AnsweredCall {
+        name: run::CallName { activation: 1, completion: 1, position: 0 },
+        tool: b"deliver".as_slice().into(),
+        answer: Answered::Delivery(Box::new(run::Delivery::Nothing)),
+    };
+    let calm = Settings::calm(907);
+    for limits in [
+        smith_domain::Limits { run: run::Limits { answered_calls: 0, ..calm.limits.run }, ..calm.limits },
+        smith_domain::Limits { run: run::Limits { answered_bytes: 4, ..calm.limits.run }, ..calm.limits },
+    ] {
+        let mut world =
+            World::with_history_answers(Settings { resume: true, limits, ..calm }, None, Box::new([answer.clone()]));
+        world.run(2000);
+        assert!(matches!(
+            world.answer(),
+            run::Answer::Failed { failure: run::Failure::Transcript(run::TranscriptRefusal::TooLarge), .. }
+        ));
+        assert!(world.prompts().is_empty());
+    }
 }
 
 #[test]

@@ -41,6 +41,7 @@ mod tests;
 mod translate;
 #[cfg(test)]
 mod translation_tests;
+mod waking;
 
 pub use boundary::{Answered, AnsweredCall, Event, Grant, GrantName, Request};
 pub use config::Config;

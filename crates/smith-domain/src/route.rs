@@ -11,13 +11,13 @@
 //! [`hand_off`] perform the boundary handoffs.
 
 use alloc::boxed::Box;
-use core::mem::{self, size_of};
+use core::mem;
 
 use skein_lib::{Duration, Env, Id, List, Queue, ReplyTo, Token};
 use smith_domain_run::{self as run, Spend};
 use smith_domain_session as session;
 
-use crate::boundary::{Answered, AnsweredCall, Event, Request};
+use crate::boundary::{AnsweredCall, Event, Request};
 use crate::domain::{Credential, Domain, Due, Flight, Handoff, StartContext, TurnHandoff};
 use crate::limits::{self, Limits};
 use crate::peer::Peer;
@@ -207,13 +207,9 @@ fn start(
         return;
     }
     let (transcript, answered, refused) = if charter.resume {
-        match (transcript, render_answers(answered, &env.limits)) {
-            (Some(transcript), Some(answered)) if history_fits(&transcript, &answered, &env.limits) => {
-                (Some(transcript), answered, None)
-            }
-            (None, Some(answered)) if answered.is_empty() => (None, answered, None),
-            (None, Some(_)) => (None, Box::default(), Some(run::TranscriptRefusal::Malformed)),
-            (Some(_), Some(_)) | (_, None) => (None, Box::default(), Some(run::TranscriptRefusal::TooLarge)),
+        match crate::waking::render(answered, &env.limits) {
+            Some(text) if history_fits(transcript.as_ref(), &text, &env.limits) => (transcript, text, None),
+            Some(_) | None => (None, Box::default(), Some(run::TranscriptRefusal::TooLarge)),
         }
     } else {
         (None, Box::default(), None)
@@ -234,79 +230,38 @@ fn start(
     );
 }
 
-fn history_fits(
-    transcript: &session::record::Transcript,
-    answered: &[session::record::Answered],
-    limits: &Limits,
-) -> bool {
+fn history_fits(transcript: Option<&session::record::Transcript>, answered: &[u8], limits: &Limits) -> bool {
     let cap = u64::from(limits.session.messages);
-    if u64::try_from(transcript.turns.len()).expect("owned input count fits") > cap {
-        return false;
-    }
     let mut messages = 0_u64;
-    for turn in &transcript.turns {
-        messages = match messages.checked_add(u64::try_from(turn.messages.len()).expect("owned input count fits")) {
-            Some(count) if count <= cap => count,
-            Some(_) | None => return false,
+    let mut history_bytes = 0_u64;
+    if let Some(transcript) = transcript {
+        if u64::try_from(transcript.turns.len()).expect("owned input count fits") > cap {
+            return false;
+        }
+        for turn in &transcript.turns {
+            messages = match messages.checked_add(u64::try_from(turn.messages.len()).expect("owned input count fits")) {
+                Some(count) if count <= cap => count,
+                Some(_) | None => return false,
+            };
+        }
+        history_bytes = match transcript.owned_bytes() {
+            Some(bytes) => bytes,
+            None => return false,
         };
     }
-    if messages > cap {
+    if messages > cap
+        || u64::try_from(answered.len()).expect("owned length fits") > u64::from(limits.run.answered_bytes)
+    {
         return false;
     }
-    let total = match (transcript.owned_bytes(), answered_bytes(answered)) {
-        (Some(history), Some(results)) => history.checked_add(results),
-        (None, _) | (_, None) => None,
-    };
+    let total = history_bytes.checked_add(u64::try_from(answered.len()).expect("owned length fits"));
     match total {
         Some(bytes) => match limits::record_payload(limits) {
-            Some(cap) => bytes <= cap,
+            Some(cap) => bytes <= cap && bytes <= limits.session.session_bytes,
             None => false,
         },
         None => false,
     }
-}
-
-fn answered_bytes(answered: &[session::record::Answered]) -> Option<u64> {
-    let mut bytes =
-        u64::try_from(answered.len()).ok()?.checked_mul(u64::try_from(size_of::<session::record::Answered>()).ok()?)?;
-    for answer in answered {
-        match &answer.result {
-            session::llm::Returned::Text { text, .. } => bytes = bytes.checked_add(u64::try_from(text.len()).ok()?)?,
-            session::llm::Returned::Owned { .. }
-            | session::llm::Returned::Invalid { .. }
-            | session::llm::Returned::NotRun
-            | session::llm::Returned::Withdrawn => return None,
-        }
-    }
-    Some(bytes)
-}
-
-fn render_answers(answered: Box<[AnsweredCall]>, limits: &Limits) -> Option<Box<[session::record::Answered]>> {
-    let count = u32::try_from(answered.len()).ok()?;
-    if count > limits.session.completion_blocks {
-        return None;
-    }
-    let mut rendered = List::with_capacity(count);
-    for AnsweredCall { name, answer } in answered {
-        let returned = match answer {
-            Answered::Host(answer) => run::Returned::HostAnswered(answer),
-            Answered::Delivery(delivery) => match *delivery {
-                run::Delivery::Delivered(receipts) => run::Returned::Delivered(receipts),
-                run::Delivery::Nothing => run::Returned::Nothing,
-                run::Delivery::Refused(refusal) => run::Returned::DeliveryRefused(refusal),
-                run::Delivery::Failed(failure) => run::Returned::DeliveryFailed { failure },
-                run::Delivery::Stale => run::Returned::Stale,
-            },
-        };
-        let feedback = crate::feedback(returned, limits.session.delegated_result_bytes).ok()?;
-        rendered
-            .push(session::record::Answered {
-                origin: session::record::Origin { sequence: name.completion, position: name.position },
-                result: session::llm::Returned::Text { text: feedback.text, error: feedback.error, replay: None },
-            })
-            .ok()?;
-    }
-    Some(rendered.into_boxed())
 }
 
 /// Routes what the child domains emitted, and what that leads to, until both
@@ -609,11 +564,29 @@ fn open(domain: &mut Domain, env: &Env<Limits>, conversation: Token, opening: ru
         }
         None => (None, Box::default()),
     };
-    let Some((spec, offered)) = translate::spec(opening, env.limits.session.budget) else {
+    let Some((mut spec, offered)) = translate::spec(opening, env.limits.session.budget) else {
         // Refused at the conversations' entrance, in the run's terms.
         let ended = run::Event::Ended { conversation, end: run::End::Invalid, spend: Spend::ZERO };
         return run_step(domain, env, ended);
     };
+    if !answered.is_empty() {
+        let Some(length) = answered.len().checked_add(spec.prompt.len()) else {
+            return run_step(
+                domain,
+                env,
+                run::Event::Ended {
+                    conversation,
+                    end: run::End::TranscriptRefused { reason: run::TranscriptRefusal::TooLarge },
+                    spend: Spend::ZERO,
+                },
+            );
+        };
+        let mut prompt = List::with_capacity(u32::try_from(length).expect("admitted waking prompt length"));
+        for byte in answered.iter().chain(spec.prompt.iter()) {
+            prompt.push(*byte).expect("measured prompt length");
+        }
+        spec.prompt = prompt.into_boxed();
+    }
     let peer = Peer::new(conversation, activation, account, offered, &env.limits.session);
     let id = domain.peers.insert(peer).expect("a peer for every conversation the run has");
     let fresh = domain.conversations.insert(conversation, id).expect("a peer for every conversation");
@@ -631,7 +604,7 @@ fn open(domain: &mut Domain, env: &Env<Limits>, conversation: Token, opening: ru
             },
             budget,
             transcript,
-            answered,
+            answered: Box::default(),
         }),
     };
     session_step(domain, env, event);

@@ -95,7 +95,7 @@ pub struct Domain {
 pub(crate) struct StartContext {
     pub(crate) reply_to: Option<ReplyTo>,
     pub(crate) transcript: Option<session::record::Transcript>,
-    pub(crate) answered: Box<[session::record::Answered]>,
+    pub(crate) answered: Box<[u8]>,
     pub(crate) refused: Option<run::TranscriptRefusal>,
 }
 

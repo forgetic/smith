@@ -62,6 +62,11 @@ pub struct Limits {
     /// Maximum host answer text bytes accepted and retained per call.
     pub host_reply_bytes: u32,
 
+    /// Maximum host answers described in a resumed run's first prompt.
+    pub answered_calls: u32,
+    /// Maximum bytes of their rendered text in that prompt.
+    pub answered_bytes: u32,
+
     /// Receiving ceiling for each relay timeout; caller and run expiry may be earlier.
     pub host_timeout: Duration,
 

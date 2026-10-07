@@ -64,6 +64,8 @@ const LIMITS: Limits = Limits {
     host_tools: 1,
     host_input_bytes: 65_536,
     host_reply_bytes: 65_536,
+    answered_calls: 16,
+    answered_bytes: 4096,
     host_timeout: Duration::from_secs(60),
     host_backoff: Duration::from_millis(50),
     verdicts: 1,
