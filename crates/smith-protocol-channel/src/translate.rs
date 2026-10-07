@@ -234,6 +234,17 @@ impl Endpoints {
         }
         None
     }
+
+    /// Find the configured wire name for one domain endpoint and dialect.
+    #[must_use]
+    pub(crate) fn name_of(&self, number: u32, dialect: u32) -> Option<&[u8]> {
+        for endpoint in &self.entries {
+            if endpoint.number == number && endpoint.dialect == dialect {
+                return Some(&endpoint.name);
+            }
+        }
+        None
+    }
 }
 
 /// Decode one charter and resolve all LLM endpoint names before admission.

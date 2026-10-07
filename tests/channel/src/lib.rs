@@ -41,6 +41,10 @@ pub enum Observation {
     HostLong { span: skein_lib::Duration },
     /// The host received the end of the long operation.
     HostLongDone,
+    /// The host received a numbered durable transcript body.
+    HostTurn { number: u32, spent: u64, read: Option<skein_lib::Token>, body: Box<[u8]> },
+    /// The agent received exact durable commitment for one turn.
+    AgentAcknowledged { turn: u32 },
     /// The host received one named call with its deadline and metadata.
     HostCall {
         call: skein_lib::Token,
@@ -172,6 +176,12 @@ impl Peer {
                 host::OpenEvent::Waiting { read } => output.push(Observation::HostWaiting { read }),
                 host::OpenEvent::Long { span } => output.push(Observation::HostLong { span }),
                 host::OpenEvent::LongDone => output.push(Observation::HostLongDone),
+                host::OpenEvent::Turn { turn } => output.push(Observation::HostTurn {
+                    number: turn.number,
+                    spent: turn.spent,
+                    read: turn.read,
+                    body: turn.body,
+                }),
                 host::OpenEvent::Call { call, name, deadline, ask } => {
                     output.push(Observation::HostCall { call, name, deadline, ask: Box::new(ask) });
                 }
@@ -241,6 +251,7 @@ impl Peer {
                     output.push(Observation::AgentDelivered { owner, delivery });
                 }
                 agent::OpenEvent::DeliveryUnsent { owner } => output.push(Observation::AgentDeliveryUnsent { owner }),
+                agent::OpenEvent::Acknowledged { turn } => output.push(Observation::AgentAcknowledged { turn }),
             }
         }
     }
@@ -458,6 +469,38 @@ impl World {
             agent
                 .send_long_done(skein_lib::Token::new(27), &mut self.agent.agent_events, &mut self.agent.below)
                 .expect("bounded long end");
+        }
+    }
+
+    /// Have the scripted domain tell one concrete turn to the host.
+    pub fn agent_tells_turn(
+        &mut self,
+        number: u32,
+        read: Option<skein_lib::Token>,
+        turn: &smith_domain_session::record::Turn,
+    ) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            let mut spent = smith_domain::run::Spend::ZERO;
+            spent.units = turn.spent;
+            agent
+                .send_turn(
+                    number,
+                    read,
+                    spent,
+                    turn,
+                    skein_lib::Token::new(28),
+                    &mut self.agent.agent_events,
+                    &mut self.agent.below,
+                )
+                .expect("bounded turn");
+        }
+    }
+
+    /// Have the scripted host acknowledge its exact durable turn.
+    pub fn host_acknowledges(&mut self, turn: u32) {
+        if let Half::Host(host) = &mut self.host.half {
+            host.send_acknowledge(turn, skein_lib::Token::new(29), &mut self.host.host_events, &mut self.host.below)
+                .expect("bounded acknowledgement");
         }
     }
 

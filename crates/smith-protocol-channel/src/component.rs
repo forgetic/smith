@@ -11,6 +11,7 @@ use crate::transcript::decode_transcript;
 use crate::translate::{
     DecodedStart, Endpoints, answer_record, decode_charter, invalid_start, saved_delivery, start_context,
 };
+use crate::turn::encode_turn;
 use smith_domain::run;
 use smith_domain_session::record;
 
@@ -68,6 +69,8 @@ pub enum OpenEvent {
     Delivered { owner: Token, delivery: Box<run::Delivery> },
     /// A delivery frame never entered the stream; service settles its IO operation.
     DeliveryUnsent { owner: Token },
+    /// The host durably kept this numbered turn and its preceding prefix.
+    Acknowledged { turn: u32 },
     /// The channel ended before or after opening.
     Ended { why: Closed },
 }
@@ -265,6 +268,44 @@ impl Component {
         Ok(())
     }
 
+    /// Tell the host one concrete transcript turn with activation-wide spend.
+    #[expect(clippy::manual_map, reason = "production steps do not use closure methods")]
+    #[expect(clippy::too_many_arguments, reason = "turn and its host envelope have independent names")]
+    pub fn send_turn(
+        &mut self,
+        number: u32,
+        read: Option<Token>,
+        spent: run::Spend,
+        turn: &record::Turn,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted || number == 0 {
+            return Err(Error::Order);
+        }
+        let body = encode_turn(turn, &self.transcript, &self.endpoints)?;
+        let last_read = match read {
+            Some(name) => Some(name.raw()),
+            None => None,
+        };
+        let record = smith_channel::Turn::new(
+            &self.bodies,
+            smith_channel::TurnParts { number, spent: spent.units, last_read, body },
+        )?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::ResultCapacity);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x0109, record.measure())?;
+        frame.put(&body.finish())?;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
     /// Relay one declared host tool under its durable name and live attempt.
     #[expect(clippy::too_many_arguments, reason = "the typed channel boundary carries each domain value")]
     pub fn send_host_call(
@@ -436,6 +477,15 @@ impl Component {
                                 },
                                 None => self.refuse_rules(below),
                             }
+                        }
+                        Err(_) => self.refuse_rules(below),
+                    }
+                }
+                Some(Event::Body { kind: 0x0103, body }) if self.phase == Phase::Admitted => {
+                    match smith_channel::Acknowledge::decode(&self.bodies, &mut Reader::new(&body)) {
+                        Ok(acknowledge) => {
+                            to_service.push(OpenEvent::Acknowledged { turn: acknowledge.number() });
+                            self.machine.down(Request::Read, &mut self.events, below);
                         }
                         Err(_) => self.refuse_rules(below),
                     }

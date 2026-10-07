@@ -211,6 +211,7 @@ dependencies = [
  "smith-channel",
  "smith-charter",
  "smith-domain",
+ "smith-domain-session",
  "smith-host-domain",
  "smith-host-protocol",
  "smith-protocol-channel",

@@ -14,6 +14,7 @@ smith-channel.workspace = true
 smith-charter.workspace = true
 smith-transcript.workspace = true
 smith-domain.workspace = true
+smith-domain-session.workspace = true
 smith-host-domain.workspace = true
 smith-protocol-channel.workspace = true
 smith-host-protocol.workspace = true

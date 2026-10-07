@@ -377,6 +377,72 @@ fn a_long_operation_stretches_progress_until_its_end() {
 }
 
 #[test]
+#[expect(clippy::wildcard_enum_match_arm, reason = "test selects one observed wire turn")]
+fn a_concrete_turn_reaches_the_host_and_its_acknowledgement_returns() {
+    use smith_domain_session::{llm, record};
+
+    let turn = record::Turn {
+        version: record::VERSION,
+        endpoint: llm::Endpoint(0),
+        dialect: 0,
+        sequence: 1,
+        usage: llm::Usage { input_tokens: 3, output_tokens: 5, cache_read_tokens: 1, cache_write_tokens: 2 },
+        spent: 11,
+        messages: Box::from([llm::Message {
+            role: llm::Role::Assistant,
+            content: Box::from([
+                llm::Block::Text { text: Box::from(*b"hello"), replay: None },
+                llm::Block::ToolCall {
+                    id: Box::from(*b"id"),
+                    name: Box::from(*b"check"),
+                    input: Box::from(*b"{}"),
+                    call: llm::Decoded::Historical,
+                    replay: None,
+                },
+                llm::Block::ToolResult {
+                    id: Box::from(*b"id"),
+                    result: llm::Returned::Invalid { problem: llm::Problem::UnknownTool },
+                },
+            ]),
+        }]),
+    };
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    let read = Some(skein_lib::Token::new(31));
+    world.agent_tells_turn(1, read, &turn);
+    world.settle();
+    let body = world
+        .observations()
+        .iter()
+        .find_map(|observation| match observation {
+            Observation::HostTurn { number: 1, spent: 11, read: actual, body } if *actual == read => Some(body.clone()),
+            _ => None,
+        })
+        .expect("one forwarded turn");
+    let mut endpoints = skein_lib::List::with_capacity(1);
+    endpoints
+        .push(smith_protocol_channel::Endpoint { name: Box::default(), number: 0, dialect: 0, account: 0 })
+        .expect("one endpoint");
+    let transcript = smith_protocol_channel::decode_transcript(
+        &[body],
+        &smith_transcript::CEILINGS,
+        &smith_protocol_channel::Endpoints::new(endpoints),
+    )
+    .expect("decoded turn")
+    .expect("one turn");
+    assert_eq!(transcript.turns.as_ref(), &[turn]);
+    world.host_acknowledges(1);
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentAcknowledged { turn: 1 }));
+}
+
+#[test]
 fn host_tools_answered_busy_are_asked_again_under_their_names() {
     let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
     world.settle();

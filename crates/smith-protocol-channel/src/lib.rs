@@ -25,6 +25,7 @@ mod component;
 mod limits;
 mod transcript;
 mod translate;
+mod turn;
 
 #[cfg(test)]
 mod tests;
@@ -35,3 +36,4 @@ pub use transcript::decode_transcript;
 pub use translate::{
     DecodedStart, Endpoint, Endpoints, Grant, Mount, answer_record, decode_charter, encode_result, start_context,
 };
+pub use turn::encode_turn;
