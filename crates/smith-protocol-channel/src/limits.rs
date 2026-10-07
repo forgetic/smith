@@ -31,6 +31,8 @@ pub enum Error {
     Result(smith_charter::v1::Problem),
     /// A bounded result list had no room for a field or item.
     ResultCapacity,
+    /// A saved answer decodes but fails the domain's sealed result bounds.
+    InvalidSavedAnswer,
     /// The service sent admission or an answer out of order.
     Order,
     /// The measured result did not fit its output writer.

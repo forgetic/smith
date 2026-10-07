@@ -38,7 +38,7 @@ pub struct DecodedStart {
     pub charter: run::Charter,
     pub mounts: Option<Box<[Mount]>>,
     pub transcript: Option<smith_domain_session::record::Transcript>,
-    pub answered: Box<[channel::AnsweredCall]>,
+    pub answered: Box<[smith_domain::AnsweredCall]>,
     pub grants: Box<[Grant]>,
     pub window: smith_domain::Window,
 }
@@ -85,10 +85,95 @@ pub fn start_context(
         charter,
         mounts,
         transcript,
-        answered: parts.answered.into_boxed(),
+        answered: saved_answers(parts.answered.as_slice())?,
         grants: grants.into_boxed(),
         window: smith_domain::Window { turns: parts.window.turns(), bytes: parts.window.bytes() },
     })
+}
+
+/// Move post-transcript host decisions into the domain's settled vocabulary.
+fn saved_answers(source: &[channel::AnsweredCall]) -> Result<Box<[smith_domain::AnsweredCall]>, Error> {
+    let Ok(count) = u32::try_from(source.len()) else {
+        return Err(Error::InvalidSavedAnswer);
+    };
+    let mut answered = List::with_capacity(count);
+    for call in source {
+        let name = call.name();
+        let reply = match call.reply() {
+            channel::SavedReply::Host(host) => {
+                let answer =
+                    run::HostAnswer::new(Box::from(host.text()), host.error()).ok_or(Error::InvalidSavedAnswer)?;
+                smith_domain::Answered::Host(answer)
+            }
+            channel::SavedReply::Delivery(delivery) => {
+                smith_domain::Answered::Delivery(Box::new(saved_delivery(delivery.value())?))
+            }
+            channel::SavedReply::TooLarge => smith_domain::Answered::TooLarge,
+        };
+        let item = smith_domain::AnsweredCall {
+            name: run::CallName {
+                activation: name.activation(),
+                completion: name.completion(),
+                position: name.position(),
+            },
+            tool: Box::from(call.tool()),
+            answer: reply,
+        };
+        if answered.push(item).is_err() {
+            return Err(Error::InvalidSavedAnswer);
+        }
+    }
+    Ok(answered.into_boxed())
+}
+
+fn saved_delivery(source: &channel::Delivery) -> Result<run::Delivery, Error> {
+    let delivery = match source {
+        channel::Delivery::Delivered(delivered) => {
+            let mut receipts = List::with_capacity(delivered.receipts().len());
+            for receipt in delivered.receipts() {
+                let receipt = run::Receipt::new(receipt.directory(), Box::from(receipt.text()))
+                    .ok_or(Error::InvalidSavedAnswer)?;
+                if receipts.push(receipt).is_err() {
+                    return Err(Error::InvalidSavedAnswer);
+                }
+            }
+            let evidence = run::Delivered::new(receipts.into_boxed()).ok_or(Error::InvalidSavedAnswer)?;
+            run::Delivery::Delivered(evidence)
+        }
+        channel::Delivery::Nothing => run::Delivery::Nothing,
+        channel::Delivery::Refused(refused) => {
+            let marker = match refused.marker() {
+                Some(marker) => Some(
+                    run::Marker::new(marker.directory(), Box::from(marker.path())).ok_or(Error::InvalidSavedAnswer)?,
+                ),
+                None => None,
+            };
+            let refusal =
+                run::DeliveryRefusal::new(marker, Box::from(refused.explanation())).ok_or(Error::InvalidSavedAnswer)?;
+            run::Delivery::Refused(refusal)
+        }
+        channel::Delivery::Failed(failed) => {
+            let reason = match failed.reason() {
+                channel::DeliveryReason::Unreachable => run::DeliveryReason::Unreachable,
+                channel::DeliveryReason::RefusedByTarget => run::DeliveryReason::RefusedByTarget,
+                channel::DeliveryReason::TimedOut => run::DeliveryReason::TimedOut,
+                channel::DeliveryReason::Broken => run::DeliveryReason::Broken,
+                channel::DeliveryReason::TooLarge => run::DeliveryReason::TooLarge,
+                channel::DeliveryReason::Missing => run::DeliveryReason::Missing,
+                channel::DeliveryReason::Busy => run::DeliveryReason::Busy,
+                channel::DeliveryReason::Unavailable => run::DeliveryReason::Unavailable,
+                channel::DeliveryReason::Cancelled => run::DeliveryReason::Cancelled,
+                channel::DeliveryReason::Unknown => run::DeliveryReason::Unknown,
+            };
+            run::Delivery::Failed(run::DeliveryFailure {
+                directory: failed.directory(),
+                reason,
+                diagnostic: run::Diagnostic::new(failed.diagnostic(), failed.dropped()),
+            })
+        }
+        channel::Delivery::Stale => run::Delivery::Stale,
+    };
+    Ok(delivery)
 }
 
 /// One configured endpoint name and its domain-visible identities.

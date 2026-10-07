@@ -250,6 +250,12 @@ fn the_start_keeps_workspace_paths_saved_answers_and_grant_values_below_the_doma
         credential: Box::from(*b"secret"),
         window: 2,
     }));
+    assert!(world.observations().contains(&Observation::AgentSavedHost {
+        activation: 6,
+        tool: Box::from(*b"check"),
+        text: Box::from(*b"ok"),
+        error: false,
+    }));
 }
 
 #[test]

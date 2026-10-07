@@ -31,6 +31,8 @@ pub enum Observation {
     AgentContext { path: Box<[u8]>, answered: usize, credential: Box<[u8]>, window: u32 },
     /// A settled oversized answer survived Start translation.
     AgentSavedTooLarge,
+    /// A saved host decision reached the domain vocabulary with its stable name.
+    AgentSavedHost { activation: u64, tool: Box<[u8]>, text: Box<[u8]>, error: bool },
     /// Host received an invalid Start answer.
     InvalidStart { why: smith_channel::InvalidStart, turns: u32, spent: u64 },
     /// Host received admission before the final answer.
@@ -175,8 +177,18 @@ impl Peer {
                     {
                         output.push(Observation::AgentHistory { turns: transcript.turns.len(), place: turn.sequence });
                     }
-                    if start.answered.iter().any(|call| matches!(call.reply(), smith_channel::SavedReply::TooLarge)) {
+                    if start.answered.iter().any(|call| matches!(call.answer, smith_domain::Answered::TooLarge)) {
                         output.push(Observation::AgentSavedTooLarge);
+                    }
+                    for call in &start.answered {
+                        if let smith_domain::Answered::Host(answer) = &call.answer {
+                            output.push(Observation::AgentSavedHost {
+                                activation: call.name.activation,
+                                tool: call.tool.clone(),
+                                text: Box::from(answer.text()),
+                                error: answer.error(),
+                            });
+                        }
                     }
                     if let Some(mounts) = &start.mounts
                         && let Some(mount) = mounts.first()
