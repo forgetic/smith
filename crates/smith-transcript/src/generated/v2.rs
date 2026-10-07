@@ -25,7 +25,6 @@ pub struct Limits {
     pub ambiguous_lines: u32,
     pub field_problem_field: u32,
     pub said_text: u32,
-    pub invalid_problems: u32,
     pub tool_result_id: u32,
     pub message_blocks: u32,
     pub turn_endpoint: u32,
@@ -54,7 +53,6 @@ pub const CEILINGS: Limits = Limits {
     ambiguous_lines: 1_024,
     field_problem_field: 64,
     said_text: 1_048_576,
-    invalid_problems: 16,
     tool_result_id: 256,
     message_blocks: 16,
     turn_endpoint: 64,
@@ -207,8 +205,8 @@ pub enum Path {
     SaidError,
     /// Bytes after `Said`.
     SaidTail,
-    /// The `problems` field of `Invalid`.
-    InvalidProblems,
+    /// The `problem` field of `Invalid`.
+    InvalidProblem,
     /// Bytes after `Invalid`.
     InvalidTail,
     /// The `value` field of `OwnedOutcome`.
@@ -330,7 +328,6 @@ impl Usage {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -397,7 +394,6 @@ impl Replay {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -467,7 +463,6 @@ impl Text {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -539,7 +534,6 @@ impl Opaque {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -623,7 +617,6 @@ impl Call {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -684,7 +677,6 @@ impl Kind {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -751,7 +743,6 @@ impl Entry {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -827,7 +818,6 @@ impl Hit {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -917,7 +907,6 @@ impl Read {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -985,7 +974,6 @@ impl Listed {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1063,7 +1051,6 @@ impl Found {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1128,7 +1115,6 @@ impl Written {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1189,7 +1175,6 @@ impl Edited {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1250,7 +1235,6 @@ impl ExitCode {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1311,7 +1295,6 @@ impl ExitSignal {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1364,7 +1347,6 @@ impl Exit {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1445,7 +1427,6 @@ impl CommandEnd {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1509,7 +1490,6 @@ impl TooLarge {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1570,7 +1550,6 @@ impl LineNumber {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1637,7 +1616,6 @@ impl Ambiguous {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1692,7 +1670,6 @@ impl Fault {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1752,7 +1729,6 @@ impl Failed {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1859,7 +1835,6 @@ impl Outcome {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1919,7 +1894,6 @@ impl FieldProblem {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -1979,7 +1953,6 @@ impl CallProblem {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -2046,7 +2019,6 @@ impl Said {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -2061,32 +2033,32 @@ impl Said {
 /// Movable fields of `Invalid`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct InvalidParts {
-    /// The `problems` field.
-    pub problems: List<CallProblem>,
+    /// The `problem` field.
+    pub problem: CallProblem,
 }
 
 /// `Invalid` in this codec family.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Invalid {
-    problems: List<CallProblem>,
+    problem: CallProblem,
 }
 
 impl Invalid {
     /// Makes a value within the given limits.
     pub fn new(limits: &Limits, parts: InvalidParts) -> Result<Self, Problem> {
-        let InvalidParts { problems } = parts;
-        let value = Self { problems };
+        let InvalidParts { problem } = parts;
+        let value = Self { problem };
         value.check(limits)?;
         Ok(value)
     }
 
-    /// Reads the `problems` field.
+    /// Reads the `problem` field.
     #[must_use]
-    pub fn problems(&self) -> &List<CallProblem> { &self.problems }
+    pub fn problem(&self) -> &CallProblem { &self.problem }
 
     /// Moves the fields out without copying.
     #[must_use]
-    pub fn into_parts(self) -> InvalidParts { InvalidParts { problems: self.problems } }
+    pub fn into_parts(self) -> InvalidParts { InvalidParts { problem: self.problem } }
 
     fn check(&self, limits: &Limits) -> Result<(), Problem> {
         if limits.replay_dialect > CEILINGS.replay_dialect { return Err(Problem { path: Path::ReplayDialect, reason: skein_codec::Reason::Bound }); }
@@ -2108,16 +2080,12 @@ impl Invalid {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
         if limits.turn_dialect > CEILINGS.turn_dialect { return Err(Problem { path: Path::TurnDialect, reason: skein_codec::Reason::Bound }); }
         if limits.turn_messages > CEILINGS.turn_messages { return Err(Problem { path: Path::TurnMessages, reason: skein_codec::Reason::Bound }); }
-        if self.problems.capacity() > limits.invalid_problems.min(CEILINGS.invalid_problems) { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
-        for item_0 in self.problems.as_slice() {
-        item_0.check(limits)?;
-        }
+        self.problem.check(limits)?;
         Ok(())
     }
 }
@@ -2172,7 +2140,6 @@ impl OwnedOutcome {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -2231,7 +2198,6 @@ impl Returned {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -2298,7 +2264,6 @@ impl ToolResult {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -2359,7 +2324,6 @@ impl Block {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -2408,7 +2372,6 @@ impl Role {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -2475,7 +2438,6 @@ impl Message {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -2575,7 +2537,6 @@ impl Turn {
         if limits.ambiguous_lines > CEILINGS.ambiguous_lines { return Err(Problem { path: Path::AmbiguousLines, reason: skein_codec::Reason::Bound }); }
         if limits.field_problem_field > CEILINGS.field_problem_field { return Err(Problem { path: Path::FieldProblemField, reason: skein_codec::Reason::Bound }); }
         if limits.said_text > CEILINGS.said_text { return Err(Problem { path: Path::SaidText, reason: skein_codec::Reason::Bound }); }
-        if limits.invalid_problems > CEILINGS.invalid_problems { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Bound }); }
         if limits.tool_result_id > CEILINGS.tool_result_id { return Err(Problem { path: Path::ToolResultId, reason: skein_codec::Reason::Bound }); }
         if limits.message_blocks > CEILINGS.message_blocks { return Err(Problem { path: Path::MessageBlocks, reason: skein_codec::Reason::Bound }); }
         if limits.turn_endpoint > CEILINGS.turn_endpoint { return Err(Problem { path: Path::TurnEndpoint, reason: skein_codec::Reason::Bound }); }
@@ -3652,21 +3613,15 @@ impl Invalid {
     #[must_use]
     pub fn measure(&self) -> u32 {
         let mut size = 0_u32;
-        let field_problems = &self.problems;
-        size = size.checked_add(4).expect("schema ceilings fit u32");
-        for item_0 in field_problems.as_slice() {
-        size = size.checked_add(item_0.measure()).expect("schema ceilings fit u32");
-        }
+        let field_problem = &self.problem;
+        size = size.checked_add(field_problem.measure()).expect("schema ceilings fit u32");
         size
     }
 
     /// Writes into a writer with room for the measured bytes.
     pub fn encode(&self, writer: &mut skein_lib::Writer) -> Result<(), skein_lib::Overflow> {
-        let field_problems = &self.problems;
-        writer.put(&field_problems.len().to_be_bytes())?;
-        for item_0 in field_problems.as_slice() {
-        item_0.encode(writer)?;
-        }
+        let field_problem = &self.problem;
+        field_problem.encode(writer)?;
         Ok(())
     }
 
@@ -3678,8 +3633,8 @@ impl Invalid {
     }
 
     fn decode_from(limits: &Limits, reader: &mut skein_lib::Reader<'_>) -> Result<Self, Problem> {
-        let decoded_problems = { let count = match skein_codec::read_count(reader, limits.invalid_problems.min(CEILINGS.invalid_problems)) { Ok(count) => count, Err(reason) => return Err(Problem { path: Path::InvalidProblems, reason }), }; if count > reader.remaining() { return Err(Problem { path: Path::InvalidProblems, reason: skein_codec::Reason::Short }); } let mut items_0 = List::with_capacity(count); for _index in 0_u32..count { let item = CallProblem::decode_from(limits, reader)?; items_0.push(item).expect("count within capacity"); } items_0 };
-        Self::new(limits, InvalidParts { problems: decoded_problems })
+        let decoded_problem = CallProblem::decode_from(limits, reader)?;
+        Self::new(limits, InvalidParts { problem: decoded_problem })
     }
 }
 
@@ -3985,7 +3940,7 @@ impl Turn {
 }
 
 fn limits_valid(limits: &Limits) -> bool {
-    limits.replay_dialect <= CEILINGS.replay_dialect && limits.replay_bytes <= CEILINGS.replay_bytes && limits.text_text <= CEILINGS.text_text && limits.opaque_dialect <= CEILINGS.opaque_dialect && limits.opaque_bytes <= CEILINGS.opaque_bytes && limits.call_id <= CEILINGS.call_id && limits.call_name <= CEILINGS.call_name && limits.call_input <= CEILINGS.call_input && limits.entry_name <= CEILINGS.entry_name && limits.hit_path <= CEILINGS.hit_path && limits.hit_text <= CEILINGS.hit_text && limits.read_content <= CEILINGS.read_content && limits.listed_entries <= CEILINGS.listed_entries && limits.found_hits <= CEILINGS.found_hits && limits.command_end_head <= CEILINGS.command_end_head && limits.command_end_last <= CEILINGS.command_end_last && limits.ambiguous_lines <= CEILINGS.ambiguous_lines && limits.field_problem_field <= CEILINGS.field_problem_field && limits.said_text <= CEILINGS.said_text && limits.invalid_problems <= CEILINGS.invalid_problems && limits.tool_result_id <= CEILINGS.tool_result_id && limits.message_blocks <= CEILINGS.message_blocks && limits.turn_endpoint <= CEILINGS.turn_endpoint && limits.turn_dialect <= CEILINGS.turn_dialect && limits.turn_messages <= CEILINGS.turn_messages
+    limits.replay_dialect <= CEILINGS.replay_dialect && limits.replay_bytes <= CEILINGS.replay_bytes && limits.text_text <= CEILINGS.text_text && limits.opaque_dialect <= CEILINGS.opaque_dialect && limits.opaque_bytes <= CEILINGS.opaque_bytes && limits.call_id <= CEILINGS.call_id && limits.call_name <= CEILINGS.call_name && limits.call_input <= CEILINGS.call_input && limits.entry_name <= CEILINGS.entry_name && limits.hit_path <= CEILINGS.hit_path && limits.hit_text <= CEILINGS.hit_text && limits.read_content <= CEILINGS.read_content && limits.listed_entries <= CEILINGS.listed_entries && limits.found_hits <= CEILINGS.found_hits && limits.command_end_head <= CEILINGS.command_end_head && limits.command_end_last <= CEILINGS.command_end_last && limits.ambiguous_lines <= CEILINGS.ambiguous_lines && limits.field_problem_field <= CEILINGS.field_problem_field && limits.said_text <= CEILINGS.said_text && limits.tool_result_id <= CEILINGS.tool_result_id && limits.message_blocks <= CEILINGS.message_blocks && limits.turn_endpoint <= CEILINGS.turn_endpoint && limits.turn_dialect <= CEILINGS.turn_dialect && limits.turn_messages <= CEILINGS.turn_messages
 }
 
 impl Usage {
@@ -4580,7 +4535,7 @@ impl Invalid {
     pub fn worst_case_bytes(limits: &Limits) -> Option<u64> {
         if !limits_valid(limits) { return None; }
         let mut size = 0_u64;
-        size = size.checked_add(4_u64.checked_add(u64::from(limits.invalid_problems).checked_mul(CallProblem::worst_case_bytes(limits)?)?)?)?;
+        size = size.checked_add(CallProblem::worst_case_bytes(limits)?)?;
         Some(size)
     }
 
@@ -4589,7 +4544,7 @@ impl Invalid {
     pub fn worst_case_heap(limits: &Limits) -> Option<u64> {
         if !limits_valid(limits) { return None; }
         let mut heap = 0_u64;
-        heap = heap.checked_add(List::<CallProblem>::worst_case(limits.invalid_problems)?.checked_add(u64::from(limits.invalid_problems).checked_mul(CallProblem::worst_case_heap(limits)?)?)?)?;
+        heap = heap.checked_add(CallProblem::worst_case_heap(limits)?)?;
         Some(heap)
     }
 }
@@ -6109,8 +6064,8 @@ mod golden_tests {
 
     #[test]
     fn record_invalid_smallest() {
-        let value = Invalid::new(&CEILINGS, InvalidParts { problems: skein_lib::List::with_capacity(0) }).expect("golden within ceilings");
-        let golden: &[u8] = &[0, 0, 0, 0];
+        let value = Invalid::new(&CEILINGS, InvalidParts { problem: CallProblem::UnknownTool }).expect("golden within ceilings");
+        let golden: &[u8] = &[0];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -6119,8 +6074,8 @@ mod golden_tests {
 
     #[test]
     fn record_invalid_full() {
-        let value = Invalid::new(&CEILINGS, InvalidParts { problems: { let mut items = skein_lib::List::with_capacity(1); items.push(CallProblem::UnknownTool).expect("one slot"); items } }).expect("golden within ceilings");
-        let golden: &[u8] = &[0, 0, 0, 1, 0];
+        let value = Invalid::new(&CEILINGS, InvalidParts { problem: CallProblem::UnknownTool }).expect("golden within ceilings");
+        let golden: &[u8] = &[0];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -6189,8 +6144,8 @@ mod golden_tests {
 
     #[test]
     fn enum_returned_invalid_smallest() {
-        let value = Returned::Invalid(Invalid::new(&CEILINGS, InvalidParts { problems: skein_lib::List::with_capacity(0) }).expect("golden within ceilings"));
-        let golden: &[u8] = &[2, 0, 0, 0, 0];
+        let value = Returned::Invalid(Invalid::new(&CEILINGS, InvalidParts { problem: CallProblem::UnknownTool }).expect("golden within ceilings"));
+        let golden: &[u8] = &[2, 0];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -6199,8 +6154,8 @@ mod golden_tests {
 
     #[test]
     fn enum_returned_invalid_full() {
-        let value = Returned::Invalid(Invalid::new(&CEILINGS, InvalidParts { problems: { let mut items = skein_lib::List::with_capacity(1); items.push(CallProblem::UnknownTool).expect("one slot"); items } }).expect("golden within ceilings"));
-        let golden: &[u8] = &[2, 0, 0, 0, 1, 0];
+        let value = Returned::Invalid(Invalid::new(&CEILINGS, InvalidParts { problem: CallProblem::UnknownTool }).expect("golden within ceilings"));
+        let golden: &[u8] = &[2, 0];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -6825,26 +6780,6 @@ mod golden_tests {
         Said::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(1_048_576, true))).expect("field at ceiling");
         let problem = Said::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(1_048_577, false))).expect_err("field past ceiling");
         assert_eq!((problem.path, problem.reason), (Path::SaidText, skein_codec::Reason::Bound));
-    }
-
-    #[test]
-    fn bound_invalid_problems() {
-        fn wire(count: u32, payload: bool) -> Box<[u8]> {
-            let body = usize::try_from(count).expect("u32 fits usize").checked_mul(1).expect("schema ceiling");
-            let header = 0_usize.checked_add(4).expect("header size");
-            let total = if payload { let with_body = header.checked_add(body).expect("body size"); with_body.checked_add(0_usize).expect("wire size") } else { header };
-            let mut writer = skein_lib::Writer::new(total);
-            writer.put(&[]).expect("prefix room");
-            writer.put(&count.to_be_bytes()).expect("length room");
-            if payload {
-                for _item in 0_u32..count { writer.put(&[0]).expect("item room"); }
-                writer.put(&[]).expect("suffix room");
-            }
-            writer.finish()
-        }
-        Invalid::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(16, true))).expect("field at ceiling");
-        let problem = Invalid::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(17, false))).expect_err("field past ceiling");
-        assert_eq!((problem.path, problem.reason), (Path::InvalidProblems, skein_codec::Reason::Bound));
     }
 
     #[test]

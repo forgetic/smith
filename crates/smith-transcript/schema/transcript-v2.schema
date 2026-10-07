@@ -49,7 +49,7 @@ enum CallProblem {
     wrong_type: FieldProblem, bad_value: FieldProblem, too_large
 }
 record Said { text: text 1048576 error: bool }
-record Invalid { problems: list 16 CallProblem }
+record Invalid { problem: CallProblem }
 record OwnedOutcome { value: Outcome }
 enum Returned { outcome: OwnedOutcome, said: Said, invalid: Invalid, not_run, withdrawn }
 record ToolResult { id: text 256 returned: Returned }

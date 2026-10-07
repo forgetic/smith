@@ -66,7 +66,6 @@ fn transcript_limits() -> transcript::Limits {
         ambiguous_lines: 0,
         field_problem_field: 0,
         said_text: 0,
-        invalid_problems: 0,
         tool_result_id: 0,
         message_blocks: 1,
         turn_endpoint: 0,
