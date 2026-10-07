@@ -2,7 +2,7 @@
 //! programming-model.md, section 6). Parent owns forwarded turn payloads; kit
 //! owns metadata and queued responses through final Answer.
 use crate::domain::{Account, Agent, Alarm, Call, Sent, TurnMeta};
-use crate::{Delivered, Directory, Down, Fact, Grant};
+use crate::{AnsweredCall, Delivered, Directory, Down, Fact, Grant};
 use alloc::boxed::Box;
 use core::mem::size_of;
 use skein_lib::{Deadlines, Duration, Map, Queue, Slab, Token};
@@ -99,7 +99,9 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let start = limits
         .charter_bytes
         .checked_add(limits.transcript_bytes)?
+        .checked_add(64_u64.checked_mul(u64::try_from(size_of::<Box<[u8]>>()).ok()?)?)?
         .checked_add(limits.answered_bytes)?
+        .checked_add(128_u64.checked_mul(u64::try_from(size_of::<AnsweredCall>()).ok()?)?)?
         .checked_add(directories)?
         .checked_add(u64::from(limits.accounts).checked_mul(u64::try_from(size_of::<Grant>()).ok()?)?)?;
     let queued = u64::from(limits.messages)

@@ -3,8 +3,8 @@
 //! The kit knows channel send order, not private agent stop
 //! decisions; policy and durable decisions remain in the parent.
 use crate::{
-    Ask, Bounce, CallName, Down, End, Event, Fact, Fault, Grant, Invalid, Limits, Reply, Request, RunFailure,
-    RunResult, Signal, Start, Up,
+    AnsweredCall, Ask, Bounce, CallName, Delivery, Down, End, Event, Fact, Fault, Grant, Invalid, Limits, Reply,
+    Request, RunFailure, RunResult, Signal, Start, Up,
 };
 use alloc::boxed::Box;
 use skein_lib::{Deadlines, Env, Id, Map, Queue, Slab, Time, Token};
@@ -487,12 +487,19 @@ fn valid_start(start: &Start, limits: &Limits) -> Option<Invalid> {
     if !within(&start.charter, limits.charter_bytes) {
         return Some(Invalid::Charter);
     }
-    match &start.transcript {
-        Some(transcript) if !within(transcript, limits.transcript_bytes) => return Some(Invalid::Transcript),
-        Some(_) | None => {}
+    let transcript_fits = match &start.transcript {
+        Some(transcript) => match transcript_bytes(transcript) {
+            Some(bytes) => bytes <= limits.transcript_bytes,
+            None => false,
+        },
+        None => true,
+    };
+    if !transcript_fits {
+        return Some(Invalid::Transcript);
     }
-    if !within(&start.answered, limits.answered_bytes) {
-        return Some(Invalid::Answered);
+    match answered_bytes(&start.answered, limits.name_bytes) {
+        Some(bytes) if bytes <= limits.answered_bytes => {}
+        Some(_) | None => return Some(Invalid::Answered),
     }
     if start.directories.len() > usize::try_from(limits.directories).expect("u32 fits usize") {
         return Some(Invalid::Directories);
@@ -567,6 +574,41 @@ fn safe_name(name: &[u8]) -> bool {
 
 fn within(bytes: &[u8], limit: u64) -> bool {
     u64::try_from(bytes.len()).expect("length fits u64") <= limit
+}
+
+fn transcript_bytes(turns: &[Box<[u8]>]) -> Option<u64> {
+    if turns.len() > 64 {
+        return None;
+    }
+    let mut total = 0_u64;
+    for turn in turns {
+        total = total.checked_add(u64::try_from(turn.len()).ok()?)?;
+    }
+    Some(total)
+}
+
+fn answered_bytes(calls: &[AnsweredCall], name_bytes: u32) -> Option<u64> {
+    if calls.len() > 128 {
+        return None;
+    }
+    let mut total = 0_u64;
+    for call in calls {
+        if call.tool.is_empty() || !within(&call.tool, u64::from(name_bytes)) {
+            return None;
+        }
+        total = total.checked_add(u64::try_from(call.tool.len()).ok()?)?;
+        let reply = match &call.reply {
+            Reply::Host { body, .. } => u64::try_from(body.len()).ok()?,
+            Reply::Delivery(delivery) => match delivery {
+                Delivery::Delivered(delivered) => delivered.owned_bytes(),
+                Delivery::Refused(refusal) => refusal.owned_bytes(),
+                Delivery::Nothing | Delivery::Failed(_) | Delivery::Stale => 0,
+            },
+            Reply::Busy | Reply::Unavailable | Reply::Withdrawn | Reply::TooLarge => return None,
+        };
+        total = total.checked_add(reply)?;
+    }
+    Some(total)
 }
 
 fn relative(path: &[u8], limit: u32) -> bool {

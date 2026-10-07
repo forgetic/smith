@@ -19,14 +19,25 @@ pub struct Start {
     pub workspace: Option<Token>,
     /// Opaque charter at most `Limits::charter_bytes`.
     pub charter: Box<[u8]>,
-    /// Opaque V2 transcript at most `Limits::transcript_bytes`.
-    pub transcript: Option<Box<[u8]>>,
-    /// Opaque calls answered after transcript, at most `Limits::answered_bytes`.
-    pub answered: Box<[u8]>,
+    /// Opaque turn bodies, each kept as told, with aggregate `Limits::transcript_bytes`.
+    pub transcript: Option<Box<[Box<[u8]>]>>,
+    /// Calls answered after the last saved turn, bounded in aggregate.
+    pub answered: Box<[AnsweredCall]>,
     /// At most `Limits::directories` unique named mounts.
     pub directories: Box<[Directory]>,
     /// At most `Limits::accounts` distinct credential names; no values.
     pub grants: Box<[Grant]>,
+}
+
+/// One durable host answer absent from the saved transcript.
+#[derive(PartialEq, Eq, Debug)]
+pub struct AnsweredCall {
+    /// Original stable call name, preserved across activations.
+    pub name: CallName,
+    /// The host tool name from the call, kept as text bytes.
+    pub tool: Box<[u8]>,
+    /// The settled host or delivery answer, never a temporary refusal.
+    pub reply: Reply,
 }
 
 /// Host credit sent with the start for turns awaiting durable acknowledgement.

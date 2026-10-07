@@ -3,8 +3,8 @@
 use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 use skein_world::domain::heap::{Counting, Meter};
 use smith_host_domain::{
-    self as host, Answer, Ask, CallName, Delivered, Delivery, Directory, Down, Effect, Event, Grant, Limits, Receipt,
-    Reply, Request, RunResult, Start, Turn, Up,
+    self as host, Answer, AnsweredCall, Ask, CallName, Delivered, Delivery, Directory, Down, Effect, Event, Grant,
+    Limits, Receipt, Reply, Request, RunResult, Start, Turn, Up,
 };
 
 #[global_allocator]
@@ -19,8 +19,16 @@ fn maximum_start(limits: Limits) -> Start {
         activation: 1,
         workspace: (limits.directories > 0).then_some(Token::new(8)),
         charter: bytes(limits.charter_bytes),
-        transcript: Some(bytes(limits.transcript_bytes)),
-        answered: bytes(limits.answered_bytes),
+        transcript: Some(Box::new([bytes(limits.transcript_bytes)])),
+        answered: if limits.answered_bytes > 0 {
+            Box::new([AnsweredCall {
+                name: CallName { activation: 1, completion: 1, position: 0 },
+                tool: Box::from(&b"x"[..]),
+                reply: Reply::Host { error: false, body: bytes(limits.answered_bytes - 1) },
+            }])
+        } else {
+            Box::new([])
+        },
         directories: (0..limits.directories)
             .map(|at| Directory {
                 name: vec![
