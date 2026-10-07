@@ -75,6 +75,10 @@ pub enum OpenEvent {
     Acknowledged { turn: u32 },
     /// A refreshed credential name and validity, without its value.
     Grant { grant: smith_domain::Grant },
+    /// The host asked the admitted run to stop politely once.
+    Cancel,
+    /// Independent write failure; input and terminal rights may still continue.
+    WriteFailed,
     /// The channel ended before or after opening.
     Ended { why: Closed },
 }
@@ -100,6 +104,7 @@ pub struct Component {
     fact_reserve_bytes: u32,
     lost_facts: u64,
     credentials: Credentials,
+    cancelled: bool,
 }
 
 impl Component {
@@ -135,6 +140,7 @@ impl Component {
             fact_reserve_bytes: limits.fact_reserve_bytes,
             lost_facts: 0,
             credentials: Credentials::new(limits.grants),
+            cancelled: false,
         })
     }
 
@@ -378,6 +384,61 @@ impl Component {
     #[must_use]
     pub fn grant_value(&self, name: smith_domain::GrantName) -> Option<&[u8]> {
         self.credentials.value(name.account, name.generation)
+    }
+
+    /// Tell the host a provider rejected one named credential generation.
+    pub fn send_rejected(
+        &mut self,
+        name: smith_domain::GrantName,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let record = smith_channel::Rejected::new(
+            &self.bodies,
+            smith_channel::RejectedParts { account: name.account, generation: name.generation },
+        )?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::ResultCapacity);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x010d, record.measure())?;
+        frame.put(&body.finish())?;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
+    /// Tell the host one account is exhausted for a relative cooldown.
+    pub fn send_exhausted(
+        &mut self,
+        account: u32,
+        retry_after: Duration,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let record =
+            smith_channel::Exhausted::new(&self.bodies, smith_channel::ExhaustedParts { account, retry_after })?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::ResultCapacity);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x010e, record.measure())?;
+        frame.put(&body.finish())?;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
     }
 
     fn offer_fact(
@@ -652,6 +713,22 @@ impl Component {
                         Err(_) => self.refuse_rules(below),
                     }
                 }
+                Some(Event::Body { kind: 0x0105, body })
+                    if self.phase == Phase::Started || self.phase == Phase::Admitted =>
+                {
+                    if self.cancelled {
+                        self.refuse_rules(below);
+                    } else {
+                        match smith_channel::Cancel::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(_) => {
+                                self.cancelled = true;
+                                to_service.push(OpenEvent::Cancel);
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
+                }
                 Some(Event::Body { kind, body }) => {
                     if self.phase != Phase::Opened || kind != 0x0100 {
                         self.refuse_rules(below);
@@ -731,10 +808,10 @@ impl Component {
                     | Event::Unsupported { .. }
                     | Event::Refused { .. }
                     | Event::Sent { .. }
-                    | Event::Drained
-                    | Event::OutputFailed,
+                    | Event::Drained,
                 )
                 | None => {}
+                Some(Event::OutputFailed) => to_service.push(OpenEvent::WriteFailed),
             }
         }
     }

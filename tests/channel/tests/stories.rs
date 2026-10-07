@@ -522,6 +522,57 @@ fn grants_refreshed_while_a_call_is_in_flight_reach_the_table() {
 }
 
 #[test]
+fn rejected_and_exhausted_notices_reach_the_host_without_values() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    world.agent_rejects_grant(3, 4);
+    world.agent_exhausts_account(3, skein_lib::Duration::from_nanos(42));
+    world.settle();
+    assert!(world.observations().contains(&Observation::HostRejected { account: 3, generation: 4 }));
+    assert!(
+        world
+            .observations()
+            .contains(&Observation::HostExhausted { account: 3, retry_after: skein_lib::Duration::from_nanos(42) })
+    );
+}
+
+#[test]
+fn a_cancel_with_a_host_call_in_flight_keeps_its_terminal_and_one_answer() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    let name = smith_domain::run::CallName { activation: 1, completion: 1, position: 0 };
+    let relay = smith_domain::run::RelayName { owner: skein_lib::Token::new(41), attempt: 1 };
+    world.agent_calls_host(name, relay);
+    world.settle();
+    world.host_cancels();
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentCancel));
+    world.host_answers(skein_lib::Token::new(1), smith_host_domain::channel::Reply::Busy);
+    world.settle();
+    assert!(world.observations().iter().any(|observation| matches!(
+        observation, Observation::AgentHostReturned { relay: seen, .. } if *seen == relay
+    )));
+    world.agent_parks();
+    world.settle();
+    assert_eq!(
+        world.observations().iter().filter(|observation| matches!(observation, Observation::HostParked { .. })).count(),
+        1
+    );
+}
+
+#[test]
 fn host_tools_answered_busy_are_asked_again_under_their_names() {
     let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
     world.settle();

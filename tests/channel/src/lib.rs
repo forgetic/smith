@@ -47,6 +47,12 @@ pub enum Observation {
     HostTurn { number: u32, spent: u64, read: Option<skein_lib::Token>, body: Box<[u8]> },
     /// A best-effort content-free fact reached the host.
     HostFact { kind: smith_channel::FactKind, elapsed: skein_lib::Duration, count: u64 },
+    /// The host received a credential rejection notice.
+    HostRejected { account: u32, generation: u64 },
+    /// The host received an account exhaustion notice.
+    HostExhausted { account: u32, retry_after: skein_lib::Duration },
+    /// The agent received the host's one polite cancellation.
+    AgentCancel,
     /// The agent received exact durable commitment for one turn.
     AgentAcknowledged { turn: u32 },
     /// The host received one named call with its deadline and metadata.
@@ -197,6 +203,13 @@ impl Peer {
                         count: fact.count(),
                     });
                 }
+                host::OpenEvent::Rejected { account, generation } => {
+                    output.push(Observation::HostRejected { account, generation });
+                }
+                host::OpenEvent::Exhausted { account, retry_after } => {
+                    output.push(Observation::HostExhausted { account, retry_after });
+                }
+                host::OpenEvent::WriteFailed => {}
                 host::OpenEvent::Call { call, name, deadline, ask } => {
                     output.push(Observation::HostCall { call, name, deadline, ask: Box::new(ask) });
                 }
@@ -270,6 +283,8 @@ impl Peer {
                     generation: grant.name.generation,
                     valid: grant.valid,
                 }),
+                agent::OpenEvent::Cancel => output.push(Observation::AgentCancel),
+                agent::OpenEvent::WriteFailed => {}
             }
         }
     }
@@ -443,6 +458,20 @@ impl World {
         }
     }
 
+    /// Have the admitted scripted domain park after its effects settle.
+    pub fn agent_parks(&mut self) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_answer(
+                    smith_domain::run::Answer::Parked { spent: smith_domain::run::Spend::ZERO, turns: 0 },
+                    skein_lib::Token::new(33),
+                    &mut self.agent.agent_events,
+                    &mut self.agent.below,
+                )
+                .expect("bounded parked answer");
+        }
+    }
+
     /// Have the scripted domain admit without ending the run.
     pub fn agent_admits(&mut self) {
         if let Half::Agent(agent) = &mut self.agent.half {
@@ -585,6 +614,43 @@ impl World {
             return agent.grant_value(name).map(Box::from);
         }
         None
+    }
+
+    /// Forward one provider rejection from the scripted agent domain.
+    pub fn agent_rejects_grant(&mut self, account: u32, generation: u64) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_rejected(
+                    smith_domain::GrantName { account, generation },
+                    skein_lib::Token::new(34),
+                    &mut self.agent.agent_events,
+                    &mut self.agent.below,
+                )
+                .expect("bounded rejected notice");
+        }
+    }
+
+    /// Forward one account cooldown from the scripted agent domain.
+    pub fn agent_exhausts_account(&mut self, account: u32, retry_after: skein_lib::Duration) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_exhausted(
+                    account,
+                    retry_after,
+                    skein_lib::Token::new(35),
+                    &mut self.agent.agent_events,
+                    &mut self.agent.below,
+                )
+                .expect("bounded exhaustion notice");
+        }
+    }
+
+    /// Ask the admitted agent to cancel once.
+    pub fn host_cancels(&mut self) {
+        if let Half::Host(host) = &mut self.host.half {
+            host.send_cancel(skein_lib::Token::new(36), &mut self.host.host_events, &mut self.host.below)
+                .expect("one cancel");
+        }
     }
 
     /// Have the scripted domain relay a declared host tool under a durable name.

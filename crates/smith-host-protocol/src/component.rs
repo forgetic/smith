@@ -60,6 +60,12 @@ pub enum OpenEvent {
     Turn { turn: channel::Turn },
     /// One content-free, best-effort fact kept in its bounded wire body.
     Fact { body: Box<[u8]> },
+    /// A provider rejected this known account and credential generation.
+    Rejected { account: u32, generation: u64 },
+    /// A provider exhausted this known account for a relative cooldown.
+    Exhausted { account: u32, retry_after: Duration },
+    /// The independent write stream failed while reads may still settle.
+    WriteFailed,
     /// A named operation whose one host terminal remains owed.
     Call { call: Token, name: channel::CallName, deadline: Time, ask: channel::Ask },
     /// The agent withdrew a call; its terminal still remains owed.
@@ -79,6 +85,7 @@ pub struct Component {
     calls_by_token: Map<Token, CallKey>,
     next_call: u64,
     now: Time,
+    cancelled: bool,
 }
 
 impl Component {
@@ -103,6 +110,7 @@ impl Component {
             calls_by_token: Map::with_capacity(limits.calls),
             next_call: 1,
             now: Time::ZERO,
+            cancelled: false,
         })
     }
 
@@ -243,6 +251,31 @@ impl Component {
         record.encode(&mut body)?;
         let mut frame = frame_writer(0x0104, record.measure())?;
         frame.put(&body.finish())?;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
+    /// Ask the agent to stop politely once, preserving answers owed to calls.
+    pub fn send_cancel(
+        &mut self,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Started && self.phase != Phase::Admitted || self.cancelled {
+            return Err(Error::Order);
+        }
+        let record = smith_channel::Cancel::new(&self.bodies, smith_channel::CancelParts {})?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::MissingValue);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x0105, record.measure())?;
+        frame.put(&body.finish())?;
+        self.cancelled = true;
         self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
         self.drain(to_service, below);
         self.fire(to_service, below);
@@ -396,6 +429,30 @@ impl Component {
                             Err(_) => self.refuse_rules(below),
                         }
                     }
+                    0x010d if self.phase == Phase::Admitted => {
+                        match smith_channel::Rejected::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(rejected) => {
+                                to_service.push(OpenEvent::Rejected {
+                                    account: rejected.account(),
+                                    generation: rejected.generation(),
+                                });
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
+                    0x010e if self.phase == Phase::Admitted => {
+                        match smith_channel::Exhausted::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(exhausted) => {
+                                to_service.push(OpenEvent::Exhausted {
+                                    account: exhausted.account(),
+                                    retry_after: exhausted.retry_after(),
+                                });
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
                     0x010b if self.phase == Phase::Admitted => {
                         match smith_channel::Long::decode(&self.bodies, &mut Reader::new(&body)) {
                             Ok(long) => {
@@ -462,14 +519,8 @@ impl Component {
                 Some(Event::Unsent { token, why }) => {
                     to_service.push(OpenEvent::Unsent { token, why });
                 }
-                Some(
-                    Event::Ping
-                    | Event::Unsupported { .. }
-                    | Event::Refused { .. }
-                    | Event::Drained
-                    | Event::OutputFailed,
-                )
-                | None => {}
+                Some(Event::Ping | Event::Unsupported { .. } | Event::Refused { .. } | Event::Drained) | None => {}
+                Some(Event::OutputFailed) => to_service.push(OpenEvent::WriteFailed),
             }
         }
     }
