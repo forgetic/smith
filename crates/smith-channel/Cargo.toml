@@ -1,0 +1,15 @@
+[package]
+name = "smith-channel"
+description = "Smith channel kind table and versioned body codecs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+skein-lib.workspace = true
+skein-codec.workspace = true
+skein-channel.workspace = true
+
+[lints]
+workspace = true

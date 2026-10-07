@@ -1,0 +1,129 @@
+family smith-channel 1
+
+# The receiving host/agent additionally checks aggregate ownership and counts
+# against its configured domain Limits. Bytes carried from other codec families
+# are bounded here before their own versioned decoders read them.
+record CallName { activation: u64 completion: u32 position: u32 }
+record Window { turns: u32 bytes: u64 }
+record Directory {
+    name: text 1024
+    path: text 4096
+    writable: bool
+    git: bool
+    conflicts: list 64 text 4096
+}
+record Workspace { directories: list 64 Directory }
+record GrantValue { credential: bytes 8192 }
+record Grant {
+    account: u32
+    generation: u64
+    valid: duration
+    value: GrantValue
+}
+record Receipt { directory: u32 text: bytes 512 }
+record Delivered { receipts: list 64 Receipt }
+record Marker { directory: u32 path: text 4096 }
+record DeliveryRefusal { marker: option Marker explanation: text 512 }
+enum DeliveryReason {
+    unreachable, refused_by_target, timed_out, broken, too_large,
+    missing, busy, unavailable, cancelled, unknown
+}
+record DeliveryFailure {
+    directory: u32
+    reason: DeliveryReason
+    diagnostic: bytes 512
+    dropped: u64
+}
+enum Delivery {
+    delivered: Delivered, nothing, refused: DeliveryRefusal,
+    failed: DeliveryFailure, stale
+}
+record HostReply { error: bool text: text 1048576 }
+record DeliveryReply { value: Delivery }
+enum Reply { host: HostReply, delivery: DeliveryReply, busy, unavailable }
+record AnsweredCall { name: CallName tool: text 64 reply: Reply }
+
+# Start has all values required to resume; the transcript consists of the
+# exact opaque versioned turn bytes told on earlier activations.
+record Start {
+    activation: u64
+    charter: bytes 67108864
+    workspace: option Workspace
+    transcript: list 64 bytes 8388608
+    answered: list 128 AnsweredCall
+    grants: list 64 Grant
+    window: Window
+}
+record Message { name: u64 label: text 1024 text: text 1048576 }
+record HostAnswer { name: CallName reply: Reply }
+record Acknowledge { number: u32 }
+record GrantRefresh { grant: Grant }
+record Cancel {}
+
+record Admitted {}
+enum Effect { read, write }
+record HostAsk { tool: text 64 input: bytes 1048576 }
+record Field { name: text 64 text: text 262144 }
+record DeliverAsk { fields: list 32 Field }
+enum Ask { host: HostAsk, deliver: DeliverAsk }
+record Call { name: CallName effect: Effect deadline: duration ask: Ask }
+record Withdraw { name: CallName }
+record Turn {
+    number: u32
+    spent: u64
+    last_read: option u64
+    body: bytes 8388608
+}
+record Waiting { last_read: option u64 }
+record Long { span: duration }
+record LongDone {}
+record Rejected { account: u32 generation: u64 }
+record Exhausted { account: u32 retry_after: duration }
+
+# Facts contain no text or credential values. The kind and count identify
+# what happened; elapsed is relative to this activation's start.
+enum FactKind {
+    admitted, ended, llm_started, llm_retried, llm_finished,
+    tool_started, tool_finished, check_started, check_finished, text_arrived
+}
+record Fact { kind: FactKind elapsed: duration count: u64 }
+
+enum ReceivingLimit { input, output, cache_read, cache_write }
+enum Overflow { spend, usage }
+record ReceivingLimitValue { value: ReceivingLimit }
+record OverflowValue { value: Overflow }
+enum BudgetFailure { turns, spend, time, tokens: ReceivingLimitValue, overflow: OverflowValue }
+enum CompletionFailure {
+    limit, protocol, cancelled, overloaded, unavailable, timed_out,
+    context_too_long, invalid, unauthorized, rate_limited, exhausted
+}
+enum CompletionEvidence { unsent, unknown, response }
+record CompletionFault {
+    failure: CompletionFailure
+    evidence: CompletionEvidence
+    retry_after: option duration
+}
+enum ModelFault {
+    completion: CompletionFault, exhausted, provider, context_full,
+    refused, truncated, malformed
+}
+enum TranscriptRefusal { version, endpoint, dialect, malformed, unresolved, too_large }
+record TranscriptRefusalValue { value: TranscriptRefusal }
+record ModelFaultValue { value: ModelFault }
+record BudgetFailureValue { value: BudgetFailure }
+record PolicyFailure { nudges: u32 rejected: u32 }
+enum RunFailure {
+    transcript: TranscriptRefusalValue, model: ModelFaultValue,
+    budget: BudgetFailureValue, policy: PolicyFailure, cancelled, stale
+}
+enum InvalidStart {
+    charter_version, activation, window, conventions, too_large,
+    workspace, grants, outcome, budget, llm, conversation, endpoint
+}
+record InvalidStartValue { value: InvalidStart }
+enum StartRefusal { busy, invalid: InvalidStartValue }
+record Accepted { result: bytes 67108864 }
+record Failed { reason: RunFailure }
+record Refused { reason: StartRefusal }
+enum RunResult { accepted: Accepted, parked, failed: Failed, refused: Refused }
+record Answer { turns: u32 spent: u64 result: RunResult }

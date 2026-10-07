@@ -10,8 +10,10 @@ publish.workspace = true
 skein-codegen.workspace = true
 skein-lib.workspace = true
 skein-codec.workspace = true
+skein-channel.workspace = true
 smith-charter.workspace = true
 smith-transcript.workspace = true
+smith-channel.workspace = true
 
 [lints.rust]
 unsafe_code = "deny"
