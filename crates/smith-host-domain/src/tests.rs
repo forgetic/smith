@@ -7,7 +7,10 @@ use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 #[test]
 fn an_unread_charter_version_is_a_distinct_agent_refusal() {
     let unread = crate::RunResult::Refused { refusal: crate::Refusal::Invalid(crate::RunInvalid::CharterVersion) };
+    let malformed = crate::RunResult::Refused { refusal: crate::Refusal::Invalid(crate::RunInvalid::MalformedCharter) };
     let oversized = crate::RunResult::Refused { refusal: crate::Refusal::Invalid(crate::RunInvalid::TooLarge) };
+    assert_ne!(unread, malformed);
+    assert_ne!(malformed, oversized);
     assert_ne!(unread, oversized);
 }
 

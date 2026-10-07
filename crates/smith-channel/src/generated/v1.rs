@@ -4065,6 +4065,8 @@ impl RunFailure {
 pub enum InvalidStart {
     /// `charter_version` without a payload.
     CharterVersion,
+    /// `malformed_charter` without a payload.
+    MalformedCharter,
     /// `activation` without a payload.
     Activation,
     /// `window` without a payload.
@@ -4098,7 +4100,7 @@ impl InvalidStart {
 
     fn check(&self, limits: &Limits) -> Result<(), Problem> {
         match self {
-            Self::CharterVersion | Self::Activation | Self::Window | Self::Conventions | Self::TooLarge | Self::Workspace | Self::Grants | Self::Outcome | Self::Budget | Self::Llm | Self::Conversation | Self::Endpoint => Ok(()),
+            Self::CharterVersion | Self::MalformedCharter | Self::Activation | Self::Window | Self::Conventions | Self::TooLarge | Self::Workspace | Self::Grants | Self::Outcome | Self::Budget | Self::Llm | Self::Conversation | Self::Endpoint => Ok(()),
         }?;
         if limits.directory_name > CEILINGS.directory_name { return Err(Problem { path: Path::DirectoryName, reason: skein_codec::Reason::Bound }); }
         if limits.directory_path > CEILINGS.directory_path { return Err(Problem { path: Path::DirectoryPath, reason: skein_codec::Reason::Bound }); }
@@ -6680,7 +6682,7 @@ impl InvalidStart {
     #[must_use]
     pub fn measure(&self) -> u32 {
         match self {
-            Self::CharterVersion | Self::Activation | Self::Window | Self::Conventions | Self::TooLarge | Self::Workspace | Self::Grants | Self::Outcome | Self::Budget | Self::Llm | Self::Conversation | Self::Endpoint => 1,
+            Self::CharterVersion | Self::MalformedCharter | Self::Activation | Self::Window | Self::Conventions | Self::TooLarge | Self::Workspace | Self::Grants | Self::Outcome | Self::Budget | Self::Llm | Self::Conversation | Self::Endpoint => 1,
         }
     }
 
@@ -6688,17 +6690,18 @@ impl InvalidStart {
     pub fn encode(&self, writer: &mut skein_lib::Writer) -> Result<(), skein_lib::Overflow> {
         match self {
             Self::CharterVersion => writer.put(&[0_u8])?,
-            Self::Activation => writer.put(&[1_u8])?,
-            Self::Window => writer.put(&[2_u8])?,
-            Self::Conventions => writer.put(&[3_u8])?,
-            Self::TooLarge => writer.put(&[4_u8])?,
-            Self::Workspace => writer.put(&[5_u8])?,
-            Self::Grants => writer.put(&[6_u8])?,
-            Self::Outcome => writer.put(&[7_u8])?,
-            Self::Budget => writer.put(&[8_u8])?,
-            Self::Llm => writer.put(&[9_u8])?,
-            Self::Conversation => writer.put(&[10_u8])?,
-            Self::Endpoint => writer.put(&[11_u8])?,
+            Self::MalformedCharter => writer.put(&[1_u8])?,
+            Self::Activation => writer.put(&[2_u8])?,
+            Self::Window => writer.put(&[3_u8])?,
+            Self::Conventions => writer.put(&[4_u8])?,
+            Self::TooLarge => writer.put(&[5_u8])?,
+            Self::Workspace => writer.put(&[6_u8])?,
+            Self::Grants => writer.put(&[7_u8])?,
+            Self::Outcome => writer.put(&[8_u8])?,
+            Self::Budget => writer.put(&[9_u8])?,
+            Self::Llm => writer.put(&[10_u8])?,
+            Self::Conversation => writer.put(&[11_u8])?,
+            Self::Endpoint => writer.put(&[12_u8])?,
         }
         Ok(())
     }
@@ -6714,17 +6717,18 @@ impl InvalidStart {
         let tag = reader.u8().ok_or(Problem { path: Path::InvalidStartTag, reason: skein_codec::Reason::Short })?;
         let value = match tag {
             0 => Self::CharterVersion,
-            1 => Self::Activation,
-            2 => Self::Window,
-            3 => Self::Conventions,
-            4 => Self::TooLarge,
-            5 => Self::Workspace,
-            6 => Self::Grants,
-            7 => Self::Outcome,
-            8 => Self::Budget,
-            9 => Self::Llm,
-            10 => Self::Conversation,
-            11 => Self::Endpoint,
+            1 => Self::MalformedCharter,
+            2 => Self::Activation,
+            3 => Self::Window,
+            4 => Self::Conventions,
+            5 => Self::TooLarge,
+            6 => Self::Workspace,
+            7 => Self::Grants,
+            8 => Self::Outcome,
+            9 => Self::Budget,
+            10 => Self::Llm,
+            11 => Self::Conversation,
+            12 => Self::Endpoint,
             _ => return Err(Problem { path: Path::InvalidStartTag, reason: skein_codec::Reason::Tag }),
         };
         Self::new(limits, value)
@@ -10847,9 +10851,29 @@ mod golden_tests {
     }
 
     #[test]
+    fn enum_invalid_start_malformed_charter_smallest() {
+        let value = InvalidStart::MalformedCharter;
+        let golden: &[u8] = &[1];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(InvalidStart::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_invalid_start_malformed_charter_full() {
+        let value = InvalidStart::MalformedCharter;
+        let golden: &[u8] = &[1];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(InvalidStart::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
     fn enum_invalid_start_activation_smallest() {
         let value = InvalidStart::Activation;
-        let golden: &[u8] = &[1];
+        let golden: &[u8] = &[2];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10859,7 +10883,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_activation_full() {
         let value = InvalidStart::Activation;
-        let golden: &[u8] = &[1];
+        let golden: &[u8] = &[2];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10869,7 +10893,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_window_smallest() {
         let value = InvalidStart::Window;
-        let golden: &[u8] = &[2];
+        let golden: &[u8] = &[3];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10879,7 +10903,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_window_full() {
         let value = InvalidStart::Window;
-        let golden: &[u8] = &[2];
+        let golden: &[u8] = &[3];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10889,7 +10913,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_conventions_smallest() {
         let value = InvalidStart::Conventions;
-        let golden: &[u8] = &[3];
+        let golden: &[u8] = &[4];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10899,7 +10923,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_conventions_full() {
         let value = InvalidStart::Conventions;
-        let golden: &[u8] = &[3];
+        let golden: &[u8] = &[4];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10909,7 +10933,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_too_large_smallest() {
         let value = InvalidStart::TooLarge;
-        let golden: &[u8] = &[4];
+        let golden: &[u8] = &[5];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10919,7 +10943,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_too_large_full() {
         let value = InvalidStart::TooLarge;
-        let golden: &[u8] = &[4];
+        let golden: &[u8] = &[5];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10929,7 +10953,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_workspace_smallest() {
         let value = InvalidStart::Workspace;
-        let golden: &[u8] = &[5];
+        let golden: &[u8] = &[6];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10939,7 +10963,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_workspace_full() {
         let value = InvalidStart::Workspace;
-        let golden: &[u8] = &[5];
+        let golden: &[u8] = &[6];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10949,7 +10973,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_grants_smallest() {
         let value = InvalidStart::Grants;
-        let golden: &[u8] = &[6];
+        let golden: &[u8] = &[7];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10959,7 +10983,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_grants_full() {
         let value = InvalidStart::Grants;
-        let golden: &[u8] = &[6];
+        let golden: &[u8] = &[7];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10969,7 +10993,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_outcome_smallest() {
         let value = InvalidStart::Outcome;
-        let golden: &[u8] = &[7];
+        let golden: &[u8] = &[8];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10979,7 +11003,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_outcome_full() {
         let value = InvalidStart::Outcome;
-        let golden: &[u8] = &[7];
+        let golden: &[u8] = &[8];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10989,7 +11013,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_budget_smallest() {
         let value = InvalidStart::Budget;
-        let golden: &[u8] = &[8];
+        let golden: &[u8] = &[9];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -10999,7 +11023,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_budget_full() {
         let value = InvalidStart::Budget;
-        let golden: &[u8] = &[8];
+        let golden: &[u8] = &[9];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -11009,7 +11033,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_llm_smallest() {
         let value = InvalidStart::Llm;
-        let golden: &[u8] = &[9];
+        let golden: &[u8] = &[10];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -11019,7 +11043,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_llm_full() {
         let value = InvalidStart::Llm;
-        let golden: &[u8] = &[9];
+        let golden: &[u8] = &[10];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -11029,7 +11053,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_conversation_smallest() {
         let value = InvalidStart::Conversation;
-        let golden: &[u8] = &[10];
+        let golden: &[u8] = &[11];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -11039,7 +11063,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_conversation_full() {
         let value = InvalidStart::Conversation;
-        let golden: &[u8] = &[10];
+        let golden: &[u8] = &[11];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -11049,7 +11073,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_endpoint_smallest() {
         let value = InvalidStart::Endpoint;
-        let golden: &[u8] = &[11];
+        let golden: &[u8] = &[12];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -11059,7 +11083,7 @@ mod golden_tests {
     #[test]
     fn enum_invalid_start_endpoint_full() {
         let value = InvalidStart::Endpoint;
-        let golden: &[u8] = &[11];
+        let golden: &[u8] = &[12];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);

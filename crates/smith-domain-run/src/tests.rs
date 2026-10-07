@@ -22,7 +22,10 @@ const BUDGET: Budget = Budget { turns: 10, spend: 10_000, time: Duration::from_s
 #[test]
 fn an_unread_charter_version_has_its_own_start_refusal() {
     let unread = Answer::Refused(Refusal::Invalid(Invalid::CharterVersion));
+    let malformed = Answer::Refused(Refusal::Invalid(Invalid::MalformedCharter));
     let oversized = Answer::Refused(Refusal::Invalid(Invalid::TooLarge));
+    assert_ne!(unread, malformed);
+    assert_ne!(malformed, oversized);
     assert_ne!(unread, oversized);
 }
 

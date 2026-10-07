@@ -117,7 +117,7 @@ enum RunFailure {
     budget: BudgetFailureValue, policy: PolicyFailure, cancelled, stale
 }
 enum InvalidStart {
-    charter_version, activation, window, conventions, too_large,
+    charter_version, malformed_charter, activation, window, conventions, too_large,
     workspace, grants, outcome, budget, llm, conversation, endpoint
 }
 record InvalidStartValue { value: InvalidStart }

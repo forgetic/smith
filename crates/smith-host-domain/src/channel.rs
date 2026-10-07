@@ -367,6 +367,8 @@ pub enum Refusal {
 pub enum RunInvalid {
     /// The agent does not read the charter's version.
     CharterVersion,
+    /// The charter does not decode in a version the agent reads.
+    MalformedCharter,
     /// The activation name is invalid.
     Activation,
     /// The acknowledgement window cannot hold one largest permitted turn.

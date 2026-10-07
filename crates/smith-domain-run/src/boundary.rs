@@ -803,6 +803,8 @@ pub enum Refusal {
 pub enum Invalid {
     /// The agent does not read this charter version; the protocol refuses it before domain admission.
     CharterVersion,
+    /// The charter does not decode in a version the agent reads; protocol refuses before domain admission.
+    MalformedCharter,
     /// The charter names a main or sub-agent endpoint absent from agent configuration.
     Endpoint,
     /// A host Start with activation zero is refused before the run opens.
