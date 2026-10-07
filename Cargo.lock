@@ -191,6 +191,7 @@ dependencies = [
  "skein-codegen",
  "skein-lib",
  "smith-charter",
+ "smith-transcript",
 ]
 
 [[package]]
@@ -324,6 +325,14 @@ dependencies = [
  "skein-lib",
  "skein-world",
  "smith-domain-tools",
+]
+
+[[package]]
+name = "smith-transcript"
+version = "0.0.0"
+dependencies = [
+ "skein-codec",
+ "skein-lib",
 ]
 
 [[package]]

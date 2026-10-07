@@ -1,0 +1,69 @@
+family smith-transcript 2
+
+# The aggregate turn is limited again by the receiving session's
+# Limits.session_bytes. These member ceilings cover its default fixtures and
+# the tools' configurable read, list, search and command response limits.
+record Usage { input: u64 output: u64 cache_read: u64 cache_write: u64 }
+record Replay { dialect: text 32 bytes: bytes 1048576 }
+record Text { text: text 1048576 replay: option Replay }
+record Opaque { dialect: text 32 bytes: bytes 1048576 }
+record Call {
+    id: text 256
+    name: text 64
+    input: bytes 1048576
+    replay: option Replay
+}
+
+# These records mirror smith-domain-tools::call::Outcome, its nested Kind,
+# Exit and Fault, with each payload bounded above the tools' default tests.
+enum Kind { file, directory, link, other }
+record Entry { name: bytes 1024 kind: Kind }
+record Hit { path: bytes 4096 line: u32 text: bytes 4096 }
+record Read { content: bytes 1048576 skipped: u32 lines: u32 total: u32 cut: bool }
+record Listed { entries: list 256 Entry more: u64 }
+record Found { hits: list 256 Hit more: u64 timed_out: bool }
+record Written { created: bool }
+record Edited { replaced: u32 }
+record ExitCode { code: u8 }
+record ExitSignal { signal: u8 }
+enum Exit { code: ExitCode, signal: ExitSignal, timed_out }
+record CommandEnd { exit: Exit head: bytes 1048576 last: bytes 1048576 dropped: u64 }
+record TooLarge { size: u64 }
+record LineNumber { number: u32 }
+record Ambiguous { count: u32 lines: list 1024 LineNumber }
+enum Fault { denied, no_space, other }
+record Failed { fault: Fault }
+enum Outcome {
+    read: Read, listed: Listed, found: Found, written: Written,
+    edited: Edited, exited: CommandEnd, not_granted, outside, read_only,
+    too_long, not_found, not_file, linked, protected, not_directory,
+    too_large: TooLarge, not_read, stale, no_match,
+    ambiguous: Ambiguous, unchanged, failed: Failed, timed_out,
+    cancelled, busy, nul_byte
+}
+
+# The problem variants mirror smith-domain-session::llm::Problem.
+record FieldProblem { field: text 64 }
+enum CallProblem {
+    unknown_tool, not_an_object, missing: FieldProblem,
+    wrong_type: FieldProblem, bad_value: FieldProblem, too_large
+}
+record Said { text: text 1048576 error: bool }
+record Invalid { problems: list 16 CallProblem }
+record OwnedOutcome { value: Outcome }
+enum Returned { outcome: OwnedOutcome, said: Said, invalid: Invalid, not_run, withdrawn }
+record ToolResult { id: text 256 returned: Returned }
+enum Block { text: Text, refusal: Text, call: Call, result: ToolResult, opaque: Opaque }
+enum Role { user, assistant }
+record Message { role: Role blocks: list 16 Block }
+
+# Transcript admission also checks common version, endpoint, dialect and
+# consecutive place, and its aggregate byte and message limits.
+versioned record Turn {
+    endpoint: text 64
+    dialect: text 32
+    place: u32
+    usage: Usage
+    spent: u64
+    messages: list 64 Message
+}
