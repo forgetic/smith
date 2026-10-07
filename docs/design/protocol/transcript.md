@@ -52,7 +52,8 @@ A versioned record. Every turn starts with its version.
       entries listed, an edit made, a command's exit and output);
     - text the domain wrote, as a result or an error: a served tool's, or a
       host tool's answer;
-    - invalid, with the problems found in the call;
+    - invalid, with the problem found in the call (domain/tools.md,
+      section 4);
     - not run;
     - withdrawn;
   - **an opaque block:** the provider's bytes, tagged with its dialect.

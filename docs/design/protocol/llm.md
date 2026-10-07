@@ -114,7 +114,7 @@ the dialect's cache markers go where skein's client puts them.
 
   The same rendering serves a live call and a resumed transcript
   (transcript.md, section 5).
-- **An invalid call** is rendered with its problems, each naming the field.
+- **An invalid call** is rendered with its problem, naming the field.
 - **Not run and withdrawn** are short fixed texts saying which.
 - **Text the domain wrote,** a served tool's or a host tool's, goes as
   written, its error flag mapped to the dialect's.
