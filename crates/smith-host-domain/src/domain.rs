@@ -263,7 +263,7 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
                 detail: tail(&detail, env.limits.detail_bytes),
             });
         }
-        Event::Message { name, body, .. } => message(agent, name, body, env, out),
+        Event::Message { name, label, text, .. } => message(agent, name, label, text, env, out),
         Event::Answer { call, reply, .. } => answered(agent, call, reply, env),
         Event::Acknowledge { turn, .. } => acknowledge_turn(agent, turn),
         Event::Grant { grant, .. } => grant_name(agent, grant),
@@ -641,8 +641,22 @@ fn named_message(agent: &Agent, name: Token) -> bool {
     false
 }
 
-fn message(agent: &mut Agent, name: Token, body: Box<[u8]>, env: &Env<Limits>, out: &mut Queue<Request>) {
-    let bounce = if !within(&body, env.limits.message_bytes) {
+fn message(
+    agent: &mut Agent,
+    name: Token,
+    label: Box<[u8]>,
+    text: Box<[u8]>,
+    env: &Env<Limits>,
+    out: &mut Queue<Request>,
+) {
+    let too_large = match label.len().checked_add(text.len()) {
+        Some(bytes) => match u64::try_from(bytes) {
+            Ok(bytes) => bytes > env.limits.message_bytes,
+            Err(_) => true,
+        },
+        None => true,
+    };
+    let bounce = if too_large {
         Some(Bounce::TooLarge)
     } else if !accepts(agent) {
         Some(Bounce::Ending)
@@ -659,7 +673,7 @@ fn message(agent: &mut Agent, name: Token, body: Box<[u8]>, env: &Env<Limits>, o
     }
     agent.messages = agent.messages.checked_add(1).expect("bounded messages");
     agent.waiting = false;
-    agent.outbox.push(Down::Message { name, body });
+    agent.outbox.push(Down::Message { name, label, text });
 }
 
 fn known_read(agent: &Agent, read: Option<Token>) -> bool {

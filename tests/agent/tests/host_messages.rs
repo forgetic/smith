@@ -44,12 +44,16 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
                 host.event(Event::Message {
                     agent: host.agent(),
                     name: Token::new(0),
-                    body: b"person: live host".as_slice().into(),
+                    label: b"person".as_slice().into(),
+                    text: b"live host".as_slice().into(),
                 });
-                let Down::Message { name, body } = host.seen.down.last().expect("actual downlink write") else {
+                let Down::Message { name, label, text } = host.seen.down.last().expect("actual downlink write") else {
                     panic!("parent input must become the actual Message Send")
                 };
-                agent.message_at(*at, *name, body.clone());
+                let mut joined = label.to_vec();
+                joined.extend_from_slice(b": ");
+                joined.extend_from_slice(text);
+                agent.message_at(*at, *name, joined.into_boxed_slice());
                 host.sent();
             }
         }

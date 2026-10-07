@@ -493,8 +493,10 @@ pub enum Down {
     Message {
         /// Opaque parent name; reserved until read fence covers it.
         name: Token,
-        /// Opaque text bounded by `Limits::message_bytes`.
-        body: Box<[u8]>,
+        /// Opaque sender label; label and text together fit `Limits::message_bytes`.
+        label: Box<[u8]>,
+        /// Opaque text; label and text together fit `Limits::message_bytes`.
+        text: Box<[u8]>,
     },
     /// One response to agent callback.
     Answer {

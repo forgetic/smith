@@ -104,7 +104,7 @@ impl Measured {
                     Down::Start { start, .. } if retain_start => {
                         assert!(self.held_start.replace(start).is_none());
                     }
-                    Down::Message { body, .. } if self.retain_message => {
+                    Down::Message { text: body, .. } if self.retain_message => {
                         assert!(self.held_messages.len() < self.held_messages.capacity());
                         self.held_messages.push(body);
                     }
@@ -204,7 +204,8 @@ fn maximum_v2_starts_and_full_queued_replies_fit_every_slot() {
                     Event::Message {
                         agent: owner,
                         name: Token::new(100 + u64::from(name)),
-                        body: bytes(limits.message_bytes),
+                        label: Box::new([]),
+                        text: bytes(limits.message_bytes),
                     },
                     false,
                 );
@@ -247,11 +248,19 @@ fn maximum_start_io_ownership_coexists_with_full_pre_read_message_queue() {
     let caller = limits.charter_bytes + limits.transcript_bytes + limits.answered_bytes;
     let mut measured = Measured::new(limits, caller);
     let owner = measured.spawn(1);
-    measured.step(Event::Message { agent: owner, name: Token::new(100), body: bytes(limits.message_bytes) }, false);
+    measured.step(
+        Event::Message { agent: owner, name: Token::new(100), label: Box::new([]), text: bytes(limits.message_bytes) },
+        false,
+    );
     measured.step(Event::Spawned { owner, process: owner }, true);
     for name in 0..limits.messages {
         measured.step(
-            Event::Message { agent: owner, name: Token::new(100 + u64::from(name)), body: bytes(limits.message_bytes) },
+            Event::Message {
+                agent: owner,
+                name: Token::new(100 + u64::from(name)),
+                label: Box::new([]),
+                text: bytes(limits.message_bytes),
+            },
             false,
         );
     }

@@ -59,7 +59,8 @@ fn message(world: &mut World, name: u64, bytes: usize) {
     world.event(Event::Message {
         agent: world.agent(),
         name: Token::new(name),
-        body: vec![b'm'; bytes].into_boxed_slice(),
+        label: Box::new([]),
+        text: vec![b'm'; bytes].into_boxed_slice(),
     });
 }
 fn grant(world: &mut World, generation: u64) {
@@ -91,7 +92,12 @@ fn process_started_precedes_agent_admitted_and_start_is_first() {
     assert!(world.seen.agent.is_none());
     assert!(!world.seen.admitted);
     // A guessed lower token before Started is not a legitimate parent handle.
-    world.event(Event::Message { agent: world.owner(), name: Token::new(2), body: Box::from(&b"early"[..]) });
+    world.event(Event::Message {
+        agent: world.owner(),
+        name: Token::new(2),
+        label: Box::new([]),
+        text: Box::from(&b"early"[..]),
+    });
     assert_eq!(world.seen.bounces, [Bounce::Ending]);
     world.spawned();
     assert!(!world.seen.admitted);
@@ -404,6 +410,33 @@ fn inbound_messages_are_ordered_bounded_and_named_opaquely() {
         })
         .collect();
     assert_eq!(names, [Token::new(u64::MAX), Token::new(0), Token::new(31)]);
+    finish(&mut world);
+}
+
+#[test]
+fn a_message_sends_its_label_and_text_to_the_agent_as_given() {
+    let mut world = World::new(242, limits());
+    world.live();
+    world.event(Event::Message {
+        agent: world.agent(),
+        name: Token::new(34),
+        label: b"reviewer".as_slice().into(),
+        text: b"ready to proceed".as_slice().into(),
+    });
+    let Some(Down::Message { name, label, text }) = world.seen.down.last() else {
+        panic!("the host sends the accepted message");
+    };
+    assert_eq!(*name, Token::new(34));
+    assert_eq!(label.as_ref(), b"reviewer");
+    assert_eq!(text.as_ref(), b"ready to proceed");
+    world.event(Event::Message {
+        agent: world.agent(),
+        name: Token::new(35),
+        label: b"x".as_slice().into(),
+        text: vec![b'm'; 64].into_boxed_slice(),
+    });
+    assert_eq!(world.seen.bounces, [Bounce::TooLarge], "label and text share the message byte cap");
+    world.sent();
     finish(&mut world);
 }
 

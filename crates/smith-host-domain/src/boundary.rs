@@ -27,8 +27,10 @@ pub enum Event {
         agent: Token,
         /// Opaque parent message name.
         name: Token,
-        /// Bounded parent message.
-        body: Box<[u8]>,
+        /// Sender's bounded label, forwarded without interpretation.
+        label: Box<[u8]>,
+        /// Sender's bounded text, forwarded without interpretation.
+        text: Box<[u8]>,
     },
     /// Parent consumes one outstanding operation right, even after channel shutdown.
     Answer {

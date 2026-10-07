@@ -29,7 +29,7 @@ pub struct Limits {
     pub transcript_bytes: u64,
     /// Opaque post-transcript answer bytes.
     pub answered_bytes: u64,
-    /// One inbound message bytes.
+    /// One inbound message's label and text bytes together.
     pub message_bytes: u64,
     /// Queued plus sent-unread message names.
     pub messages: u32,
