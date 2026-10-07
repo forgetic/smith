@@ -1,6 +1,6 @@
 //! Opening the host and agent halves over in-memory pipes and a socket-like
-//! stream (protocol/channel.md, sections 2 and 10). Later stories compose the
-//! domains after start and application records are translated.
+//! stream (protocol/channel.md, sections 2 and 10). The composed story routes
+//! a real host Start and agent answer through both domains and both halves.
 
 use std::collections::VecDeque;
 
@@ -114,6 +114,7 @@ struct Peer {
     cut_after: Option<usize>,
     received_bytes: usize,
     host_answer: Option<smith_host_domain::channel::Answer>,
+    agent_start: Option<Box<agent::DecodedStart>>,
 }
 
 impl Peer {
@@ -131,6 +132,7 @@ impl Peer {
             cut_after: None,
             received_bytes: 0,
             host_answer: None,
+            agent_start: None,
         };
         if let Half::Host(host) = &mut peer.half {
             host.open(&mut peer.host_events, &mut peer.below);
@@ -154,6 +156,7 @@ impl Peer {
             cut_after: None,
             received_bytes: 0,
             host_answer: None,
+            agent_start: None,
         }
     }
 
@@ -322,6 +325,7 @@ impl Peer {
                             window: start.window.turns,
                         });
                     }
+                    assert!(self.agent_start.replace(start).is_none(), "one decoded Start per channel");
                 }
                 agent::OpenEvent::Ended { why } => output.push(Observation::AgentEnded(why)),
                 agent::OpenEvent::Message { name, text } => output.push(Observation::AgentMessage { name, text }),
@@ -436,7 +440,6 @@ impl World {
 
     /// Send a Start carrying saved turn bytes, if present.
     pub fn send_start_with_turns(&mut self, charter: Box<[u8]>, transcript: Option<Box<[Box<[u8]>]>>) {
-        self.observed.push(Observation::HostStarted);
         let start = smith_host_domain::channel::Start {
             logical_run: skein_lib::Token::new(1),
             activation: 1,
@@ -447,11 +450,26 @@ impl World {
             directories: Box::default(),
             grants: Box::default(),
         };
+        self.send_domain_start(
+            start,
+            smith_host_domain::channel::Window { turns: 1, bytes: 1_000_000_000 },
+            smith_host_protocol::Values { paths: Box::default(), credentials: Box::default() },
+        );
+    }
+
+    /// Route the host domain's actual first Send through the host protocol half.
+    pub fn send_domain_start(
+        &mut self,
+        start: smith_host_domain::channel::Start,
+        window: smith_host_domain::channel::Window,
+        values: smith_host_protocol::Values,
+    ) {
+        self.observed.push(Observation::HostStarted);
         if let Half::Host(host) = &mut self.host.half {
             host.send_start(
                 start,
-                smith_host_domain::channel::Window { turns: 1, bytes: 1_000_000_000 },
-                smith_host_protocol::Values { paths: Box::default(), credentials: Box::default() },
+                window,
+                values,
                 skein_lib::Token::new(2),
                 &mut self.host.host_events,
                 &mut self.host.below,
@@ -831,5 +849,10 @@ impl World {
     /// Take the typed last word for a real host domain or a boundary assertion.
     pub fn take_host_answer(&mut self) -> Option<smith_host_domain::channel::Answer> {
         self.host.host_answer.take()
+    }
+
+    /// Take the agent protocol half's translated Start for the real agent domain.
+    pub fn take_agent_start(&mut self) -> Option<Box<agent::DecodedStart>> {
+        self.agent.agent_start.take()
     }
 }

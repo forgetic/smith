@@ -18,6 +18,8 @@ smith-domain-session.workspace = true
 smith-host-domain.workspace = true
 smith-protocol-channel.workspace = true
 smith-host-protocol.workspace = true
+smith-agent-world.workspace = true
+smith-host-world.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"
