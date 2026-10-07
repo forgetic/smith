@@ -111,6 +111,8 @@ struct Peer {
     end_reported: bool,
     fail_next_write: bool,
     pending: Option<usize>,
+    cut_after: Option<usize>,
+    received_bytes: usize,
 }
 
 impl Peer {
@@ -125,6 +127,8 @@ impl Peer {
             end_reported: false,
             fail_next_write: false,
             pending: None,
+            cut_after: None,
+            received_bytes: 0,
         };
         if let Half::Host(host) = &mut peer.half {
             host.open(&mut peer.host_events, &mut peer.below);
@@ -145,6 +149,8 @@ impl Peer {
             end_reported: false,
             fail_next_write: false,
             pending: None,
+            cut_after: None,
+            received_bytes: 0,
         }
     }
 
@@ -182,7 +188,19 @@ impl Peer {
                     };
                     self.receive(LowerEvent::Write(stream::OutputUp::Settled { right, outcome }));
                 }
-                Lower::Write(stream::OutputDown::Send { bytes, .. }) => other.incoming.extend(bytes.iter().copied()),
+                Lower::Write(stream::OutputDown::Send { bytes, .. }) => {
+                    if !other.incoming_ended {
+                        let keep = other.cut_after.map_or(bytes.len(), |remaining| remaining.min(bytes.len()));
+                        other.incoming.extend(bytes[..keep].iter().copied());
+                        other.received_bytes += keep;
+                        if let Some(remaining) = &mut other.cut_after {
+                            *remaining -= keep;
+                            if *remaining == 0 {
+                                other.incoming_ended = true;
+                            }
+                        }
+                    }
+                }
                 Lower::Write(stream::OutputDown::Cancel { right }) => {
                     self.receive(LowerEvent::Write(stream::OutputUp::Settled {
                         right,
@@ -198,7 +216,8 @@ impl Peer {
             self.pending = None;
             self.receive(LowerEvent::Read(stream::Up::Bytes(bytes)));
         }
-        if self.pending.is_some() && self.incoming_ended && self.incoming.is_empty() && !self.end_reported {
+        if self.pending.is_some() && self.incoming_ended && !self.end_reported {
+            self.incoming.clear();
             self.pending = None;
             self.end_reported = true;
             self.receive(LowerEvent::Read(stream::Up::End));
@@ -381,6 +400,28 @@ impl World {
             self.host.observations(&mut self.observed);
             self.agent.observations(&mut self.observed);
         }
+    }
+
+    /// End one input stream after exactly this many more wire bytes arrive.
+    pub fn cut_agent_input_after(&mut self, bytes: usize) {
+        self.agent.cut_after = Some(bytes);
+        if bytes == 0 {
+            self.agent.incoming_ended = true;
+        }
+    }
+
+    /// End the host input stream after exactly this many more wire bytes arrive.
+    pub fn cut_host_input_after(&mut self, bytes: usize) {
+        self.host.cut_after = Some(bytes);
+        if bytes == 0 {
+            self.host.incoming_ended = true;
+        }
+    }
+
+    /// Actual bytes each side received from the wire, including opening bytes.
+    #[must_use]
+    pub fn received_bytes(&self) -> (usize, usize) {
+        (self.host.received_bytes, self.agent.received_bytes)
     }
 
     /// Send one Start with the supplied opaque charter bytes.
