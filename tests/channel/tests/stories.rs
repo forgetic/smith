@@ -337,3 +337,22 @@ fn a_run_resumed_from_a_transcript_restores_the_calls_answered_after_its_last_tu
         error: true,
     }));
 }
+
+#[test]
+fn a_message_reaches_the_llm_with_its_senders_label() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    let name = skein_lib::Token::new(31);
+    world.send_message(name, Box::from(*b"Ada"), Box::from(*b"Please retry"));
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentMessage { name, text: Box::from(*b"Ada: Please retry") }));
+    world.agent_waits(Some(name));
+    world.settle();
+    assert!(world.observations().contains(&Observation::HostWaiting { read: Some(name) }));
+}

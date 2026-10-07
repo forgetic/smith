@@ -33,6 +33,10 @@ pub enum Observation {
     AgentSavedTooLarge,
     /// A saved host decision reached the domain vocabulary with its stable name.
     AgentSavedHost { activation: u64, tool: Box<[u8]>, text: Box<[u8]>, error: bool },
+    /// Host's sender label and message text reached the agent's domain face.
+    AgentMessage { name: skein_lib::Token, text: Box<[u8]> },
+    /// The host saw the run wait after reading a named message.
+    HostWaiting { read: Option<skein_lib::Token> },
     /// Host received an invalid Start answer.
     InvalidStart { why: smith_channel::InvalidStart, turns: u32, spent: u64 },
     /// Host received admission before the final answer.
@@ -146,6 +150,7 @@ impl Peer {
                 host::OpenEvent::Sent { token } => output.push(Observation::HostSent(token)),
                 host::OpenEvent::Unsent { token, why } => output.push(Observation::HostUnsent(token, why)),
                 host::OpenEvent::Admitted => output.push(Observation::HostAdmitted),
+                host::OpenEvent::Waiting { read } => output.push(Observation::HostWaiting { read }),
                 host::OpenEvent::Answer { answer } => {
                     if let smith_channel::RunResult::Refused(refused) = answer.result()
                         && let smith_channel::StartRefusal::Invalid(invalid) = refused.reason()
@@ -203,6 +208,7 @@ impl Peer {
                     }
                 }
                 agent::OpenEvent::Ended { why } => output.push(Observation::AgentEnded(why)),
+                agent::OpenEvent::Message { name, text } => output.push(Observation::AgentMessage { name, text }),
             }
         }
     }
@@ -368,6 +374,39 @@ impl World {
                     &mut self.agent.below,
                 )
                 .expect("bounded answer");
+        }
+    }
+
+    /// Have the scripted domain admit without ending the run.
+    pub fn agent_admits(&mut self) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_admitted(skein_lib::Token::new(3), &mut self.agent.agent_events, &mut self.agent.below)
+                .expect("bounded admitted");
+        }
+    }
+
+    /// Relay one named message through the host's half.
+    pub fn send_message(&mut self, name: skein_lib::Token, label: Box<[u8]>, text: Box<[u8]>) {
+        if let Half::Host(host) = &mut self.host.half {
+            host.send_message(
+                name,
+                label,
+                text,
+                skein_lib::Token::new(5),
+                &mut self.host.host_events,
+                &mut self.host.below,
+            )
+            .expect("bounded message");
+        }
+    }
+
+    /// Tell the host that the run waits after its latest read message.
+    pub fn agent_waits(&mut self, read: Option<skein_lib::Token>) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_waiting(read, skein_lib::Token::new(6), &mut self.agent.agent_events, &mut self.agent.below)
+                .expect("bounded waiting");
         }
     }
 

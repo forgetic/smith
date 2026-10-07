@@ -21,6 +21,8 @@ pub enum Error {
     Channel(SchemaError),
     /// A service omitted a workspace path or credential value.
     MissingValue,
+    /// The service sent a record before or after its permitted channel phase.
+    Order,
     /// A host record does not fit the configured channel body limits.
     Body(smith_channel::v1::Problem),
     /// The measured frame could not be written.

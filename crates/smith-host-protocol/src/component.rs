@@ -1,7 +1,7 @@
 //! Host-side opening machine (protocol/channel.md, sections 2 and 5).
 use alloc::boxed::Box;
-use skein_channel::{Closed, Event, Lower, LowerEvent, Machine, Request, Role, Schema, StreamMode};
-use skein_lib::{Queue, Reader, Token};
+use skein_channel::{Closed, Event, Lower, LowerEvent, Machine, Request, Role, Schema, StreamMode, frame_writer};
+use skein_lib::{Queue, Reader, Token, Writer};
 use smith_host_domain::channel;
 
 use crate::limits::{Error, Limits};
@@ -33,6 +33,8 @@ pub enum OpenEvent {
     Answer { answer: smith_channel::Answer },
     /// The agent admitted the Start before its later final answer.
     Admitted,
+    /// The run is waiting after reading the named message, if any.
+    Waiting { read: Option<Token> },
 }
 
 /// The initiator's framed channel and checked sending terms.
@@ -94,6 +96,34 @@ impl Component {
         Ok(())
     }
 
+    /// Relay one named sender label and text to the admitted agent.
+    pub fn send_message(
+        &mut self,
+        name: Token,
+        label: Box<[u8]>,
+        text: Box<[u8]>,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let record =
+            smith_channel::Message::new(&self.bodies, smith_channel::MessageParts { name: name.raw(), label, text })?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::MissingValue);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x0101, record.measure())?;
+        frame.put(&body.finish())?;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
     /// Consume one stream event and progress the opening.
     pub fn from_below(&mut self, event: LowerEvent, to_service: &mut Queue<OpenEvent>, below: &mut Queue<Lower>) {
         self.machine.up(event, &mut self.events, below);
@@ -113,6 +143,7 @@ impl Component {
         self.phase != Phase::Opening
     }
 
+    #[expect(clippy::manual_map, reason = "production steps do not use closure methods")]
     fn drain(&mut self, to_service: &mut Queue<OpenEvent>, below: &mut Queue<Lower>) {
         for _ in 0_u8..8_u8 {
             let event = self.events.pop();
@@ -141,6 +172,19 @@ impl Component {
                     }
                 }
                 Some(Event::Body { kind, body }) => match kind {
+                    0x010a if self.phase == Phase::Admitted => {
+                        match smith_channel::Waiting::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(waiting) => {
+                                let read = match waiting.last_read() {
+                                    Some(name) => Some(Token::new(*name)),
+                                    None => None,
+                                };
+                                to_service.push(OpenEvent::Waiting { read });
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
                     0x0106 if self.phase == Phase::Started => {
                         match smith_channel::Admitted::decode(&self.bodies, &mut Reader::new(&body)) {
                             Ok(_) => {

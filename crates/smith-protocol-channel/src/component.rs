@@ -30,6 +30,8 @@ pub enum OpenEvent {
     Opened { version: u16 },
     /// A structurally valid Start with its charter translated before domain admission.
     Start { start: Box<DecodedStart> },
+    /// A host-labelled message for the admitted run.
+    Message { name: Token, text: Box<[u8]> },
     /// The channel ended before or after opening.
     Ended { why: Closed },
 }
@@ -146,6 +148,36 @@ impl Component {
         Ok(())
     }
 
+    /// Tell the host that the run waits after the last message it read.
+    #[expect(clippy::manual_map, reason = "production steps do not use closure methods")]
+    pub fn send_waiting(
+        &mut self,
+        read: Option<Token>,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let last_read = match read {
+            Some(name) => Some(name.raw()),
+            None => None,
+        };
+        let record = smith_channel::Waiting::new(&self.bodies, smith_channel::WaitingParts { last_read })?;
+        let Ok(length) = usize::try_from(record.measure()) else {
+            return Err(Error::ResultCapacity);
+        };
+        let mut body = Writer::new(length);
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x010a, record.measure())?;
+        frame.put(&body.finish())?;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
     /// Whether the channel can take application records.
     #[must_use]
     pub fn opened(&self) -> bool {
@@ -183,6 +215,20 @@ impl Component {
                         }
                     }
                 }
+                Some(Event::Body { kind: 0x0101, body })
+                    if self.phase == Phase::Started || self.phase == Phase::Admitted =>
+                {
+                    match smith_channel::Message::decode(&self.bodies, &mut Reader::new(&body)) {
+                        Ok(message) => match labelled_message(&message) {
+                            Some(text) => {
+                                to_service.push(OpenEvent::Message { name: Token::new(message.name()), text });
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            }
+                            None => self.refuse_rules(below),
+                        },
+                        Err(_) => self.refuse_rules(below),
+                    }
+                }
                 Some(Event::Body { kind, body }) => {
                     if self.phase != Phase::Opened || kind != 0x0100 {
                         self.refuse_rules(below);
@@ -200,6 +246,7 @@ impl Component {
                                             Ok(transcript) => match start_context(start, charter, transcript) {
                                                 Ok(start) => {
                                                     to_service.push(OpenEvent::Start { start: Box::new(start) });
+                                                    self.machine.down(Request::Read, &mut self.events, below);
                                                 }
                                                 Err(_) => self.refuse_rules(below),
                                             },
@@ -286,6 +333,15 @@ impl Component {
             self.refuse_rules(below);
         }
     }
+}
+
+fn labelled_message(message: &smith_channel::Message) -> Option<Box<[u8]>> {
+    let capacity = message.label().len().checked_add(2)?.checked_add(message.text().len())?;
+    let mut writer = Writer::new(capacity);
+    writer.put(message.label()).ok()?;
+    writer.put(b": ").ok()?;
+    writer.put(message.text()).ok()?;
+    Some(writer.finish())
 }
 
 fn invalid_answer(limits: &smith_channel::Limits, invalid: smith_channel::InvalidStart) -> Option<Frame> {
