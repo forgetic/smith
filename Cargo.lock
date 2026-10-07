@@ -209,6 +209,7 @@ dependencies = [
  "skein-lib",
  "skein-world",
  "smith-channel",
+ "smith-charter",
  "smith-domain",
  "smith-host-domain",
  "smith-host-protocol",

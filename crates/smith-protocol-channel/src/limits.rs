@@ -9,7 +9,11 @@ use crate::{Component, OpenEvent};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub bodies: smith_channel::Limits,
+    /// This agent's bounded charter decoder allowances.
+    pub charter: smith_charter::v1::Limits,
     pub channel: skein_channel::Limits,
+    /// Maximum configured endpoint names kept by this component.
+    pub endpoints: u32,
 }
 
 /// A checked channel cannot be built from the supplied limits.
@@ -19,6 +23,8 @@ pub enum Error {
     Codec(smith_channel::Overflow),
     /// Skein rejected the schema or framing limits.
     Channel(SchemaError),
+    /// Configured endpoint names exceed their count or byte allowance.
+    Endpoints,
 }
 
 /// Slots reserved by the caller at each entry point during opening.
@@ -44,6 +50,10 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     }
     let bytes = skein_channel::worst_case(&schema, &limits.channel)?
         .checked_add(duplicate)?
+        .checked_add(u64::from(limits.endpoints).checked_mul(u64::try_from(size_of::<crate::Endpoint>()).ok()?)?)?
+        .checked_add(u64::from(limits.endpoints).checked_mul(u64::from(smith_charter::CEILINGS.llm_endpoint))?)?
+        .checked_add(smith_channel::Start::worst_case_bytes(&limits.bodies)?)?
+        .checked_add(smith_charter::Charter::worst_case_bytes(&limits.charter)?.checked_mul(2)?)?
         .checked_add(Queue::<skein_channel::Event>::worst_case(8)?)?
         .checked_add(Queue::<OpenEvent>::worst_case(1)?)?
         .checked_add(Queue::<Lower>::worst_case(6)?)?;

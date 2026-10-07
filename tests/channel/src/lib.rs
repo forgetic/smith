@@ -63,7 +63,7 @@ impl Peer {
 
     fn agent(limits: agent::Limits, mode: StreamMode) -> Peer {
         Peer {
-            half: Half::Agent(agent::Component::new(&limits, mode).expect("checked agent channel")),
+            half: Half::Agent(agent::Component::new(&limits, mode, test_endpoints()).expect("checked agent channel")),
             below: Queue::with_capacity(64),
             host_events: Queue::with_capacity(16),
             agent_events: Queue::with_capacity(16),
@@ -152,6 +152,12 @@ impl Peer {
     }
 }
 
+fn test_endpoints() -> agent::Endpoints {
+    let mut entries = skein_lib::List::with_capacity(1);
+    entries.push(agent::Endpoint { name: Box::default(), number: 0, dialect: 0, account: 0 }).expect("one endpoint");
+    agent::Endpoints::new(entries)
+}
+
 fn channel_limits(bodies: smith_channel::Limits) -> skein_channel::Limits {
     let schema = smith_channel::schema(&bodies).expect("bounded bodies");
     let version = schema.version(1).expect("v1");
@@ -180,7 +186,10 @@ impl World {
     pub fn new(host_bodies: smith_channel::Limits, agent_bodies: smith_channel::Limits, mode: StreamMode) -> World {
         let channel = channel_limits(smith_channel::CEILINGS);
         let host = Peer::host(host::Limits { bodies: host_bodies, channel }, mode);
-        let agent = Peer::agent(agent::Limits { bodies: agent_bodies, channel }, mode);
+        let agent = Peer::agent(
+            agent::Limits { bodies: agent_bodies, charter: smith_charter::CEILINGS, channel, endpoints: 1 },
+            mode,
+        );
         World { host, agent, observed: Vec::new(), channel }
     }
 

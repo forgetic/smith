@@ -8,6 +8,8 @@ use crate::{Component, Limits, OpenEvent};
 fn the_agent_demands_the_open_before_the_domain_hears_anything() {
     let limits = Limits {
         bodies: smith_channel::CEILINGS,
+        charter: smith_charter::CEILINGS,
+        endpoints: 0,
         channel: skein_channel::Limits {
             chunk: 8,
             credential: 0,
@@ -17,7 +19,9 @@ fn the_agent_demands_the_open_before_the_domain_hears_anything() {
             kinds: 17,
         },
     };
-    let mut component = Component::new(&limits, StreamMode::Two).expect("checked schema");
+    let mut component =
+        Component::new(&limits, StreamMode::Two, crate::Endpoints::new(skein_lib::List::with_capacity(0)))
+            .expect("checked schema");
     let mut to_service = Queue::<OpenEvent>::with_capacity(2);
     let mut below = Queue::<Lower>::with_capacity(8);
     component.fire(&mut to_service, &mut below);

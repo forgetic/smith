@@ -79,3 +79,73 @@ fn a_start_record_that_does_not_decode_breaks_the_channel_rules() {
     assert!(world.observations().contains(&Observation::AgentEnded(Closed::RefusedHere(256))));
     assert!(!world.observations().contains(&Observation::AgentStart));
 }
+
+#[test]
+fn the_agent_resolves_the_charters_endpoint_before_admission() {
+    let mut entries = skein_lib::List::with_capacity(1);
+    entries
+        .push(smith_protocol_channel::Endpoint { name: Box::default(), number: 17, dialect: 23, account: 29 })
+        .expect("one endpoint");
+    let endpoints = smith_protocol_channel::Endpoints::new(entries);
+    let bytes = include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin");
+    let charter =
+        smith_protocol_channel::decode_charter(bytes, &smith_charter::CEILINGS, &endpoints).expect("v1 charter");
+    assert_eq!(charter.llm.endpoint.0, 17);
+    assert_eq!(charter.llm.dialect, 23);
+    assert_eq!(charter.llm.account, 29);
+    assert!(charter.brief.sections.is_empty());
+    assert!(charter.models.is_empty());
+    let unknown = smith_protocol_channel::decode_charter(
+        bytes,
+        &smith_charter::CEILINGS,
+        &smith_protocol_channel::Endpoints::new(skein_lib::List::with_capacity(0)),
+    );
+    assert!(matches!(unknown, Err(smith_domain::run::Invalid::Endpoint)));
+}
+
+#[test]
+fn the_full_charter_keeps_contracts_tools_and_model_prices() {
+    let bytes = include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_full.bin");
+    let wire = smith_charter::Charter::decode(&smith_charter::CEILINGS, &mut skein_lib::Reader::new(bytes))
+        .expect("full charter");
+    let mut entries = skein_lib::List::with_capacity(1 + wire.models().len());
+    entries
+        .push(smith_protocol_channel::Endpoint {
+            name: Box::from(wire.main().endpoint()),
+            number: 17,
+            dialect: 23,
+            account: 29,
+        })
+        .expect("main endpoint");
+    for model in wire.models() {
+        entries
+            .push(smith_protocol_channel::Endpoint {
+                name: Box::from(model.endpoint()),
+                number: 17,
+                dialect: 23,
+                account: 29,
+            })
+            .expect("model endpoint");
+    }
+    let charter = smith_protocol_channel::decode_charter(
+        bytes,
+        &smith_charter::CEILINGS,
+        &smith_protocol_channel::Endpoints::new(entries),
+    )
+    .expect("translated charter");
+    assert_eq!(charter.instructions.as_ref(), wire.instructions());
+    assert_eq!(charter.brief.sections.len(), usize::try_from(wire.brief().len()).expect("bounded count"));
+    assert_eq!(charter.grants.host_tools.len(), usize::try_from(wire.tools().host().len()).expect("bounded count"));
+    assert_eq!(
+        charter.outcome.verdicts.len(),
+        usize::try_from(wire.contract().verdicts().len()).expect("bounded count")
+    );
+    assert_eq!(charter.models.len(), usize::try_from(wire.models().len()).expect("bounded count"));
+    assert_eq!(charter.llm.prices.input, wire.main().prices().input());
+    assert_eq!(charter.llm.prices.cached, wire.main().prices().cached());
+    assert_eq!(charter.llm.prices.output, wire.main().prices().output());
+    assert_eq!(charter.llm.prices.unit, wire.main().prices().unit());
+    assert_eq!(charter.budget.turns, wire.budget().turns());
+    assert_eq!(charter.budget.spend, wire.budget().spend());
+    assert_eq!(charter.budget.time, wire.budget().time());
+}

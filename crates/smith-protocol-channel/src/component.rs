@@ -6,17 +6,19 @@ use skein_channel::{
 use skein_lib::{Queue, Reader, Token, Writer};
 
 use crate::limits::{Error, Limits};
+use crate::translate::{Endpoints, decode_charter};
+use smith_domain::run;
 
 const RULES: u16 = 256;
 const UNAUTHORIZED: u16 = 258;
 
-/// An opening result for the agent service; the domain is not entered yet.
+/// One channel event for the agent service.
 #[derive(Debug)]
 pub enum OpenEvent {
     /// Framing and terms have been agreed at this version.
     Opened { version: u16 },
-    /// A structurally valid Start, before charter and transcript translation.
-    Start { start: smith_channel::Start },
+    /// A structurally valid Start with its charter translated before domain admission.
+    Start { start: Box<smith_channel::Start>, charter: Box<run::Charter> },
     /// The channel ended before or after opening.
     Ended { why: Closed },
 }
@@ -31,11 +33,16 @@ pub struct Component {
     ended: bool,
     started: bool,
     bodies: smith_channel::Limits,
+    charter: smith_charter::v1::Limits,
+    endpoints: Endpoints,
 }
 
 impl Component {
-    /// Build one channel with a pipe pair or one socket-like stream.
-    pub fn new(limits: &Limits, mode: StreamMode) -> Result<Component, Error> {
+    /// Build one channel with configured endpoint names and either stream shape.
+    pub fn new(limits: &Limits, mode: StreamMode, endpoints: Endpoints) -> Result<Component, Error> {
+        if !endpoints.fits(limits.endpoints) {
+            return Err(Error::Endpoints);
+        }
         let schema = match smith_channel::schema(&limits.bodies) {
             Ok(schema) => schema,
             Err(error) => return Err(Error::Codec(error)),
@@ -52,6 +59,8 @@ impl Component {
             ended: false,
             started: false,
             bodies: limits.bodies,
+            charter: limits.charter,
+            endpoints,
         })
     }
 
@@ -112,9 +121,10 @@ impl Component {
                         match smith_channel::Start::decode(&self.bodies, &mut Reader::new(&body)) {
                             Ok(start) => {
                                 self.started = true;
-                                match charter_problem(start.charter()) {
-                                    Some(invalid) => self.invalid_start(invalid, below),
-                                    None => to_service.push(OpenEvent::Start { start }),
+                                match decode_charter(start.charter(), &self.charter, &self.endpoints) {
+                                    Ok(charter) => to_service
+                                        .push(OpenEvent::Start { start: Box::new(start), charter: Box::new(charter) }),
+                                    Err(invalid) => self.invalid_start(wire_invalid(invalid), below),
                                 }
                             }
                             Err(_) => self.refuse_rules(below),
@@ -166,16 +176,21 @@ impl Component {
     }
 }
 
-fn charter_problem(bytes: &[u8]) -> Option<smith_channel::InvalidStart> {
-    if bytes.len() < 2 {
-        return Some(smith_channel::InvalidStart::MalformedCharter);
-    }
-    if bytes.get(..2) != Some(&[0, 1][..]) {
-        return Some(smith_channel::InvalidStart::CharterVersion);
-    }
-    match smith_charter::Charter::decode(&smith_charter::CEILINGS, &mut Reader::new(bytes)) {
-        Ok(_) => None,
-        Err(_) => Some(smith_channel::InvalidStart::MalformedCharter),
+fn wire_invalid(invalid: run::Invalid) -> smith_channel::InvalidStart {
+    match invalid {
+        run::Invalid::CharterVersion => smith_channel::InvalidStart::CharterVersion,
+        run::Invalid::MalformedCharter => smith_channel::InvalidStart::MalformedCharter,
+        run::Invalid::Endpoint => smith_channel::InvalidStart::Endpoint,
+        run::Invalid::Activation => smith_channel::InvalidStart::Activation,
+        run::Invalid::Window => smith_channel::InvalidStart::Window,
+        run::Invalid::Conventions => smith_channel::InvalidStart::Conventions,
+        run::Invalid::TooLarge => smith_channel::InvalidStart::TooLarge,
+        run::Invalid::Workspace => smith_channel::InvalidStart::Workspace,
+        run::Invalid::Grants => smith_channel::InvalidStart::Grants,
+        run::Invalid::Outcome => smith_channel::InvalidStart::Outcome,
+        run::Invalid::Budget => smith_channel::InvalidStart::Budget,
+        run::Invalid::Llm => smith_channel::InvalidStart::Llm,
+        run::Invalid::Conversation => smith_channel::InvalidStart::Conversation,
     }
 }
 
