@@ -3,10 +3,10 @@
 
 use alloc::boxed::Box;
 use core::mem::size_of;
-use skein_lib::{Queue, Token};
+use skein_lib::{Map, Queue, Token};
 use smith_domain::{self as agent, run};
 
-use crate::{AgentIo, Fact, IntentDirectory, Request};
+use crate::{AgentIo, DeliveryRecord, Fact, IntentDirectory, Request};
 
 /// Capacity of one local chat and its child agent.
 #[derive(Clone, Debug)]
@@ -60,6 +60,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let child_out = Queue::<agent::Request>::worst_case(agent::max_out(&limits.agent))?
         .checked_add(u64::from(agent::max_out(&limits.agent)).checked_mul(record.max(limits.agent.run.run_bytes))?)?;
     let held = Queue::<AgentIo>::worst_case(1)?.checked_add(limits.agent.session.completion_bytes)?;
+    let answered = Map::<run::CallName, DeliveryRecord>::worst_case(limits.agent.run.answered_calls)?
+        .checked_add(u64::from(limits.agent.run.answered_calls).checked_mul(run::Delivered::worst_case())?)?;
     let delivery = skein_lib::List::<run::Receipt>::worst_case(run::MAX_DIRECTORIES)?
         .checked_add(run::Delivered::worst_case().checked_mul(4)?)?
         .checked_add(limits.agent.run.outcome_bytes.checked_mul(2)?)?
@@ -76,5 +78,6 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(child_out)?
         .checked_add(held)?
         .checked_add(delivery)?
+        .checked_add(answered)?
         .checked_add(Queue::<Fact>::worst_case(limits.facts)?)
 }

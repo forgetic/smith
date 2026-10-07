@@ -44,10 +44,6 @@ pub struct DeliveryRecord {
     pub state: DeliveryState,
     /// Effects found or observed before the saved answer, in workspace order.
     pub landed: Box<[run::Receipt]>,
-    /// Latest turn told before this decision; a later durable turn contains its answer.
-    pub after_turn: u32,
-    /// Whether a later turn carrying the answer became durable.
-    pub told: bool,
 }
 
 impl DeliveryRecord {
@@ -185,7 +181,7 @@ pub enum Event {
     /// The terminal closed; finish outstanding work, then leave.
     Closed,
     /// Terminal for Load, including a possibly empty saved chat.
-    Loaded { state: Option<ChatState>, transcript: Option<agent::Transcript>, delivery: Option<Box<DeliveryRecord>> },
+    Loaded { state: Option<ChatState>, transcript: Option<agent::Transcript>, deliveries: Box<[DeliveryRecord]> },
     /// Terminal for `SaveState`; names and activation are now durable.
     StateSaved,
     /// Terminal for `SaveTurn`; the named turn is now durable.

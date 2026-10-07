@@ -20,6 +20,8 @@ pub enum Seen {
     Turn { number: u32 },
     /// The host asked the store to save a turn.
     SaveTurn { number: u32, read: Option<Token> },
+    /// Delivery records remaining after an atomic turn save.
+    StoredAnswers { activation: u64, sequence: u32, names: Vec<CallName> },
     /// The store acknowledged a turn.
     TurnSaved { number: u32 },
     /// The agent produced one answer.
@@ -88,8 +90,12 @@ impl Meeting {
 
     /// Seed independent observations that survived an earlier invocation.
     #[must_use]
-    pub fn prior_delivery(mut self, record: Option<&DeliveryRecord>, commits: &[(CallName, u32)]) -> Self {
-        if let Some(record) = record {
+    pub fn prior_delivery<'a>(
+        mut self,
+        records: impl Iterator<Item = &'a DeliveryRecord>,
+        commits: &[(CallName, u32)],
+    ) -> Self {
+        for record in records {
             let key = call_key(record.name);
             match &record.state {
                 DeliveryState::Intent(_) => {
@@ -155,6 +161,12 @@ impl Expectations for Meeting {
                     judge.check(read.raw() >= self.last_read, "the read fence never moves backwards");
                     self.last_read = read.raw();
                 }
+            }
+            Seen::StoredAnswers { activation, sequence, names } => {
+                judge.check(
+                    names.iter().all(|name| name.activation == activation && name.completion > sequence),
+                    "no answer remains after a saved turn follows it",
+                );
             }
             Seen::TurnSaved { number } => {
                 judge.check(self.pending_turns.remove(&number), "one store terminal per turn save");

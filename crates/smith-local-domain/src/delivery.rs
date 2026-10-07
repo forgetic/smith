@@ -5,36 +5,14 @@
 //! write, then saves the answer before returning it to the child.
 
 use alloc::boxed::Box;
-use skein_lib::{List, Time, Token};
+use skein_lib::{List, Map, Time, Token};
 use smith_domain::run::{self, outcome};
 
-use crate::{DeliveryRecord, DeliveryState, IntentDirectory};
+use crate::{DeliveryRecord, IntentDirectory};
 
 /// Return the first durable answer for a repeated call name.
-pub(crate) fn cached(record: Option<&DeliveryRecord>, name: run::CallName) -> Option<run::Delivery> {
-    match record {
-        Some(record) => record.answer(name),
-        None => None,
-    }
-}
-
-/// A same-activation turn carries the answer after its call. Across starts,
-/// only a read fence through the latest saved person line proves the waking
-/// notice was read; turn numbers begin again at one.
-pub(crate) fn told(
-    record: &DeliveryRecord,
-    activation: u64,
-    number: u32,
-    read: Option<Token>,
-    latest_message: u64,
-) -> bool {
-    if record.name.activation == activation {
-        return number > record.after_turn;
-    }
-    match read {
-        Some(read) => read.raw() >= latest_message,
-        None => false,
-    }
+pub(crate) fn cached(records: &Map<run::CallName, DeliveryRecord>, name: run::CallName) -> Option<run::Delivery> {
+    records.get(&name)?.answer(name)
 }
 
 /// Operation awaited from the caller, or the durable store.
@@ -200,76 +178,9 @@ pub(crate) fn append_bounded(out: &mut List<u8>, bytes: &[u8]) {
     }
 }
 
-/// Add an untold landed delivery to the next waking person message. The
-/// configured message bound keeps this usable even with many receipts.
-pub(crate) fn waking_text(record: Option<&DeliveryRecord>, line: Box<[u8]>, max: u32) -> Box<[u8]> {
-    let Some(record) = record else { return line };
-    if record.told {
-        return line;
-    }
-    let interrupted = match &record.state {
-        DeliveryState::Answer(run::Delivery::Delivered(_)) => None,
-        DeliveryState::Answer(run::Delivery::Failed(failure))
-            if failure.diagnostic.output().starts_with(b"delivery interrupted;") =>
-        {
-            Some(failure.diagnostic.output())
-        }
-        DeliveryState::Answer(run::Delivery::Failed(_)) if !record.landed.is_empty() => None,
-        DeliveryState::Intent(_)
-        | DeliveryState::Answer(
-            run::Delivery::Nothing | run::Delivery::Refused(_) | run::Delivery::Failed(_) | run::Delivery::Stale,
-        ) => {
-            return line;
-        }
-    };
-    let prefix = b"Earlier ";
-    let cap = usize::try_from(max).expect("u32 fits usize");
-    let notice_cap = cap.saturating_sub(line.len().saturating_add(1));
-    if notice_cap < prefix.len() {
-        return line;
-    }
-    let mut bytes = List::with_capacity(max);
-    for byte in prefix {
-        if usize::try_from(bytes.len()).expect("bounded message") < notice_cap {
-            bytes.push(*byte).expect("bounded message");
-        }
-    }
-    if interrupted.is_none() {
-        append_notice(&mut bytes, b"delivery committed: ", notice_cap);
-        for receipt in &record.landed {
-            append_notice(&mut bytes, b"directory ", notice_cap);
-            let mut number = List::with_capacity(20);
-            decimal(&mut number, u64::from(receipt.directory()));
-            append_notice(&mut bytes, &number.into_boxed(), notice_cap);
-            append_notice(&mut bytes, b": ", notice_cap);
-            append_notice(&mut bytes, receipt.text(), notice_cap);
-            append_notice(&mut bytes, b"; ", notice_cap);
-        }
-    }
-    if let Some(interrupted) = interrupted {
-        append_notice(&mut bytes, interrupted, notice_cap);
-    }
-    for byte in b"\n".iter().chain(line.iter()) {
-        if usize::try_from(bytes.len()).expect("bounded message") < cap {
-            bytes.push(*byte).expect("bounded message");
-        }
-    }
-    bytes.into_boxed()
-}
-
-fn append_notice(out: &mut List<u8>, text: &[u8], cap: usize) {
-    for byte in text {
-        if usize::try_from(out.len()).expect("bounded message") >= cap {
-            break;
-        }
-        let shown = if byte.is_ascii_graphic() || *byte == b' ' { *byte } else { b'?' };
-        out.push(shown).expect("bounded message");
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{cached, commit_message, told, waking_text};
+    use super::{cached, commit_message};
     use crate::DeliveryRecord;
     use smith_domain::run::outcome::{Change, Field, FieldRule};
     use smith_domain::run::{CallName, Delivery};
@@ -294,53 +205,11 @@ mod tests {
     #[test]
     fn a_delivery_asked_again_under_its_name_gets_its_first_answer() {
         let name = CallName { activation: 2, completion: 3, position: 1 };
-        let record = DeliveryRecord {
-            name,
-            state: crate::DeliveryState::Answer(Delivery::Nothing),
-            landed: Box::new([]),
-            after_turn: 2,
-            told: false,
-        };
-        assert_eq!(cached(Some(&record), name), Some(Delivery::Nothing));
-        assert_eq!(cached(Some(&record), CallName { activation: 2, completion: 4, position: 1 }), None);
-    }
-
-    #[test]
-    fn a_reconciled_interruption_names_no_commits_in_the_waking_text() {
-        let name = CallName { activation: 2, completion: 3, position: 1 };
-        let record = DeliveryRecord {
-            name,
-            state: crate::DeliveryState::Answer(Delivery::Failed(smith_domain::run::DeliveryFailure {
-                directory: 0,
-                reason: smith_domain::run::DeliveryReason::Broken,
-                diagnostic: smith_domain::run::Diagnostic::new(b"delivery interrupted; committed: none", 0),
-            })),
-            landed: Box::new([]),
-            after_turn: 2,
-            told: false,
-        };
-        assert_eq!(
-            waking_text(Some(&record), Box::from(&b"Continue"[..]), 1024).as_ref(),
-            b"Earlier delivery interrupted; committed: none\nContinue"
-        );
-    }
-
-    #[test]
-    fn a_later_activation_only_tells_a_delivery_when_it_reads_the_waking_line() {
-        let name = CallName { activation: 2, completion: 3, position: 1 };
-        let receipt = smith_domain::run::Receipt::new(0, Box::from(&b"commit 2"[..])).expect("bounded receipt");
-        let record = DeliveryRecord {
-            name,
-            state: crate::DeliveryState::Answer(Delivery::Delivered(
-                smith_domain::run::Delivered::new(Box::new([receipt.clone()])).expect("one receipt"),
-            )),
-            landed: Box::new([receipt]),
-            after_turn: 2,
-            told: false,
-        };
-        assert!(told(&record, 2, 3, None, 7));
-        assert!(!told(&record, 3, 3, None, 8));
-        assert!(!told(&record, 3, 4, Some(skein_lib::Token::new(7)), 8));
-        assert!(told(&record, 3, 1, Some(skein_lib::Token::new(8)), 8));
+        let record =
+            DeliveryRecord { name, state: crate::DeliveryState::Answer(Delivery::Nothing), landed: Box::new([]) };
+        let mut records = skein_lib::Map::with_capacity(1);
+        records.insert(name, record).expect("one entry");
+        assert_eq!(cached(&records, name), Some(Delivery::Nothing));
+        assert_eq!(cached(&records, CallName { activation: 2, completion: 4, position: 1 }), None);
     }
 }

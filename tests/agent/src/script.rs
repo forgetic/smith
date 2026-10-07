@@ -144,6 +144,7 @@ pub fn all() -> Box<[Script]> {
             ],
         ),
         script(b"@midreport", mid_report()),
+        script(b"@local-two-deliveries", two_deliveries()),
         script(b"@midchange", mid_change()),
         script(b"@markerreport", marker_report()),
         script(b"@coding", coding()),
@@ -327,6 +328,14 @@ fn mid_report() -> Vec<Turn> {
             "finish",
             r#"{"report":"Delivery completed; continuing produced this report.","source":"checkout"}"#,
         )]),
+    ]
+}
+
+fn two_deliveries() -> Vec<Turn> {
+    vec![
+        calls(vec![read("src/lib.rs"), edit("42", "43")]),
+        calls(vec![call("deliver", r#"{"ticket":"first"}"#), call("deliver", r#"{"ticket":"second"}"#)]),
+        calls(vec![call("finish", r#"{"report":"Both deliveries answered.","source":"checkout"}"#)]),
     ]
 }
 

@@ -24,7 +24,7 @@ pub struct Store {
     state: Option<ChatState>,
     turns: Vec<agent::Turn>,
     history_override: Option<agent::Transcript>,
-    delivery: Option<DeliveryRecord>,
+    deliveries: BTreeMap<run::CallName, DeliveryRecord>,
     disk: Option<Checkout>,
     history: Option<History>,
     git_head: Option<u64>,
@@ -35,13 +35,19 @@ impl Store {
     /// Replay the first durable terminal for the same delivery call name.
     #[must_use]
     pub fn delivery_answer(&self, name: run::CallName) -> Option<run::Delivery> {
-        self.delivery.as_ref()?.answer(name)
+        self.deliveries.get(&name)?.answer(name)
     }
 
     /// The last durable delivery call name.
     #[must_use]
     pub fn delivery_name(&self) -> Option<run::CallName> {
-        Some(self.delivery.as_ref()?.name)
+        Some(*self.deliveries.last_key_value()?.0)
+    }
+
+    /// Number of durable delivery answers still missing from a saved turn.
+    #[must_use]
+    pub fn delivery_answers(&self) -> usize {
+        self.deliveries.values().filter(|record| matches!(record.state, DeliveryState::Answer(_))).count()
     }
 
     fn history(&self) -> Option<agent::Transcript> {
@@ -97,6 +103,8 @@ pub enum Cut {
     AfterTurnSaved(u32),
     /// A commit and its delivery record are durable, but its child terminal is lost.
     AfterSaveDelivery,
+    /// The second delivery answer is durable, but its child terminal is lost.
+    AfterSecondSaveDelivery,
     /// An intent is durable and no commit has begun.
     AfterIntent,
     /// A commit landed, but its result has not reached the host domain.
@@ -123,6 +131,7 @@ enum Scenario {
     PushStale,
     SecondFails,
     MidReport,
+    TwoDeliveries,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -163,6 +172,7 @@ pub struct World {
     cancelled: BTreeSet<Token>,
     events: VecDeque<Event>,
     store: Store,
+    last_delivery: Option<run::Delivery>,
     shown: Vec<Box<[u8]>>,
     reached: BTreeSet<Goal>,
     exit: Option<ExitStatus>,
@@ -276,6 +286,18 @@ impl World {
         Self::with_capacity(seed, store, true, 2, 64, Scenario::MidReport)
     }
 
+    /// Two delivery calls in one turn, before that turn is saved.
+    #[must_use]
+    pub fn with_two_deliveries(seed: u64) -> World {
+        Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::TwoDeliveries)
+    }
+
+    /// Resume two delivery calls after both answers are durable.
+    #[must_use]
+    pub fn with_two_deliveries_store(seed: u64, store: Store) -> World {
+        Self::with_capacity(seed, store, true, 2, 64, Scenario::TwoDeliveries)
+    }
+
     /// Resume over the same transcript, checkout, graph and delivery record.
     #[must_use]
     pub fn with_git_change_store(seed: u64, store: Store) -> World {
@@ -292,6 +314,12 @@ impl World {
     #[must_use]
     pub fn with_moved_remote(seed: u64) -> World {
         Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::PushStale)
+    }
+
+    /// Resume a configured push whose target had moved.
+    #[must_use]
+    pub fn with_moved_remote_store(seed: u64, store: Store) -> World {
+        Self::with_capacity(seed, store, true, 2, 64, Scenario::PushStale)
     }
 
     /// Head of the remote branch in this fixture.
@@ -315,10 +343,7 @@ impl World {
     /// The last durable delivery decision, if one was made.
     #[must_use]
     pub fn delivery(&self) -> Option<&run::Delivery> {
-        match &self.store.delivery.as_ref()?.state {
-            DeliveryState::Intent(_) => None,
-            DeliveryState::Answer(delivery) => Some(delivery),
-        }
+        self.last_delivery.as_ref()
     }
 
     /// Message stored by the fake git graph for its latest local commit.
@@ -347,7 +372,7 @@ impl World {
     )]
     fn with_capacity(seed: u64, mut store: Store, resume: bool, unsaved: u32, facts: u32, scenario: Scenario) -> World {
         let meeting = Meeting::after(store.activation(), store.state.map_or(0, |state| state.next_message))
-            .prior_delivery(store.delivery.as_ref(), &store.commits);
+            .prior_delivery(store.deliveries.values(), &store.commits);
         let meeting = match scenario {
             Scenario::Chat => meeting,
             Scenario::SecondFails => meeting.writable(&[0, 1], &[1, 2]),
@@ -358,7 +383,8 @@ impl World {
             | Scenario::GitMarker
             | Scenario::PushLands
             | Scenario::PushStale
-            | Scenario::MidReport => meeting.writable(&[0], &[1]),
+            | Scenario::MidReport
+            | Scenario::TwoDeliveries => meeting.writable(&[0], &[1]),
         };
         let referee = Referee::new(meeting);
         let limits = local::Limits {
@@ -388,6 +414,7 @@ impl World {
                     | Scenario::GitMarker
                     | Scenario::SecondFails
                     | Scenario::MidReport
+                    | Scenario::TwoDeliveries
                     | Scenario::PushLands
                     | Scenario::PushStale
             ) && !restored
@@ -398,6 +425,7 @@ impl World {
                     Scenario::GitChange
                         | Scenario::SecondFails
                         | Scenario::MidReport
+                        | Scenario::TwoDeliveries
                         | Scenario::PushLands
                         | Scenario::PushStale
                 ) {
@@ -442,6 +470,7 @@ impl World {
                         | Scenario::GitMarker
                         | Scenario::SecondFails
                         | Scenario::MidReport
+                        | Scenario::TwoDeliveries
                         | Scenario::PushLands
                         | Scenario::PushStale
                 ),
@@ -481,7 +510,9 @@ impl World {
                 | Scenario::PushLands
                 | Scenario::PushStale
         );
-        let instructions: &[u8] = if scenario == Scenario::MidReport {
+        let instructions: &[u8] = if scenario == Scenario::TwoDeliveries {
+            b"@local-two-deliveries Deliver twice, then report."
+        } else if scenario == Scenario::MidReport {
             b"@midreport Deliver then report."
         } else if scenario == Scenario::PlainNothing {
             b"@local-nothing Declare an unchanged result."
@@ -520,7 +551,7 @@ impl World {
             budget: agent_world::BUDGET,
             conventions: None,
             contract,
-            deliver: if scenario == Scenario::MidReport {
+            deliver: if matches!(scenario, Scenario::MidReport | Scenario::TwoDeliveries) {
                 Some(run::outcome::ChangeSpec {
                     checks_must_pass: true,
                     fields: Box::new([run::outcome::FieldRule { name: b"ticket".as_slice().into(), max: 128 }]),
@@ -528,7 +559,7 @@ impl World {
             } else {
                 None
             },
-            title_field: if scenario == Scenario::MidReport {
+            title_field: if matches!(scenario, Scenario::MidReport | Scenario::TwoDeliveries) {
                 b"ticket".as_slice().into()
             } else {
                 b"title".as_slice().into()
@@ -567,6 +598,10 @@ impl World {
             pending: BTreeMap::new(),
             cancelled: BTreeSet::new(),
             events: VecDeque::new(),
+            last_delivery: store.deliveries.values().rev().find_map(|record| match &record.state {
+                DeliveryState::Answer(delivery) => Some(delivery.clone()),
+                DeliveryState::Intent(_) => None,
+            }),
             store,
             shown: Vec::new(),
             reached: BTreeSet::new(),
@@ -762,7 +797,7 @@ impl World {
                     }
                     Event::DeliverySaved { name } => {
                         let intent = matches!(
-                            self.store.delivery.as_ref().map(|record| &record.state),
+                            self.store.deliveries.get(name).map(|record| &record.state),
                             Some(DeliveryState::Intent(_))
                         );
                         self.observe(Seen::DeliverySaved { name: *name, intent });
@@ -874,7 +909,7 @@ impl World {
                     self.events.push_back(Event::Loaded {
                         state: self.store.state,
                         transcript: self.store.history(),
-                        delivery: self.store.delivery.clone().map(Box::new),
+                        deliveries: self.store.deliveries.values().cloned().collect::<Vec<_>>().into_boxed_slice(),
                     });
                 }
             }
@@ -891,6 +926,7 @@ impl World {
                 if fresh {
                     self.store.turns.clear();
                     self.store.history_override = None;
+                    self.store.deliveries.clear();
                 }
                 self.store.state = Some(state);
                 self.events.push_back(Event::StateSaved);
@@ -913,14 +949,15 @@ impl World {
                 self.activation_turns = number;
                 let state = self.store.state.as_mut().expect("activation state saved before any turn");
                 state.read = read;
+                let activation = state.activation;
+                let sequence = turn.sequence;
                 self.store.turns.push(turn);
-                if let Some(record) = &mut self.store.delivery
-                    && ((record.name.activation == state.activation && number > record.after_turn)
-                        || (record.name.activation != state.activation
-                            && read.is_some_and(|read| read.raw() >= state.next_message)))
-                {
-                    record.told = true;
-                }
+                self.store.deliveries.retain(|name, _| name.activation == activation && name.completion > sequence);
+                self.observe(Seen::StoredAnswers {
+                    activation,
+                    sequence,
+                    names: self.store.deliveries.keys().copied().collect(),
+                });
                 if self.slow_store {
                     self.delayed_turns.push_back(number);
                 } else {
@@ -941,11 +978,14 @@ impl World {
                 let intent = matches!(record.state, DeliveryState::Intent(_));
                 let receipts = record.landed.iter().map(run::Receipt::directory).collect();
                 self.observe(Seen::DeliveryRecorded { name, intent, receipts });
-                self.store.delivery = Some(*record);
+                if let DeliveryState::Answer(delivery) = &record.state {
+                    self.last_delivery = Some(delivery.clone());
+                }
+                self.store.deliveries.insert(name, *record);
                 self.events.push_back(Event::DeliverySaved { name });
                 if self.cut == Some(Cut::AfterIntent)
                     && matches!(
-                        self.store.delivery.as_ref().map(|record| &record.state),
+                        self.store.deliveries.get(&name).map(|record| &record.state),
                         Some(DeliveryState::Intent(_))
                     )
                 {
@@ -953,9 +993,20 @@ impl World {
                 }
                 if self.cut == Some(Cut::AfterSaveDelivery)
                     && matches!(
-                        self.store.delivery.as_ref().map(|record| &record.state),
+                        self.store.deliveries.get(&name).map(|record| &record.state),
                         Some(DeliveryState::Answer(_))
                     )
+                {
+                    self.reached.insert(Goal::Cut);
+                }
+                if self.cut == Some(Cut::AfterSecondSaveDelivery)
+                    && self
+                        .store
+                        .deliveries
+                        .values()
+                        .filter(|record| matches!(record.state, DeliveryState::Answer(_)))
+                        .count()
+                        == 2
                 {
                     self.reached.insert(Goal::Cut);
                 }
@@ -990,7 +1041,13 @@ impl World {
                 if matches!(result, GitResult::Committed { .. }) {
                     let mut tree = self.disk.tree(b"work");
                     tree.retain(|path, _| !skein_fake_checkout::in_git(path));
-                    let name = self.store.delivery.as_ref().expect("intent saved before commit").name;
+                    let name = *self
+                        .store
+                        .deliveries
+                        .iter()
+                        .find(|(_, record)| matches!(record.state, DeliveryState::Intent(_)))
+                        .expect("intent saved before commit")
+                        .0;
                     self.commits.push((name, directory));
                     self.observe(Seen::Committed { name, directory, tree });
                     if self.cut == Some(Cut::AfterCommit(directory)) {

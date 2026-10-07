@@ -4,7 +4,7 @@
 
 use alloc::boxed::Box;
 use core::mem;
-use skein_lib::{Env, List, Queue, ReplyTo, Time, Token};
+use skein_lib::{Env, List, Map, Queue, ReplyTo, Time, Token};
 use smith_domain as agent;
 
 use crate::boundary::{
@@ -31,13 +31,12 @@ pub struct Domain {
     agent_out: Queue<agent::Request>,
     chat: Chat,
     transcript: Option<agent::Transcript>,
-    record: Option<DeliveryRecord>,
+    records: Map<agent::run::CallName, DeliveryRecord>,
     delivery: Option<InPlace>,
     saving: Option<DeliveryRecord>,
     delivery_owner: Option<Token>,
     landed: List<agent::run::Receipt>,
     reconciling: Option<Reconcile>,
-    last_turn: u32,
     raw_lines: Queue<Box<[u8]>>,
     line: Option<Line>,
     grants: Grants,
@@ -89,13 +88,12 @@ impl Domain {
             agent_out: Queue::with_capacity(agent::max_out(&limits.agent)),
             chat: Chat::new(),
             transcript: None,
-            record: None,
+            records: Map::with_capacity(limits.agent.run.answered_calls),
             delivery: None,
             saving: None,
             delivery_owner: None,
             landed: List::with_capacity(agent::run::MAX_DIRECTORIES),
             reconciling: None,
-            last_turn: 0,
             raw_lines: Queue::with_capacity(limits.lines),
             line: None,
             grants: Grants::new(limits.agent.accounts),
@@ -159,9 +157,9 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
         Event::Line { text } => receive_line(domain, env, text, out),
         Event::Interrupt => interrupt(domain, env, out),
         Event::Closed => closed(domain, out),
-        Event::Loaded { state, transcript, delivery } => loaded(domain, env, state, transcript, delivery, out),
+        Event::Loaded { state, transcript, deliveries } => loaded(domain, env, state, transcript, deliveries, out),
         Event::StateSaved => state_saved(domain, env, out),
-        Event::TurnSaved { number } => turn_saved(domain, number, out),
+        Event::TurnSaved { number } => turn_saved(domain, env, number, out),
         Event::DeliverySaved { name } => delivery_saved(domain, env, name, out),
         Event::Git { owner, result } => git_result(domain, env, owner, result, out),
         Event::PlainStatus { owner, changed } => plain_status(domain, env, owner, changed, out),
@@ -283,33 +281,40 @@ fn stop_names(domain: &mut Domain, out: &mut Queue<Request>) {
     out.push(Request::Exit { status: ExitStatus::Failed });
 }
 
-#[expect(clippy::manual_map, reason = "strict domain code uses an exhaustive match instead of a closure")]
 fn loaded(
     domain: &mut Domain,
     env: &Env<Limits>,
     state: Option<ChatState>,
     transcript: Option<agent::Transcript>,
-    delivery: Option<Box<DeliveryRecord>>,
+    deliveries: Box<[DeliveryRecord]>,
     out: &mut Queue<Request>,
 ) {
     assert!(domain.chat.phase == Phase::Loading && domain.chat.load_requested, "Load has one terminal");
     domain.chat.state = state.unwrap_or(ChatState { activation: 0, next_message: 0, read: None });
     domain.transcript = transcript;
-    domain.record = match delivery {
-        Some(record) => Some(*record),
-        None => None,
-    };
-    let pending = match &domain.record {
-        Some(record) => match &record.state {
-            DeliveryState::Intent(_) => true,
-            DeliveryState::Answer(_) => false,
-        },
-        None => false,
-    };
-    if pending {
-        domain.reconciling = Some(Reconcile::new(domain.record.as_ref().expect("pending intent").clone()));
-        reconcile_next(domain, env, out);
-        return;
+    domain.records = Map::with_capacity(env.limits.agent.run.answered_calls);
+    for record in deliveries {
+        match domain.records.insert(record.name, record) {
+            Ok(None) => {}
+            Ok(Some(_)) | Err(_) => {
+                store_failed(domain, env, out);
+                return;
+            }
+        }
+    }
+    resume_loading(domain, env, out);
+}
+
+fn resume_loading(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
+    for (_, record) in &domain.records {
+        match &record.state {
+            DeliveryState::Intent(_) => {
+                domain.reconciling = Some(Reconcile::new(record.clone()));
+                reconcile_next(domain, env, out);
+                return;
+            }
+            DeliveryState::Answer(_) => {}
+        }
     }
     domain.chat.phase = Phase::Idle;
     domain.chat.load_requested = false;
@@ -382,13 +387,29 @@ fn maybe_start(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
     }
     let grants = mem::replace(&mut domain.grants.values, List::with_capacity(env.limits.agent.accounts)).into_boxed();
     let history = if domain.config.resume { domain.transcript.take() } else { None };
+    let mut answered = List::with_capacity(env.limits.agent.run.answered_calls);
+    if domain.config.resume {
+        for (name, record) in &domain.records {
+            match &record.state {
+                DeliveryState::Answer(delivery) => answered
+                    .push(agent::AnsweredCall {
+                        name: *name,
+                        tool: Box::from(&b"deliver"[..]),
+                        answer: agent::Answered::Delivery(Box::new(delivery.clone())),
+                    })
+                    .expect("one turn's calls fit the bound"),
+                DeliveryState::Intent(_) => unreachable!("intents reconciled before starting"),
+            }
+        }
+    } else {
+        domain.records = Map::with_capacity(env.limits.agent.run.answered_calls);
+    }
     domain.wall_deadline = Some(env.now.saturating_add(domain.config.budget.time));
-    domain.last_turn = 0;
     agent::step(
         &mut domain.agent,
         &agent_env(env),
         agent::Event::Start {
-            answered: Box::default(),
+            answered: answered.into_boxed(),
             reply_to: ReplyTo::new(Token::new(domain.chat.state.activation)),
             host_run: Token::new(1),
             activation: domain.chat.state.activation,
@@ -406,32 +427,29 @@ fn maybe_start(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
 fn send_line(domain: &mut Domain, env: &Env<Limits>) {
     let Some(run) = domain.run else { return };
     let Some(line) = domain.line.take() else { return };
-    let text = crate::delivery::waking_text(domain.record.as_ref(), line.text, env.limits.agent.run.message_bytes);
     agent::step(
         &mut domain.agent,
         &agent_env(env),
-        agent::Event::Message { run, name: line.name, text },
+        agent::Event::Message { run, name: line.name, text: line.text },
         &mut domain.agent_out,
     );
     observe(domain, Fact::Message { name: line.name });
 }
 
-fn turn_saved(domain: &mut Domain, number: u32, out: &mut Queue<Request>) {
+fn turn_saved(domain: &mut Domain, env: &Env<Limits>, number: u32, out: &mut Queue<Request>) {
     if domain.stop_failed {
         return;
     }
-    let pending = domain.turns.unsaved.pop().expect("TurnSaved answers a pending SaveTurn");
+    let (pending, sequence) = domain.turns.unsaved.pop().expect("TurnSaved answers a pending SaveTurn");
     assert_eq!(number, pending, "turns become durable in order");
-    if let Some(record) = &mut domain.record
-        && crate::delivery::told(
-            record,
-            domain.chat.state.activation,
-            number,
-            domain.chat.state.read,
-            domain.chat.state.next_message,
-        )
-    {
-        record.told = true;
+    let mut retired = List::with_capacity(env.limits.agent.run.answered_calls);
+    for (name, _) in &domain.records {
+        if name.activation != domain.chat.state.activation || name.completion <= sequence {
+            retired.push(*name).expect("bounded saved answers");
+        }
+    }
+    for name in &retired {
+        domain.records.remove(name);
     }
     if domain.turns.unsaved.is_empty() {
         finish_answer(domain, out);
@@ -523,8 +541,7 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
                 }
                 assert!(domain.turns.unsaved.room() > 0, "store backpressure bounds unsaved turns");
                 let shown = crate::person::turn_text(&turn, env.limits.show_bytes);
-                domain.turns.unsaved.push(number);
-                domain.last_turn = number;
+                domain.turns.unsaved.push((number, turn.sequence));
                 domain.chat.state.read = read;
                 observe(domain, Fact::Turn { number });
                 out.push(Request::SaveTurn { number, read, turn });
@@ -649,7 +666,7 @@ fn begin_delivery(
 ) {
     assert!(domain.delivery.is_none() && domain.saving.is_none(), "one delivery in flight");
     domain.landed = List::with_capacity(agent::run::MAX_DIRECTORIES);
-    if let Some(delivery) = crate::delivery::cached(domain.record.as_ref(), name) {
+    if let Some(delivery) = crate::delivery::cached(&domain.records, name) {
         agent::step(
             &mut domain.agent,
             &agent_env(env),
@@ -727,21 +744,7 @@ fn advance_delivery(domain: &mut Domain, env: &Env<Limits>, mut in_place: InPlac
                 out.push(request);
                 return;
             }
-            let mut entries = List::with_capacity(agent::run::MAX_DIRECTORIES);
-            for entry in &in_place.directories {
-                entries.push(entry.clone()).expect("admitted directory count");
-            }
-            let record = DeliveryRecord {
-                name: in_place.name,
-                state: DeliveryState::Intent(DeliveryIntent { directories: entries.into_boxed() }),
-                landed: Box::new([]),
-                after_turn: domain.last_turn,
-                told: false,
-            };
-            domain.saving = Some(record.clone());
-            domain.delivery_owner = Some(in_place.owner);
-            domain.delivery = Some(in_place);
-            out.push(Request::SaveDelivery { record: Box::new(record) });
+            save_intent(domain, in_place, out);
         }
         Stage::Execute => {
             for index in 0..in_place.directories.len() {
@@ -780,6 +783,22 @@ fn advance_delivery(domain: &mut Domain, env: &Env<Limits>, mut in_place: InPlac
             save_delivery(domain, name, owner, in_place.result(), out);
         }
     }
+}
+
+fn save_intent(domain: &mut Domain, in_place: InPlace, out: &mut Queue<Request>) {
+    let mut entries = List::with_capacity(agent::run::MAX_DIRECTORIES);
+    for entry in &in_place.directories {
+        entries.push(entry.clone()).expect("admitted directory count");
+    }
+    let record = DeliveryRecord {
+        name: in_place.name,
+        state: DeliveryState::Intent(DeliveryIntent { directories: entries.into_boxed() }),
+        landed: Box::new([]),
+    };
+    domain.saving = Some(record.clone());
+    domain.delivery_owner = Some(in_place.owner);
+    domain.delivery = Some(in_place);
+    out.push(Request::SaveDelivery { record: Box::new(record) });
 }
 
 fn plain_status(domain: &mut Domain, env: &Env<Limits>, owner: Token, changed: bool, out: &mut Queue<Request>) {
@@ -1044,13 +1063,7 @@ fn save_delivery(
     for receipt in &domain.landed {
         landed.push(receipt.clone()).expect("admitted directories");
     }
-    let record = DeliveryRecord {
-        name,
-        state: DeliveryState::Answer(delivery),
-        landed: landed.into_boxed(),
-        after_turn: domain.last_turn,
-        told: false,
-    };
+    let record = DeliveryRecord { name, state: DeliveryState::Answer(delivery), landed: landed.into_boxed() };
     assert!(domain.saving.is_none(), "one delivery store operation in flight");
     domain.saving = Some(record.clone());
     domain.delivery_owner = Some(owner);
@@ -1061,7 +1074,7 @@ fn save_delivery(
 fn delivery_saved(domain: &mut Domain, env: &Env<Limits>, name: agent::run::CallName, out: &mut Queue<Request>) {
     let record = domain.saving.take().expect("DeliverySaved answers one SaveDelivery");
     assert_eq!(record.name, name, "delivery store terminal names the decision");
-    domain.record = Some(record.clone());
+    domain.records.insert(record.name, record.clone()).expect("one turn's calls fit the bound");
     match record.state {
         DeliveryState::Intent(_) => {
             let mut in_place = domain.delivery.take().expect("saved intent retains delivery");
@@ -1079,14 +1092,7 @@ fn delivery_saved(domain: &mut Domain, env: &Env<Limits>, name: agent::run::Call
                     &mut domain.agent_out,
                 );
             } else {
-                domain.chat.phase = Phase::Idle;
-                domain.chat.load_requested = false;
-                if domain.chat.closed {
-                    domain.chat.phase = Phase::Done;
-                    out.push(Request::Exit { status: ExitStatus::Success });
-                } else {
-                    dispatch_line(domain, env, out);
-                }
+                resume_loading(domain, env, out);
             }
         }
     }
@@ -1197,8 +1203,6 @@ fn reconcile_answer(domain: &mut Domain, reconcile: Reconcile, interrupted: Opti
         name: reconcile.record.name,
         state: DeliveryState::Answer(answer),
         landed: landed.into_boxed(),
-        after_turn: reconcile.record.after_turn,
-        told: false,
     };
     domain.saving = Some(record.clone());
     out.push(Request::SaveDelivery { record: Box::new(record) });

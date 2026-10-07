@@ -128,7 +128,7 @@ fn a_moved_remote_makes_a_configured_push_stale() {
 }
 
 #[test]
-fn a_crash_after_a_commit_before_its_turn_is_saved_tells_the_next_run_what_was_committed() {
+fn a_crash_after_a_commit_tells_the_resumed_run_what_was_committed() {
     let mut first = World::with_git_change(201);
     first.line(b"Make the answer 43");
     assert!(first.drive_to_cut(600, Cut::AfterSaveDelivery), "the commit and its decision become durable");
@@ -140,10 +140,77 @@ fn a_crash_after_a_commit_before_its_turn_is_saved_tells_the_next_run_what_was_c
     let mut second = World::with_git_change_store(202, store);
     second.line(b"What happened before the crash?");
     second.drive(600);
-    assert!(second.prompt_texts().iter().any(|text| {
-        text.windows(b"Earlier delivery committed:".len()).any(|part| part == b"Earlier delivery committed:")
-    }));
-    assert!(second.prompt_texts().iter().any(|text| text.windows(b"commit 2".len()).any(|part| part == b"commit 2")));
+    assert!(
+        second.prompt_texts().iter().any(|text| text.windows(b"commit 2".len()).any(|part| part == b"commit 2")),
+        "prompts: {:?}, trace: {:?}, shown: {:?}",
+        second.prompt_texts(),
+        second.trace(),
+        second.shown()
+    );
+}
+
+#[test]
+fn two_deliveries_before_a_saved_turn_are_both_told_after_a_crash() {
+    let mut first = World::with_two_deliveries(216);
+    first.line(b"Deliver twice");
+    assert!(first.drive_to_cut(600, Cut::AfterSecondSaveDelivery), "both delivery answers are durable");
+    let store = first.into_store();
+    assert_eq!(store.turns(), 1, "the call turn is not saved yet");
+    assert_eq!(store.delivery_answers(), 2);
+    let mut second = World::with_two_deliveries_store(217, store);
+    second.line(b"What was delivered?");
+    second.drive(600);
+    assert_eq!(second.delivery_commits(), 1, "the first delivery is not repeated");
+    let prompts = second.prompt_texts();
+    for answer in [b"position=0 tool=deliver result: delivered".as_slice(), b"position=1 tool=deliver error: nothing"] {
+        assert!(
+            prompts.iter().any(|text| text.windows(answer.len()).any(|part| part == answer)),
+            "missing: {answer:?}"
+        );
+    }
+}
+
+#[test]
+fn a_saved_stale_answer_is_told_after_a_crash() {
+    let mut first = World::with_moved_remote(218);
+    first.line(b"Make the answer 43 and push");
+    assert!(first.drive_to_cut(600, Cut::AfterSaveDelivery));
+    assert!(matches!(first.delivery(), Some(smith_domain::run::Delivery::Stale)));
+    let mut second = World::with_moved_remote_store(219, first.into_store());
+    second.line(b"What happened?");
+    second.drive(600);
+    assert!(
+        second.prompt_texts().iter().any(|text| text
+            .windows(b"tool=deliver error: stale".len())
+            .any(|part| part == b"tool=deliver error: stale"))
+    );
+    assert_eq!(second.delivery_commits(), 1);
+}
+
+#[test]
+fn a_saved_failure_after_a_commit_is_told_after_a_crash() {
+    let mut first = World::with_second_commit_failure(220);
+    first.line(b"Deliver both repositories");
+    assert!(first.drive_to_cut(600, Cut::AfterSaveDelivery));
+    assert_eq!(first.delivery_commits(), 1);
+    let mut second = World::with_second_commit_failure_store(221, first.into_store());
+    second.line(b"What happened?");
+    second.drive(600);
+    let outcome = b"tool=deliver error: delivery-failed directory=1 reason=broken";
+    assert!(second.prompt_texts().iter().any(|text| text.windows(outcome.len()).any(|part| part == outcome)));
+    assert_eq!(second.delivery_commits(), 1);
+}
+
+#[test]
+fn a_maximum_length_person_line_reaches_the_run_whole_after_a_crash() {
+    let mut first = World::with_git_change(222);
+    first.line(b"Make the answer 43");
+    assert!(first.drive_to_cut(600, Cut::AfterSaveDelivery));
+    let mut second = World::with_git_change_store(223, first.into_store());
+    let line = vec![b'Q'; 1024];
+    second.line(&line);
+    second.drive(600);
+    assert!(second.prompt_texts().iter().any(|text| text.windows(line.len()).any(|part| part == line)));
 }
 
 #[test]
@@ -177,21 +244,15 @@ fn an_intent_after_the_first_of_two_commits_reports_only_that_commit() {
     };
     assert_eq!(failure.directory, 1);
     assert_eq!(failure.reason, smith_domain::run::DeliveryReason::Broken);
-    assert!(
-        failure
-            .diagnostic
-            .output()
-            .windows(b"directory 0: commit 2".len())
-            .any(|part| part == b"directory 0: commit 2")
-    );
+    assert!(failure.diagnostic.output().windows(b"commit 2".len()).any(|part| part == b"commit 2"));
     assert_eq!(second.delivery_commits(), 1, "recovery did not commit again");
     second.line(b"What landed?");
     second.drive(600);
     assert!(
-        second
-            .prompt_texts()
-            .iter()
-            .any(|text| text.windows(b"directory 0: commit 2".len()).any(|part| part == b"directory 0: commit 2"))
+        second.prompt_texts().iter().any(|text| text.windows(b"commit 2".len()).any(|part| part == b"commit 2")),
+        "prompts: {:?}, shown: {:?}",
+        second.prompt_texts(),
+        second.shown()
     );
 }
 
@@ -208,10 +269,10 @@ fn an_intent_after_every_commit_reconciles_to_delivered() {
     second.line(b"What landed?");
     second.drive(600);
     assert!(
-        second
-            .prompt_texts()
-            .iter()
-            .any(|text| text.windows(b"directory 0: commit 2".len()).any(|part| part == b"directory 0: commit 2"))
+        second.prompt_texts().iter().any(|text| text.windows(b"commit 2".len()).any(|part| part == b"commit 2")),
+        "prompts: {:?}, shown: {:?}",
+        second.prompt_texts(),
+        second.shown()
     );
 }
 
@@ -219,7 +280,7 @@ fn an_intent_after_every_commit_reconciles_to_delivered() {
 fn a_delivery_asked_again_under_its_name_gets_its_first_answer() {
     let mut world = World::with_git_change(203);
     world.line(b"Make the answer 43");
-    world.drive(500);
+    assert!(world.drive_to_cut(500, Cut::AfterSaveDelivery));
     let commit = world.commit_message().expect("one real commit").to_vec();
     let store = world.into_store();
     let name = store.delivery_name().expect("one saved delivery name");

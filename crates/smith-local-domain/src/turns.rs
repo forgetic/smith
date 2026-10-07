@@ -5,10 +5,10 @@
 use skein_lib::Queue;
 use smith_domain::run;
 
-/// Bounded unsaved turn numbers and a held child answer.
+/// Bounded unsaved activation numbers and conversation positions, and a held child answer.
 #[derive(Debug)]
 pub(crate) struct Turns {
-    pub(crate) unsaved: Queue<u32>,
+    pub(crate) unsaved: Queue<(u32, u32)>,
     pub(crate) answer: Option<run::Answer>,
 }
 

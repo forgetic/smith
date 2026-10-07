@@ -10,7 +10,7 @@ use core::mem::size_of;
 /// Transcript-derived host operation name, supplied by the composing root.
 /// The host scopes it by the same logical run and a distinct activation; it is not a live
 /// callback token. Zero completion is refused before checks or host effects.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CallName {
     /// Host-supplied activation number, unique for each start of a logical run.
     /// The host never reuses it when a run restarts.
