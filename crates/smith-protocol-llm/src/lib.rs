@@ -1,27 +1,27 @@
-//! Smith's application vocabulary over the actual shared LLM Client.
+//! Smith's LLM component over skein's connection pool.
 //!
-//! Preparation checks the receiving contract before constructing one Client.
-//! Its context retains the exact served and application declarations until an
-//! actual terminal. Pure translations preserve block order, full replay,
-//! provider IDs, usage and bounded failure evidence. The caller drives the
-//! Client's stream and retains it through actual reuse or lower settlement.
-//! There is no provider grammar, credential exchange, application scheduling
-//! or retry policy here. Non-host schemas and decoded values come from the
-//! caller's explicit application codec, without callbacks or application traits.
-//!
-//! [`prepare`] constructs the Client and Context; [`prompt()`] translates only
-//! the prompt. [`completion()`], [`failed`] and [`cancelled`] consume the Context
-//! once for an actual terminal, while [`refusal`] reports preparation refusal
-//! before wire work. The caller separately keeps and drives the Client through
-//! Reusable or Close/Closed settlement.
-//! Contract: programming-model.md, sections 4.4 and 6.3.
+//! It keeps endpoint names and options, two credential generations per account,
+//! and each accepted call's receiving contract. It never knows credential
+//! acquisition, run policy, retry decisions, or provider wire grammar.
+//! [`Component::from_domain`] translates a completion under its admitted run
+//! contract, [`Component::from_below`] routes io, and [`Component::fire`]
+//! advances child deadlines and buffered work. The service calls
+//! [`Component::reclaim`] after settlement. A Complete returns exactly one
+//! Completed, Failed or Cancelled; streaming text crosses as a byte count.
+//! The typed tools, their schemas, decoding and rendering live here. The pure
+//! preparation and terminal translation functions remain available to callers
+//! that drive a skein Client directly.
+//! Contract: protocol/llm.md, sections 1 to 10;
+//! programming-model.md, sections 4.4 and 6.3.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 
 extern crate alloc;
 
+mod boundary;
 mod completion;
+mod component;
 mod contract;
 mod decode;
 mod endpoints;
@@ -33,10 +33,12 @@ mod render;
 mod tools;
 mod types;
 
+pub use boundary::{Below, BelowEvent, FromDomain, ToDomain};
 pub use completion::completion;
+pub use component::{Component, ComponentError, ComponentLimits, MAX_OUT, MaxOut, component_worst_case};
 pub use contract::{decode_deliver, decode_finish, deliver_schema, finish_schema};
 pub use decode::decode;
-pub use endpoints::{ConfiguredEndpoint, EndpointError, EndpointOptions, Endpoints};
+pub use endpoints::{ConfiguredEndpoint, EndpointError, EndpointOptions, Endpoints, IdentityProfile};
 pub use failure::{cancelled, failed, refusal};
 pub use grants::{GrantError, Grants};
 pub use limits::{Limits, Receiving, completion_worst_case, worst_case};

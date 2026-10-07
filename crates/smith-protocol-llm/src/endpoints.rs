@@ -10,6 +10,15 @@ use skein_llm::{Prompt, Provider};
 use skein_llm_connection as connection;
 use smith_domain::llm;
 
+/// Optional provider identity prepended to the endpoint's instructions.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum IdentityProfile {
+    /// Send only the domain's system instructions.
+    Plain,
+    /// Opt in to skein's archived Claude Code identity blocks.
+    ClaudeCode,
+}
+
 /// One startup-resolved endpoint, named as the domain names it.
 /// The address, TLS trust/name, dialect, path and headers live in destination.
 #[derive(Debug)]
@@ -24,6 +33,8 @@ pub struct ConfiguredEndpoint {
     pub reasoning_effort: Option<Box<[u8]>>,
     /// Dialect-supported cache affinity supplied by startup configuration.
     pub cache_key: Option<Box<[u8]>>,
+    /// Optional provider system identity selected at startup.
+    pub identity: IdentityProfile,
 }
 
 /// Per-name options kept after the connection component takes destinations.
@@ -39,6 +50,8 @@ pub struct EndpointOptions {
     pub reasoning_effort: Option<Box<[u8]>>,
     /// Configured cache affinity, when supported.
     pub cache_key: Option<Box<[u8]>>,
+    /// Optional provider system identity selected at startup.
+    pub identity: IdentityProfile,
 }
 
 /// Why startup endpoint registration cannot be admitted.
@@ -52,6 +65,8 @@ pub enum EndpointError {
     Account,
     /// A prompt named no configured destination.
     Unknown,
+    /// The selected identity is incompatible with the dialect or bound.
+    Identity,
 }
 
 /// Checked numeric names and resolved skein destinations.
@@ -82,6 +97,9 @@ impl Endpoints {
                 return Err(EndpointError::Duplicate);
             }
             let provider = configured.destination.llm.provider;
+            if configured.identity == IdentityProfile::ClaudeCode && provider != Provider::Anthropic {
+                return Err(EndpointError::Identity);
+            }
             destinations.push(configured.destination).or(Err(EndpointError::TooMany))?;
             let option = EndpointOptions {
                 index,
@@ -89,6 +107,7 @@ impl Endpoints {
                 provider,
                 reasoning_effort: configured.reasoning_effort,
                 cache_key: configured.cache_key,
+                identity: configured.identity,
             };
             options.insert(configured.name.0, option).or(Err(EndpointError::TooMany))?;
         }
@@ -107,6 +126,13 @@ impl Endpoints {
         let options = self.resolve(name).ok_or(EndpointError::Unknown)?;
         prompt.reasoning_effort.clone_from(&options.reasoning_effort);
         prompt.cache_key.clone_from(&options.cache_key);
+        match options.identity {
+            IdentityProfile::Plain => {}
+            IdentityProfile::ClaudeCode => {
+                prompt.instructions = skein_llm::anthropic::identity::instructions(&prompt.instructions)
+                    .or(Err(EndpointError::Identity))?;
+            }
+        }
         Ok(options.index)
     }
 

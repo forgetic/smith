@@ -295,3 +295,10 @@ restart numbering, and an answer lost before a named call's retry,
 passed in 0.160 seconds. Its one fuzzy test, sweeping seeded cuts on both
 stream shapes, passed in 0.205 seconds. The one-second focused and five-second
 fuzzy world shares, and workspace budgets, remain unchanged.
+
+The completed protocol LLM component was measured serially on 2026-10-07
+with `measure -j 1`: 57 focused protocol LLM world tests passed in 2.271
+seconds. The twelve new component, identity and fake-peer stories contributed
+0.060 seconds of reported individual test durations, including both dialects,
+typed calls, grants, phase deadlines and a full pool memory measurement. This
+world has no fuzzy binary. The workspace budgets are unchanged.

@@ -26,6 +26,7 @@ skein-fake-checkout = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-llm = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-llm-connection = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-tls = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-tls-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-fake-llm-domain = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-fake-llm-protocol = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-llm-world = { git = "https://git.ekanayaka.io/ai/skein.git" }

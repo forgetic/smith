@@ -47,6 +47,24 @@ pub fn prepare_for_contract(
     prepare(input, limits)
 }
 
+/// Prepare the translated prompt and retained context for the connection
+/// component, which prepares the sole shared Client when it admits Start.
+pub(crate) fn prepare_component(
+    owner: skein_lib::Token,
+    prompt: llm::Prompt,
+    outcome: &run::outcome::OutcomeSpec,
+    deliver: Option<&run::outcome::ChangeSpec>,
+    receiving: crate::Receiving,
+    limits: &Limits,
+) -> Result<(shared::Prompt, Context), Error> {
+    worst_case(limits, &receiving).ok_or(Error::Limit)?;
+    let application =
+        crate::tools::schemas_for_contract(&prompt, outcome, deliver, limits.client.dialect.document_bytes)?;
+    let grants = prompt.tools;
+    let (translated, served) = translate(prompt, &application, &[], limits)?;
+    Ok((translated, Context { owner, grants, served, application, receiving, limits: *limits }))
+}
+
 /// Pure application prompt translation, including whole supplied tool schemas.
 /// The caller applies the shared `output_ceiling` for its configured endpoint
 /// before directly preparing a Client; prepare performs that step itself.

@@ -272,6 +272,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "skein-tls-world"
+version = "0.0.0"
+source = "git+https://git.ekanayaka.io/ai/skein.git#17b221b8423352d5c1d30128837ccbf5cd8025c2"
+dependencies = [
+ "rustls",
+ "skein-io",
+ "skein-lib",
+ "skein-sim",
+ "skein-tls",
+]
+
+[[package]]
 name = "skein-world"
 version = "0.0.0"
 source = "git+https://git.ekanayaka.io/ai/skein.git#17b221b8423352d5c1d30128837ccbf5cd8025c2"
@@ -462,6 +474,7 @@ dependencies = [
 name = "smith-protocol-llm"
 version = "0.0.0"
 dependencies = [
+ "skein-io",
  "skein-json",
  "skein-lib",
  "skein-llm",
@@ -475,12 +488,15 @@ version = "0.0.0"
 dependencies = [
  "skein-fake-checkout",
  "skein-fake-llm-domain",
+ "skein-fake-llm-protocol",
+ "skein-io",
  "skein-json",
  "skein-lib",
  "skein-llm",
  "skein-llm-connection",
  "skein-llm-world",
  "skein-tls",
+ "skein-tls-world",
  "skein-world",
  "smith-domain",
  "smith-domain-tools",

@@ -27,6 +27,7 @@ fn destination(name: u32, account: u32, provider: shared::Provider) -> Configure
         account,
         reasoning_effort: Some(b"medium".as_slice().into()),
         cache_key: Some(b"run-cache".as_slice().into()),
+        identity: smith_protocol_llm::IdentityProfile::Plain,
     }
 }
 
@@ -108,4 +109,26 @@ fn a_refresh_preserves_the_first_call_then_evicts_the_oldest_generation() {
     assert!(matches!(grants.grant(second, credential(b"stale", b""), Time::from_nanos(400)), Err(GrantError::Stale)));
     assert!(Grants::worst_case(1, 64).expect("bounded footprint") >= 128);
     assert!(!format!("{grants:?}").contains("third"), "debug hides bearer values");
+}
+
+#[test]
+fn configured_claude_identity_precedes_domain_instructions_only_for_anthropic() {
+    let mut anthropic = destination(8, 0, shared::Provider::Anthropic);
+    anthropic.identity = smith_protocol_llm::IdentityProfile::ClaudeCode;
+    let endpoints = Endpoints::new(Box::new([anthropic]), 1, 1).expect("provider supports identity");
+    let mut prompt = shared::Prompt {
+        model: b"model".as_slice().into(),
+        instructions: b"domain system".as_slice().into(),
+        tools: Box::new([]),
+        messages: Box::new([]),
+        reasoning_effort: None,
+        cache_key: None,
+        max_output_tokens: Some(32),
+    };
+    assert_eq!(endpoints.apply(llm::Endpoint(8), &mut prompt), Ok(0));
+    assert!(prompt.instructions.starts_with(shared::anthropic::identity::CLAUDE_CODE_SYSTEM_IDENTITY));
+    assert!(prompt.instructions.ends_with(b"domain system"));
+    let mut codex = destination(9, 0, shared::Provider::OpenAiCodex);
+    codex.identity = smith_protocol_llm::IdentityProfile::ClaudeCode;
+    assert!(matches!(Endpoints::new(Box::new([codex]), 1, 1), Err(EndpointError::Identity)));
 }
