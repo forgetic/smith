@@ -103,9 +103,13 @@ of domain/host.md, section 2.
   they were told (transcript.md);
 - **the calls the transcript does not hold as answered,** that the host
   answered: a call whose turn was never told, or one the run withdrew and
-  the host decided later. Each is a name, the tool, and its answer. The run
-  tells the LLM of them as text in its waking prompt, since they have no
-  open place in the history to go back to (domain/run.md, section 6);
+  the host decided later. Each is a name, the tool, and the answer the
+  host decided: a host tool's text, as a result or an error; a delivery's
+  answer; or too large, when that answer is larger than the run takes.
+  Busy, unavailable and withdrawn are not decisions, and never appear
+  here. The run tells the LLM of them as text in its waking prompt, since
+  they have no open place in the history to go back to (domain/run.md,
+  section 6);
 - **the grants** the charter's endpoints need;
 - **the window:** how many turns, and how many bytes of them, may be
   unacknowledged (section 7). It must hold at least one turn of the largest
