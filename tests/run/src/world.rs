@@ -1055,7 +1055,9 @@ impl World {
         match event {
             run::Event::HostReturned { relay, .. } => self.relay_owner.get(&relay.owner).copied(),
             run::Event::Start { .. } => None,
-            run::Event::Cancel { run } | run::Event::Message { run, .. } => Some(*run),
+            run::Event::Cancel { run } | run::Event::Acknowledge { run, .. } | run::Event::Message { run, .. } => {
+                Some(*run)
+            }
             run::Event::Read { owner, .. } | run::Event::Probed { owner, .. } => Some(*owner),
             run::Event::Started { conversation, .. }
             | run::Event::Turn { conversation, .. }
@@ -1100,6 +1102,7 @@ impl World {
             | run::Event::HostReturned { .. }
             | run::Event::Start { .. }
             | run::Event::Message { .. }
+            | run::Event::Acknowledge { .. }
             | run::Event::Turn { .. }
             | run::Event::Yielded { .. }
             | run::Event::Ended { .. }
@@ -1332,6 +1335,7 @@ impl World {
                 }
                 run::Event::HostReturned { .. }
                 | run::Event::Turn { .. }
+                | run::Event::Acknowledge { .. }
                 | run::Event::Started { .. }
                 | run::Event::Yielded { .. }
                 | run::Event::Priced { .. }
@@ -1350,6 +1354,7 @@ impl World {
     /// Hands every delivery that is due to its destination.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
+    #[expect(clippy::too_many_lines, reason = "the scripted world's finite delivery routing stays in one match")]
     fn deliver(&mut self) {
         while let Some(delivery) = self.wire.next(self.now) {
             match delivery {
@@ -1434,6 +1439,7 @@ impl World {
                         }
                         run::Event::HostReturned { .. }
                         | run::Event::Message { .. }
+                        | run::Event::Acknowledge { .. }
                         | run::Event::Turn { .. }
                         | run::Event::Start { .. }
                         | run::Event::Cancel { .. }
@@ -1477,6 +1483,7 @@ impl World {
             reply_to,
             host_run,
             activation: 1,
+            window: run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
             charter,
             workspace,
             transcript: None,
@@ -1611,6 +1618,7 @@ impl World {
             run::Event::HostReturned { .. }
             | run::Event::Start { .. }
             | run::Event::Message { .. }
+            | run::Event::Acknowledge { .. }
             | run::Event::Cancel { .. }
             | run::Event::Read { .. }
             | run::Event::Probed { .. }

@@ -306,6 +306,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
             reply_to: ReplyTo::new(host_run),
             host_run,
             activation: 1,
+            window: smith_domain_run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
             charter: selected_charter(limits.run_bytes, selected),
             transcript: None,
         };
@@ -378,6 +379,7 @@ fn refuse_oversized_charter(limits: Limits, env: &Env<Limits>, out: &mut Queue<R
         reply_to: ReplyTo::new(host_run),
         host_run,
         activation: 1,
+        window: smith_domain_run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
         charter: charter(limits.run_bytes + 1),
         transcript: None,
     };
@@ -524,6 +526,7 @@ fn full_receipt_delivery_settles_before_a_cancelled_answer() {
             reply_to: ReplyTo::new(host_run),
             host_run,
             activation: 1,
+            window: smith_domain_run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
             charter,
             transcript: None,
         },
@@ -725,6 +728,7 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
             reply_to: ReplyTo::new(Token::new(88)),
             host_run: Token::new(91),
             activation: 1,
+            window: smith_domain_run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
             charter,
             transcript: None,
         }),

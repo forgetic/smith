@@ -439,6 +439,7 @@ fn maybe_start(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
             reply_to: ReplyTo::new(Token::new(domain.chat.state.activation)),
             host_run: Token::new(1),
             activation: domain.chat.state.activation,
+            window: agent::Window { turns: 1, bytes: u64::MAX },
             charter: charter(&domain.config),
             workspace: domain.config.workspace.clone(),
             transcript: history,
@@ -520,6 +521,14 @@ fn turn_saved(domain: &mut Domain, env: &Env<Limits>, number: u32, out: &mut Que
     }
     let (pending, sequence) = domain.turns.unsaved.pop().expect("TurnSaved answers a pending SaveTurn");
     assert_eq!(number, pending, "turns become durable in order");
+    if let Some(run) = domain.run {
+        agent::step(
+            &mut domain.agent,
+            &agent_env(env),
+            agent::Event::Acknowledge { run, turn: number },
+            &mut domain.agent_out,
+        );
+    }
     let mut retired = List::with_capacity(env.limits.agent.run.answered_calls);
     for (name, _) in &domain.records {
         if name.activation != domain.chat.state.activation || name.completion <= sequence {

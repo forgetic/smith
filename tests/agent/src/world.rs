@@ -237,6 +237,7 @@ enum Family {
 )]
 enum Delivery {
     Message { name: Token, text: Box<[u8]> },
+    Acknowledge { turn: u32 },
     Terminal { family: Family, owner: Token, event: Event },
     Io { owner: Token, op: tools::Op, deadline: Time },
     Command { owner: Token, process: skein_fake_checkout::Process, head: u32, tail: u32, timed_out: bool },
@@ -399,6 +400,7 @@ pub struct World {
     turns: Vec<agent::Turn>,
     messages_seen: Vec<(Time, crate::messages_referee::Seen)>,
     turn_metadata: Vec<(u32, Option<Token>, run::Spend)>,
+    auto_ack: bool,
     waiting: Vec<(Time, Option<Token>)>,
     facts: Vec<Fact>,
     trace: Trace,
@@ -416,13 +418,24 @@ fn choose_start(
     selected_start: Option<Event>,
 ) -> (Event, Token) {
     match selected_start {
-        Some(Event::Start { reply_to, host_run, activation, charter, workspace, grants, transcript, answered }) => {
+        Some(Event::Start {
+            reply_to,
+            host_run,
+            activation,
+            window,
+            charter,
+            workspace,
+            grants,
+            transcript,
+            answered,
+        }) => {
             let token = reply_to.into_token();
             (
                 Event::Start {
                     reply_to: ReplyTo::new(token),
                     host_run,
                     activation,
+                    window,
                     charter,
                     workspace,
                     grants,
@@ -438,6 +451,7 @@ fn choose_start(
                 reply_to: ReplyTo::new(Token::new(1)),
                 host_run: Token::new(1),
                 activation: if settings.resume { 2 } else { 1 },
+                window: agent::Window { turns: u32::MAX, bytes: u64::MAX },
                 charter: selected_charter.unwrap_or_else(|| charter(settings)),
                 workspace,
                 grants: Box::new([Grant {
@@ -498,6 +512,26 @@ impl World {
             None,
             Some(start),
         )
+    }
+
+    /// Start a scripted run with the host's specified acknowledgement credit.
+    #[must_use]
+    pub fn with_window(settings: Settings, window: agent::Window) -> World {
+        let start = Event::Start {
+            reply_to: ReplyTo::new(Token::new(1)),
+            host_run: Token::new(1),
+            activation: 1,
+            window,
+            charter: charter(&settings),
+            workspace: None,
+            transcript: None,
+            answered: Box::default(),
+            grants: Box::new([Grant {
+                name: GrantName { account: 0, generation: 1 },
+                valid: Duration::from_secs(7200),
+            }]),
+        };
+        Self::with_start(settings, start)
     }
 
     fn with_backend(
@@ -618,6 +652,7 @@ impl World {
             turns: Vec::new(),
             messages_seen: Vec::new(),
             turn_metadata: Vec::new(),
+            auto_ack: false,
             waiting: Vec::new(),
             facts: Vec::new(),
             trace: Trace::default(),
@@ -865,6 +900,16 @@ impl World {
         self.schedule.send(at, Delivery::Message { name, text });
     }
 
+    /// Script durable host acknowledgement of this turn and its prefix.
+    pub fn acknowledge_at(&mut self, at: Time, turn: u32) {
+        self.schedule.send(at, Delivery::Acknowledge { turn });
+    }
+
+    /// Make a host with no transcript commit each turn as soon as it is told.
+    pub fn acknowledge_each_turn(&mut self) {
+        self.auto_ack = true;
+    }
+
     /// Runs at most `iterations` deterministic shell rounds. Success means the
     /// one start answered, every boundary settled, and every expectation passed.
     ///
@@ -1028,6 +1073,10 @@ impl World {
                     .push((self.now, crate::messages_referee::Seen::Turn { number, read, spent, turn: turn.clone() }));
                 self.turn_metadata.push((number, read, spent));
                 self.turns.push(turn);
+                if self.auto_ack {
+                    let run = self.admitted.expect("turn follows admission");
+                    self.stage.push(Event::Acknowledge { run, turn: number });
+                }
             }
             Request::Waiting { host_run, read } => {
                 assert_eq!(host_run, self.host_run);
@@ -1403,6 +1452,10 @@ impl World {
                 let run = self.admitted.expect("parent sends only after actual admission");
                 self.stage.push(Event::Message { run, name, text });
             }
+            Delivery::Acknowledge { turn } => {
+                let run = self.admitted.expect("parent acknowledges only an admitted run");
+                self.stage.push(Event::Acknowledge { run, turn });
+            }
             Delivery::Host { relay, reply } => {
                 self.host_terminals.push((relay, self.now, reply.clone()));
                 self.host_history.terminal(self.now, relay, &reply).expect("one actual host terminal");
@@ -1488,6 +1541,7 @@ impl World {
             Event::HostReturned { .. }
             | Event::Start { .. }
             | Event::Message { .. }
+            | Event::Acknowledge { .. }
             | Event::Grant { .. }
             | Event::Cancel { .. }
             | Event::Delivered { .. }
@@ -1542,6 +1596,7 @@ impl World {
             Event::Aborted { .. } => self.observe(Seen::Checked { owner, exit: run::Exit::Signalled }),
             Event::HostReturned { .. }
             | Event::Message { .. }
+            | Event::Acknowledge { .. }
             | Event::Start { .. }
             | Event::Grant { .. }
             | Event::Cancel { .. }
@@ -1561,6 +1616,7 @@ impl World {
             }
             Event::Start { .. }
             | Event::Message { .. }
+            | Event::Acknowledge { .. }
             | Event::Grant { .. }
             | Event::Cancel { .. }
             | Event::HostReturned { .. }
@@ -1962,6 +2018,7 @@ mod bridge_tests {
             reply_to: ReplyTo::new(Token::new(71)),
             host_run: Token::new(73),
             activation: 4,
+            window: agent::Window { turns: u32::MAX, bytes: u64::MAX },
             charter: charter(&settings),
             workspace: None,
             grants: Box::new([Grant {
@@ -2005,6 +2062,7 @@ mod bridge_tests {
             reply_to: ReplyTo::new(Token::new(71)),
             host_run: Token::new(73),
             activation: 4,
+            window: agent::Window { turns: u32::MAX, bytes: u64::MAX },
             charter,
             workspace: None,
             grants: Box::new([Grant {

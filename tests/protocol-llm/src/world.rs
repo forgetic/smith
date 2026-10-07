@@ -489,6 +489,7 @@ impl World {
             model_prices.insert(model.model.clone(), model.prices);
         }
         stage.push(Event::Start {
+            window: smith_domain::Window { turns: u32::MAX, bytes: u64::MAX },
             answered,
             reply_to: ReplyTo::new(Token::new(1)),
             host_run: Token::new(1),
@@ -1496,6 +1497,7 @@ impl World {
             Event::Cancelled { .. } => CompletionTerminal::Cancelled,
             Event::HostReturned { .. }
             | Event::Start { .. }
+            | Event::Acknowledge { .. }
             | Event::Message { .. }
             | Event::Grant { .. }
             | Event::Cancel { .. }
@@ -1551,6 +1553,7 @@ impl World {
             Event::Aborted { .. } => self.observe(Seen::Checked { owner, exit: run::Exit::Signalled }),
             Event::HostReturned { .. }
             | Event::Message { .. }
+            | Event::Acknowledge { .. }
             | Event::Start { .. }
             | Event::Grant { .. }
             | Event::Cancel { .. }
@@ -1570,6 +1573,7 @@ impl World {
             }
             Event::Start { .. }
             | Event::Message { .. }
+            | Event::Acknowledge { .. }
             | Event::Grant { .. }
             | Event::Cancel { .. }
             | Event::HostReturned { .. }

@@ -36,7 +36,7 @@ pub(crate) const fn session_env(env: &Env<Limits>) -> Env<session::Limits> {
 /// Hands one of the protocol's events to the child domain it is for.
 pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
     let event = match event {
-        Event::Start { reply_to, host_run, activation, charter, workspace, grants, transcript, answered } => {
+        Event::Start { reply_to, host_run, activation, window, charter, workspace, grants, transcript, answered } => {
             if !endpoints_known(domain, &charter) {
                 domain.notices.push(Request::Answer {
                     to: reply_to,
@@ -54,8 +54,11 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
             for grant in grants {
                 granted(domain, env, grant);
             }
-            return start(domain, env, reply_to, host_run, activation, charter, workspace, transcript, answered);
+            return start(
+                domain, env, reply_to, host_run, activation, window, charter, workspace, transcript, answered,
+            );
         }
+        Event::Acknowledge { run, turn } => return acknowledge(domain, env, run, turn),
         Event::Grant { grant } => return granted(domain, env, grant),
         Event::Message { run, name, text } => run::Event::Message { run, name, text },
         Event::Cancel { run } => run::Event::Cancel { run },
@@ -131,6 +134,18 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
     run_step(domain, env, event);
 }
 
+/// Resume the one unsent main completion when its host has kept enough turns.
+fn acknowledge(domain: &mut Domain, env: &Env<Limits>, run: Token, turn: u32) {
+    run_step(domain, env, run::Event::Acknowledge { run, turn });
+    if let Some(pending) = domain.pending.remove(&run) {
+        let mut emitted = Queue::with_capacity(1);
+        complete(domain, env, pending, &mut emitted);
+        if let Some(request) = emitted.pop() {
+            domain.notices.push(request);
+        }
+    }
+}
+
 fn priced_overflow(failure: Option<run::Failure>) -> Option<session::End> {
     match failure {
         Some(run::Failure::Budget(run::Exhausted::Overflow(run::Overflow::Spend))) => Some(session::End::PriceOverflow),
@@ -183,11 +198,20 @@ fn start(
     reply_to: ReplyTo,
     host_run: Token,
     activation: u64,
+    window: crate::Window,
     charter: run::Charter,
     workspace: Option<run::Workspace>,
     transcript: Option<session::record::Transcript>,
     answered: Box<[AnsweredCall]>,
 ) {
+    let largest_turn = limits::max_turn_bytes(&env.limits).expect("representable turn cap");
+    if window.turns == 0 || window.bytes < largest_turn {
+        domain.notices.push(Request::Answer {
+            to: reply_to,
+            answer: run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Window)),
+        });
+        return;
+    }
     if domain.starts.is_full() {
         domain.notices.push(Request::Answer { to: reply_to, answer: run::Answer::Refused(run::Refusal::Busy) });
         return;
@@ -223,6 +247,7 @@ fn start(
             reply_to: ReplyTo::new(id.token()),
             host_run,
             activation,
+            window: run::Window { turns: window.turns, bytes: window.bytes, largest_turn },
             charter,
             workspace,
             transcript: Some(id.token()),
@@ -334,7 +359,20 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
             };
             return complete(domain, env, pending, out);
         }
-        session::Request::Cancel { owner } => return out.push(Request::Cancel { owner }),
+        session::Request::Cancel { owner } => {
+            let id = *domain.sessions.get(&owner).expect("a call owner retains its session");
+            let conversation = domain.peers.get(id).expect("session retains peer").conversation;
+            let run = run::owner(&domain.run, conversation).expect("run outlives its session");
+            let held = match domain.pending.get(&run) {
+                Some(pending) => pending.owner == owner,
+                None => false,
+            };
+            if held {
+                domain.pending.remove(&run);
+                return session_step(domain, env, session::Event::Cancelled { owner });
+            }
+            return out.push(Request::Cancel { owner });
+        }
         session::Request::Io { owner, op, deadline } => return out.push(Request::Io { owner, op, deadline }),
         session::Request::CancelIo { owner } => return out.push(Request::CancelIo { owner }),
         session::Request::Opened { opener, session } => {
@@ -355,6 +393,8 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
             run::Event::Used { conversation: opener, spend: translate::spend(1, usage) }
         }
         session::Request::Ended { opener, end, turns, usage } => {
+            let run = run::owner(&domain.run, opener).expect("run outlives its conversation");
+            domain.pending.remove(&run);
             let id = peer(domain, opener);
             free(domain, id);
             run::Event::Ended { conversation: opener, end: translate::end(end), spend: translate::spend(turns, usage) }
@@ -468,7 +508,8 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
 /// Unsent session request moved into one concrete root admission cell. Its
 /// source prompt already owns the receiving reservation; no extra copy is made
 /// until the pure run gate accepts.
-struct PendingCompletion {
+#[derive(Debug)]
+pub(crate) struct PendingCompletion {
     owner: Token,
     prompt: session::llm::Prompt,
     timeout: Duration,
@@ -478,14 +519,19 @@ struct PendingCompletion {
 }
 
 fn complete(domain: &mut Domain, env: &Env<Limits>, pending: PendingCompletion, out: &mut Queue<Request>) {
-    let PendingCompletion { owner, prompt, timeout, max_completion_bytes, max_completion_blocks, max_failure_bytes } =
-        pending;
+    let owner = pending.owner;
     let id = *domain.sessions.get(&owner).expect("a session asks for completions once it has opened");
     let conversation = domain.peers.get(id).expect("a peer lives as its session").conversation;
     // Admission precedes grant lookup, prompt cloning, lease retention
     // and every Client effect. This completion is still unsent.
     match run::completion_permit(&domain.run, conversation) {
         run::CompletionPermit::Allowed => {}
+        run::CompletionPermit::Held => {
+            let run = run::owner(&domain.run, conversation).expect("main remains live while held");
+            let old = domain.pending.insert(run, pending).expect("one held completion per run");
+            assert!(old.is_none(), "only one unsent main completion");
+            return;
+        }
         run::CompletionPermit::Denied(exhausted) => {
             let reason = match exhausted {
                 run::Exhausted::Turns => session::BudgetDenial::Turns,
@@ -501,6 +547,8 @@ fn complete(domain: &mut Domain, env: &Env<Limits>, pending: PendingCompletion, 
             return session_step(domain, env, session::Event::UnsentClosed { owner });
         }
     }
+    let PendingCompletion { owner, prompt, timeout, max_completion_bytes, max_completion_blocks, max_failure_bytes } =
+        pending;
     let peer = domain.peers.get_mut(id).expect("a peer lives as its session");
     // What the last completion asked and the session did not dispatch,
     // it never will.

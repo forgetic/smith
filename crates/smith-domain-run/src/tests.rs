@@ -125,6 +125,7 @@ impl Harness {
     fn start_workspace(&mut self, call: u64, charter: Charter, workspace: Option<Workspace>) -> Box<[Request]> {
         let reply_to = ReplyTo::new(Token::new(call));
         self.step(Event::Start {
+            window: crate::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
             reply_to,
             host_run: Token::new(call),
             activation: 1,
@@ -570,6 +571,7 @@ fn a_main_conversation_refused_at_its_entrance_refuses_the_run() {
 fn zero_activation_has_its_own_refusal_before_admission() {
     let mut harness = Harness::new(LIMITS);
     let emitted = harness.step(Event::Start {
+        window: crate::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
         reply_to: ReplyTo::new(Token::new(81)),
         host_run: Token::new(81),
         activation: 0,

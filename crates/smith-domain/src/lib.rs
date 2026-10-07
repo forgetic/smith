@@ -43,13 +43,13 @@ mod translate;
 mod translation_tests;
 mod waking;
 
-pub use boundary::{Answered, AnsweredCall, Event, Grant, GrantName, Request};
+pub use boundary::{Answered, AnsweredCall, Event, Grant, GrantName, Request, Window};
 pub use config::Config;
 pub use domain::{Domain, fire, max_out, resume, step};
 pub use facts::{Content, Fact};
 
 pub use feedback::{Feedback, FeedbackRefusal, feedback, feedback_worst_case};
-pub use limits::{Limits, worst_case};
+pub use limits::{Limits, max_turn_bytes, worst_case};
 // The payloads are the children's: a parent may use its children's types.
 pub use smith_domain_run as run;
 pub use smith_domain_session as session;

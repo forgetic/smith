@@ -57,6 +57,7 @@ pub struct Limits {
 /// transfer. V2 has no persistent answer-ticket map; valid results own
 /// pre-effect session credit until received and recorded through close.
 #[must_use]
+#[expect(clippy::too_many_lines, reason = "the worst-case sum keeps each owning container and payload visible")]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     let Limits { run: run_limits, session: session_limits, accounts: _, endpoints: _, skew: _, decoded_call_bytes: _ } =
         limits;
@@ -150,6 +151,9 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let starts = Slab::<StartContext>::worst_case(run_limits.runs)?.checked_add(
         u64::from(run_limits.runs).checked_mul(record.checked_add(u64::from(run_limits.answered_bytes))?)?,
     )?;
+    let pending = Map::<Token, crate::route::PendingCompletion>::worst_case(run_limits.runs)?
+        .checked_add(u64::from(run_limits.runs).checked_mul(prompt_payload(limits)?)?)?
+        .checked_add(Queue::<crate::Request>::worst_case(1)?)?;
     let turns = Slab::<TurnHandoff>::worst_case(session_out(limits))?
         .checked_add(u64::from(session_out(limits)).checked_mul(record)?)?;
     // Canonical rendering can temporarily retain the complete semantic result
@@ -172,6 +176,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(run_out)?
         .checked_add(queued_session)?
         .checked_add(starts)?
+        .checked_add(pending)?
         .checked_add(turns)?
         .checked_add(rendering)?
         .checked_add(facts)?
@@ -255,6 +260,13 @@ pub(crate) fn record_payload(limits: &Limits) -> Option<u64> {
         .session_bytes
         .checked_add(messages.checked_mul(u64::try_from(size_of::<session::record::Turn>()).ok()?)?)?
         .checked_add(messages.checked_mul(u64::try_from(size_of::<session::llm::Message>()).ok()?)?)
+}
+
+/// Largest owned concrete turn the domain may tell, including allocated record envelopes.
+/// A host's acknowledgement window must reserve this much for its next turn.
+#[must_use]
+pub fn max_turn_bytes(limits: &Limits) -> Option<u64> {
+    record_payload(limits)
 }
 
 /// Rewritten root prompt envelopes can be larger than session Block cells:

@@ -393,6 +393,7 @@ impl Driver {
                 reply_to: ReplyTo::new(host_run),
                 host_run,
                 activation: self.workers,
+                window: smith_domain::Window { turns: u32::MAX, bytes: u64::MAX },
                 charter: charter(brief),
                 transcript: None,
             });

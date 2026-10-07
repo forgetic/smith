@@ -74,7 +74,8 @@ use skein_lib::{Deadlines, Duration, Env, Id, Queue, ReplyTo, Slab, Time, Token}
 
 use crate::agent::{self, Child, Means};
 use crate::boundary::{
-    Answer, Ask, AskRefusal, End, Failure, Fault, Invalid, Opening, Policy, Ran, Read, Refusal, Request, Returned, Stop,
+    Answer, Ask, AskRefusal, End, Failure, Fault, Invalid, Opening, Policy, Ran, Read, Refusal, Request, Returned,
+    Stop, Window,
 };
 use crate::budget::{Exhausted, Spend};
 use crate::call::{self, Call, Calls, Withdrawal, Work};
@@ -101,6 +102,10 @@ pub(crate) struct Run {
     pub(crate) host_name: Token,
     /// Host-supplied number that distinguishes this activation's call names.
     pub(crate) activation: u64,
+    /// Per-activation acknowledgement credit, reserved at the largest turn size.
+    window: Window,
+    /// Highest durably acknowledged activation turn.
+    acknowledged: u32,
     /// What its conversations have spent.
     spent: Spend,
     /// Nudges given.
@@ -166,7 +171,7 @@ enum Ending {
 /// A conversation a run opened: main, or a sub-agent.
 #[derive(Debug)]
 pub(crate) struct Conversation {
-    run: Id<Run>,
+    pub(crate) run: Id<Run>,
     /// The sub-agent call it serves, if it is a sub-agent.
     asker: Option<Id<Call>>,
     /// Its families of tools.
@@ -222,6 +227,7 @@ pub(crate) struct Start {
     pub(crate) host_run: Token,
     /// Host-supplied positive activation number.
     pub(crate) activation: u64,
+    pub(crate) window: Window,
 
     /// Immutable requested contract and budget.
     pub(crate) charter: Charter,
@@ -234,12 +240,16 @@ pub(crate) struct Start {
 }
 
 pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &mut Queue<Request>) {
-    let Start { reply_to, host_run, activation, charter, workspace, transcript } = start;
+    let Start { reply_to, host_run, activation, window, charter, workspace, transcript } = start;
     let Domain { runs, conversations, calls: _, alarms, facts } = domain;
     // A charter that can never fit is invalid, room or not: busy invites a
     // retry.
     if activation == 0 {
         out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(Invalid::Activation)) });
+        return;
+    }
+    if window.turns == 0 || window.largest_turn == 0 || window.bytes < window.largest_turn {
+        out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(Invalid::Window)) });
         return;
     }
     if let Err(invalid) = charter::check(&charter, workspace.as_ref(), &env.limits) {
@@ -260,6 +270,8 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         found,
         host_name: host_run,
         activation,
+        window,
+        acknowledged: 0,
         spent: Spend::ZERO,
         nudges: 0,
         rejected: 0,
@@ -384,6 +396,16 @@ pub(crate) fn turn(domain: &mut Domain, conversation: Token, record: Token, sequ
         read: run.read,
         spent: run.spent,
     });
+}
+
+/// Release every outstanding turn through the host's durable prefix.
+pub(crate) fn acknowledge(domain: &mut Domain, run: Token, turn: u32) {
+    let Some(run) = domain.runs.get_mut(Id::from_token(run)) else {
+        return;
+    };
+    if turn > run.acknowledged && turn <= run.turns {
+        run.acknowledged = turn;
+    }
 }
 
 pub(crate) fn park(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request>) {
@@ -711,7 +733,24 @@ pub(crate) fn completion_permit(domain: &Domain, conversation: Token) -> Complet
     match &run.state {
         State::Working { .. } => match run.charter.budget.exhausted(run.spent) {
             Some(exhausted) => CompletionPermit::Denied(exhausted),
-            None => CompletionPermit::Allowed,
+            None => {
+                let pending = run.turns.checked_sub(run.acknowledged).expect("acknowledged prefix never exceeds turns");
+                let next_bytes = match u64::from(pending).checked_add(1) {
+                    Some(count) => count.checked_mul(run.window.largest_turn),
+                    None => None,
+                };
+                if conversation.asker.is_none()
+                    && (pending >= run.window.turns
+                        || match next_bytes {
+                            Some(bytes) => bytes > run.window.bytes,
+                            None => true,
+                        })
+                {
+                    CompletionPermit::Held
+                } else {
+                    CompletionPermit::Allowed
+                }
+            }
         },
         State::Over { exhausted, .. } => CompletionPermit::Denied(*exhausted),
         State::Waiting { .. }

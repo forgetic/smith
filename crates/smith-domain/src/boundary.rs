@@ -45,6 +45,15 @@ use smith_domain_tools as tools;
 use crate::llm::{Completion, Failure, Prompt};
 use alloc::boxed::Box;
 
+/// Host credit for unacknowledged turns in one activation (protocol/channel.md, sections 3 and 7).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Window {
+    /// Maximum turns awaiting acknowledgement.
+    pub turns: u32,
+    /// Maximum encoded bytes of those turns.
+    pub bytes: u64,
+}
+
 /// One durable host decision made after the last saved turn.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct AnsweredCall {
@@ -105,6 +114,8 @@ pub enum Event {
         host_run: Token,
         /// Host-supplied positive number, unique for each activation of `host_run`.
         activation: u64,
+        /// Credit for turns awaiting durable host acknowledgement.
+        window: Window,
         /// Host-supplied admission policy, validated before the run starts.
         charter: run::Charter,
         /// Optional immutable host mounts and initial conflicts, moved to run admission.
@@ -133,6 +144,9 @@ pub enum Event {
         /// Attested UTF-8 including sender label, at most `Limits.run.message_bytes`.
         text: Box<[u8]>,
     },
+
+    /// The host durably kept this turn and every preceding turn of the run.
+    Acknowledge { run: Token, turn: u32 },
 
     /// A refreshed credential, pushed by the engine through the host.
     Grant {

@@ -950,6 +950,7 @@ impl Counted {
             reply_to: ReplyTo::new(PARENT),
             host_run: WORKER,
             activation: if restoring { 2 } else { 1 },
+            window: root::Window { turns: u32::MAX, bytes: u64::MAX },
             charter: charter(restoring),
             transcript: history,
             grants: Box::new([Grant {
@@ -1519,6 +1520,7 @@ fn a_restored_run_keeps_full_brief_and_custom_paths_with_two_clients() {
         reply_to: ReplyTo::new(PARENT),
         host_run: WORKER,
         activation: 1,
+        window: root::Window { turns: u32::MAX, bytes: u64::MAX },
         charter: run::Charter { instructions, brief, conventions: selected, outcome, ..charter(false) },
         workspace: mounted,
         transcript: None,

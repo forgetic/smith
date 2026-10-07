@@ -3,10 +3,11 @@
 //! the child domains (programming-model.md, section 4.5) before it returns, routing what is for the protocol
 //! layer out.
 //! It retains the run and session children, conversation and credential
-//! bindings, pending starts, turn handoffs and bounded notices. [`step`],
+//! bindings, pending starts, turn handoffs, unsent completions waiting for
+//! acknowledgements and bounded notices. [`step`],
 //! [`fire`] and [`resume`] are its entries (domain/run.md, sections 2, 3, 10,
 //! 13; domain/session.md, sections 3 and 5). It never knows provider
-//! wire syntax, credential secrets, forge state or host delivery policy.
+//! wire syntax, encoded turn size, credential secrets, forge state or host delivery policy.
 //!
 //! Hand-offs between the run and the sessions go both ways, so a chain of them
 //! could go on within one step: a session's delegated call that the run
@@ -75,6 +76,8 @@ pub struct Domain {
     pub(crate) flights: Map<Token, Flight>,
     pub(crate) grants: Map<u32, Credential>,
     pub(crate) completions: Map<Token, GrantName>,
+    /// One unsent main completion per run awaiting acknowledgement credit.
+    pub(crate) pending: Map<Token, route::PendingCompletion>,
     pub(crate) notices: Queue<Request>,
     pub(crate) ready: Ready,
     /// Tickets the peers hold.
@@ -217,6 +220,7 @@ impl Domain {
             flights: Map::with_capacity(flights),
             grants: Map::with_capacity(limits.accounts),
             completions: Map::with_capacity(limits.run.conversations),
+            pending: Map::with_capacity(limits.run.runs),
             notices: Queue::with_capacity(1),
             ready: Ready::with_capacity(handoffs),
             tickets: 0,

@@ -1,4 +1,5 @@
-//! V2 typed host channel (domain/host.md, sections 2, 3, 6 and 7).
+//! V2 typed host channel (domain/host.md, sections 2, 3, 6 and 7;
+//! protocol/channel.md, sections 3 and 7).
 //! Opaque payloads move; metadata controls sequence, spend, read fences and ACKs.
 //! No framing, secrets, policy decoding or V1 compatibility. All payloads are
 //! checked against receiving Limits before retained state changes. Durable decisions
@@ -26,6 +27,15 @@ pub struct Start {
     pub directories: Box<[Directory]>,
     /// At most `Limits::accounts` distinct credential names; no values.
     pub grants: Box<[Grant]>,
+}
+
+/// Host credit sent with the start for turns awaiting durable acknowledgement.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Window {
+    /// Maximum unacknowledged turns.
+    pub turns: u32,
+    /// Maximum unacknowledged turn bytes.
+    pub bytes: u64,
 }
 
 /// Parent mount descriptor forwarded without filesystem or delivery policy.
@@ -346,6 +356,8 @@ pub enum Refusal {
 pub enum RunInvalid {
     /// The activation name is invalid.
     Activation,
+    /// The acknowledgement window cannot hold one largest permitted turn.
+    Window,
     /// A convention path is invalid.
     Conventions,
     /// The charter owns too many bytes.
@@ -474,6 +486,8 @@ pub enum Down {
     Start {
         /// Validated parent start including post-transcript answers.
         start: Start,
+        /// Credit derived from the host kit's limits.
+        window: Window,
     },
     /// Named ordered parent message.
     Message {

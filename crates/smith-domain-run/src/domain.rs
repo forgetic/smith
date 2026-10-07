@@ -112,9 +112,15 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
 fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     match event {
         Event::HostReturned { relay, reply } => run::host_returned(domain, env, relay, reply, out),
-        Event::Start { reply_to, host_run, activation, charter, workspace, transcript } => {
-            run::start(domain, env, run::Start { reply_to, host_run, activation, charter, workspace, transcript }, out);
+        Event::Start { reply_to, host_run, activation, window, charter, workspace, transcript } => {
+            run::start(
+                domain,
+                env,
+                run::Start { reply_to, host_run, activation, window, charter, workspace, transcript },
+                out,
+            );
         }
+        Event::Acknowledge { run, turn } => run::acknowledge(domain, run, turn),
         Event::Message { run, name, text } => run::message(domain, env, run, name, text, out),
         Event::Turn { conversation, record, sequence } => run::turn(domain, conversation, record, sequence, out),
         Event::Cancel { run } => run::cancel(domain, run, out),
@@ -161,6 +167,13 @@ pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
 #[must_use]
 pub fn completion_permit(domain: &Domain, conversation: Token) -> crate::CompletionPermit {
     run::completion_permit(domain, conversation)
+}
+
+/// Live run that owns this conversation, for its parent's acknowledgement routing.
+#[must_use]
+pub fn owner(domain: &Domain, conversation: Token) -> Option<Token> {
+    let conversation = domain.conversations.get(skein_lib::Id::from_token(conversation))?;
+    Some(conversation.run.token())
 }
 
 /// Check one provider completion against exact run-wide arithmetic before its

@@ -241,7 +241,14 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
             for grant in &start.grants {
                 agent.accounts.get_mut(&grant.account).expect("validated start grant").emitted = grant.generation;
             }
-            out.push(Request::Send { owner: token, process, message: Down::Start { start } });
+            out.push(Request::Send {
+                owner: token,
+                process,
+                message: Down::Start {
+                    start,
+                    window: crate::Window { turns: env.limits.turns, bytes: env.limits.unacknowledged_bytes },
+                },
+            });
             agent.sending = Some(Sent::Start);
             out.push(Request::Wait { owner: token, process });
             out.push(Request::Reap { owner: token, process });

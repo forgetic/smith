@@ -48,6 +48,7 @@ impl CrashHost {
             reply_to: skein_lib::ReplyTo::new(Token::new(88)),
             host_run: Token::new(91),
             activation,
+            window: run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
             charter: run::Charter { resume: true, ..charter },
             workspace,
             transcript: None,

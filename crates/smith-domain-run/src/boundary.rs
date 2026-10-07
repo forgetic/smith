@@ -1,7 +1,7 @@
 //! The records that cross the boundary with the run's parent, the top-level
 //! domain (programming-model.md, section 4.5). The run defines them; its parent depends on it.
 //! Contracts: domain/run.md, sections 3, 5, 6, 8, 9 and 10;
-//! protocol/channel.md, sections 4 and 5; protocol/transcript.md, section 2.
+//! protocol/channel.md, sections 4, 5 and 7; protocol/transcript.md, section 2.
 //!
 //! All three of the run's faces cross here:
 //!
@@ -47,6 +47,18 @@ use crate::budget::{Budget, Exhausted, Spend};
 use crate::charter::{Charter, Families, Llm, Tools};
 use crate::outcome::{Change, Declared, Problems};
 
+/// Host acknowledgement credit for one activation; the agent reserves the largest turn before another completion
+/// (protocol/channel.md, sections 3 and 7).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Window {
+    /// Turns that may be told without acknowledgement.
+    pub turns: u32,
+    /// Bytes that may be told without acknowledgement.
+    pub bytes: u64,
+    /// Largest turn this agent may tell, established from its receiving limits.
+    pub largest_turn: u64,
+}
+
 /// parent -> run
 #[derive(PartialEq, Eq, Debug)]
 pub enum Event {
@@ -69,6 +81,8 @@ pub enum Event {
         host_run: Token,
         /// Host-supplied positive activation number, unique within `host_run` across starts.
         activation: u64,
+        /// Bounded acknowledgement credit for this activation.
+        window: Window,
         /// Host-supplied admission policy, validated before the run starts.
         charter: Charter,
         /// Optional immutable host mounts and initial conflicts, admitted before effects.
@@ -89,6 +103,9 @@ pub enum Event {
         /// Attested UTF-8, including the sender label, bounded before retention.
         text: Box<[u8]>,
     },
+
+    /// The host durably kept this turn and every preceding turn of the run.
+    Acknowledge { run: Token, turn: u32 },
 
     /// Actual concrete session turn; the root owns the body behind record.
     Turn {
@@ -784,6 +801,8 @@ pub enum Invalid {
     Endpoint,
     /// A host Start with activation zero is refused before the run opens.
     Activation,
+    /// The acknowledgement window cannot hold one largest permitted turn.
+    Window,
 
     /// A host convention path is empty, oversized, absolute or has unsafe
     /// components/bytes. The Start is refused before admission or any effects.

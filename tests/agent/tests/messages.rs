@@ -112,6 +112,46 @@ fn parked_transcript_resumes_without_recharging_history_or_reusing_activation_nu
 }
 
 #[test]
+fn a_full_window_holds_the_next_completion_until_a_turn_is_acknowledged() {
+    let mut world = World::with_window(waiting(923), smith_domain::Window { turns: 1, bytes: u64::MAX });
+    let acknowledged = Time::ZERO.saturating_add(Duration::from_millis(500));
+    world.acknowledge_at(acknowledged, 1);
+    world.run(2000);
+    assert!(matches!(world.answer(), run::Answer::Parked { turns: 2, .. }));
+    assert_eq!(world.turns().len(), 2, "the told first turn remains in the transcript");
+    let mut prompts = Vec::new();
+    for (at, seen) in world.messages_seen() {
+        if matches!(seen, smith_agent_world::messages_referee::Seen::Prompt { .. }) {
+            prompts.push(*at);
+        }
+    }
+    assert_eq!(prompts.len(), 2);
+    assert!(prompts[0] < acknowledged && prompts[1] >= acknowledged);
+}
+
+#[test]
+fn a_window_too_small_for_one_turn_refuses_the_start() {
+    let settings = waiting(924);
+    let largest = smith_domain::max_turn_bytes(&settings.limits).expect("bounded turn");
+    let mut world = World::with_window(settings, smith_domain::Window { turns: 1, bytes: largest - 1 });
+    world.run(2000);
+    assert_eq!(world.answer(), &run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Window)));
+    assert!(world.turns().is_empty() && world.prompts().is_empty());
+}
+
+#[test]
+fn a_host_that_keeps_no_turns_acknowledges_each_at_once_and_never_holds_the_run() {
+    let settings = waiting(925);
+    let largest = smith_domain::max_turn_bytes(&settings.limits).expect("bounded turn");
+    let mut world = World::with_window(settings, smith_domain::Window { turns: 1, bytes: largest });
+    world.acknowledge_each_turn();
+    world.run(2000);
+    assert!(matches!(world.answer(), run::Answer::Parked { turns: 2, .. }));
+    assert_eq!(world.turns().len(), 2);
+    assert_eq!(world.prompts().len(), 2);
+}
+
+#[test]
 fn a_run_parked_resumed_and_parked_again_numbers_turns_from_one_each_time_without_a_gap_in_the_conversation() {
     let mut first = World::new(waiting(920));
     first.run(2000);

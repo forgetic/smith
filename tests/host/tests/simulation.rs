@@ -96,7 +96,11 @@ fn process_started_precedes_agent_admitted_and_start_is_first() {
     world.spawned();
     assert!(!world.seen.admitted);
     match world.seen.down.first().expect("Start issued") {
-        Down::Start { start: actual } => {
+        Down::Start { start: actual, window } => {
+            assert_eq!(
+                *window,
+                smith_host_domain::Window { turns: limits().turns, bytes: limits().unacknowledged_bytes }
+            );
             assert_eq!(actual.charter, start().charter);
             assert_eq!(actual.transcript, start().transcript);
             assert_eq!(actual.answered, start().answered);

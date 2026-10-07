@@ -888,6 +888,7 @@ impl Partner {
                 return;
             }
             smith_domain_run::CompletionPermit::Allowed => {}
+            smith_domain_run::CompletionPermit::Held => return,
         }
         let latency = self.draw(self.script.turn);
         let talk = self.talks.get_mut(&peer).expect("a live admitted conversation");

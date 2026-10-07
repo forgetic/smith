@@ -101,7 +101,7 @@ impl Measured {
             match request {
                 Request::Spawn { owner: token, .. } => owner = Some(token),
                 Request::Send { message, .. } => match message {
-                    Down::Start { start } if retain_start => {
+                    Down::Start { start, .. } if retain_start => {
                         assert!(self.held_start.replace(start).is_none());
                     }
                     Down::Message { body, .. } if self.retain_message => {

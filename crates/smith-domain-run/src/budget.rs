@@ -175,6 +175,9 @@ pub enum CompletionPermit {
     /// Live conversation with remaining global allowance.
     Allowed,
 
+    /// The main awaits durable acknowledgement credit before its unsent completion.
+    Held,
+
     /// Live conversation prevented by a scalar ceiling.
     Denied(
         /// Exact scalar dimension.
