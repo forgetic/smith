@@ -62,12 +62,16 @@ of domain/host.md, section 2.
   agent's is still open (README.md, section 11).
 - **The agent accepts at once** over pipes. A daemon decides by its
   configuration (agent.md).
-- **Terms.** Each side checks the other's terms against what it may send,
-  and refuses with *limits*, naming the kind, when they do not fit. The
-  agent's sending bounds come from its configuration, and must fit within
-  what its hosts take. A host with smaller limits than its agents'
-  configuration then finds out at the first opening, not in the middle of
-  a run.
+- **Required and optional kinds.** Each version names the kinds it
+  requires each side to take. A kind added within a version is optional:
+  a peer that does not take it leaves it out of its terms, and the writer,
+  refused at its entrance, carries on without it.
+- **Terms.** Each side checks the other's terms for every required kind it
+  may send, and refuses with *limits*, naming the kind, when one is missing
+  or too small. The agent's sending bounds come from its configuration, and
+  must fit within what its hosts take. A host with smaller limits than its
+  agents' configuration then finds out at the first opening, not in the
+  middle of a run.
 - **smith's refusal reasons,** from the application's range (skein's
   `channel.md`, 5.1):
   - **rules:** the peer broke the channel's rules (section 5);
@@ -81,7 +85,7 @@ of domain/host.md, section 2.
 | start | the start (below) | first, once |
 | message | a name; the sender's label; the text | any time after the start, in order |
 | answer | a call's name, and its answer (below) | once per call, also after a cancel |
-| acknowledge | a turn's number: that turn and every one before it are kept | as the host keeps them |
+| acknowledge | a turn's number: that turn and every one before it are kept durably | as the host keeps them |
 | grant | an account; a generation; how long it is valid; its value (section 6) | when the host refreshes one |
 | cancel | nothing | at most once |
 
@@ -97,11 +101,17 @@ of domain/host.md, section 2.
   - for a merge in progress, the files left in conflict;
 - **the transcript,** if the run resumes: its turns' bytes, in order, as
   they were told (transcript.md);
-- **the calls answered after its last turn,** each a name and an answer;
+- **the calls the transcript does not hold as answered,** that the host
+  answered: a call whose turn was never told, or one the run withdrew and
+  the host decided later. Each is a name, the tool, and its answer. The run
+  tells the LLM of them as text in its waking prompt, since they have no
+  open place in the history to go back to (domain/run.md, section 6);
 - **the grants** the charter's endpoints need;
 - **the window:** how many turns, and how many bytes of them, may be
-  unacknowledged (section 7). A host that keeps no turns gives a window it
-  will never fill, and acknowledges each turn at once.
+  unacknowledged (section 7). It must hold at least one turn of the largest
+  size the agent may send, or the start is invalid. A host that keeps no
+  turns gives a window it will never fill, and acknowledges each turn at
+  once.
 
 **An answer to a call** is one of:
 
@@ -123,7 +133,7 @@ of domain/host.md, section 2.
 | admitted | nothing | once, when the start is admitted |
 | call | a name; the tool; its effect; its deadline, as a duration; what it asks (below) | while the run lives, each name once while in flight |
 | withdraw | a call's name | once per call, at most |
-| turn | its number; the spend so far; the last message read, if any; its body, as bytes (transcript.md) | numbered from one, each once |
+| turn | its number in this activation; the spend so far; the last message read, if any; its body, as bytes (transcript.md) | numbered from one in each activation, each once |
 | waiting | the last message read | when the run waits for a message |
 | long | how long, at most, as a duration | when checks start |
 | long done | nothing | when they end |
@@ -163,7 +173,12 @@ of domain/host.md, section 2.
   - admitted, or a refused answer, comes first;
   - turns are consecutive from one, and their spend never falls;
   - a call's name is used once while it is in flight;
-  - the answer is the last word, and its turn count is the turns told.
+  - the answer is the last word, and its turn count is the turns told in
+    this activation.
+
+  A turn's number on the channel counts this activation's turns. Its place
+  in the conversation, which goes on across activations, is in its body
+  (transcript.md, section 2).
 - **Who checks what.**
   - **Each half checks what its codecs and the order can show:** a record
     that does not decode, a kind out of order, a number out of sequence.
@@ -194,6 +209,10 @@ of domain/host.md, section 2.
 
 ## 7. Flow control
 
+- **An acknowledgement means durable.** The host acknowledges a turn once
+  it would survive the host's own crash, since the agent then holds it no
+  longer. A host that keeps turns less safely acknowledges at once, and
+  does not resume from what it may have lost.
 - **The window.** The agent's half counts turns, and their bytes, sent and
   not yet acknowledged. When the window is full, the run waits, without
   starting another completion, until an acknowledgement makes room
@@ -252,11 +271,19 @@ one is kept is the agent's configuration (agent.md).
   each way, and over a socket-like stream.
 - **Its stories:**
   - a run from start to answer;
-  - a run resumed from a transcript, with calls answered after it;
+  - a run resumed from a transcript, with calls answered that the
+    transcript does not hold as answered;
+  - a run parked, resumed and parked again, its turns numbered from one on
+    the channel each time and without a gap in the conversation;
+  - a host tool answered as the agent loses its channel, before
+    the turn is told;
   - host tools answered busy and asked again under their names;
   - a delivery, and one found stale;
   - a cancel in the middle of a turn;
   - a full window holding turns back until acknowledged;
+  - a window that holds one turn of the largest size, and one too small,
+    refused;
+  - an older peer that leaves an optional kind out of its terms;
   - grants refreshed while a call is in flight;
   - facts dropped under pressure;
   - no version in common;

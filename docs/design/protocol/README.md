@@ -107,13 +107,15 @@ host would be another.
 | Shape | How agent and host meet | The host runs | The agent runs |
 |---|---|---|---|
 | a spawned agent | the host spawns `smith`, and the channel runs over its standard input and output | skein's contained processes and smith's host half | the `smith` binary |
-| a connected agent | `smith` runs as a daemon; a host connects to it, with one connection per run, over TLS when remote | a connection and smith's host half | the `smith` binary, listening |
+| a connected agent, later | `smith` runs as a daemon; a host connects to it, with one connection per run, over TLS when remote | a connection and smith's host half | the `smith` binary, listening |
 | one process | the consumer owns smith's domain as a child, and nothing crosses between them as bytes (domain/host.md, section 9) | its own domain and protocol layer | as the consumer's child: smith's domain, its LLM and machine components, and no channel |
 
 - **A spawned agent** is how temper's worker runs smith, and one of the
   local host's two ways. The process tree is the run's containment
   (domain/host.md, section 4).
-- **A connected agent** waits on the domain. The domain today:
+- **A connected agent** is not available yet: it waits on the domain. The
+  components allow it, but admission, cancellation, a lost connection and
+  the daemon's own life have no contract yet. The domain today:
   - runs one run per agent process;
   - supervises only a process its host spawned (domain/host.md, sections 1
     and 4).
@@ -141,7 +143,7 @@ host would be another.
 | `smith-host-protocol` | component | the host's half: skein's channel and smith's codecs on the streams it is given, translated to and from `smith-host-domain` (hosts.md) |
 | `smith-local-protocol` | protocol layer | the local host's: the terminal, configuration, transcripts in files, signing in and committing in place (hosts.md) |
 | `smith-agent-service`, `smith-local-service` | service | the agent process's and the local host's `iterate` |
-| `smith` | shell | the binary: the agent on its standard input and output or as a daemon, or the local host |
+| `smith` | shell | the binary: the agent on its standard input and output (and, later, as a daemon), or the local host |
 | `smith-mcp`, later | component | MCP servers as a tool source |
 
 These are the roles of programming-model.md, section 4:
@@ -245,9 +247,11 @@ a host (temper's worker, smith's local host, ...)
     it speaks, and the highest version both speak is chosen. With none in
     common, the channel ends before a run starts.
   - **Adding a kind:** a kind may be added within a version, as optional.
-    A peer that does not take it leaves it out of its terms; the writer,
-    refused at its entrance, carries on without it (skein's `channel.md`,
-    section 5.2). Every other change is a new version.
+    Each version names the kinds it requires, and only those are checked
+    at the opening. A peer that does not take an optional kind leaves it
+    out of its terms; the writer, refused at its entrance, carries on
+    without it (channel.md, section 2). Every other change is a new
+    version.
 - **The charter carries its own version.** The party that writes it may
   not be the host, and may run another release of smith: temper's engine
   writes charters that its workers carry unread. The run's result is

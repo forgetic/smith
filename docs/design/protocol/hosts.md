@@ -81,9 +81,10 @@ The domain's stops become the tree's three steps: the cancel goes down the
 channel first, then the termination signal, then the kill. Gone means the
 tree was proved empty and the channel was read to its end.
 
-## 4. Connecting to an agent
+## 4. Connecting to an agent, later
 
-For a connected agent (README.md, section 4):
+A connected agent waits on the domain (README.md, section 11). This is
+what its host's protocol layer would do:
 
 - **a socket** to the daemon's address, with TLS when it is remote;
 - **the credential** in the opening, which the daemon's configuration
@@ -128,12 +129,13 @@ For a connected agent (README.md, section 4):
 ### 5.3 Transcripts
 
 - **Each chat** has a directory under the workspace's state directory.
-- **Each turn** is a file of its own, numbered, written atomically. A turn
-  is acknowledged once its file is stored.
+- **Each turn** is a file of its own, numbered by its place in the
+  conversation, and written durably: the file and its directory are
+  flushed before the turn is acknowledged (channel.md, section 7).
 - **A chat's transcript** is its turns' files, in order (transcript.md,
   section 3).
-- **The calls answered after the last turn** are kept the same way, until
-  the next turn makes them part of the history.
+- **Answers the transcript lacks** are kept the same way, until a waking
+  prompt has told the LLM of them and a turn has been kept after it.
 
 ### 5.4 Signing in
 

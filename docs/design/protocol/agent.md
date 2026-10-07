@@ -86,7 +86,10 @@ kept) is the binary's, decided when the binary is built.
   - its dialect;
   - its address, as a name resolved at startup (skein's `io.md`,
     section 4);
-  - its TLS server name;
+  - its TLS server name, and what to trust it by, the machine's roots by
+    default;
+  - the dialect's path and headers, each the dialect's own by default
+    (skein's `llm.md`);
   - the account its grants are named by;
   - its options: reasoning effort, an identity profile, a cache key.
 - **Limits:**

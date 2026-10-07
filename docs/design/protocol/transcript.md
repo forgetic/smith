@@ -34,7 +34,9 @@ A versioned record. Every turn starts with its version.
 
 - **endpoint:** the name of the endpoint it ran on, as the agent's
   configuration names it, and the dialect of its provider;
-- **number:** within the run's main session, from one;
+- **its place in the conversation:** from one, going on across the
+  activations that resume it. The channel numbers turns per activation
+  (channel.md, section 4);
 - **usage:** the tokens the provider counted (input, output, cache reads
   and cache writes);
 - **spend:** the run's spend so far, in the host's unit, sub-agents included
@@ -62,9 +64,11 @@ resumes, as it did when the call was made.
 
 - **Its turns, in order,** each as its own bytes. They must share a version,
   an endpoint and a dialect, and be numbered without a gap.
-- **The calls answered after the last turn** are not part of it. The start
-  carries them beside it, each a call's name and its answer (channel.md,
-  section 3).
+- **Answers the transcript lacks** are not part of it. A call whose turn
+  was never told, or one the run withdrew and its host decided later, has
+  no open place in the history. The start carries the host's answers to
+  them beside the transcript, and the run tells the LLM of them as text in
+  its waking prompt (channel.md, section 3).
 
 What a host keeps is therefore the turns' bytes, and nothing it must
 assemble.
