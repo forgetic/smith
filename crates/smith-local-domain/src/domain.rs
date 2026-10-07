@@ -607,7 +607,8 @@ fn store_failed(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>
 }
 
 fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
-    while let Some(request) = domain.agent_out.pop() {
+    for _ in 0..agent::max_out(&env.limits.agent) {
+        let Some(request) = domain.agent_out.pop() else { break };
         match request {
             agent::Request::Admitted { host_run: _, run } => {
                 domain.run = Some(run);
@@ -664,6 +665,7 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
             | agent::Request::Abort { .. }) => out.push(Request::Agent(forwarded)),
         }
     }
+    assert!(domain.agent_out.is_empty(), "one agent step stays within its output bound");
 }
 
 fn finish_answer(domain: &mut Domain, out: &mut Queue<Request>) {
