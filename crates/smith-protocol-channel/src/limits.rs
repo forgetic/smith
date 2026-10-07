@@ -18,6 +18,8 @@ pub struct Limits {
     pub endpoints: u32,
     /// Maximum live host tool and delivery calls awaiting a channel answer.
     pub calls: u32,
+    /// Maximum turns retained while durable host acknowledgement is pending.
+    pub turns: u32,
 }
 
 /// A checked channel cannot be built from the supplied limits.
@@ -43,6 +45,8 @@ pub enum Error {
     Order,
     /// A live host operation name is repeated, unknown, or beyond capacity.
     Calls,
+    /// The host's outstanding turn or byte window has no remaining credit.
+    Window,
     /// The measured result did not fit its output writer.
     ResultWrite(skein_lib::Overflow),
     /// A domain answer exceeds the configured channel body limits.
@@ -119,5 +123,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(skein_lib::Map::<crate::component::CallKey, crate::component::CallRoute>::worst_case(
             limits.calls,
         )?)?
+        .checked_add(skein_lib::Map::<u32, u64>::worst_case(limits.turns)?)?
+        .checked_add(List::<u32>::worst_case(limits.turns)?)?
         .checked_add(u64::try_from(size_of::<Component>()).ok()?)
 }

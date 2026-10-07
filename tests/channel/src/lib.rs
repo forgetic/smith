@@ -299,6 +299,7 @@ impl World {
                 channel,
                 endpoints: 1,
                 calls: 8,
+                turns: 8,
             },
             mode,
         );
@@ -479,21 +480,33 @@ impl World {
         read: Option<skein_lib::Token>,
         turn: &smith_domain_session::record::Turn,
     ) {
+        self.try_agent_tells_turn(number, read, turn).expect("bounded turn");
+    }
+
+    /// Attempt a scripted turn while the host may still hold all its credit.
+    ///
+    /// # Errors
+    /// Returns the channel's flow-control or encoding error.
+    pub fn try_agent_tells_turn(
+        &mut self,
+        number: u32,
+        read: Option<skein_lib::Token>,
+        turn: &smith_domain_session::record::Turn,
+    ) -> Result<(), agent::Error> {
         if let Half::Agent(agent) = &mut self.agent.half {
             let mut spent = smith_domain::run::Spend::ZERO;
             spent.units = turn.spent;
-            agent
-                .send_turn(
-                    number,
-                    read,
-                    spent,
-                    turn,
-                    skein_lib::Token::new(28),
-                    &mut self.agent.agent_events,
-                    &mut self.agent.below,
-                )
-                .expect("bounded turn");
+            agent.send_turn(
+                number,
+                read,
+                spent,
+                turn,
+                skein_lib::Token::new(28),
+                &mut self.agent.agent_events,
+                &mut self.agent.below,
+            )?;
         }
+        Ok(())
     }
 
     /// Have the scripted host acknowledge its exact durable turn.

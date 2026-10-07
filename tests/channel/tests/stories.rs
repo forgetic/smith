@@ -436,10 +436,18 @@ fn a_concrete_turn_reaches_the_host_and_its_acknowledgement_returns() {
     )
     .expect("decoded turn")
     .expect("one turn");
-    assert_eq!(transcript.turns.as_ref(), &[turn]);
+    assert_eq!(transcript.turns.as_ref(), std::slice::from_ref(&turn));
+    let mut second = turn.clone();
+    second.sequence = 2;
+    assert_eq!(world.try_agent_tells_turn(2, read, &second), Err(smith_protocol_channel::Error::Window));
     world.host_acknowledges(1);
     world.settle();
     assert!(world.observations().contains(&Observation::AgentAcknowledged { turn: 1 }));
+    world.agent_tells_turn(2, read, &second);
+    world.settle();
+    assert!(
+        world.observations().iter().any(|observation| matches!(observation, Observation::HostTurn { number: 2, .. }))
+    );
 }
 
 #[test]

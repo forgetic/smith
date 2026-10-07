@@ -88,6 +88,10 @@ pub struct Component {
     transcript: smith_transcript::v2::Limits,
     endpoints: Endpoints,
     calls: Map<CallKey, CallRoute>,
+    window: Option<smith_domain::Window>,
+    turns: Map<u32, u64>,
+    last_sent_turn: u32,
+    held_turn_bytes: u64,
 }
 
 impl Component {
@@ -115,6 +119,10 @@ impl Component {
             transcript: limits.transcript,
             endpoints,
             calls: Map::with_capacity(limits.calls),
+            window: None,
+            turns: Map::with_capacity(limits.turns),
+            last_sent_turn: 0,
+            held_turn_bytes: 0,
         })
     }
 
@@ -285,6 +293,15 @@ impl Component {
             return Err(Error::Order);
         }
         let body = encode_turn(turn, &self.transcript, &self.endpoints)?;
+        let window = self.window.ok_or(Error::Order)?;
+        let Ok(body_bytes) = u64::try_from(body.len()) else {
+            return Err(Error::Window);
+        };
+        let next = self.last_sent_turn.checked_add(1).ok_or(Error::Window)?;
+        let held_bytes = self.held_turn_bytes.checked_add(body_bytes).ok_or(Error::Window)?;
+        if number != next || self.turns.len() >= window.turns || held_bytes > window.bytes {
+            return Err(Error::Window);
+        }
         let last_read = match read {
             Some(name) => Some(name.raw()),
             None => None,
@@ -300,7 +317,13 @@ impl Component {
         record.encode(&mut body)?;
         let mut frame = frame_writer(0x0109, record.measure())?;
         frame.put(&body.finish())?;
-        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        let frame = frame.finish()?;
+        if self.turns.insert(number, body_bytes).is_err() {
+            return Err(Error::Window);
+        }
+        self.last_sent_turn = number;
+        self.held_turn_bytes = held_bytes;
+        self.machine.down(Request::Send { token, frame }, &mut self.events, below);
         self.drain(to_service, below);
         self.fire(to_service, below);
         Ok(())
@@ -484,6 +507,37 @@ impl Component {
                 Some(Event::Body { kind: 0x0103, body }) if self.phase == Phase::Admitted => {
                     match smith_channel::Acknowledge::decode(&self.bodies, &mut Reader::new(&body)) {
                         Ok(acknowledge) => {
+                            if acknowledge.number() > self.last_sent_turn || acknowledge.number() == 0 {
+                                self.refuse_rules(below);
+                                continue;
+                            }
+                            let mut released = 0_u64;
+                            let mut old = skein_lib::List::with_capacity(self.turns.len());
+                            for (number, bytes) in &self.turns {
+                                if *number <= acknowledge.number() {
+                                    released = match released.checked_add(*bytes) {
+                                        Some(total) => total,
+                                        None => {
+                                            self.refuse_rules(below);
+                                            return;
+                                        }
+                                    };
+                                    if old.push(*number).is_err() {
+                                        self.refuse_rules(below);
+                                        return;
+                                    }
+                                }
+                            }
+                            for number in &old {
+                                self.turns.remove(number);
+                            }
+                            self.held_turn_bytes = match self.held_turn_bytes.checked_sub(released) {
+                                Some(held) => held,
+                                None => {
+                                    self.refuse_rules(below);
+                                    return;
+                                }
+                            };
                             to_service.push(OpenEvent::Acknowledged { turn: acknowledge.number() });
                             self.machine.down(Request::Read, &mut self.events, below);
                         }
@@ -505,7 +559,9 @@ impl Component {
                                             &self.endpoints,
                                         ) {
                                             Ok(transcript) => match start_context(start, charter, transcript) {
-                                                Ok(start) => {
+                                                Ok(mut start) => {
+                                                    start.window.turns = start.window.turns.min(self.turns.capacity());
+                                                    self.window = Some(start.window);
                                                     to_service.push(OpenEvent::Start { start: Box::new(start) });
                                                     self.machine.down(Request::Read, &mut self.events, below);
                                                 }
