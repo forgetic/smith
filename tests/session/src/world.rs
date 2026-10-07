@@ -192,6 +192,7 @@ impl Settings {
             agent: agent::Limits {
                 sessions: 4,
                 spend: 1,
+                protocol_allowance: 0,
                 messages: 32,
                 session_bytes: 1 << 20,
                 completion_bytes: 4096,

@@ -7,9 +7,10 @@
 //! one exclusive checked snapshot. Before submission checks may abort; after
 //! submission the bounded host terminal remains owed. Final Change
 //! landing wins shutdown; a mid-run delivery settles before the pending
-//! ending answers. Sessions alone price own usage;
-//! global scalar admission sums monotonic own deltas, while inclusive subtree
-//! totals transfer only as child bills. A charge that cannot fit ends the
+//! ending answers. Sessions alone price own usage; the run reserves each
+//! completion's maximum across all conversations before the root sends it and
+//! returns unused credit on its terminal. Global accounting sums monotonic own
+//! deltas, while inclusive subtree totals transfer only as child bills. A charge that cannot fit ends the
 //! session before it is added (domain/run.md, sections 9 and 10).
 //!
 //! The run and its conversations move through these retained phases. Each row
@@ -108,6 +109,8 @@ pub(crate) struct Run {
     acknowledged: u32,
     /// What its conversations have spent.
     spent: Spend,
+    /// Maximum charges of completions sent but not yet settled, across all conversations.
+    reserved: u64,
     /// Nudges given.
     nudges: u32,
     /// Outcomes `finish` refused: rejected, or not landed.
@@ -151,8 +154,7 @@ enum State {
     Working { reply_to: ReplyTo, main: Id<Conversation> },
     /// Actual settled main yield after wait; wall and idle timers remain distinct.
     Waiting { reply_to: ReplyTo, main: Id<Conversation>, until: Time },
-    /// It has spent past its budget's `exhausted` part, and main keeps the
-    /// turn in flight.
+    /// Its scalar budget is exhausted, and main keeps its turn in flight.
     Over { reply_to: ReplyTo, main: Id<Conversation>, exhausted: Exhausted },
     /// It ends with `ending` once its main conversation has ended.
     Winding { reply_to: ReplyTo, ending: Ending },
@@ -179,6 +181,8 @@ pub(crate) struct Conversation {
     /// What it has spent, by its `Used` so far.
     spent: Spend,
     subtree_spent: u64,
+    /// The one provider completion this conversation has reserved with the run.
+    reservation: Option<(Token, u64)>,
     /// Its calls to the run in flight.
     calls: u32,
     phase: Phase,
@@ -273,6 +277,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         window,
         acknowledged: 0,
         spent: Spend::ZERO,
+        reserved: 0,
         nudges: 0,
         rejected: 0,
         conversations: 1,
@@ -296,6 +301,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         families,
         spent: Spend::ZERO,
         subtree_spent: 0,
+        reservation: None,
         calls: 0,
         phase: Phase::Pending,
     };
@@ -761,6 +767,35 @@ pub(crate) fn completion_permit(domain: &Domain, conversation: Token) -> Complet
     }
 }
 
+/// Reserve one completion against the run's shared unspent ceiling before the
+/// parent publishes it. Every live conversation can hold at most one.
+pub(crate) fn reserve(domain: &mut Domain, conversation: Token, owner: Token, most: u64) -> Result<(), Exhausted> {
+    let id = Id::<Conversation>::from_token(conversation);
+    let conversation = domain.conversations.get_mut(id).expect("a provider request retains its conversation");
+    assert!(conversation.reservation.is_none(), "a conversation sends one completion at a time");
+    let run = domain.runs.get_mut(conversation.run).expect("conversation retains run");
+    let committed = run.spent.units.checked_add(run.reserved).ok_or(Exhausted::Overflow(crate::Overflow::Spend))?;
+    let total = committed.checked_add(most).ok_or(Exhausted::Overflow(crate::Overflow::Spend))?;
+    if total > run.charter.budget.spend {
+        return Err(Exhausted::Spend);
+    }
+    run.reserved = run.reserved.checked_add(most).expect("checked with total above");
+    conversation.reservation = Some((owner, most));
+    Ok(())
+}
+
+/// Return unused credit after the provider's terminal. An overbound charge is
+/// rejected by the caller before it can enter the session's spend record.
+pub(crate) fn settle_reservation(domain: &mut Domain, conversation: Token, owner: Token, charge: u64) -> bool {
+    let id = Id::<Conversation>::from_token(conversation);
+    let conversation = domain.conversations.get_mut(id).expect("a provider terminal retains its conversation");
+    let (reserved_owner, most) = conversation.reservation.take().expect("every sent completion was reserved");
+    assert!(reserved_owner == owner, "provider terminal settles its own reservation");
+    let run = domain.runs.get_mut(conversation.run).expect("conversation retains run");
+    run.reserved = run.reserved.checked_sub(most).expect("reservation belongs to this run");
+    charge <= most
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "the cell receives concrete origin independently of live callback identity"
@@ -960,6 +995,7 @@ pub(crate) fn ended(domain: &mut Domain, conversation: Token, end: End, spend: S
         Phase::Pending | Phase::Opening | Phase::Unwanted | Phase::Running { .. } | Phase::Closing => {}
     }
     assert!(conversation.calls == 0, "a conversation ends once its calls have returned");
+    assert!(conversation.reservation.is_none(), "a conversation settles its provider before ending");
     let phase = mem::replace(&mut conversation.phase, Phase::Closed);
     match phase {
         Phase::Opening | Phase::Unwanted | Phase::Running { .. } | Phase::Closing => {}
@@ -1451,6 +1487,7 @@ fn sub_agent(
         families: plan.families,
         spent: Spend::ZERO,
         subtree_spent: 0,
+        reservation: None,
         calls: 0,
         phase: Phase::Opening,
     };

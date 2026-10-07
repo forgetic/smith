@@ -43,6 +43,7 @@ fn size(of: usize) -> u64 {
 const LIMITS: Limits = Limits {
     sessions: 1,
     spend: 1,
+    protocol_allowance: 0,
     messages: 4,
     session_bytes: 1024,
     completion_bytes: 4096,

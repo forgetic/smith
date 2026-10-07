@@ -68,33 +68,15 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
         Event::Probed { owner, executable } => run::Event::Probed { owner, executable },
         Event::Checked { owner, ran } => run::Event::Checked { owner, ran },
         Event::Aborted { owner } => run::Event::Aborted { owner },
-        Event::Completed { owner, completion } => {
-            capture(domain, env, owner, &completion);
-            let ended = domain.completions.remove(&owner);
-            assert!(ended.is_some(), "completed calls were emitted");
-            let id = *domain.sessions.get(&owner).expect("a session lives until its call has ended");
-            let conversation = domain.peers.get(id).expect("a peer lives as its session").conversation;
-            let overflow = match session::preview_completion(&domain.session, owner, completion.usage) {
-                Err(end) => Some(end),
-                Ok(price) => priced_overflow(run::completion_overflow(
-                    &domain.run,
-                    conversation,
-                    price,
-                    translate::spend(1, completion.usage),
-                )),
-            };
-            if let Some(end) = overflow {
-                return session_step(domain, env, session::Event::Overflowed { owner, end });
-            }
-            let peer = domain.peers.get_mut(id).expect("a peer lives as its session");
-            let before = peer.tickets();
-            let completion =
-                peer.completion(completion, env.limits.decoded_call_bytes.min(env.limits.session.session_bytes));
-            domain.tickets = domain.tickets.saturating_add(peer.tickets()).saturating_sub(before);
-            return session_step(domain, env, session::Event::Completed { owner, completion });
-        }
+        Event::Completed { owner, completion } => return completed(domain, env, owner, completion),
         Event::Failed { owner, failure, evidence, detail } => {
             let grant = domain.completions.remove(&owner).expect("failed calls were emitted");
+            let id = *domain.sessions.get(&owner).expect("a session lives until its call has ended");
+            let conversation = domain.peers.get(id).expect("a peer lives as its session").conversation;
+            assert!(
+                run::settle_reservation(&mut domain.run, conversation, owner, 0),
+                "failed call held its reservation"
+            );
             match failure {
                 crate::llm::Failure::Unauthorized => {
                     if let Some(held) = domain.grants.get_mut(&grant.account)
@@ -122,6 +104,12 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
         Event::Cancelled { owner } => {
             let ended = domain.completions.remove(&owner);
             assert!(ended.is_some(), "cancelled calls were emitted");
+            let id = *domain.sessions.get(&owner).expect("a session lives until its call has ended");
+            let conversation = domain.peers.get(id).expect("a peer lives as its session").conversation;
+            assert!(
+                run::settle_reservation(&mut domain.run, conversation, owner, 0),
+                "cancelled call held its reservation"
+            );
             return session_step(domain, env, session::Event::Cancelled { owner });
         }
         Event::Done { owner, done } => {
@@ -135,6 +123,39 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
 }
 
 /// Resume the one unsent main completion when its host has kept enough turns.
+/// Settle the provider lease and its budget reservation before the session
+/// may record usage or run decoded calls.
+fn completed(domain: &mut Domain, env: &Env<Limits>, owner: Token, completion: crate::llm::Completion) {
+    capture(domain, env, owner, &completion);
+    let ended = domain.completions.remove(&owner);
+    assert!(ended.is_some(), "completed calls were emitted");
+    let id = *domain.sessions.get(&owner).expect("a session lives until its call has ended");
+    let conversation = domain.peers.get(id).expect("a peer lives as its session").conversation;
+    let preview = session::preview_completion(&domain.session, owner, completion.usage);
+    let overflow = match preview {
+        Err(end) => Some(end),
+        Ok(price) => priced_overflow(run::completion_overflow(
+            &domain.run,
+            conversation,
+            price,
+            translate::spend(1, completion.usage),
+        )),
+    };
+    let charge = preview.unwrap_or_default();
+    let within_reservation = run::settle_reservation(&mut domain.run, conversation, owner, charge);
+    if !within_reservation {
+        return session_step(domain, env, session::Event::Overflowed { owner, end: session::End::PriceOverflow });
+    }
+    if let Some(end) = overflow {
+        return session_step(domain, env, session::Event::Overflowed { owner, end });
+    }
+    let peer = domain.peers.get_mut(id).expect("a peer lives as its session");
+    let before = peer.tickets();
+    let completion = peer.completion(completion, env.limits.decoded_call_bytes.min(env.limits.session.session_bytes));
+    domain.tickets = domain.tickets.saturating_add(peer.tickets()).saturating_sub(before);
+    session_step(domain, env, session::Event::Completed { owner, completion });
+}
+
 fn acknowledge(domain: &mut Domain, env: &Env<Limits>, run: Token, turn: u32) {
     run_step(domain, env, run::Event::Acknowledge { run, turn });
     if let Some(pending) = domain.pending.remove(&run) {
@@ -556,9 +577,37 @@ fn complete(domain: &mut Domain, env: &Env<Limits>, pending: PendingCompletion, 
     let forgotten = peer.forget_asks(&env.limits.session);
     domain.tickets = domain.tickets.saturating_sub(forgotten);
     let account = peer.account;
+    let input_bytes = match prompt.input_bytes() {
+        Some(bytes) => match peer.declaration_bytes() {
+            Some(declarations) => bytes.checked_add(declarations),
+            None => None,
+        },
+        None => None,
+    };
+    let prompt = peer.prompt(prompt);
+    let reservation = match input_bytes {
+        Some(bytes) => session::preview_reservation(
+            &domain.session,
+            owner,
+            bytes,
+            env.limits.session.protocol_allowance,
+            prompt.max_tokens,
+        ),
+        None => None,
+    };
+    let Some(most) = reservation else {
+        return session_step(domain, env, session::Event::BudgetDenied { owner, reason: session::BudgetDenial::Spend });
+    };
+    if run::reserve(&mut domain.run, conversation, owner, most).is_err() {
+        return session_step(domain, env, session::Event::BudgetDenied { owner, reason: session::BudgetDenial::Spend });
+    }
     let grant = match domain.grants.get(&account) {
         Some(held) if held.expires > env.now => held.name,
         Some(_) | None => {
+            assert!(
+                run::settle_reservation(&mut domain.run, conversation, owner, 0),
+                "unsent call held its reservation"
+            );
             return session_step(
                 domain,
                 env,
@@ -571,7 +620,6 @@ fn complete(domain: &mut Domain, env: &Env<Limits>, pending: PendingCompletion, 
             );
         }
     };
-    let prompt = peer.prompt(prompt);
     let inserted = domain.completions.insert(owner, grant).expect("one completion per session");
     assert!(inserted.is_none(), "the previous completion ended");
     out.push(Request::Complete {

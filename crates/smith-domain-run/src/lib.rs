@@ -61,7 +61,9 @@ pub use boundary::{
 };
 pub use budget::{Budget, CompletionPermit, Exhausted, Overflow, Prices, ReceivingLimit, Share, Spend};
 pub use charter::{Brief, Charter, Conventions, Section};
-pub use domain::{Domain, MAX_OUT, completion_overflow, completion_permit, fire, owner, step};
+pub use domain::{
+    Domain, MAX_OUT, completion_overflow, completion_permit, fire, owner, reserve, settle_reservation, step,
+};
 pub use limits::{Limits, worst_case};
 pub use workspace::{Directory, Workspace};
 

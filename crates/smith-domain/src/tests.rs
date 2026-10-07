@@ -71,6 +71,7 @@ const LIMITS: Limits = Limits {
     session: session::Limits {
         sessions: 4,
         spend: 1,
+        protocol_allowance: 0,
         messages: 16,
         session_bytes: 2_097_152,
         completion_bytes: 4096,
@@ -1680,8 +1681,8 @@ fn maximum_custom_guide_headings_obey_the_session_receiving_limit_after_discover
 
 fn scalar_limits() -> Limits {
     Limits {
-        run: run::Limits { budget: run::Budget { spend: 1000, ..LIMITS.run.budget }, ..LIMITS.run },
-        session: session::Limits { spend: 1000, ..LIMITS.session },
+        run: run::Limits { budget: run::Budget { spend: 100_000, ..LIMITS.run.budget }, ..LIMITS.run },
+        session: session::Limits { spend: 100_000, ..LIMITS.session },
         ..LIMITS
     }
 }
@@ -1695,39 +1696,64 @@ fn scalar_charter() -> Charter {
     }
 }
 
-#[test]
-fn scalar_crossing_yields_a_turn_and_ends_without_consulting_credentials() {
+fn scalar_prepared(charter: Charter) -> (Harness, Box<[Request]>) {
     let mut harness = Harness::with(&scalar_limits());
-    let (_, main, _) = harness.admit(1, scalar_charter());
-    // Exact-cap completion owns its Turn. Closing needs no credential
-    // lookup or subsequent provider request.
-    assert!(harness.domain.grants.remove(&0).is_some());
-    let usage = Usage { input_tokens: 100, ..Usage::ZERO };
-    let completion = Completion {
-        content: Box::new([Said::Text { text: bytes(b"unfinished"), replay: None }]),
-        stop: Stop::EndTurn,
-        usage,
+    let emitted = harness.step(Event::Start {
+        window: crate::Window { turns: u32::MAX, bytes: u64::MAX },
+        answered: Box::default(),
+        workspace: Some(workspace()),
+        grants: Box::default(),
+        reply_to: ReplyTo::new(Token::new(1)),
+        host_run: Token::new(1),
+        activation: 1,
+        charter,
+        transcript: None,
+    });
+    let [Request::Admitted { run, .. }, Request::Read { .. }] = emitted.as_ref() else {
+        panic!("run admission: {emitted:?}");
     };
-    assert!(harness.step(Event::Completed { owner: main, completion }).is_empty());
-    let emitted = harness.next();
+    let emitted = harness.step(Event::Read { owner: *run, read: run::Read::Missing });
+    let prepared = match emitted.as_ref() {
+        [Request::Probe { owner, .. }] => harness.step(Event::Probed { owner: *owner, executable: false }),
+        _ => emitted,
+    };
+    let mut prepared = prepared;
+    for _ in 0_u32..10 {
+        if !prepared.is_empty() {
+            break;
+        }
+        prepared = harness.next();
+    }
+    (harness, prepared)
+}
+
+#[test]
+fn scalar_reservation_denies_before_any_provider_call_or_credential_lookup() {
+    let (mut harness, emitted) = scalar_prepared(scalar_charter());
     let [Request::Answer { answer: run::Answer::Failed { failure, spent, turns }, .. }] = emitted.as_ref() else {
-        panic!("scalar exhaustion must settle locally: {emitted:?}")
+        panic!("unaffordable maximum must settle locally: {emitted:?}")
     };
     assert_eq!(*failure, run::Failure::Budget(run::Exhausted::Spend));
-    assert_eq!((spent.units, spent.turns, *turns), (100, 1, 1));
-    assert_eq!(harness.turns.len(), 1);
+    assert_eq!((spent.units, spent.turns, *turns), (0, 0, 0));
+    assert!(harness.turns.is_empty());
     harness.domain.reclaim();
     assert_eq!((harness.domain.completions.len(), harness.domain.peers(), harness.domain.flights()), (0, 0, 0));
 }
 
 #[test]
-fn a_priced_crossing_finish_settles_without_publishing_another_completion() {
+fn a_priced_finish_settles_within_its_prior_reservation() {
     let mut harness = Harness::with(&scalar_limits());
-    let (_, main, _) = harness.admit(1, scalar_charter());
+    let selected = scalar_charter();
+    let selected = Charter {
+        budget: run::Budget { spend: 100_000, ..selected.budget },
+        llm: Llm { max_tokens: 10, ..selected.llm },
+        ..selected
+    };
+    let (_, main, _) = harness.admit(1, selected);
     assert!(harness.answer(main, Box::new([served(b"finish", verdict(b"approve"))])).is_empty());
     let emitted = harness.next();
     let [Request::Answer { answer: run::Answer::Accepted { spent, turns, .. }, .. }] = emitted.as_ref() else {
-        panic!("same-turn accepted finish wins scalar crossing: {emitted:?}")
+        panic!("priced finish should settle: {emitted:?}")
     };
     assert_eq!((spent.units, spent.turns, *turns), (130, 1, 1));
     assert_eq!(harness.turns.len(), 1);
@@ -1735,23 +1761,41 @@ fn a_priced_crossing_finish_settles_without_publishing_another_completion() {
 }
 
 #[test]
-fn overflowing_completion_runs_no_calls_and_tells_no_turn() {
+fn a_provider_charge_above_its_reserved_maximum_fails_without_recording_it() {
     let mut harness = Harness::with(&scalar_limits());
+    let selected = scalar_charter();
+    let selected = Charter {
+        budget: run::Budget { spend: 100_000, ..selected.budget },
+        llm: Llm { max_tokens: 10, ..selected.llm },
+        ..selected
+    };
+    let (_, main, _) = harness.admit(1, selected);
+    let completion = Completion {
+        content: Box::new([Said::Text { text: bytes(b"overbound"), replay: None }]),
+        stop: Stop::EndTurn,
+        usage: Usage { output_tokens: 100_000, ..Usage::ZERO },
+    };
+    let emitted = harness.step(Event::Completed { owner: main, completion });
+    let emitted = if emitted.is_empty() { harness.next() } else { emitted };
+    let [Request::Answer { answer: run::Answer::Failed { failure, spent, turns }, .. }] = emitted.as_ref() else {
+        panic!("overbound terminal fails the run: {emitted:?}");
+    };
+    assert_eq!(*failure, run::Failure::Budget(run::Exhausted::Overflow(run::Overflow::Spend)));
+    assert_eq!((*spent, *turns), (run::Spend::ZERO, 0));
+    assert!(harness.turns.is_empty());
+}
+
+#[test]
+fn overflowing_reservation_runs_no_calls_and_tells_no_turn() {
     let selected = Charter {
         llm: Llm { prices: run::Prices { input: u64::MAX, cached: 0, output: 0, unit: 1 }, ..scalar_charter().llm },
         ..scalar_charter()
     };
-    let (_, main, _) = harness.admit(1, selected);
-    let completion = Completion {
-        content: Box::new([served(b"call", Ask::Wait)]),
-        stop: Stop::ToolUse,
-        usage: Usage { input_tokens: 2, ..Usage::ZERO },
-    };
-    let emitted = harness.step(Event::Completed { owner: main, completion });
+    let (harness, emitted) = scalar_prepared(selected);
     let [Request::Answer { answer: run::Answer::Failed { failure, spent, turns }, .. }] = emitted.as_ref() else {
         panic!("overflow settles with a typed answer: {emitted:?}");
     };
-    assert_eq!(*failure, run::Failure::Budget(run::Exhausted::Overflow(run::Overflow::Spend)));
+    assert_eq!(*failure, run::Failure::Budget(run::Exhausted::Spend));
     assert_eq!((spent.units, spent.turns, *turns), (0, 0, 0));
     assert!(harness.turns.is_empty());
     assert_eq!(harness.domain.flights(), 0);

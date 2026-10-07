@@ -212,6 +212,31 @@ pub struct Prompt {
     pub max_tokens: u32,
 }
 
+impl Prompt {
+    /// Checked bytes of the owned domain request before protocol rendering.
+    /// Fixed cells and payloads are counted; schemas and provider framing are
+    /// added by the parent or covered by the configured protocol allowance.
+    #[must_use]
+    pub fn input_bytes(&self) -> Option<u64> {
+        use core::mem::size_of;
+
+        let mut bytes = u64::try_from(size_of::<Self>())
+            .ok()?
+            .checked_add(u64::try_from(self.model.len()).ok()?)?
+            .checked_add(u64::try_from(self.system.len()).ok()?)?
+            .checked_add(
+                u64::try_from(size_of::<Descriptor>()).ok()?.checked_mul(u64::try_from(self.delegated.len()).ok()?)?,
+            )?
+            .checked_add(
+                u64::try_from(size_of::<Message>()).ok()?.checked_mul(u64::try_from(self.messages.len()).ok()?)?,
+            )?;
+        for message in &self.messages {
+            bytes = bytes.checked_add(crate::session::content_cost(&message.content)?)?;
+        }
+        Some(bytes)
+    }
+}
+
 /// The next assistant message.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Completion {

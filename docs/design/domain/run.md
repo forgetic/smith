@@ -380,10 +380,12 @@ answers as it was ending; the host has the delivery's own answer.
 - **Reserved before it is made.** Before each completion, its
   sub-agents' included, a session reserves that completion's maximum
   cost from the run's budget: the input it sends and the output its
-  `max_tokens` allows, at its model's prices. When the completion
-  ends, the difference is returned. A completion whose maximum does not
-  fit what is left is not made, and the run ends for its budget. So a
-  run never spends past its budget, and stops a little early rather
+  `max_tokens` allows, at its model's prices. The input's maximum counts
+  what the agent sends as at most one token per byte, plus an allowance
+  its limits give for what the protocol layer and the provider add. When
+  the completion ends, the difference is returned. A completion whose
+  maximum does not fit what is left is not made, and the run ends for its
+  budget. So a run never spends past its budget, and stops a little early rather
   than late. All of it is inside the run, with no call to its host.
 - **Spend is told:** cumulative in each turn, and whole in the answer.
 

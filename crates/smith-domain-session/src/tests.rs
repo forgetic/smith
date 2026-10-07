@@ -54,6 +54,7 @@ const TOOLS: tools::Limits = tools::Limits {
 const LIMITS: Limits = Limits {
     sessions: 2,
     spend: 100,
+    protocol_allowance: 0,
     messages: 8,
     session_bytes: 65_536,
     completion_bytes: 4096,
@@ -1726,6 +1727,24 @@ fn reserved_recorded_call(harness: &mut Harness) -> Token {
     let (owner, _) = calling(harness.one());
     assert_eq!(owner, session);
     owner
+}
+
+#[test]
+fn reservation_prices_input_bytes_allowance_and_maximum_output_once() {
+    let mut harness = Harness::new(LIMITS);
+    let mut opening = opening(spec());
+    opening.prices = crate::record::Prices { input: 2, cached: 1, output: 3, unit: 10 };
+    opening.budget = 4;
+    step(&mut harness.domain, &harness.env, Event::Open { opener: Token::new(1), opening }, &mut harness.out);
+    let Some(Request::Opened { session, .. }) = harness.out.pop() else { panic!("recorded opening") };
+    let (owner, prompt) = calling(harness.one());
+    assert_eq!(owner, session);
+    match prompt.input_bytes() {
+        Some(bytes) => assert!(bytes >= 7),
+        None => panic!("bounded prompt bytes"),
+    }
+    assert_eq!(crate::preview_reservation(&harness.domain, owner, 7, 5, 4), Some(4));
+    assert_eq!(crate::preview_reservation(&harness.domain, owner, 10, 5, 4), None);
 }
 
 #[test]

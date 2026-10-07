@@ -1436,6 +1436,23 @@ fn a_sub_agent_answers_with_its_last_message_once_it_has_ended() {
 }
 
 #[test]
+fn simultaneous_sessions_reserve_one_run_budget_and_return_unused_credit() {
+    let mut harness = Harness::new(LIMITS);
+    let (_, main) = harness.running_on(1, 100, agents());
+    let (child, _) = harness.child(main, 7, families(true, false, false), 101);
+    let first = Token::new(801);
+    let second = Token::new(802);
+
+    assert_eq!(crate::reserve(&mut harness.domain, main, first, 6_000), Ok(()));
+    assert_eq!(crate::reserve(&mut harness.domain, child, second, 5_000), Err(Exhausted::Spend));
+    assert!(crate::settle_reservation(&mut harness.domain, main, first, 2_000));
+    drop(harness.step(Event::Priced { conversation: main, own_spent: 2_000, subtree_spent: 2_000 }));
+    assert_eq!(crate::reserve(&mut harness.domain, child, second, 5_000), Ok(()));
+    assert!(!crate::settle_reservation(&mut harness.domain, child, second, 5_001));
+    assert_eq!(crate::reserve(&mut harness.domain, child, Token::new(803), 8_000), Ok(()));
+}
+
+#[test]
 fn a_child_opening_has_workspace_tools_only_even_when_the_ask_requests_agents() {
     let mut h = Harness::new(LIMITS);
     let (_, main) = h.running_on(1, 100, agents());

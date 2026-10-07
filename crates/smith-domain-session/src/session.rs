@@ -486,6 +486,31 @@ pub fn preview_completion(domain: &Domain, owner: Token, usage: Usage) -> Result
     Ok(price)
 }
 
+/// Price the input byte bound and the requested maximum output with no cache
+/// discount, rounding the two parts together as one possible completion.
+#[must_use]
+pub fn preview_reservation(
+    domain: &Domain,
+    owner: Token,
+    input_bytes: u64,
+    allowance: u64,
+    max_tokens: u32,
+) -> Option<u64> {
+    let session = domain.sessions.get(Id::from_token(owner)).expect("completion retains its session");
+    let input_tokens = input_bytes.checked_add(allowance)?;
+    let most = session.conversation.recording.prices.price(Usage {
+        input_tokens,
+        output_tokens: u64::from(max_tokens),
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+    })?;
+    let total = session.conversation.recording.spent.checked_add(most)?;
+    if total > session.conversation.recording.budget {
+        return None;
+    }
+    Some(most)
+}
+
 /// Settle a provider completion rejected by the parent's run-wide arithmetic
 /// check. Its calls and turn never enter the session.
 pub(crate) fn overflowed(domain: &mut Domain, env: &Env<Limits>, owner: Token, end: End, out: &mut Queue<Request>) {

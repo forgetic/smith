@@ -7,10 +7,10 @@ use skein_lib::Duration;
 /// spend or time refuses admission before effects.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Budget {
-    /// Maximum completions; already admitted work may cross once.
+    /// Maximum completions; spend for each is reserved before provider work.
     pub turns: u32,
 
-    /// Host-unit ceiling; sessions alone price usage against it.
+    /// Host-unit ceiling shared by spent charges and live reservations.
     pub spend: u64,
 
     /// Monotonic activation time; expiry immediately settles cancellation.

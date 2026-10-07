@@ -369,7 +369,7 @@ fn two_priced_models_and_a_refused_child_delegate_conserve_global_own_charges() 
 }
 
 #[test]
-fn an_crossing_edit_settles_and_same_turn_finish_can_win_the_scalar_fence() {
+fn an_unaffordable_completion_never_edits_or_finishes() {
     for finish in [false, true] {
         let mut settings = settings(702, true, false);
         settings.budget.spend = 4;
@@ -381,38 +381,40 @@ fn an_crossing_edit_settles_and_same_turn_finish_can_win_the_scalar_fence() {
             Box::new([script(b"@budget-crossing", vec![calls(vec![call(b"read", READ)], 3), calls(lines, 7)])]);
         let mut world = typed_world(&settings, b"@budget-crossing", &CROSSING_RATES, scripts);
         world.run(20_000);
-        let expected = conservation(&world, &CROSSING_RATES);
-        assert_eq!((expected.turns, expected.units, expected.output), (2, 10, 10));
-        assert_eq!(world.completions().len(), 2, "no actual next provider start beyond the scalar fence");
-        assert_eq!(world.disk().content(b"work/data.txt"), Some(b"after\n".as_slice()));
-        assert_eq!(world.disk().content(b"work/.git/HEAD"), Some(b"HOST-GIT-METADATA".as_slice()));
-        let stores = world
-            .boundaries()
-            .iter()
-            .filter_map(|(_, boundary)| match boundary {
-                Boundary::Io { op: tools::Op::Store { content, .. } } => Some(content.as_ref()),
-                Boundary::Read { .. } | Boundary::Probe { .. } | Boundary::Check { .. } | Boundary::Io { .. } => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(stores, [b"after\n".as_slice()], "crossing completion's write settled once");
-        assert_eq!(world.turns().len(), 2);
-        assert_eq!(world.turns()[1].spent, 10);
-        assert!(world.turns()[1].messages.iter().flat_map(|message| &message.content).any(|block| matches!(
-            block,
-            llm::Block::ToolResult { result: llm::Returned::Owned { outcome: tools::Outcome::Edited { .. } }, .. }
-        )));
-        if finish {
-            assert!(matches!(
-                world.answer(),
-                run::Answer::Accepted { outcome: run::outcome::Declared::Report(_), turns: 2, .. }
-            ));
-        } else {
-            assert!(matches!(
-                world.answer(),
-                run::Answer::Failed { failure: run::Failure::Budget(run::Exhausted::Spend), turns: 2, .. }
-            ));
-        }
+        assert!(world.completions().is_empty(), "the maximum cannot fit even the first completion");
+        assert_eq!(spent(world.answer()), run::Spend::ZERO);
+        assert!(matches!(
+            world.answer(),
+            run::Answer::Failed { failure: run::Failure::Budget(run::Exhausted::Spend), turns: 0, .. }
+        ));
+        assert_eq!(world.disk().content(b"work/data.txt"), Some(b"before\n".as_slice()));
+        assert!(
+            !world
+                .boundaries()
+                .iter()
+                .any(|(_, boundary)| matches!(boundary, Boundary::Io { op: tools::Op::Store { .. } }))
+        );
     }
+}
+
+#[test]
+fn an_affordable_completion_edits_and_finishes_within_the_budget() {
+    let settings = settings(702, true, false);
+    let scripts = Box::new([script(
+        b"@budget-crossing",
+        vec![calls(vec![call(b"read", READ)], 3), calls(vec![call(b"edit", EDIT), call(b"finish", REPORT)], 7)],
+    )]);
+    let mut world = typed_world(&settings, b"@budget-crossing", &CROSSING_RATES, scripts);
+    world.run(20_000);
+    let expected = conservation(&world, &CROSSING_RATES);
+    assert_eq!((expected.turns, expected.units, expected.output), (2, 10, 10));
+    assert!(expected.units <= settings.budget.spend);
+    assert_eq!(world.disk().content(b"work/data.txt"), Some(b"after\n".as_slice()));
+    assert_eq!(world.turns().len(), 2);
+    assert!(matches!(
+        world.answer(),
+        run::Answer::Accepted { outcome: run::outcome::Declared::Report(_), turns: 2, .. }
+    ));
 }
 
 const COSTLY_INPUT: &[u8] = br#"{"brief":"@budget-costly own task","tools":["inspect"],"llm":"fake-2"}"#;
@@ -420,156 +422,34 @@ const CHEAP_INPUT: &[u8] = br#"{"brief":"@budget-cheap own task!","tools":["insp
 const COSTLY_RESPONSE: &[u8] = b"costly actual winner";
 const CHEAP_RESPONSE: &[u8] = b"cheap actual winner!";
 
-fn parallel_scripts(read_then_denied: bool) -> Box<[Script]> {
-    let cheap = if read_then_denied {
-        vec![calls(vec![call(b"read", READ)], 3), says(b"UNSENT-CHEAP-NEXT-CALL", 99)]
-    } else {
-        vec![says(CHEAP_RESPONSE, 3)]
-    };
+fn parallel_scripts() -> Box<[Script]> {
     Box::new([
         script(
             b"@budget-parallel",
             vec![calls(vec![call(b"sub_agent", COSTLY_INPUT), call(b"sub_agent", CHEAP_INPUT)], 1)],
         ),
         script(b"@budget-costly", vec![says(COSTLY_RESPONSE, 2)]),
-        script(b"@budget-cheap", cheap),
+        script(b"@budget-cheap", vec![says(CHEAP_RESPONSE, 3)]),
     ])
 }
 
-fn parallel_story(index: usize, read_then_denied: bool) {
-    let mut settings = settings(703, false, false);
-    settings.budget.spend = 201;
-    let mut world =
-        native_world(settings, b"@budget-parallel", &PARALLEL_RATES, parallel_scripts(read_then_denied), None, index);
+fn parallel_story(index: usize) {
+    let settings = settings(703, false, false);
+    let mut world = native_world(settings, b"@budget-parallel", &PARALLEL_RATES, parallel_scripts(), None, index);
     world.run(100_000);
     native_settled(&world);
     let expected = conservation(&world, &PARALLEL_RATES);
-    assert_eq!((expected.turns, expected.units, expected.output), (3, 204, 6));
-    assert!(matches!(
-        world.answer(),
-        run::Answer::Failed { failure: run::Failure::Budget(run::Exhausted::Spend), turns: 1, .. }
-    ));
-    assert_eq!(world.wire_bindings().len(), 3, "no next Client is started after the costly crossing");
-    assert_eq!(world.turns().len(), 1);
-    assert_eq!(world.turns()[0].spent, 204, "caller cap includes both actual terminal bills");
-    let results = &world.turns()[0].messages[2].content;
-    assert_eq!(results.len(), 2);
-    let cheap_response = if read_then_denied { b"unanswered end=budget:spend".as_slice() } else { CHEAP_RESPONSE };
-    for (index, (id, response)) in
-        [(ID, COSTLY_RESPONSE), (b"call_0000000000000002".as_slice(), cheap_response)].into_iter().enumerate()
-    {
-        assert_eq!(
-            results[index],
-            llm::Block::ToolResult {
-                id: id.into(),
-                result: llm::Returned::Text {
-                    text: response.into(),
-                    error: read_then_denied && index == 1,
-                    replay: None
-                },
-            },
-            "both actual child results settle in the crossing main Turn"
-        );
-    }
-
-    let costly = model_calls(&world, b"fake-2");
-    let cheap = model_calls(&world, b"fake-3");
-    assert_eq!((costly.len(), cheap.len()), (1, 1));
-    let costly_at = costly[0].terminal.expect("costly actual terminal").0;
-    let cheap_at = cheap[0].terminal.expect("cheap actual terminal").0;
-    assert!(
-        costly[0].started <= cheap_at && cheap[0].started <= costly_at,
-        "both calls started before either winner could fence a new call"
-    );
-    if !read_then_denied {
-        assert_eq!(costly_at, cheap_at, "both Client terminals won at the same injected clock");
-    }
-    assert!(world.completions().iter().all(|actual| actual.started <= costly_at));
-    if read_then_denied {
-        root_denied_after_tool(&world, &settings);
-    }
-}
-
-/// A live cheap child finishes its actual read after the sibling's price
-/// crosses the global cap. Its own allowance remains positive, so the extra
-/// requested completion is stopped by the root before Client preparation.
-fn root_denied_after_tool(world: &World, settings: &Settings) {
-    use smith_domain::{Fact, session};
-
-    let main = model_calls(world, b"fake-1");
-    let costly = model_calls(world, b"fake-2");
-    let cheap = model_calls(world, b"fake-3");
-    let granted = settings.budget.spend - own_units(&main, PARALLEL_RATES[0]);
-    assert_eq!(granted, 200, "both children opened before either actual sibling terminal");
-    let own = own_units(&cheap, PARALLEL_RATES[2]);
-    assert_eq!(own, 3);
-    assert!(own < granted, "cheap child's inclusive local cap cannot explain denial");
-    let raw = usage(cheap[0]);
-    let receiving = settings.limits.session.budget;
-    assert!(raw.input_tokens < receiving.input && raw.output_tokens < receiving.output);
-    assert!(raw.cache_read_tokens <= receiving.cache_read && raw.cache_write_tokens <= receiving.cache_write);
-    let loads = world
-        .boundaries()
-        .iter()
-        .filter_map(|(at, boundary)| match boundary {
-            Boundary::Io { op: tools::Op::Load { at: place, .. } } if place.path.as_ref() == b"data.txt" => Some(*at),
-            Boundary::Read { .. } | Boundary::Probe { .. } | Boundary::Check { .. } | Boundary::Io { .. } => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(loads.len(), 1, "already-started crossing completion runs its checkout read");
-    assert!(loads[0] >= costly[0].terminal.expect("actual costly winner").0);
-    let costly_callback = format!("agent <- Completed {{ owner: {:?},", costly[0].owner);
-    let crossing = world
-        .trace()
-        .iter()
-        .position(|line| line.contains(&costly_callback))
-        .expect("actual costly callback entered root");
-    let settled = world
-        .trace()
-        .iter()
-        .position(|line| line.contains("agent <- Done {"))
-        .expect("actual owned read terminal entered root");
-    assert!(crossing < settled, "the read settles after root accepted the costly crossing completion");
-    let requested = world
-        .facts()
-        .iter()
-        .filter_map(|fact| match fact {
-            Fact::Session { fact: session::Fact::CompletionStarted { opener, .. } } => Some(*opener),
-            Fact::Session { .. } | Fact::Run { .. } => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(requested.len(), 4, "Session declared one more completion after its read settled");
-    let denied = requested
-        .iter()
-        .copied()
-        .find(|opener| requested.iter().filter(|other| **other == *opener).count() == 2)
-        .expect("cheap's original and unsent next requests");
-    assert!(
-        world.facts().iter().any(|fact| matches!(fact, Fact::Session { fact: session::Fact::Ended {
-        opener, end: session::End::Budget { spent: session::Dimension::Unit }, turns: 1, usage,
-    }} if *opener == denied && *usage == turn_usage(raw))),
-        "actual root denial settles cheap with exactly its single accepted completion"
-    );
-    assert_eq!(
-        world.facts().iter().filter(|fact| matches!(fact, Fact::Session { fact: session::Fact::Used { .. } })).count(),
-        3
-    );
-    assert!(
-        !world
-            .facts()
-            .iter()
-            .any(|fact| matches!(fact, Fact::Session { fact: session::Fact::CompletionCancelled { .. } })),
-        "unsent denial invents no provider cancel"
-    );
-    assert_eq!((world.completions().len(), world.wire_bindings().len(), world.prompts().len()), (3, 3, 3));
+    assert!(expected.units <= settings.budget.spend);
+    assert!(!model_calls(&world, b"fake-1").is_empty());
+    assert_eq!(model_calls(&world, b"fake-2").len(), 1);
+    assert!(!model_calls(&world, b"fake-3").is_empty());
+    assert_eq!(world.wire_bindings().len(), world.completions().len());
 }
 
 #[test]
-fn both_native_forms_charge_costly_and_cheap_already_won_parallel_calls_once() {
+fn both_native_forms_account_parallel_children_under_one_budget() {
     for index in 0..2 {
-        for read_then_denied in [false, true] {
-            parallel_story(index, read_then_denied);
-        }
+        parallel_story(index);
     }
 }
 
