@@ -128,6 +128,76 @@ fn a_moved_remote_makes_a_configured_push_stale() {
 }
 
 #[test]
+fn a_commit_before_push_is_recovered_to_the_recorded_target() {
+    let mut first = World::with_push(224);
+    first.line(b"Make the answer 43 and push");
+    assert!(first.drive_to_cut(600, Cut::AfterCommit(0)));
+    assert_eq!(first.remote_head(), Some(1));
+    let mut second = World::with_git_change_store(225, first.into_store());
+    second.line(b"What landed?");
+    assert!(second.drive_to_cut(600, Cut::AfterSaveDelivery));
+    assert_eq!(second.remote_head(), Some(2), "recovery uses the saved target despite changed configuration");
+    assert!(matches!(second.delivery(), Some(smith_domain::run::Delivery::Delivered(_))));
+    assert_eq!(second.delivery_commits(), 1);
+}
+
+#[test]
+fn a_push_effect_before_its_terminal_is_recovered_as_delivered() {
+    let mut first = World::with_push(226);
+    first.line(b"Make the answer 43 and push");
+    assert!(first.drive_to_cut(600, Cut::BeforePushTerminal));
+    assert_eq!(first.remote_head(), Some(2));
+    let mut second = World::with_push_store(227, first.into_store());
+    second.line(b"What landed?");
+    assert!(second.drive_to_cut(600, Cut::AfterSaveDelivery));
+    assert_eq!(second.remote_head(), Some(2));
+    assert!(matches!(second.delivery(), Some(smith_domain::run::Delivery::Delivered(_))));
+    assert_eq!(second.delivery_commits(), 1);
+}
+
+#[test]
+fn a_push_terminal_before_the_saved_answer_is_recovered_as_delivered() {
+    let mut first = World::with_push(228);
+    first.line(b"Make the answer 43 and push");
+    assert!(first.drive_to_cut(600, Cut::AfterPushTerminal));
+    assert_eq!(first.remote_head(), Some(2));
+    let mut second = World::with_push_store(229, first.into_store());
+    second.line(b"What landed?");
+    assert!(second.drive_to_cut(600, Cut::AfterSaveDelivery));
+    assert_eq!(second.remote_head(), Some(2));
+    assert!(matches!(second.delivery(), Some(smith_domain::run::Delivery::Delivered(_))));
+    assert_eq!(second.delivery_commits(), 1);
+}
+
+#[test]
+fn a_recovered_push_whose_remote_moved_is_stale() {
+    let mut first = World::with_moved_remote(230);
+    first.line(b"Make the answer 43 and push");
+    assert!(first.drive_to_cut(600, Cut::AfterCommit(0)));
+    let mut second = World::with_moved_remote_store(231, first.into_store());
+    second.line(b"What landed?");
+    assert!(second.drive_to_cut(600, Cut::AfterSaveDelivery));
+    assert!(matches!(second.delivery(), Some(smith_domain::run::Delivery::Stale)));
+    assert_eq!(second.delivery_commits(), 1);
+}
+
+#[test]
+fn a_recovered_push_failure_keeps_its_local_commit_receipt() {
+    let mut first = World::with_push(232);
+    first.line(b"Make the answer 43 and push");
+    assert!(first.drive_to_cut(600, Cut::AfterCommit(0)));
+    let mut second = World::with_push_store(233, first.into_store());
+    second.fail_next_push();
+    second.line(b"What landed?");
+    assert!(second.drive_to_cut(600, Cut::AfterSaveDelivery));
+    let Some(smith_domain::run::Delivery::Failed(failure)) = second.delivery() else { panic!("push failed") };
+    assert_eq!(failure.directory, 0);
+    assert_eq!(failure.reason, smith_domain::run::DeliveryReason::Broken);
+    assert_eq!(failure.diagnostic.output(), b"simulated push failure");
+    assert_eq!(second.delivery_commits(), 1);
+}
+
+#[test]
 fn a_crash_after_a_commit_tells_the_resumed_run_what_was_committed() {
     let mut first = World::with_git_change(201);
     first.line(b"Make the answer 43");

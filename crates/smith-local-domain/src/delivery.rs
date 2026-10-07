@@ -69,7 +69,9 @@ impl InPlace {
     }
 
     pub(crate) fn directory(&mut self, directory: u32, changed: bool, head: Option<Box<[u8]>>) {
-        self.directories.push(IntentDirectory { directory, changed, head }).expect("admitted directory count");
+        self.directories
+            .push(IntentDirectory { directory, changed, head, push: None })
+            .expect("admitted directory count");
     }
 
     pub(crate) fn result(self) -> run::Delivery {

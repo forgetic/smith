@@ -82,6 +82,9 @@ impl Remote for History {
         if branch != b"main" {
             return Err(Fault::Missing(What::Branch));
         }
+        if self.branch == commit {
+            return Ok(Pushed::Pushed);
+        }
         if expected.is_some_and(|head| self.branch != head) {
             return Ok(Pushed::Rejected);
         }

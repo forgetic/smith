@@ -59,6 +59,14 @@ fn a_named_commit_missing_from_the_saved_answer_is_rejected() {
 }
 
 #[test]
+fn a_delivered_target_without_its_remote_commit_is_rejected() {
+    broken(
+        vec![Seen::DeliveredTarget { remote_matches: false }],
+        "delivered target names its commit on the fake remote",
+    );
+}
+
+#[test]
 fn a_commit_of_a_tree_changed_after_checks_is_rejected() {
     let checked = std::collections::BTreeMap::from([(b"answer".to_vec(), b"43".to_vec())]);
     let changed = std::collections::BTreeMap::from([(b"answer".to_vec(), b"44".to_vec())]);

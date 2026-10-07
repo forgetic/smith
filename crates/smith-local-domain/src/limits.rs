@@ -44,10 +44,12 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_mul(u64::try_from(size_of::<run::charter::Llm>()).ok()?)?
         .checked_add(u64::from(limits.models).checked_mul(u64::from(limits.text_bytes))?)?;
     let accounts = u64::from(limits.agent.accounts).checked_mul(u64::try_from(size_of::<u32>()).ok()?)?;
+    let targets = u64::from(limits.agent.run.directories).checked_mul(u64::from(limits.text_bytes))?.checked_mul(2)?;
     let configuration = u64::from(limits.chat_bytes)
         .checked_add(u64::from(limits.text_bytes).checked_mul(2)?)?
         .checked_add(endpoints)?
         .checked_add(accounts)?
+        .checked_add(targets)?
         .checked_add(limits.agent.run.run_bytes)?;
     let lines = Queue::<Token>::worst_case(limits.lines)?
         .checked_add(u64::from(limits.lines).checked_mul(u64::from(limits.line_bytes))?)?;
@@ -60,12 +62,17 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let child_out = Queue::<agent::Request>::worst_case(agent::max_out(&limits.agent))?
         .checked_add(u64::from(agent::max_out(&limits.agent)).checked_mul(record.max(limits.agent.run.run_bytes))?)?;
     let held = Queue::<AgentIo>::worst_case(1)?.checked_add(limits.agent.session.completion_bytes)?;
-    let answered = Map::<run::CallName, DeliveryRecord>::worst_case(limits.agent.run.answered_calls)?
-        .checked_add(u64::from(limits.agent.run.answered_calls).checked_mul(run::Delivered::worst_case())?)?;
+    let intent = skein_lib::List::<IntentDirectory>::worst_case(run::MAX_DIRECTORIES)?
+        .checked_add(u64::from(run::MAX_DIRECTORIES).checked_mul(u64::try_from(run::Receipt::CAPACITY).ok()?)?)?
+        .checked_add(targets)?;
+    let answered = Map::<run::CallName, DeliveryRecord>::worst_case(limits.agent.run.answered_calls)?.checked_add(
+        u64::from(limits.agent.run.answered_calls).checked_mul(run::Delivered::worst_case().max(intent))?,
+    )?;
     let delivery = skein_lib::List::<run::Receipt>::worst_case(run::MAX_DIRECTORIES)?
         .checked_add(run::Delivered::worst_case().checked_mul(4)?)?
         .checked_add(limits.agent.run.outcome_bytes.checked_mul(2)?)?
         .checked_add(skein_lib::List::<IntentDirectory>::worst_case(run::MAX_DIRECTORIES)?.checked_mul(3)?)?
+        .checked_add(targets.checked_mul(3)?)?
         .checked_add(
             u64::from(run::MAX_DIRECTORIES).checked_mul(u64::try_from(run::Receipt::CAPACITY).ok()?)?.checked_mul(3)?,
         )?

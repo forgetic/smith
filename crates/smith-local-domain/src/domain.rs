@@ -56,11 +56,12 @@ struct Reconcile {
     record: DeliveryRecord,
     next: u32,
     receipts: List<agent::run::Receipt>,
+    pushing: bool,
 }
 
 impl Reconcile {
     fn new(record: DeliveryRecord) -> Self {
-        Self { record, next: 0, receipts: List::with_capacity(agent::run::MAX_DIRECTORIES) }
+        Self { record, next: 0, receipts: List::with_capacity(agent::run::MAX_DIRECTORIES), pushing: false }
     }
 
     fn intent(&self) -> &DeliveryIntent {
@@ -785,9 +786,21 @@ fn advance_delivery(domain: &mut Domain, env: &Env<Limits>, mut in_place: InPlac
     }
 }
 
-fn save_intent(domain: &mut Domain, in_place: InPlace, out: &mut Queue<Request>) {
+fn save_intent(domain: &mut Domain, mut in_place: InPlace, out: &mut Queue<Request>) {
     let mut entries = List::with_capacity(agent::run::MAX_DIRECTORIES);
-    for entry in &in_place.directories {
+    for index in 0..in_place.directories.len() {
+        let entry = in_place.directories.get_mut(index).expect("surveyed directory");
+        if entry.head.is_some() {
+            entry.push = match &domain.config.push {
+                Some(targets) => {
+                    match targets.get(usize::try_from(entry.directory).expect("bounded directory position")) {
+                        Some(target) => target.clone(),
+                        None => None,
+                    }
+                }
+                None => None,
+            };
+        }
         entries.push(entry.clone()).expect("admitted directory count");
     }
     let record = DeliveryRecord {
@@ -959,20 +972,18 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
                     .landed
                     .push(agent::run::Receipt::new(directory, receipt).expect("bounded receipt"))
                     .expect("admitted directories");
-                let target = match &domain.config.push {
-                    Some(targets) => match targets.get(usize::try_from(directory).expect("bounded directory position"))
-                    {
-                        Some(target) => target.as_ref(),
-                        None => None,
-                    },
-                    None => None,
-                };
+                let mut target = None;
+                for entry in &in_place.directories {
+                    if entry.directory == directory {
+                        target.clone_from(&entry.push);
+                    }
+                }
                 if let Some(target) = target {
                     in_place.step = Step::Push;
                     out.push(Request::Git {
                         owner,
                         directory,
-                        op: GitOp::Push { remote: target.remote.clone(), branch: target.branch.clone() },
+                        op: GitOp::Push { remote: target.remote, branch: target.branch },
                         deadline: in_place.deadline,
                     });
                     domain.delivery = Some(in_place);
@@ -1134,6 +1145,32 @@ fn reconcile_git(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: G
         .get(usize::try_from(reconcile.next).expect("bounded position"))
         .expect("position in saved intent")
         .clone();
+    if reconcile.pushing {
+        match result {
+            GitResult::Pushed => {
+                reconcile.pushing = false;
+                reconcile.next = reconcile.next.checked_add(1).expect("admitted position");
+                domain.reconciling = Some(reconcile);
+                reconcile_next(domain, env, out);
+            }
+            GitResult::Stale => reconcile_terminal(domain, reconcile, agent::run::Delivery::Stale, out),
+            GitResult::Failed { reason, diagnostic } => reconcile_terminal(
+                domain,
+                reconcile,
+                agent::run::Delivery::Failed(agent::run::DeliveryFailure {
+                    directory: entry.directory,
+                    reason,
+                    diagnostic: *diagnostic,
+                }),
+                out,
+            ),
+            GitResult::Status { .. }
+            | GitResult::Inspected { .. }
+            | GitResult::Markers { .. }
+            | GitResult::Committed { .. } => unreachable!("recovery awaits one push terminal"),
+        }
+        return;
+    }
     let before = entry.head.expect("inspection applies to a git directory");
     match result {
         GitResult::Inspected { head, named } => {
@@ -1144,9 +1181,23 @@ fn reconcile_git(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: G
                     text.push(*byte).expect("bounded receipt");
                 }
                 reconcile.receipt(entry.directory, text.into_boxed());
-                reconcile.next = reconcile.next.checked_add(1).expect("admitted position");
-                domain.reconciling = Some(reconcile);
-                reconcile_next(domain, env, out);
+                match entry.push {
+                    Some(target) => {
+                        reconcile.pushing = true;
+                        domain.reconciling = Some(reconcile);
+                        out.push(Request::Git {
+                            owner: Token::new(0),
+                            directory: entry.directory,
+                            op: GitOp::Push { remote: target.remote, branch: target.branch },
+                            deadline: env.now.saturating_add(domain.config.budget.time),
+                        });
+                    }
+                    None => {
+                        reconcile.next = reconcile.next.checked_add(1).expect("admitted position");
+                        domain.reconciling = Some(reconcile);
+                        reconcile_next(domain, env, out);
+                    }
+                }
             } else {
                 reconcile_answer(domain, reconcile, Some(entry.directory), out);
             }
@@ -1199,11 +1250,26 @@ fn reconcile_answer(domain: &mut Domain, reconcile: Reconcile, interrupted: Opti
             })
         }
     };
-    let record = DeliveryRecord {
-        name: reconcile.record.name,
-        state: DeliveryState::Answer(answer),
-        landed: landed.into_boxed(),
-    };
+    reconcile_terminal_with_receipts(domain, reconcile.record.name, answer, landed.into_boxed(), out);
+}
+
+fn reconcile_terminal(
+    domain: &mut Domain,
+    reconcile: Reconcile,
+    answer: agent::run::Delivery,
+    out: &mut Queue<Request>,
+) {
+    reconcile_terminal_with_receipts(domain, reconcile.record.name, answer, reconcile.receipts.into_boxed(), out);
+}
+
+fn reconcile_terminal_with_receipts(
+    domain: &mut Domain,
+    name: agent::run::CallName,
+    answer: agent::run::Delivery,
+    landed: Box<[agent::run::Receipt]>,
+    out: &mut Queue<Request>,
+) {
+    let record = DeliveryRecord { name, state: DeliveryState::Answer(answer), landed };
     domain.saving = Some(record.clone());
     out.push(Request::SaveDelivery { record: Box::new(record) });
 }

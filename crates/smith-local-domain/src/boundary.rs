@@ -16,6 +16,8 @@ pub struct IntentDirectory {
     pub changed: bool,
     /// Git head before delivery; absent for a plain directory.
     pub head: Option<Box<[u8]>>,
+    /// Remote target selected before this delivery began, if configured.
+    pub push: Option<crate::PushTarget>,
 }
 
 /// The durable pre-effect record for a delivery.

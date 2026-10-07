@@ -28,6 +28,7 @@ pub struct Store {
     disk: Option<Checkout>,
     history: Option<History>,
     git_head: Option<u64>,
+    git_expected: Option<u64>,
     commits: Vec<(run::CallName, u32)>,
 }
 
@@ -109,6 +110,10 @@ pub enum Cut {
     AfterIntent,
     /// A commit landed, but its result has not reached the host domain.
     AfterCommit(u32),
+    /// A push landed, but its terminal has not reached the host domain.
+    BeforePushTerminal,
+    /// The push terminal reached the host, but its answer has not been saved.
+    AfterPushTerminal,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -140,6 +145,12 @@ enum FirstFailure {
     Reject,
     Exhaust,
     Used,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PushFault {
+    None,
+    Next,
 }
 
 /// Which store request should fail once.
@@ -185,6 +196,7 @@ pub struct World {
     slow_store: bool,
     delayed_turns: VecDeque<u32>,
     slow_git: bool,
+    push_fault: PushFault,
     held_git: VecDeque<(Token, GitResult)>,
     first_failure: FirstFailure,
     credential_requests: u32,
@@ -310,6 +322,12 @@ impl World {
         Self::with_capacity(seed, Store::default(), true, 2, 64, Scenario::PushLands)
     }
 
+    /// Resume a configured push after a crash cut.
+    #[must_use]
+    pub fn with_push_store(seed: u64, store: Store) -> World {
+        Self::with_capacity(seed, store, true, 2, 64, Scenario::PushLands)
+    }
+
     /// A configured git change whose branch moved before push.
     #[must_use]
     pub fn with_moved_remote(seed: u64) -> World {
@@ -404,7 +422,7 @@ impl World {
         let mut disk = saved_disk.unwrap_or_default();
         let mut history = store.history.take();
         let mut git_head = store.git_head.take();
-        let git_expected = git_head.or(Some(1));
+        let git_expected = store.git_expected.take().or(git_head).or(Some(1));
         let workspace = if scenario == Scenario::Chat {
             None
         } else {
@@ -615,6 +633,7 @@ impl World {
             slow_store: false,
             delayed_turns: VecDeque::new(),
             slow_git: false,
+            push_fault: PushFault::None,
             held_git: VecDeque::new(),
             first_failure: FirstFailure::None,
             credential_requests: 0,
@@ -632,6 +651,7 @@ impl World {
         self.store.disk = Some(self.disk);
         self.store.history = self.history;
         self.store.git_head = self.git_head;
+        self.store.git_expected = self.git_expected;
         self.store.commits = self.commits;
         self.store
     }
@@ -654,6 +674,11 @@ impl World {
     /// Delay typed git terminals until the story releases them.
     pub fn slow_git(&mut self) {
         self.slow_git = true;
+    }
+
+    /// Fail the next typed push operation.
+    pub fn fail_next_push(&mut self) {
+        self.push_fault = PushFault::Next;
     }
 
     /// Release one git terminal already computed by the fake checkout.
@@ -783,6 +808,10 @@ impl World {
         self.drive_until(iterations, Goal::Waiting)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the world drives one full boundary round with the crash cut beside each event"
+    )]
     fn drive_until(&mut self, iterations: u32, goal: Goal) -> bool {
         for _ in 0..iterations {
             if self.domain.is_ready() {
@@ -790,6 +819,7 @@ impl World {
                 self.gather_facts();
             }
             if let Some(event) = self.events.pop_front() {
+                let pushed = matches!(&event, Event::Git { result: GitResult::Pushed, .. });
                 let saved = match &event {
                     Event::TurnSaved { number } => {
                         self.observe(Seen::TurnSaved { number: *number });
@@ -823,6 +853,10 @@ impl World {
                 };
                 local::step(&mut self.domain, &self.env, event, &mut self.out);
                 self.gather_facts();
+                if pushed && self.cut == Some(Cut::AfterPushTerminal) {
+                    self.reached.insert(Goal::Cut);
+                    return true;
+                }
                 if let (Some(Cut::AfterTurnSaved(target)), Some(number)) = (self.cut, saved)
                     && target == number
                 {
@@ -978,6 +1012,19 @@ impl World {
                 let intent = matches!(record.state, DeliveryState::Intent(_));
                 let receipts = record.landed.iter().map(run::Receipt::directory).collect();
                 self.observe(Seen::DeliveryRecorded { name, intent, receipts });
+                if matches!(&record.state, DeliveryState::Answer(run::Delivery::Delivered(_))) {
+                    let targeted = self.store.deliveries.get(&name).is_some_and(|prior| match &prior.state {
+                        DeliveryState::Intent(intent) => {
+                            intent.directories.iter().any(|entry| entry.push.is_some() && entry.changed)
+                        }
+                        DeliveryState::Answer(_) => false,
+                    });
+                    if targeted {
+                        self.observe(Seen::DeliveredTarget {
+                            remote_matches: self.history.as_ref().map(History::remote_head) == self.git_head,
+                        });
+                    }
+                }
                 if let DeliveryState::Answer(delivery) = &record.state {
                     self.last_delivery = Some(delivery.clone());
                 }
@@ -1017,10 +1064,17 @@ impl World {
                 self.events.push_back(Event::PlainStatus { owner, changed });
             }
             Request::Git { owner, directory, op, deadline } => {
+                let pushing = matches!(op, GitOp::Push { .. });
                 let result = if self.env.now > deadline {
                     GitResult::Failed {
                         reason: run::DeliveryReason::TimedOut,
                         diagnostic: Box::new(run::Diagnostic::empty()),
+                    }
+                } else if pushing && self.push_fault == PushFault::Next {
+                    self.push_fault = PushFault::None;
+                    GitResult::Failed {
+                        reason: run::DeliveryReason::Broken,
+                        diagnostic: Box::new(run::Diagnostic::new(b"simulated push failure", 0)),
                     }
                 } else if directory == 1 {
                     match op {
@@ -1053,6 +1107,9 @@ impl World {
                     if self.cut == Some(Cut::AfterCommit(directory)) {
                         self.reached.insert(Goal::Cut);
                     }
+                }
+                if pushing && matches!(result, GitResult::Pushed) && self.cut == Some(Cut::BeforePushTerminal) {
+                    self.reached.insert(Goal::Cut);
                 }
                 if self.slow_git {
                     self.held_git.push_back((owner, result));

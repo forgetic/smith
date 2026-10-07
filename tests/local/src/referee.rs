@@ -34,6 +34,8 @@ pub enum Seen {
     Completed { owner: Token },
     /// One delivery answer reached the typed store.
     DeliveryRecorded { name: CallName, intent: bool, receipts: Vec<u32> },
+    /// A delivered target's remote names the local committed head.
+    DeliveredTarget { remote_matches: bool },
     /// The store confirmed the record is durable.
     DeliverySaved { name: CallName, intent: bool },
     /// The local domain then returned that answer to the child.
@@ -203,6 +205,9 @@ impl Expectations for Meeting {
                     judge.check(committed.is_subset(&included), "every named commit is in the saved delivery answer");
                     self.pending_answers.insert(key);
                 }
+            }
+            Seen::DeliveredTarget { remote_matches } => {
+                judge.check(remote_matches, "delivered target names its commit on the fake remote");
             }
             Seen::DeliverySaved { name, intent } => {
                 let key = call_key(name);
