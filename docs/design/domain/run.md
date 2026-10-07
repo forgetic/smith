@@ -124,7 +124,8 @@ not text counts as no guide.
 ## 4. What a run does
 
 1. **Admits** a start, or refuses it at the entrance: busy, or invalid
-   (a charter in a version it does not read, a window of unacknowledged
+   (a charter in a version it does not read, a charter that does not
+   decode, a window of unacknowledged
    turns that cannot hold one turn, beyond the agent's `Limits`,
    an endpoint it is not configured with, a host tool whose name is
    smith's or appears twice, a contract that cannot be met).

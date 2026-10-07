@@ -122,6 +122,9 @@ already has from the delivery's own answer (channel.md, section 3).
   versions in its range, translates an older charter into its current
   domain's terms, and refuses any other version as an invalid start
   (domain/run.md, section 4).
+- **A charter that does not decode** in a version the agent reads is an
+  invalid start too, with a reason of its own: its writer has a bug to
+  fix, where another version only needs an agent that reads it.
 - **The result is written in the charter's version,** so the charter's
   writer reads what it asked for, whatever release its agents run.
 - **A writer writes its current version.** How long agents keep reading old
