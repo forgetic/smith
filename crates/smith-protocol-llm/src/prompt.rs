@@ -7,7 +7,7 @@ use core::mem::size_of;
 use skein_json::Token;
 use skein_lib::{List, bytes};
 use skein_llm::{self as shared, Error};
-use smith_domain::{llm, tools};
+use smith_domain::{llm, run, tools};
 
 use crate::types::{Context, Input, Prepared, ResultText, ToolKind, ToolSchema};
 use crate::{Limits, worst_case};
@@ -31,6 +31,20 @@ pub fn prepare(input: Input, limits: &Limits) -> Result<Prepared, Error> {
         &limits.client,
     )?;
     Ok(Prepared { client, context: Context { owner, grants, served, application, receiving, limits: *limits } })
+}
+
+/// Prepare a call with Smith's schemas derived from the admitted charter.
+/// The supplied application's transitional descriptors are replaced; the
+/// charter and the prompt, rather than a caller override, choose every tool.
+pub fn prepare_for_contract(
+    mut input: Input,
+    outcome: &run::outcome::OutcomeSpec,
+    deliver: Option<&run::outcome::ChangeSpec>,
+    limits: &Limits,
+) -> Result<Prepared, Error> {
+    input.application =
+        crate::tools::schemas_for_contract(&input.prompt, outcome, deliver, limits.client.dialect.document_bytes)?;
+    prepare(input, limits)
 }
 
 /// Pure application prompt translation, including whole supplied tool schemas.

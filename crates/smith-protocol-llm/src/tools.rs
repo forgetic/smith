@@ -6,6 +6,8 @@
 use alloc::boxed::Box;
 
 use skein_lib::List;
+use skein_llm::Error;
+use smith_domain::run;
 use smith_domain::{llm, tools};
 
 use crate::{ToolKind, ToolSchema};
@@ -90,6 +92,30 @@ pub fn schemas(prompt: &llm::Prompt) -> Box<[ToolSchema]> {
         }
     }
     descriptors.into_boxed()
+}
+
+/// The offered inventory with finish and deliver derived from the charter's
+/// admitted rules. The caller supplies a separate deliver rule only when that
+/// mid-run tool was granted.
+pub fn schemas_for_contract(
+    prompt: &llm::Prompt,
+    outcome: &run::outcome::OutcomeSpec,
+    deliver: Option<&run::outcome::ChangeSpec>,
+    maximum: u32,
+) -> Result<Box<[ToolSchema]>, Error> {
+    let mut inventory = List::with_capacity(10);
+    for mut descriptor in schemas(prompt) {
+        match descriptor.kind {
+            ToolKind::Finish => descriptor.schema = crate::contract::finish_schema(outcome, maximum)?,
+            ToolKind::Deliver => {
+                let change = deliver.ok_or(Error::Invalid)?;
+                descriptor.schema = crate::contract::deliver_schema(change, maximum)?;
+            }
+            ToolKind::Owned(_) | ToolKind::SubAgent | ToolKind::Wait => {}
+        }
+        inventory.push(descriptor).or(Err(Error::Limit))?;
+    }
+    Ok(inventory.into_boxed())
 }
 
 fn add(descriptors: &mut List<ToolSchema>, schema: ToolSchema) {
