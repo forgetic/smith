@@ -111,12 +111,22 @@ pub fn schema(limits: &v1::Limits) -> Result<Schema, Overflow> {
 /// Contract: `protocol/channel.md`, section 2.
 #[must_use]
 pub fn peer_terms_gap(schema: &Schema, role: Role, version: u16, terms: &List<Term>) -> Option<u16> {
+    required_terms_gap(schema, role, version, terms, V1)
+}
+
+fn required_terms_gap(
+    schema: &Schema,
+    role: Role,
+    version: u16,
+    terms: &List<Term>,
+    rules: &[KindRule],
+) -> Option<u16> {
     let sending = match role {
         Role::Initiator => Direction::FromInitiator,
         Role::Responder => Direction::FromResponder,
     };
     let table = schema.version(version)?;
-    for rule in V1 {
+    for rule in rules {
         if rule.direction == sending && rule.required {
             let own = table.kind(rule.kind)?;
             let mut accepted = false;
@@ -131,4 +141,36 @@ pub fn peer_terms_gap(schema: &Schema, role: Role, version: u16, terms: &List<Te
         }
     }
     None
+}
+
+#[cfg(test)]
+mod optional_tests {
+    use super::{Body, KindRule, required_terms_gap};
+    use skein_channel::{Direction, Kind, Role, Schema, Term, Version};
+    use skein_lib::List;
+
+    #[test]
+    fn an_older_peer_may_leave_a_test_only_optional_kind_out() {
+        let rules = [
+            KindRule { kind: 0x0100, direction: Direction::FromInitiator, required: true, body: Body::Start },
+            KindRule { kind: 0x0101, direction: Direction::FromInitiator, required: false, body: Body::Message },
+            KindRule { kind: 0x0102, direction: Direction::FromResponder, required: true, body: Body::Answer },
+            KindRule { kind: 0x0103, direction: Direction::FromResponder, required: false, body: Body::Fact },
+        ];
+        let mut kinds = List::with_capacity(4);
+        for rule in rules {
+            kinds.push(Kind { kind: rule.kind, direction: rule.direction, largest: 32 }).expect("four test kinds");
+        }
+        let mut versions = List::with_capacity(1);
+        versions.push(Version { version: 1, kinds }).expect("one test version");
+        let schema = Schema { magic: *b"smth", versions };
+        let mut host_terms = List::with_capacity(1);
+        host_terms.push(Term { kind: 0x0100, largest: 32 }).expect("one required kind");
+        assert_eq!(required_terms_gap(&schema, Role::Initiator, 1, &host_terms, &rules), None);
+        assert_eq!(required_terms_gap(&schema, Role::Initiator, 1, &List::with_capacity(0), &rules), Some(0x0100));
+        let mut agent_terms = List::with_capacity(1);
+        agent_terms.push(Term { kind: 0x0102, largest: 32 }).expect("one required kind");
+        assert_eq!(required_terms_gap(&schema, Role::Responder, 1, &agent_terms, &rules), None);
+        assert_eq!(required_terms_gap(&schema, Role::Responder, 1, &List::with_capacity(0), &rules), Some(0x0102));
+    }
 }
