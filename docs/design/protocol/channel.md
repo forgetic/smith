@@ -101,12 +101,11 @@ of domain/host.md, section 2.
   - for a merge in progress, the files left in conflict;
 - **the transcript,** if the run resumes: its turns' bytes, in order, as
   they were told (transcript.md);
-- **the calls answered after the last turn,** each a name and an answer.
-  Each names a call that the transcript's last turn holds without a
-  result, and the run restores it as that call's result
-  (domain/session.md, section 3). A call whose turn was never told is not
-  among them: its host tells of it as text in a waking message
-  (domain/run.md, section 6);
+- **the calls the transcript does not hold as answered,** that the host
+  answered: a call whose turn was never told, or one the run withdrew and
+  the host decided later. Each is a name, the tool, and its answer. The run
+  tells the LLM of them as text in its waking prompt, since they have no
+  open place in the history to go back to (domain/run.md, section 6);
 - **the grants** the charter's endpoints need;
 - **the window:** how many turns, and how many bytes of them, may be
   unacknowledged (section 7). It must hold at least one turn of the largest
@@ -272,8 +271,8 @@ one is kept is the agent's configuration (agent.md).
   each way, and over a socket-like stream.
 - **Its stories:**
   - a run from start to answer;
-  - a run resumed from a transcript, with calls answered after its last
-    turn restored as their results;
+  - a run resumed from a transcript, with calls answered that the
+    transcript does not hold as answered;
   - a run parked, resumed and parked again, its turns numbered from one on
     the channel each time and without a gap in the conversation;
   - a host tool answered as the agent loses its channel, before

@@ -134,8 +134,8 @@ what its host's protocol layer would do:
   flushed before the turn is acknowledged (channel.md, section 7).
 - **A chat's transcript** is its turns' files, in order (transcript.md,
   section 3).
-- **The calls answered after the last turn** are kept the same way, until
-  the next turn makes them part of the history.
+- **Answers the transcript lacks** are kept the same way, until a waking
+  prompt has told the LLM of them and a turn has been kept after it.
 
 ### 5.4 Signing in
 

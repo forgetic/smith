@@ -64,10 +64,11 @@ resumes, as it did when the call was made.
 
 - **Its turns, in order,** each as its own bytes. They must share a version,
   an endpoint and a dialect, and be numbered without a gap.
-- **The calls answered after the last turn** are not part of it. The start
-  carries them beside it, each a call's name and its answer, and the run
-  restores each as the result of the call the last turn holds
-  (channel.md, section 3).
+- **Answers the transcript lacks** are not part of it. A call whose turn
+  was never told, or one the run withdrew and its host decided later, has
+  no open place in the history. The start carries the host's answers to
+  them beside the transcript, and the run tells the LLM of them as text in
+  its waking prompt (channel.md, section 3).
 
 What a host keeps is therefore the turns' bytes, and nothing it must
 assemble.

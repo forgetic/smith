@@ -235,11 +235,12 @@ host tool for it, as temper's `delegate` does.
   the host already has, so it hands over nothing else.
 - **Resuming.** A run whose charter resumes opens its main session from
   the transcript in its start, its turns as they were, provider blocks
-  included; adds the calls its host answered after the last of them, with
-  their answers, so the LLM does not ask them again; and goes on with the
-  messages that woke it. A call answered whose turn was never told (the
-  agent stopped between the two) is not in the transcript: the host tells
-  of it, as text, in a waking message. A transcript it cannot use
+  included; tells the LLM, as text in its waking prompt, of the calls its
+  host answered that the transcript does not hold as answered (one whose
+  turn was never told, the agent having stopped between the two, or one
+  the run withdrew and its host decided later), with their answers, so the
+  LLM does not ask them again; and goes on with the messages that woke
+  it. A transcript it cannot use
   (another version, another provider or endpoint, malformed, too large)
   fails the run as transient, saying which (session.md, section 3), and
   the host decides what the next run starts from. A run that does not
