@@ -614,7 +614,7 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
                 domain.run = Some(run);
                 send_line(domain, env);
             }
-            agent::Request::Turn { host_run: _, number, read, spent: _, turn } => {
+            agent::Request::Turn { host_run: _, number, position: _, read, spent: _, turn } => {
                 if domain.stop_failed {
                     continue;
                 }

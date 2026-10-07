@@ -376,7 +376,14 @@ pub(crate) fn turn(domain: &mut Domain, conversation: Token, record: Token, sequ
         run.read = Some(name);
     }
     domain.facts.about(conversation.run.token());
-    out.push(Request::Turn { host_run: run.host_name, record, number: run.turns, read: run.read, spent: run.spent });
+    out.push(Request::Turn {
+        host_run: run.host_name,
+        record,
+        number: run.turns,
+        position: sequence,
+        read: run.read,
+        spent: run.spent,
+    });
 }
 
 pub(crate) fn park(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request>) {

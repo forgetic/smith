@@ -421,12 +421,13 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
             return out.push(Request::Answer { to, answer });
         }
         run::Request::Waiting { host_run, read } => return out.push(Request::Waiting { host_run, read }),
-        run::Request::Turn { host_run, record, number, read, spent } => {
+        run::Request::Turn { host_run, record, number, position, read, spent } => {
             let id = Id::<TurnHandoff>::from_token(record);
             let handoff = domain.turns.get_mut(id).expect("root issued the concrete turn binding");
             let turn = handoff.turn.take().expect("one actual output takes the concrete body");
+            assert_eq!(turn.sequence, position, "run and record name the same conversation turn");
             domain.turns.retire(id);
-            return out.push(Request::Turn { host_run, number, read, spent, turn });
+            return out.push(Request::Turn { host_run, number, position, read, spent, turn });
         }
         run::Request::Checking { host_run, deadline } => return out.push(Request::Checking { host_run, deadline }),
         run::Request::Deliver { host_run, owner, change, name, deadline } => {

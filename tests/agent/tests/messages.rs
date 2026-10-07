@@ -112,6 +112,32 @@ fn parked_transcript_resumes_without_recharging_history_or_reusing_activation_nu
 }
 
 #[test]
+fn a_run_parked_resumed_and_parked_again_numbers_turns_from_one_each_time_without_a_gap_in_the_conversation() {
+    let mut first = World::new(waiting(920));
+    first.run(2000);
+    assert!(matches!(first.answer(), run::Answer::Parked { turns: 2, .. }));
+    let first_numbers = first.turn_metadata().iter().map(|(number, _, _)| *number).collect::<Vec<_>>();
+    assert_eq!(first_numbers, [1, 2]);
+    assert_eq!(first.turns().iter().map(|turn| turn.sequence).collect::<Vec<_>>(), [1, 2]);
+
+    let mut second = World::with_history(Settings { resume: true, ..waiting(921) }, Some(history(&first)));
+    second.run(2000);
+    assert!(matches!(second.answer(), run::Answer::Parked { turns: 2, .. }));
+    assert_eq!(second.turn_metadata().iter().map(|(number, _, _)| *number).collect::<Vec<_>>(), [1, 2]);
+    assert_eq!(second.turns().iter().map(|turn| turn.sequence).collect::<Vec<_>>(), [3, 4]);
+
+    let mut continued = history(&first);
+    let mut turns = continued.turns.into_vec();
+    turns.extend_from_slice(second.turns());
+    continued.turns = turns.into_boxed_slice();
+    let mut third = World::with_history(Settings { resume: true, ..waiting(922) }, Some(continued));
+    third.run(2000);
+    assert!(matches!(third.answer(), run::Answer::Parked { turns: 2, .. }));
+    assert_eq!(third.turn_metadata().iter().map(|(number, _, _)| *number).collect::<Vec<_>>(), [1, 2]);
+    assert_eq!(third.turns().iter().map(|turn| turn.sequence).collect::<Vec<_>>(), [5, 6]);
+}
+
+#[test]
 fn a_resumed_run_is_told_of_each_answer_its_transcript_lacks() {
     let mut first = World::new(Settings { job: Job::HostTools, ..Settings::calm(905) });
     first.run(2000);

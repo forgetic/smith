@@ -219,6 +219,9 @@ pub enum Request {
         /// One-based output number within this activation.
         number: u32,
 
+        /// One-based place in the conversation, including restored turns.
+        position: u32,
+
         /// Latest message consumed by this turn.
         read: Option<Token>,
 

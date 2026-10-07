@@ -1012,7 +1012,7 @@ impl World {
     )]
     fn request(&mut self, request: Request) {
         match request {
-            Request::Turn { host_run, number, read, spent, turn } => {
+            Request::Turn { host_run, number, position: _, read, spent, turn } => {
                 assert_eq!(host_run, Token::new(1));
                 assert_eq!(usize::try_from(number).expect("bounded output number"), self.turns.len() + 1);
                 self.observe(Seen::Turn { number });

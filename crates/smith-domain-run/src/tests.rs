@@ -2326,7 +2326,14 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_main_turn() {
     );
     assert_eq!(
         &*h.step(Event::Turn { conversation, record: Token::new(50), sequence: 1 }),
-        &[Request::Turn { host_run: Token::new(1), record: Token::new(50), number: 1, read: None, spent: Spend::ZERO }]
+        &[Request::Turn {
+            host_run: Token::new(1),
+            record: Token::new(50),
+            number: 1,
+            position: 1,
+            read: None,
+            spent: Spend::ZERO
+        }]
     );
     assert_eq!(
         &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }),
@@ -2348,6 +2355,7 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_main_turn() {
                 host_run: Token::new(1),
                 record: Token::new(u64::from(sequence)),
                 number: sequence,
+                position: sequence,
                 read: Some(Token::new(read)),
                 spent: Spend::ZERO
             }]
@@ -2409,7 +2417,14 @@ fn zero_waiting_time_parks_when_main_yields() {
     );
     assert_eq!(
         harness.step(Event::Turn { conversation, record: Token::new(73), sequence: 1 }).as_ref(),
-        [Request::Turn { host_run: Token::new(70), record: Token::new(73), number: 1, read: None, spent: Spend::ZERO }]
+        [Request::Turn {
+            host_run: Token::new(70),
+            record: Token::new(73),
+            number: 1,
+            position: 1,
+            read: None,
+            spent: Spend::ZERO
+        }]
     );
     assert_eq!(
         harness.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"idle") }).as_ref(),
@@ -2437,6 +2452,7 @@ fn bounded_message_and_input_at_idle_deadline_preserve_existing_fifo() {
             host_run: Token::new(1),
             record: Token::new(40),
             number: 1,
+            position: 1,
             read: Some(Token::new(5)),
             spent: Spend::ZERO
         }]

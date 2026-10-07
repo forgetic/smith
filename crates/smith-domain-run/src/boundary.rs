@@ -1,6 +1,7 @@
 //! The records that cross the boundary with the run's parent, the top-level
 //! domain (programming-model.md, section 4.5). The run defines them; its parent depends on it.
-//! Contracts: domain/run.md, sections 3, 5, 6, 8, 9 and 10.
+//! Contracts: domain/run.md, sections 3, 5, 6, 8, 9 and 10;
+//! protocol/channel.md, sections 4 and 5; protocol/transcript.md, section 2.
 //!
 //! All three of the run's faces cross here:
 //!
@@ -219,6 +220,9 @@ pub enum Request {
 
         /// One-based activation-local output number.
         number: u32,
+
+        /// One-based place in the conversation, including restored turns.
+        position: u32,
 
         /// Latest message actually consumed by this turn.
         read: Option<Token>,
