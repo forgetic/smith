@@ -258,3 +258,11 @@ Configured local pushes were measured serially on 2026-10-06 with
 The two added stories cover a push that lands and a remote branch that
 moved before the push. The existing one-test, 64-seed local fuzzy sweep
 remains. The workspace and local-world budgets are unchanged.
+
+The protocol codec world was measured serially on 2026-10-07 with
+`measure -j 1`: eleven focused tests passed in 0.112 seconds and one fuzzy
+decoder test in 0.061 seconds. The focused tests cover generated goldens,
+drift, version and kind tables, and bounded charter and turn decoding. The
+fuzzy test drives all 20 top-level records with arbitrary and mutated bytes.
+The world's one-second focused and five-second fuzzy shares, and workspace
+budgets, are unchanged.

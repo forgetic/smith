@@ -15,6 +15,7 @@ skein-lib = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-codec = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-codegen = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-channel = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-heap = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-io = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-http = { git = "https://git.ekanayaka.io/ai/skein.git" }

@@ -207,6 +207,7 @@ dependencies = [
  "skein-channel",
  "skein-codec",
  "skein-codegen",
+ "skein-heap",
  "skein-lib",
  "smith-channel",
  "smith-charter",

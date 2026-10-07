@@ -13,9 +13,9 @@ extern crate alloc;
 pub mod v2;
 
 pub use v2::{
-    Ambiguous, AmbiguousParts, Block, Call, CallParts, CallProblem, CommandEnd, CommandEndParts, Edited, EditedParts,
-    Entry, EntryParts, Exit, ExitCode, ExitCodeParts, ExitSignal, ExitSignalParts, Failed, FailedParts, Fault,
-    FieldProblem, FieldProblemParts, Found, FoundParts, Hit, HitParts, Invalid, InvalidParts, Kind, LineNumber,
+    Ambiguous, AmbiguousParts, Block, CEILINGS, Call, CallParts, CallProblem, CommandEnd, CommandEndParts, Edited,
+    EditedParts, Entry, EntryParts, Exit, ExitCode, ExitCodeParts, ExitSignal, ExitSignalParts, Failed, FailedParts,
+    Fault, FieldProblem, FieldProblemParts, Found, FoundParts, Hit, HitParts, Invalid, InvalidParts, Kind, LineNumber,
     LineNumberParts, Listed, ListedParts, Message, MessageParts, Opaque, OpaqueParts, Outcome, OwnedOutcome,
     OwnedOutcomeParts, Read, ReadParts, Replay, ReplayParts, Returned, Role, Said, SaidParts, Text, TextParts,
     TooLarge, TooLargeParts, ToolResult, ToolResultParts, Turn, TurnParts, Usage, UsageParts, Written, WrittenParts,
