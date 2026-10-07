@@ -234,3 +234,19 @@ fn a_model_failure_keeps_transport_evidence_and_cooldown() {
     assert!(matches!(fault.evidence(), smith_channel::CompletionEvidence::Response));
     assert_eq!(fault.retry_after(), &Some(skein_lib::Duration::from_nanos(42)));
 }
+
+#[test]
+fn the_start_keeps_workspace_paths_saved_answers_and_grant_values_below_the_domain() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start_with_context(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentContext {
+        path: Box::from(*b"/tmp/src"),
+        answered: 1,
+        credential: Box::from(*b"secret"),
+        window: 2,
+    }));
+}

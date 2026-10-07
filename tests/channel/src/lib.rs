@@ -27,6 +27,8 @@ pub enum Observation {
     AgentEnded(Closed),
     /// Agent received a valid Start body.
     AgentStart,
+    /// Agent Start kept mount paths, post-transcript answers and credential values below the domain.
+    AgentContext { path: Box<[u8]>, answered: usize, credential: Box<[u8]>, window: u32 },
     /// Host received an invalid Start answer.
     InvalidStart { why: smith_channel::InvalidStart, turns: u32, spent: u64 },
     /// Host received admission before the final answer.
@@ -153,7 +155,20 @@ impl Peer {
         while let Some(event) = self.agent_events.pop() {
             match event {
                 agent::OpenEvent::Opened { version } => output.push(Observation::AgentOpened(version)),
-                agent::OpenEvent::Start { .. } => output.push(Observation::AgentStart),
+                agent::OpenEvent::Start { start } => {
+                    output.push(Observation::AgentStart);
+                    if let Some(mounts) = &start.mounts
+                        && let Some(mount) = mounts.first()
+                        && let Some(grant) = start.grants.first()
+                    {
+                        output.push(Observation::AgentContext {
+                            path: mount.path.clone(),
+                            answered: start.answered.len(),
+                            credential: grant.credential.clone(),
+                            window: start.window.turns,
+                        });
+                    }
+                }
                 agent::OpenEvent::Ended { why } => output.push(Observation::AgentEnded(why)),
             }
         }
@@ -228,6 +243,47 @@ impl World {
                 start,
                 smith_host_domain::channel::Window { turns: 1, bytes: 1_000_000_000 },
                 smith_host_protocol::Values { paths: Box::default(), credentials: Box::default() },
+                skein_lib::Token::new(2),
+                &mut self.host.host_events,
+                &mut self.host.below,
+            )
+            .expect("bounded Start");
+        }
+    }
+
+    /// Send one Start with a mount, a saved host decision and a grant value.
+    pub fn send_start_with_context(&mut self, charter: Box<[u8]>) {
+        let start = smith_host_domain::channel::Start {
+            logical_run: skein_lib::Token::new(1),
+            activation: 7,
+            workspace: Some(skein_lib::Token::new(2)),
+            charter,
+            transcript: None,
+            answered: Box::from([smith_host_domain::channel::AnsweredCall {
+                name: smith_host_domain::channel::CallName { activation: 6, completion: 1, position: 0 },
+                tool: Box::from(*b"check"),
+                reply: smith_host_domain::channel::Reply::Host { error: false, body: Box::from(*b"ok") },
+            }]),
+            directories: Box::from([smith_host_domain::channel::Directory {
+                name: Box::from(*b"src"),
+                writable: true,
+                git: true,
+                conflicts: Box::default(),
+            }]),
+            grants: Box::from([smith_host_domain::channel::Grant {
+                account: 3,
+                generation: 4,
+                valid: skein_lib::Duration::from_nanos(5),
+            }]),
+        };
+        if let Half::Host(host) = &mut self.host.half {
+            host.send_start(
+                start,
+                smith_host_domain::channel::Window { turns: 2, bytes: 1_000_000_000 },
+                smith_host_protocol::Values {
+                    paths: Box::from([Box::from(*b"/tmp/src")]),
+                    credentials: Box::from([Box::from(*b"secret")]),
+                },
                 skein_lib::Token::new(2),
                 &mut self.host.host_events,
                 &mut self.host.below,

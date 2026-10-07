@@ -6,7 +6,7 @@ use skein_channel::{
 use skein_lib::{Queue, Reader, Token, Writer};
 
 use crate::limits::{Error, Limits};
-use crate::translate::{Endpoints, answer_record, decode_charter, invalid_start};
+use crate::translate::{DecodedStart, Endpoints, answer_record, decode_charter, invalid_start, start_context};
 use smith_domain::run;
 
 const RULES: u16 = 256;
@@ -27,7 +27,7 @@ pub enum OpenEvent {
     /// Framing and terms have been agreed at this version.
     Opened { version: u16 },
     /// A structurally valid Start with its charter translated before domain admission.
-    Start { start: Box<smith_channel::Start>, charter: Box<run::Charter> },
+    Start { start: Box<DecodedStart> },
     /// The channel ended before or after opening.
     Ended { why: Closed },
 }
@@ -187,8 +187,10 @@ impl Component {
                             Ok(start) => {
                                 self.phase = Phase::Started;
                                 match decode_charter(start.charter(), &self.charter, &self.endpoints) {
-                                    Ok(charter) => to_service
-                                        .push(OpenEvent::Start { start: Box::new(start), charter: Box::new(charter) }),
+                                    Ok(charter) => match start_context(start, charter) {
+                                        Ok(start) => to_service.push(OpenEvent::Start { start: Box::new(start) }),
+                                        Err(_) => self.refuse_rules(below),
+                                    },
                                     Err(invalid) => self.invalid_start(invalid_start(invalid), below),
                                 }
                             }

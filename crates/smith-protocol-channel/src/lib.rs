@@ -29,4 +29,6 @@ mod tests;
 
 pub use component::{Component, OpenEvent};
 pub use limits::{Error, Limits, MaxOut, max_out, worst_case};
-pub use translate::{Endpoint, Endpoints, answer_record, decode_charter, encode_result};
+pub use translate::{
+    DecodedStart, Endpoint, Endpoints, Grant, Mount, answer_record, decode_charter, encode_result, start_context,
+};

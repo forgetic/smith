@@ -88,7 +88,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(duplicate)?
         .checked_add(u64::from(limits.endpoints).checked_mul(u64::try_from(size_of::<crate::Endpoint>()).ok()?)?)?
         .checked_add(u64::from(limits.endpoints).checked_mul(u64::from(smith_charter::CEILINGS.llm_endpoint))?)?
-        .checked_add(smith_channel::Start::worst_case_bytes(&limits.bodies)?)?
+        .checked_add(smith_channel::Start::worst_case_bytes(&limits.bodies)?.checked_mul(2)?)?
         .checked_add(smith_charter::Charter::worst_case_bytes(&limits.charter)?.checked_mul(2)?)?
         .checked_add(Queue::<skein_channel::Event>::worst_case(8)?)?
         .checked_add(Queue::<OpenEvent>::worst_case(1)?)?

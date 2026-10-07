@@ -13,6 +13,80 @@ use smith_domain::run;
 
 use crate::Error;
 
+/// One directory whose root path the agent service attaches to io.
+#[derive(Debug)]
+pub struct Mount {
+    pub name: Box<[u8]>,
+    pub path: Box<[u8]>,
+    pub writable: bool,
+    pub git: bool,
+    pub conflicts: Box<[Box<[u8]>]>,
+}
+
+/// One grant name and value; the service routes the value to the LLM table.
+#[derive(Debug)]
+pub struct Grant {
+    pub name: smith_domain::GrantName,
+    pub valid: skein_lib::Duration,
+    pub credential: Box<[u8]>,
+}
+
+/// Start context after channel and charter decoding, before io root attachment.
+#[derive(Debug)]
+pub struct DecodedStart {
+    pub activation: u64,
+    pub charter: run::Charter,
+    pub mounts: Option<Box<[Mount]>>,
+    pub transcript: Box<[Box<[u8]>]>,
+    pub answered: Box<[channel::AnsweredCall]>,
+    pub grants: Box<[Grant]>,
+    pub window: smith_domain::Window,
+}
+
+/// Move decoded channel fields into bounded start context, keeping values below the domain.
+pub fn start_context(start: channel::Start, charter: run::Charter) -> Result<DecodedStart, Error> {
+    let parts = start.into_parts();
+    let mounts = match parts.workspace {
+        Some(workspace) => {
+            let mut mounts = List::with_capacity(workspace.directories().len());
+            for directory in workspace.directories() {
+                let mount = Mount {
+                    name: Box::from(directory.name()),
+                    path: Box::from(directory.path()),
+                    writable: directory.writable(),
+                    git: directory.git(),
+                    conflicts: directory.conflicts().to_boxed(),
+                };
+                if mounts.push(mount).is_err() {
+                    return Err(Error::ResultCapacity);
+                }
+            }
+            Some(mounts.into_boxed())
+        }
+        None => None,
+    };
+    let mut grants = List::with_capacity(parts.grants.len());
+    for grant in &parts.grants {
+        let item = Grant {
+            name: smith_domain::GrantName { account: grant.account(), generation: grant.generation() },
+            valid: grant.valid(),
+            credential: Box::from(grant.value().credential()),
+        };
+        if grants.push(item).is_err() {
+            return Err(Error::ResultCapacity);
+        }
+    }
+    Ok(DecodedStart {
+        activation: parts.activation,
+        charter,
+        mounts,
+        transcript: parts.transcript.into_boxed(),
+        answered: parts.answered.into_boxed(),
+        grants: grants.into_boxed(),
+        window: smith_domain::Window { turns: parts.window.turns(), bytes: parts.window.bytes() },
+    })
+}
+
 /// One configured endpoint name and its domain-visible identities.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Endpoint {
