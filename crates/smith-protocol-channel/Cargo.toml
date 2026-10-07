@@ -1,0 +1,16 @@
+[package]
+name = "smith-protocol-channel"
+description = "Agent side of Smith's host channel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+skein-lib.workspace = true
+skein-channel.workspace = true
+smith-channel.workspace = true
+smith-domain.workspace = true
+
+[lints]
+workspace = true

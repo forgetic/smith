@@ -2,7 +2,7 @@
 //! [`schema`] projects the generated body bounds into Skein's channel table.
 //! Contract: `protocol/channel.md`, sections 2-4.
 
-use skein_channel::{Direction, Kind, Schema, Version};
+use skein_channel::{Direction, Kind, Role, Schema, Term, Version};
 use skein_lib::List;
 
 use crate::v1;
@@ -105,4 +105,30 @@ pub fn schema(limits: &v1::Limits) -> Result<Schema, Overflow> {
     let mut versions = List::with_capacity(1);
     versions.push(Version { version: 1, kinds }).expect("one version has one slot");
     Ok(Schema { magic: *b"smth", versions })
+}
+
+/// Find the first required kind that the peer cannot receive at our sending bound.
+/// Contract: `protocol/channel.md`, section 2.
+#[must_use]
+pub fn peer_terms_gap(schema: &Schema, role: Role, version: u16, terms: &List<Term>) -> Option<u16> {
+    let sending = match role {
+        Role::Initiator => Direction::FromInitiator,
+        Role::Responder => Direction::FromResponder,
+    };
+    let table = schema.version(version)?;
+    for rule in V1 {
+        if rule.direction == sending && rule.required {
+            let own = table.kind(rule.kind)?;
+            let mut accepted = false;
+            for term in terms {
+                if term.kind == rule.kind && term.largest >= own.largest {
+                    accepted = true;
+                }
+            }
+            if !accepted {
+                return Some(rule.kind);
+            }
+        }
+    }
+    None
 }

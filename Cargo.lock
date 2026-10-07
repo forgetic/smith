@@ -202,6 +202,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-channel-world"
+version = "0.0.0"
+dependencies = [
+ "skein-channel",
+ "skein-lib",
+ "skein-world",
+ "smith-channel",
+ "smith-domain",
+ "smith-host-domain",
+ "smith-host-protocol",
+ "smith-protocol-channel",
+]
+
+[[package]]
 name = "smith-charter"
 version = "0.0.0"
 dependencies = [
@@ -264,6 +278,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-host-protocol"
+version = "0.0.0"
+dependencies = [
+ "skein-channel",
+ "skein-lib",
+ "smith-channel",
+ "smith-host-domain",
+]
+
+[[package]]
 name = "smith-host-world"
 version = "0.0.0"
 dependencies = [
@@ -306,6 +330,16 @@ dependencies = [
  "skein-world",
  "smith-domain",
  "smith-protocol-machine",
+]
+
+[[package]]
+name = "smith-protocol-channel"
+version = "0.0.0"
+dependencies = [
+ "skein-channel",
+ "skein-lib",
+ "smith-channel",
+ "smith-domain",
 ]
 
 [[package]]

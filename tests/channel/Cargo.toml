@@ -1,0 +1,33 @@
+[package]
+name = "smith-channel-world"
+description = "The Smith host and agent channel protocol world"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+skein-lib.workspace = true
+skein-channel.workspace = true
+skein-world.workspace = true
+smith-channel.workspace = true
+smith-domain.workspace = true
+smith-host-domain.workspace = true
+smith-protocol-channel.workspace = true
+smith-host-protocol.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+elided_lifetimes_in_paths = "deny"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+missing_panics_doc = "allow"
+wildcard_enum_match_arm = "deny"
+match_wildcard_for_single_variants = "deny"
+unwrap_used = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+disallowed_types = "deny"
+disallowed_methods = "deny"

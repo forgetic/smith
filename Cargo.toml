@@ -2,7 +2,7 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine"]
+members = ["crates/*", "tests/world", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine", "tests/channel"]
 
 [workspace.package]
 version = "0.0.0"
@@ -41,6 +41,8 @@ smith-protocol-machine = { path = "crates/smith-protocol-machine" }
 smith-charter = { path = "crates/smith-charter" }
 smith-transcript = { path = "crates/smith-transcript" }
 smith-channel = { path = "crates/smith-channel" }
+smith-protocol-channel = { path = "crates/smith-protocol-channel" }
+smith-host-protocol = { path = "crates/smith-host-protocol" }
 smith-run-world = { path = "tests/run" }
 smith-session-world = { path = "tests/session" }
 smith-tools-world = { path = "tests/tools" }

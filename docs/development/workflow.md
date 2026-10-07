@@ -281,3 +281,9 @@ tests, including its saturated memory bound, passed in 0.029 seconds. Its
 128-seed fuzzy replay sweep passed in 0.037 seconds. The world's one-second
 focused and five-second fuzzy shares, and the workspace budgets, remain
 unchanged.
+
+The channel opening world was measured serially on 2026-10-07 with
+`cargo nextest run -p smith-channel-world --profile measure -j 1`. Its three
+focused opening stories passed in 0.012 seconds. It has no fuzzy test until
+the channel referee and random stream cuts land. The one-second focused
+share and workspace budgets remain unchanged.

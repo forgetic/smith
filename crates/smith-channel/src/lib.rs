@@ -15,7 +15,7 @@ pub mod v1;
 
 mod kinds;
 
-pub use kinds::{KindRule, Overflow, V1, schema};
+pub use kinds::{KindRule, Overflow, V1, peer_terms_gap, schema};
 pub use v1::{
     Accepted, AcceptedParts, Acknowledge, AcknowledgeParts, Admitted, AdmittedParts, Answer, AnswerParts, AnsweredCall,
     AnsweredCallParts, Ask, BudgetFailure, BudgetFailureValue, BudgetFailureValueParts, CEILINGS, Call, CallName,
