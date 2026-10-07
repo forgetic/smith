@@ -187,9 +187,11 @@ fn admission_refusals_preserve_separate_process_rights() {
 
 #[test]
 fn admission_refusal_and_working_traffic_are_distinct() {
-    for refusal in
-        [smith_host_domain::Refusal::Busy, smith_host_domain::Refusal::Invalid(smith_host_domain::RunInvalid::Endpoint)]
-    {
+    for refusal in [
+        smith_host_domain::Refusal::Busy,
+        smith_host_domain::Refusal::Invalid(smith_host_domain::RunInvalid::Endpoint),
+        smith_host_domain::Refusal::Invalid(smith_host_domain::RunInvalid::CharterVersion),
+    ] {
         let mut world = World::new(11, limits());
         world.spawn(start());
         world.spawned();

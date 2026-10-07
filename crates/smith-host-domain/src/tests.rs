@@ -4,6 +4,13 @@ use crate::{Domain, End, Event, Request, Start};
 use alloc::boxed::Box;
 use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 
+#[test]
+fn an_unread_charter_version_is_a_distinct_agent_refusal() {
+    let unread = crate::RunResult::Refused { refusal: crate::Refusal::Invalid(crate::RunInvalid::CharterVersion) };
+    let oversized = crate::RunResult::Refused { refusal: crate::Refusal::Invalid(crate::RunInvalid::TooLarge) };
+    assert_ne!(unread, oversized);
+}
+
 fn limits() -> crate::Limits {
     crate::Limits {
         agents: 1,

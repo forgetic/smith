@@ -799,6 +799,8 @@ pub enum Refusal {
 /// What about a charter does not fit the limits.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Invalid {
+    /// The agent does not read this charter version; the protocol refuses it before domain admission.
+    CharterVersion,
     /// The charter names a main or sub-agent endpoint absent from agent configuration.
     Endpoint,
     /// A host Start with activation zero is refused before the run opens.

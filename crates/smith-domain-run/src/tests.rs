@@ -19,6 +19,13 @@ use crate::{Directory, Workspace};
 
 const BUDGET: Budget = Budget { turns: 10, spend: 10_000, time: Duration::from_secs(600) };
 
+#[test]
+fn an_unread_charter_version_has_its_own_start_refusal() {
+    let unread = Answer::Refused(Refusal::Invalid(Invalid::CharterVersion));
+    let oversized = Answer::Refused(Refusal::Invalid(Invalid::TooLarge));
+    assert_ne!(unread, oversized);
+}
+
 /// Fixed admission and ownership limits shared by focused run and result tests.
 /// Contract: domain/run.md, sections 3.1, 7.1 and 13.
 pub(crate) const LIMITS: Limits = Limits {

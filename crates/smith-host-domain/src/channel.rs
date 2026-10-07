@@ -354,6 +354,8 @@ pub enum Refusal {
 /// The agent's reason for rejecting a start before admission.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RunInvalid {
+    /// The agent does not read the charter's version.
+    CharterVersion,
     /// The activation name is invalid.
     Activation,
     /// The acknowledgement window cannot hold one largest permitted turn.
