@@ -11,7 +11,7 @@ use smith_host_protocol as host;
 use smith_protocol_channel as agent;
 
 /// An opening observation independent of which half emitted it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Observation {
     /// Host completed the opening.
     HostOpened(u16),
@@ -37,6 +37,21 @@ pub enum Observation {
     AgentMessage { name: skein_lib::Token, text: Box<[u8]> },
     /// The host saw the run wait after reading a named message.
     HostWaiting { read: Option<skein_lib::Token> },
+    /// The host received one named call with its deadline and metadata.
+    HostCall {
+        call: skein_lib::Token,
+        name: smith_host_domain::channel::CallName,
+        deadline: skein_lib::Time,
+        ask: Box<smith_host_domain::channel::Ask>,
+    },
+    /// The host received a withdrawal for a live call.
+    HostWithdraw { call: skein_lib::Token },
+    /// The agent received the host tool's settled terminal under its relay.
+    AgentHostReturned { relay: smith_domain::run::RelayName, reply: smith_domain::run::HostReply },
+    /// The agent received a checked delivery terminal.
+    AgentDelivered { owner: skein_lib::Token, delivery: Box<smith_domain::run::Delivery> },
+    /// A delivery frame did not enter the stream.
+    AgentDeliveryUnsent { owner: skein_lib::Token },
     /// Host received an invalid Start answer.
     InvalidStart { why: smith_channel::InvalidStart, turns: u32, spent: u64 },
     /// Host received admission before the final answer.
@@ -151,6 +166,10 @@ impl Peer {
                 host::OpenEvent::Unsent { token, why } => output.push(Observation::HostUnsent(token, why)),
                 host::OpenEvent::Admitted => output.push(Observation::HostAdmitted),
                 host::OpenEvent::Waiting { read } => output.push(Observation::HostWaiting { read }),
+                host::OpenEvent::Call { call, name, deadline, ask } => {
+                    output.push(Observation::HostCall { call, name, deadline, ask: Box::new(ask) });
+                }
+                host::OpenEvent::Withdraw { call } => output.push(Observation::HostWithdraw { call }),
                 host::OpenEvent::Answer { answer } => {
                     if let smith_channel::RunResult::Refused(refused) = answer.result()
                         && let smith_channel::StartRefusal::Invalid(invalid) = refused.reason()
@@ -209,6 +228,13 @@ impl Peer {
                 }
                 agent::OpenEvent::Ended { why } => output.push(Observation::AgentEnded(why)),
                 agent::OpenEvent::Message { name, text } => output.push(Observation::AgentMessage { name, text }),
+                agent::OpenEvent::HostReturned { relay, reply } => {
+                    output.push(Observation::AgentHostReturned { relay, reply });
+                }
+                agent::OpenEvent::Delivered { owner, delivery } => {
+                    output.push(Observation::AgentDelivered { owner, delivery });
+                }
+                agent::OpenEvent::DeliveryUnsent { owner } => output.push(Observation::AgentDeliveryUnsent { owner }),
             }
         }
     }
@@ -247,7 +273,7 @@ impl World {
     #[must_use]
     pub fn new(host_bodies: smith_channel::Limits, agent_bodies: smith_channel::Limits, mode: StreamMode) -> World {
         let channel = channel_limits(smith_channel::CEILINGS);
-        let host = Peer::host(host::Limits { bodies: host_bodies, channel }, mode);
+        let host = Peer::host(host::Limits { bodies: host_bodies, channel, calls: 8 }, mode);
         let agent = Peer::agent(
             &agent::Limits {
                 bodies: agent_bodies,
@@ -255,6 +281,7 @@ impl World {
                 transcript: smith_transcript::CEILINGS,
                 channel,
                 endpoints: 1,
+                calls: 8,
             },
             mode,
         );
@@ -407,6 +434,66 @@ impl World {
             agent
                 .send_waiting(read, skein_lib::Token::new(6), &mut self.agent.agent_events, &mut self.agent.below)
                 .expect("bounded waiting");
+        }
+    }
+
+    /// Have the scripted domain relay a declared host tool under a durable name.
+    pub fn agent_calls_host(&mut self, name: smith_domain::run::CallName, relay: smith_domain::run::RelayName) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_host_call(
+                    skein_lib::Time::ZERO,
+                    name,
+                    relay,
+                    Box::from(*b"check"),
+                    smith_domain::run::HostEffect::Read,
+                    smith_domain::run::HostInput::attested(Box::from(*b"{}")).expect("attested object"),
+                    skein_lib::Time::from_nanos(100),
+                    skein_lib::Token::new(20),
+                    &mut self.agent.agent_events,
+                    &mut self.agent.below,
+                )
+                .expect("bounded host call");
+        }
+    }
+
+    /// Have the scripted domain submit checked change fields for delivery.
+    pub fn agent_delivers(&mut self, name: smith_domain::run::CallName, owner: skein_lib::Token) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_delivery(
+                    skein_lib::Time::ZERO,
+                    name,
+                    owner,
+                    smith_domain::run::outcome::Change {
+                        fields: Box::from([smith_domain::run::outcome::Field {
+                            name: Box::from(*b"title"),
+                            value: Box::from(*b"Fix"),
+                        }]),
+                    },
+                    skein_lib::Time::from_nanos(100),
+                    skein_lib::Token::new(23),
+                    &mut self.agent.agent_events,
+                    &mut self.agent.below,
+                )
+                .expect("bounded delivery call");
+        }
+    }
+
+    /// Withdraw the scripted live relay while its terminal remains owed.
+    pub fn agent_withdraws(&mut self, relay: smith_domain::run::RelayName) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_withdraw(relay, skein_lib::Token::new(21), &mut self.agent.agent_events, &mut self.agent.below)
+                .expect("bounded withdraw");
+        }
+    }
+
+    /// Have the scripted host settle one live call through its half.
+    pub fn host_answers(&mut self, call: skein_lib::Token, reply: smith_host_domain::channel::Reply) {
+        if let Half::Host(host) = &mut self.host.half {
+            host.send_reply(call, reply, skein_lib::Token::new(22), &mut self.host.host_events, &mut self.host.below)
+                .expect("bounded host answer");
         }
     }
 

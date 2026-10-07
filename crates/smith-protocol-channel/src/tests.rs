@@ -11,6 +11,7 @@ fn the_agent_demands_the_open_before_the_domain_hears_anything() {
         charter: smith_charter::CEILINGS,
         transcript: smith_transcript::CEILINGS,
         endpoints: 0,
+        calls: 0,
         channel: skein_channel::Limits {
             chunk: 8,
             credential: 0,

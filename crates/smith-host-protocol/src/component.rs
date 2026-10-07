@@ -1,11 +1,11 @@
 //! Host-side opening machine (protocol/channel.md, sections 2 and 5).
 use alloc::boxed::Box;
 use skein_channel::{Closed, Event, Lower, LowerEvent, Machine, Request, Role, Schema, StreamMode, frame_writer};
-use skein_lib::{Queue, Reader, Token, Writer};
+use skein_lib::{Map, Queue, Reader, Time, Token, Writer};
 use smith_host_domain::channel;
 
 use crate::limits::{Error, Limits};
-use crate::translate::{Values, encode_start};
+use crate::translate::{Values, decode_ask, encode_reply, encode_start};
 
 const RULES: u16 = 256;
 
@@ -18,8 +18,25 @@ enum Phase {
     Answered,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct CallKey {
+    activation: u64,
+    completion: u32,
+    position: u32,
+}
+
+impl CallKey {
+    fn from_wire(name: &smith_channel::CallName) -> CallKey {
+        CallKey { activation: name.activation(), completion: name.completion(), position: name.position() }
+    }
+
+    fn domain(self) -> channel::CallName {
+        channel::CallName { activation: self.activation, completion: self.completion, position: self.position }
+    }
+}
+
 /// An opening result for the host service.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum OpenEvent {
     /// Framing and terms have been agreed at this version.
     Opened { version: u16 },
@@ -35,6 +52,10 @@ pub enum OpenEvent {
     Admitted,
     /// The run is waiting after reading the named message, if any.
     Waiting { read: Option<Token> },
+    /// A named operation whose one host terminal remains owed.
+    Call { call: Token, name: channel::CallName, deadline: Time, ask: channel::Ask },
+    /// The agent withdrew a call; its terminal still remains owed.
+    Withdraw { call: Token },
 }
 
 /// The initiator's framed channel and checked sending terms.
@@ -46,6 +67,10 @@ pub struct Component {
     events: Queue<Event>,
     phase: Phase,
     ended: bool,
+    calls_by_name: Map<CallKey, Token>,
+    calls_by_token: Map<Token, CallKey>,
+    next_call: u64,
+    now: Time,
 }
 
 impl Component {
@@ -66,6 +91,10 @@ impl Component {
             events: Queue::with_capacity(8),
             phase: Phase::Opening,
             ended: false,
+            calls_by_name: Map::with_capacity(limits.calls),
+            calls_by_token: Map::with_capacity(limits.calls),
+            next_call: 1,
+            now: Time::ZERO,
         })
     }
 
@@ -73,6 +102,11 @@ impl Component {
     pub fn open(&mut self, to_service: &mut Queue<OpenEvent>, below: &mut Queue<Lower>) {
         self.machine.down(Request::Open { credential: Box::default() }, &mut self.events, below);
         self.fire(to_service, below);
+    }
+
+    /// Set the monotonic clock used to turn agent-relative deadlines into host deadlines.
+    pub fn set_now(&mut self, now: Time) {
+        self.now = now;
     }
 
     /// Submit the first application record after opening, with host service values.
@@ -124,6 +158,28 @@ impl Component {
         Ok(())
     }
 
+    /// Answer one admitted agent call, keeping its durable wire name.
+    pub fn send_reply(
+        &mut self,
+        call: Token,
+        reply: channel::Reply,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let key = *self.calls_by_token.get(&call).ok_or(Error::Calls)?;
+        let frame = encode_reply(key.domain(), reply, &self.bodies)?;
+        self.calls_by_token.remove(&call);
+        self.calls_by_name.remove(&key);
+        self.machine.down(Request::Send { token, frame }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
     /// Consume one stream event and progress the opening.
     pub fn from_below(&mut self, event: LowerEvent, to_service: &mut Queue<OpenEvent>, below: &mut Queue<Lower>) {
         self.machine.up(event, &mut self.events, below);
@@ -143,7 +199,11 @@ impl Component {
         self.phase != Phase::Opening
     }
 
-    #[expect(clippy::manual_map, reason = "production steps do not use closure methods")]
+    #[expect(
+        clippy::manual_map,
+        clippy::too_many_lines,
+        reason = "bounded channel event dispatch uses explicit matches"
+    )]
     fn drain(&mut self, to_service: &mut Queue<OpenEvent>, below: &mut Queue<Lower>) {
         for _ in 0_u8..8_u8 {
             let event = self.events.pop();
@@ -172,6 +232,60 @@ impl Component {
                     }
                 }
                 Some(Event::Body { kind, body }) => match kind {
+                    0x0107 if self.phase == Phase::Admitted => {
+                        match smith_channel::Call::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(record) => {
+                                let key = CallKey::from_wire(record.name());
+                                if self.calls_by_name.contains_key(&key)
+                                    || self.calls_by_name.len() >= self.calls_by_name.capacity()
+                                {
+                                    self.refuse_rules(below);
+                                } else {
+                                    match decode_ask(&record) {
+                                        Ok(Some(ask)) => {
+                                            let call = Token::new(self.next_call);
+                                            match self.next_call.checked_add(1) {
+                                                Some(next) => {
+                                                    self.next_call = next;
+                                                    if self.calls_by_name.insert(key, call).is_err()
+                                                        || self.calls_by_token.insert(call, key).is_err()
+                                                    {
+                                                        self.refuse_rules(below);
+                                                    } else {
+                                                        to_service.push(OpenEvent::Call {
+                                                            call,
+                                                            name: key.domain(),
+                                                            deadline: self.now.saturating_add(record.deadline()),
+                                                            ask,
+                                                        });
+                                                        self.machine.down(Request::Read, &mut self.events, below);
+                                                    }
+                                                }
+                                                None => self.refuse_rules(below),
+                                            }
+                                        }
+                                        Ok(None) | Err(_) => self.refuse_rules(below),
+                                    }
+                                }
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
+                    0x0108 if self.phase == Phase::Admitted => {
+                        match smith_channel::Withdraw::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(record) => {
+                                let key = CallKey::from_wire(record.name());
+                                match self.calls_by_name.get(&key) {
+                                    Some(call) => {
+                                        to_service.push(OpenEvent::Withdraw { call: *call });
+                                        self.machine.down(Request::Read, &mut self.events, below);
+                                    }
+                                    None => self.refuse_rules(below),
+                                }
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
                     0x010a if self.phase == Phase::Admitted => {
                         match smith_channel::Waiting::decode(&self.bodies, &mut Reader::new(&body)) {
                             Ok(waiting) => {

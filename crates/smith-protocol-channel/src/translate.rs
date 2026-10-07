@@ -126,7 +126,7 @@ fn saved_answers(source: &[channel::AnsweredCall]) -> Result<Box<[smith_domain::
     Ok(answered.into_boxed())
 }
 
-fn saved_delivery(source: &channel::Delivery) -> Result<run::Delivery, Error> {
+pub(crate) fn saved_delivery(source: &channel::Delivery) -> Result<run::Delivery, Error> {
     let delivery = match source {
         channel::Delivery::Delivered(delivered) => {
             let mut receipts = List::with_capacity(delivered.receipts().len());

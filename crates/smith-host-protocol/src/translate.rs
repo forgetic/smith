@@ -134,7 +134,7 @@ fn encode_saved_reply(reply: channel::SavedReply, limits: &wire::Limits) -> Resu
     Ok(wire::SavedReply::new(limits, result)?)
 }
 
-fn encode_delivery(delivery: host::Delivery, limits: &wire::Limits) -> Result<wire::Delivery, Error> {
+pub(crate) fn encode_delivery(delivery: host::Delivery, limits: &wire::Limits) -> Result<wire::Delivery, Error> {
     let result = match delivery {
         host::Delivery::Delivered(delivered) => {
             let mut receipts = List::with_capacity(limits.delivered_receipts);
@@ -189,4 +189,63 @@ fn encode_delivery(delivery: host::Delivery, limits: &wire::Limits) -> Result<wi
         host::Delivery::Stale => wire::Delivery::Stale,
     };
     Ok(wire::Delivery::new(limits, result)?)
+}
+
+/// Move one bounded channel call into the host domain's typed operation face.
+pub(crate) fn decode_ask(call: &wire::Call) -> Result<Option<channel::Ask>, Error> {
+    let ask = match call.ask() {
+        wire::Ask::Host(host) => {
+            let effect = match call.effect() {
+                wire::Effect::Read => channel::Effect::Read,
+                wire::Effect::Write => channel::Effect::Write,
+            };
+            channel::Ask::Host { tool: Box::from(host.tool()), effect, body: Box::from(host.input()) }
+        }
+        wire::Ask::Deliver(deliver) => {
+            if call.effect() != &wire::Effect::Write {
+                return Ok(None);
+            }
+            let Ok(length) = usize::try_from(deliver.measure()) else {
+                return Err(Error::MissingValue);
+            };
+            let mut writer = Writer::new(length);
+            deliver.encode(&mut writer)?;
+            channel::Ask::Deliver { fields: writer.finish() }
+        }
+    };
+    Ok(Some(ask))
+}
+
+/// Encode one host-domain terminal under the durable call name it answers.
+pub(crate) fn encode_reply(
+    name: channel::CallName,
+    reply: channel::Reply,
+    limits: &wire::Limits,
+) -> Result<Frame, Error> {
+    let name = wire::CallName::new(
+        limits,
+        wire::CallNameParts { activation: name.activation, completion: name.completion, position: name.position },
+    )?;
+    let reply = match reply {
+        channel::Reply::Host { error, body } => {
+            wire::Reply::Host(wire::HostReply::new(limits, wire::HostReplyParts { error, text: body })?)
+        }
+        channel::Reply::Delivery(delivery) => wire::Reply::Delivery(wire::DeliveryReply::new(
+            limits,
+            wire::DeliveryReplyParts { value: encode_delivery(delivery, limits)? },
+        )?),
+        channel::Reply::Busy => wire::Reply::Busy,
+        channel::Reply::Unavailable => wire::Reply::Unavailable,
+        channel::Reply::Withdrawn => wire::Reply::Withdrawn,
+        channel::Reply::TooLarge => wire::Reply::TooLarge,
+    };
+    let record = wire::HostAnswer::new(limits, wire::HostAnswerParts { name, reply })?;
+    let Ok(length) = usize::try_from(record.measure()) else {
+        return Err(Error::MissingValue);
+    };
+    let mut body = Writer::new(length);
+    record.encode(&mut body)?;
+    let mut frame = frame_writer(0x0102, record.measure())?;
+    frame.put(&body.finish())?;
+    Ok(frame.finish()?)
 }

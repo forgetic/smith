@@ -10,6 +10,8 @@ use crate::{Component, OpenEvent};
 pub struct Limits {
     pub bodies: smith_channel::Limits,
     pub channel: skein_channel::Limits,
+    /// Maximum live calls awaiting one host terminal.
+    pub calls: u32,
 }
 
 /// A checked channel cannot be built from the supplied limits.
@@ -21,6 +23,8 @@ pub enum Error {
     Channel(SchemaError),
     /// A service omitted a workspace path or credential value.
     MissingValue,
+    /// A live call name is repeated, unknown, or beyond capacity.
+    Calls,
     /// The service sent a record before or after its permitted channel phase.
     Order,
     /// A host record does not fit the configured channel body limits.
@@ -75,5 +79,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(Queue::<skein_channel::Event>::worst_case(8)?)?
         .checked_add(Queue::<OpenEvent>::worst_case(1)?)?
         .checked_add(Queue::<Lower>::worst_case(6)?)?;
-    bytes.checked_add(u64::try_from(size_of::<Component>()).ok()?)
+    bytes
+        .checked_add(skein_lib::Map::<crate::component::CallKey, skein_lib::Token>::worst_case(limits.calls)?)?
+        .checked_add(skein_lib::Map::<skein_lib::Token, crate::component::CallKey>::worst_case(limits.calls)?)?
+        .checked_add(u64::try_from(size_of::<Component>()).ok()?)
 }

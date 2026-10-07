@@ -356,3 +356,142 @@ fn a_message_reaches_the_llm_with_its_senders_label() {
     world.settle();
     assert!(world.observations().contains(&Observation::HostWaiting { read: Some(name) }));
 }
+
+#[test]
+fn host_tools_answered_busy_are_asked_again_under_their_names() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    let name = smith_domain::run::CallName { activation: 1, completion: 1, position: 0 };
+    let first = smith_domain::run::RelayName { owner: skein_lib::Token::new(40), attempt: 1 };
+    world.agent_calls_host(name, first);
+    world.settle();
+    assert!(world.observations().contains(&Observation::HostCall {
+        call: skein_lib::Token::new(1),
+        name: smith_host_domain::channel::CallName { activation: 1, completion: 1, position: 0 },
+        deadline: skein_lib::Time::from_nanos(100),
+        ask: Box::new(smith_host_domain::channel::Ask::Host {
+            tool: Box::from(*b"check"),
+            effect: smith_host_domain::channel::Effect::Read,
+            body: Box::from(*b"{}"),
+        }),
+    }));
+    world.host_answers(skein_lib::Token::new(1), smith_host_domain::channel::Reply::Busy);
+    world.settle();
+    assert!(
+        world
+            .observations()
+            .contains(&Observation::AgentHostReturned { relay: first, reply: smith_domain::run::HostReply::Busy })
+    );
+    let second = smith_domain::run::RelayName { owner: skein_lib::Token::new(40), attempt: 2 };
+    world.agent_calls_host(name, second);
+    world.settle();
+    assert!(world.observations().contains(&Observation::HostCall {
+        call: skein_lib::Token::new(2),
+        name: smith_host_domain::channel::CallName { activation: 1, completion: 1, position: 0 },
+        deadline: skein_lib::Time::from_nanos(100),
+        ask: Box::new(smith_host_domain::channel::Ask::Host {
+            tool: Box::from(*b"check"),
+            effect: smith_host_domain::channel::Effect::Read,
+            body: Box::from(*b"{}"),
+        }),
+    }));
+    world.host_answers(
+        skein_lib::Token::new(2),
+        smith_host_domain::channel::Reply::Host { error: false, body: Box::from(*b"ok") },
+    );
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentHostReturned {
+        relay: second,
+        reply: smith_domain::run::HostReply::Answered(
+            smith_domain::run::HostAnswer::new(Box::from(*b"ok"), false).expect("bounded answer"),
+        ),
+    }));
+}
+
+#[test]
+fn a_withdrawn_host_call_still_returns_under_its_live_relay() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    let name = smith_domain::run::CallName { activation: 1, completion: 1, position: 0 };
+    let relay = smith_domain::run::RelayName { owner: skein_lib::Token::new(40), attempt: 1 };
+    world.agent_calls_host(name, relay);
+    world.settle();
+    world.agent_withdraws(relay);
+    world.settle();
+    assert!(world.observations().contains(&Observation::HostWithdraw { call: skein_lib::Token::new(1) }));
+    world.host_answers(skein_lib::Token::new(1), smith_host_domain::channel::Reply::Withdrawn);
+    world.settle();
+    assert!(
+        world
+            .observations()
+            .contains(&Observation::AgentHostReturned { relay, reply: smith_domain::run::HostReply::Withdrawn })
+    );
+}
+
+#[test]
+#[expect(clippy::wildcard_enum_match_arm, reason = "test extracts one observation from many event kinds")]
+fn a_delivery_keeps_fields_and_a_settled_landing_or_stale_terminal() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    let owner = skein_lib::Token::new(50);
+    world.agent_delivers(smith_domain::run::CallName { activation: 1, completion: 1, position: 0 }, owner);
+    world.settle();
+    let fields = world.observations().iter().find_map(|observation| match observation {
+        Observation::HostCall { call, ask: boxed, .. } if *call == skein_lib::Token::new(1) => match boxed.as_ref() {
+            smith_host_domain::channel::Ask::Deliver { fields } => Some(fields.as_ref()),
+            smith_host_domain::channel::Ask::Host { .. } => None,
+        },
+        _ => None,
+    });
+    let fields = fields.expect("host receives generic delivery fields");
+    let decoded = smith_channel::DeliverAsk::decode(&CEILINGS, &mut skein_lib::Reader::new(fields))
+        .expect("bounded structured fields");
+    assert_eq!(decoded.fields().get(0).expect("title").name(), b"title");
+    assert_eq!(decoded.fields().get(0).expect("title").text(), b"Fix");
+    let receipt = smith_host_domain::Receipt::new(0, Box::from(*b"commit-1")).expect("bounded receipt");
+    let landed = smith_host_domain::Delivered::new(Box::from([receipt])).expect("one receipt");
+    world.host_answers(
+        skein_lib::Token::new(1),
+        smith_host_domain::channel::Reply::Delivery(smith_host_domain::Delivery::Delivered(landed)),
+    );
+    world.settle();
+    let expected =
+        smith_domain::run::Delivered::new(Box::from([
+            smith_domain::run::Receipt::new(0, Box::from(*b"commit-1")).expect("bounded receipt")
+        ]))
+        .expect("one receipt");
+    assert!(world.observations().contains(&Observation::AgentDelivered {
+        owner,
+        delivery: Box::new(smith_domain::run::Delivery::Delivered(expected)),
+    }));
+    let later = skein_lib::Token::new(51);
+    world.agent_delivers(smith_domain::run::CallName { activation: 1, completion: 2, position: 0 }, later);
+    world.settle();
+    world.host_answers(
+        skein_lib::Token::new(2),
+        smith_host_domain::channel::Reply::Delivery(smith_host_domain::Delivery::Stale),
+    );
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentDelivered {
+        owner: later,
+        delivery: Box::new(smith_domain::run::Delivery::Stale),
+    }));
+}

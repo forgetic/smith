@@ -3,11 +3,14 @@ use alloc::boxed::Box;
 use skein_channel::{
     Closed, Event, Frame, Lower, LowerEvent, Machine, Request, Role, Schema, StreamMode, frame_writer,
 };
-use skein_lib::{Queue, Reader, Token, Writer};
+use skein_lib::{Map, Queue, Reader, Time, Token, Writer};
 
+use crate::calls;
 use crate::limits::{Error, Limits};
 use crate::transcript::decode_transcript;
-use crate::translate::{DecodedStart, Endpoints, answer_record, decode_charter, invalid_start, start_context};
+use crate::translate::{
+    DecodedStart, Endpoints, answer_record, decode_charter, invalid_start, saved_delivery, start_context,
+};
 use smith_domain::run;
 use smith_domain_session::record;
 
@@ -23,6 +26,33 @@ enum Phase {
     Answered,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct CallKey {
+    activation: u64,
+    completion: u32,
+    position: u32,
+}
+
+impl CallKey {
+    fn from_domain(name: run::CallName) -> CallKey {
+        CallKey { activation: name.activation, completion: name.completion, position: name.position }
+    }
+
+    fn from_wire(name: &smith_channel::CallName) -> CallKey {
+        CallKey { activation: name.activation(), completion: name.completion(), position: name.position() }
+    }
+
+    fn domain(self) -> run::CallName {
+        run::CallName { activation: self.activation, completion: self.completion, position: self.position }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CallRoute {
+    Host { relay: run::RelayName, send: Token },
+    Delivery { owner: Token, send: Token },
+}
+
 /// One channel event for the agent service.
 #[derive(Debug)]
 pub enum OpenEvent {
@@ -32,6 +62,12 @@ pub enum OpenEvent {
     Start { start: Box<DecodedStart> },
     /// A host-labelled message for the admitted run.
     Message { name: Token, text: Box<[u8]> },
+    /// A declared host tool's one settled terminal.
+    HostReturned { relay: run::RelayName, reply: run::HostReply },
+    /// A delivery's one settled terminal.
+    Delivered { owner: Token, delivery: Box<run::Delivery> },
+    /// A delivery frame never entered the stream; service settles its IO operation.
+    DeliveryUnsent { owner: Token },
     /// The channel ended before or after opening.
     Ended { why: Closed },
 }
@@ -48,6 +84,7 @@ pub struct Component {
     charter: smith_charter::v1::Limits,
     transcript: smith_transcript::v2::Limits,
     endpoints: Endpoints,
+    calls: Map<CallKey, CallRoute>,
 }
 
 impl Component {
@@ -74,6 +111,7 @@ impl Component {
             charter: limits.charter,
             transcript: limits.transcript,
             endpoints,
+            calls: Map::with_capacity(limits.calls),
         })
     }
 
@@ -178,12 +216,101 @@ impl Component {
         Ok(())
     }
 
+    /// Relay one declared host tool under its durable name and live attempt.
+    #[expect(clippy::too_many_arguments, reason = "the typed channel boundary carries each domain value")]
+    pub fn send_host_call(
+        &mut self,
+        now: Time,
+        name: run::CallName,
+        relay: run::RelayName,
+        tool: Box<[u8]>,
+        effect: run::HostEffect,
+        input: run::HostInput,
+        deadline: Time,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let key = CallKey::from_domain(name);
+        if self.calls.contains_key(&key) || self.calls.len() >= self.calls.capacity() {
+            return Err(Error::Calls);
+        }
+        let frame = calls::host_call(name, tool, effect, input, deadline.saturating_since(now), &self.bodies)?;
+        if self.calls.insert(key, CallRoute::Host { relay, send: token }).is_err() {
+            return Err(Error::Calls);
+        }
+        self.machine.down(Request::Send { token, frame }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
+    /// Relay one checked delivery after its run and checkout effects settled.
+    #[expect(clippy::too_many_arguments, reason = "the typed channel boundary carries each domain value")]
+    pub fn send_delivery(
+        &mut self,
+        now: Time,
+        name: run::CallName,
+        owner: Token,
+        change: run::outcome::Change,
+        deadline: Time,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let key = CallKey::from_domain(name);
+        if self.calls.contains_key(&key) || self.calls.len() >= self.calls.capacity() {
+            return Err(Error::Calls);
+        }
+        let frame = calls::delivery_call(name, change, deadline.saturating_since(now), &self.bodies)?;
+        if self.calls.insert(key, CallRoute::Delivery { owner, send: token }).is_err() {
+            return Err(Error::Calls);
+        }
+        self.machine.down(Request::Send { token, frame }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
+    /// Ask the host to settle a live tool relay; its eventual answer remains owed.
+    pub fn send_withdraw(
+        &mut self,
+        relay: run::RelayName,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let mut name = None;
+        for (key, route) in &self.calls {
+            match route {
+                CallRoute::Host { relay: held, send: _ } if *held == relay => name = Some(key.domain()),
+                CallRoute::Host { .. } | CallRoute::Delivery { .. } => {}
+            }
+        }
+        let name = name.ok_or(Error::Calls)?;
+        let frame = calls::withdraw(name, &self.bodies)?;
+        self.machine.down(Request::Send { token, frame }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
     /// Whether the channel can take application records.
     #[must_use]
     pub fn opened(&self) -> bool {
         self.phase != Phase::Opening
     }
 
+    #[expect(clippy::too_many_lines, reason = "bounded event dispatch keeps channel order in one place")]
     fn drain(&mut self, to_service: &mut Queue<OpenEvent>, below: &mut Queue<Lower>) {
         for _ in 0_u8..8_u8 {
             let event = self.events.pop();
@@ -226,6 +353,41 @@ impl Component {
                             }
                             None => self.refuse_rules(below),
                         },
+                        Err(_) => self.refuse_rules(below),
+                    }
+                }
+                Some(Event::Body { kind: 0x0102, body }) if self.phase == Phase::Admitted => {
+                    match smith_channel::HostAnswer::decode(&self.bodies, &mut Reader::new(&body)) {
+                        Ok(answer) => {
+                            let key = CallKey::from_wire(answer.name());
+                            match self.calls.remove(&key) {
+                                Some(CallRoute::Host { relay, send: _ }) => match calls::host_reply(answer.reply()) {
+                                    Some(reply) => {
+                                        to_service.push(OpenEvent::HostReturned { relay, reply });
+                                        self.machine.down(Request::Read, &mut self.events, below);
+                                    }
+                                    None => self.refuse_rules(below),
+                                },
+                                Some(CallRoute::Delivery { owner, send: _ }) => match answer.reply() {
+                                    smith_channel::Reply::Delivery(delivery) => {
+                                        match saved_delivery(delivery.value()) {
+                                            Ok(delivery) => {
+                                                to_service
+                                                    .push(OpenEvent::Delivered { owner, delivery: Box::new(delivery) });
+                                                self.machine.down(Request::Read, &mut self.events, below);
+                                            }
+                                            Err(_) => self.refuse_rules(below),
+                                        }
+                                    }
+                                    smith_channel::Reply::Host(_)
+                                    | smith_channel::Reply::Busy
+                                    | smith_channel::Reply::Unavailable
+                                    | smith_channel::Reply::Withdrawn
+                                    | smith_channel::Reply::TooLarge => self.refuse_rules(below),
+                                },
+                                None => self.refuse_rules(below),
+                            }
+                        }
                         Err(_) => self.refuse_rules(below),
                     }
                 }
@@ -272,12 +434,36 @@ impl Component {
                         to_service.push(OpenEvent::Ended { why: Closed::Stream });
                     }
                 }
+                Some(Event::Unsent { token, why: _ }) => {
+                    let mut found = None;
+                    for (key, route) in &self.calls {
+                        let send = match route {
+                            CallRoute::Host { send, .. } | CallRoute::Delivery { send, .. } => *send,
+                        };
+                        if send == token {
+                            found = Some(*key);
+                        }
+                    }
+                    if let Some(key) = found {
+                        match self.calls.remove(&key) {
+                            Some(CallRoute::Host { relay, send: _ }) => {
+                                to_service.push(OpenEvent::HostReturned {
+                                    relay,
+                                    reply: run::HostReply::Unanswered(run::Unanswered::Lost),
+                                });
+                            }
+                            Some(CallRoute::Delivery { owner, send: _ }) => {
+                                to_service.push(OpenEvent::DeliveryUnsent { owner });
+                            }
+                            None => {}
+                        }
+                    }
+                }
                 Some(
                     Event::Ping
                     | Event::Unsupported { .. }
                     | Event::Refused { .. }
                     | Event::Sent { .. }
-                    | Event::Unsent { .. }
                     | Event::Drained
                     | Event::OutputFailed,
                 )

@@ -12,6 +12,7 @@ fn a_start_keeps_host_bytes_and_service_values_in_order() {
 
     let limits = Limits {
         bodies: smith_channel::CEILINGS,
+        calls: 8,
         channel: skein_channel::Limits {
             chunk: 8,
             credential: 0,
@@ -62,6 +63,7 @@ fn a_start_keeps_host_bytes_and_service_values_in_order() {
 fn the_host_sends_open_before_the_domain_hears_anything() {
     let limits = Limits {
         bodies: smith_channel::CEILINGS,
+        calls: 8,
         channel: skein_channel::Limits {
             chunk: 8,
             credential: 0,

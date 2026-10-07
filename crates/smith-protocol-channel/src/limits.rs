@@ -16,6 +16,8 @@ pub struct Limits {
     pub channel: skein_channel::Limits,
     /// Maximum configured endpoint names kept by this component.
     pub endpoints: u32,
+    /// Maximum live host tool and delivery calls awaiting a channel answer.
+    pub calls: u32,
 }
 
 /// A checked channel cannot be built from the supplied limits.
@@ -35,6 +37,8 @@ pub enum Error {
     InvalidSavedAnswer,
     /// The service sent admission or an answer out of order.
     Order,
+    /// A live host operation name is repeated, unknown, or beyond capacity.
+    Calls,
     /// The measured result did not fit its output writer.
     ResultWrite(skein_lib::Overflow),
     /// A domain answer exceeds the configured channel body limits.
@@ -101,5 +105,9 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(Queue::<skein_channel::Event>::worst_case(8)?)?
         .checked_add(Queue::<OpenEvent>::worst_case(1)?)?
         .checked_add(Queue::<Lower>::worst_case(6)?)?;
-    bytes.checked_add(u64::try_from(size_of::<Component>()).ok()?)
+    bytes
+        .checked_add(skein_lib::Map::<crate::component::CallKey, crate::component::CallRoute>::worst_case(
+            limits.calls,
+        )?)?
+        .checked_add(u64::try_from(size_of::<Component>()).ok()?)
 }
