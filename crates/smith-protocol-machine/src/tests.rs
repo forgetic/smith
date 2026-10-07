@@ -2,13 +2,27 @@
 
 use alloc::boxed::Box;
 use skein_io::{digest, file, kernel};
-use skein_lib::{Env, Queue, Time, Token, Wall};
+use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 use smith_domain::{run, tools};
 
 use crate::{Below, BelowEvent, Component, FromDomain, Limits, ToDomain};
 
 fn limits() -> Limits {
-    Limits { operations: 2, roots: 1, path_bytes: 64, file_bytes: 16, entries: 2, entry_bytes: 512 }
+    Limits {
+        operations: 2,
+        roots: 1,
+        path_bytes: 64,
+        file_bytes: 16,
+        entries: 2,
+        entry_bytes: 512,
+        processes: 2,
+        output_bytes: 64,
+        search_hits: 8,
+        search_bytes: 256,
+        search_line_bytes: 512,
+        env_bytes: 512,
+        stop_grace: Duration::from_millis(10),
+    }
 }
 
 fn env() -> Env<Limits> {
@@ -255,4 +269,194 @@ fn cancellation_is_sent_below_and_the_actual_terminal_decides_the_race() {
         &mut below,
     );
     assert_eq!(to_domain.pop(), Some(ToDomain::Done { owner: Token::new(2), done: tools::Done::Cancelled }));
+}
+
+#[test]
+fn guide_read_cuts_utf8_and_closes_before_answer() {
+    let mut component = component();
+    let mut to_domain = Queue::with_capacity(1);
+    let mut below = Queue::with_capacity(3);
+    let owner = Token::new(31);
+    let deadline = Time::from_nanos(100);
+    component.from_domain(
+        &env(),
+        FromDomain::Read {
+            owner,
+            at: run::Place { root: Token::new(10), path: Box::from(&b"AGENTS.md"[..]) },
+            max: 3,
+            deadline,
+        },
+        &mut to_domain,
+        &mut below,
+    );
+    match below.pop() {
+        Some(Below::OpenRead { .. }) => {}
+        other => panic!("expected open read: {other:?}"),
+    }
+    let file = Token::new(41);
+    component.from_below(
+        &env(),
+        BelowEvent::File(file::Event::Opened { owner, file, len: 4 }),
+        &mut to_domain,
+        &mut below,
+    );
+    assert_eq!(
+        below.pop(),
+        Some(Below::File { request: file::Request::ReadAt { owner, file, offset: 0, max: 3 }, deadline })
+    );
+    component.from_below(
+        &env(),
+        BelowEvent::File(file::Event::Read { owner, bytes: Box::from(&b"a\xc3\xa9"[..]) }),
+        &mut to_domain,
+        &mut below,
+    );
+    match below.pop() {
+        Some(Below::File { request: file::Request::Close { .. }, .. }) => {}
+        other => panic!("expected close: {other:?}"),
+    }
+    assert!(to_domain.is_empty());
+    component.from_below(&env(), BelowEvent::File(file::Event::Closed { owner }), &mut to_domain, &mut below);
+    assert_eq!(
+        to_domain.pop(),
+        Some(ToDomain::Read { owner, read: run::Read::Text { text: Box::from(&b"a\xc3\xa9"[..]), whole: false } })
+    );
+}
+
+#[test]
+fn command_output_waits_for_both_pipes_and_child_close() {
+    use skein_io::Event;
+    use skein_lib::stream::Up;
+    let mut component = component();
+    let mut to_domain = Queue::with_capacity(1);
+    let mut below = Queue::with_capacity(3);
+    let owner = Token::new(32);
+    component.from_domain(
+        &env(),
+        FromDomain::Op {
+            owner,
+            op: tools::Op::Spawn {
+                cwd: place(b"."),
+                command: Box::from(&b"printf abcdef"[..]),
+                env: Box::new([]),
+                roots: Box::new([]),
+                head: 2,
+                tail: 2,
+            },
+            deadline: Time::from_nanos(100),
+        },
+        &mut to_domain,
+        &mut below,
+    );
+    match below.pop() {
+        Some(Below::Spawn { owner: spawned, .. }) => assert_eq!(spawned, owner),
+        other => panic!("expected spawn: {other:?}"),
+    }
+    component.from_below(
+        &env(),
+        BelowEvent::Process(Event::Spawned {
+            owner,
+            child: Token::new(42),
+            pipes: Box::new([Token::new(43), Token::new(44)]),
+        }),
+        &mut to_domain,
+        &mut below,
+    );
+    assert_eq!(below.len(), 2);
+    assert!(below.pop().is_some());
+    assert!(below.pop().is_some());
+    component.from_below(
+        &env(),
+        BelowEvent::Process(Event::Stream { owner: Token::new(43), up: Up::Bytes(Box::from(&b"abcdef"[..])) }),
+        &mut to_domain,
+        &mut below,
+    );
+    assert!(below.pop().is_some());
+    component.from_below(
+        &env(),
+        BelowEvent::Process(Event::Exited { owner, exit: kernel::Exit::Code(0) }),
+        &mut to_domain,
+        &mut below,
+    );
+    for pipe in [Token::new(43), Token::new(44)] {
+        component.from_below(&env(), BelowEvent::Process(Event::Closed { owner: pipe }), &mut to_domain, &mut below);
+    }
+    assert!(to_domain.is_empty());
+    component.from_below(&env(), BelowEvent::Process(Event::Closed { owner }), &mut to_domain, &mut below);
+    assert_eq!(
+        to_domain.pop(),
+        Some(ToDomain::Done {
+            owner,
+            done: tools::Done::Exited {
+                exit: tools::Exit::Code { code: 0 },
+                head: Box::from(&b"ab"[..]),
+                tail: Box::from(&b"ef"[..]),
+                dropped: 2,
+            }
+        })
+    );
+}
+
+#[test]
+fn deadline_sends_term_then_kill_and_answers_after_reap() {
+    use skein_io::Event;
+    let mut component = component();
+    let mut to_domain = Queue::with_capacity(1);
+    let mut below = Queue::with_capacity(3);
+    let owner = Token::new(33);
+    component.from_domain(
+        &env(),
+        FromDomain::Check {
+            owner,
+            program: run::Place { root: Token::new(10), path: Box::from(&b"check"[..]) },
+            deadline: Time::from_nanos(100),
+            tail: 4,
+        },
+        &mut to_domain,
+        &mut below,
+    );
+    match below.pop() {
+        Some(Below::Spawn { .. }) => {}
+        other => panic!("expected spawn: {other:?}"),
+    }
+    component.from_below(
+        &env(),
+        BelowEvent::Process(Event::Spawned {
+            owner,
+            child: Token::new(45),
+            pipes: Box::new([Token::new(46), Token::new(47)]),
+        }),
+        &mut to_domain,
+        &mut below,
+    );
+    assert_eq!(below.len(), 2);
+    assert!(below.pop().is_some());
+    assert!(below.pop().is_some());
+    let mut later = env();
+    later.now = Time::from_nanos(101);
+    component.fire(&later, &mut to_domain, &mut below);
+    assert_eq!(
+        below.pop(),
+        Some(Below::Process(skein_io::Request::Signal { child: Token::new(45), signal: kernel::Signal::Terminate }))
+    );
+    later.now = Time::from_nanos(10_000_102);
+    component.fire(&later, &mut to_domain, &mut below);
+    assert_eq!(
+        below.pop(),
+        Some(Below::Process(skein_io::Request::Signal { child: Token::new(45), signal: kernel::Signal::Kill }))
+    );
+    component.from_below(
+        &later,
+        BelowEvent::Process(Event::Exited { owner, exit: kernel::Exit::Signal(9) }),
+        &mut to_domain,
+        &mut below,
+    );
+    for pipe in [Token::new(46), Token::new(47)] {
+        component.from_below(&later, BelowEvent::Process(Event::Closed { owner: pipe }), &mut to_domain, &mut below);
+    }
+    assert!(to_domain.is_empty());
+    component.from_below(&later, BelowEvent::Process(Event::Closed { owner }), &mut to_domain, &mut below);
+    assert_eq!(
+        to_domain.pop(),
+        Some(ToDomain::Checked { owner, ran: run::Ran { exit: run::Exit::TimedOut, output: Box::new([]), cut: 0 } })
+    );
 }

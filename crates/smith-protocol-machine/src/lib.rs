@@ -22,10 +22,13 @@ extern crate alloc;
 mod boundary;
 mod component;
 mod files;
+mod guide;
 mod limits;
+mod process;
+mod search;
 #[cfg(test)]
 mod tests;
 
-pub use boundary::{Below, BelowEvent, FromDomain, ToDomain};
+pub use boundary::{Below, BelowEvent, FromDomain, Spawn, ToDomain};
 pub use component::Component;
 pub use limits::{Limits, MaxOut, max_out, worst_case};

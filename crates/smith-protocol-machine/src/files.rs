@@ -51,7 +51,13 @@ pub(crate) fn request(
     }
 }
 
-fn check(roots: &List<Root>, limits: &Limits, root: Token, path: &[u8], write: bool) -> Result<(), tools::Done> {
+pub(crate) fn check(
+    roots: &List<Root>,
+    limits: &Limits,
+    root: Token,
+    path: &[u8],
+    write: bool,
+) -> Result<(), tools::Done> {
     if path.len() > usize::try_from(limits.path_bytes).expect("u32 fits usize") {
         return Err(other());
     }

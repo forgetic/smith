@@ -320,6 +320,7 @@ name = "smith-protocol-machine"
 version = "0.0.0"
 dependencies = [
  "skein-io",
+ "skein-json",
  "skein-lib",
  "smith-domain",
 ]
