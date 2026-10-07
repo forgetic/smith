@@ -377,6 +377,14 @@ answers as it was ending; the host has the delivery's own answer.
   and per-kind token caps as its limits. A run winds down when its budget
   runs out: no session starts another completion, and the run answers
   with what it has.
+- **Reserved before it is made.** Before each completion, its
+  sub-agents' included, a session reserves that completion's maximum
+  cost from the run's budget: the input it sends and the output its
+  `max_tokens` allows, at its model's prices. When the completion
+  ends, the difference is returned. A completion whose maximum does not
+  fit what is left is not made, and the run ends for its budget. So a
+  run never spends past its budget, and stops a little early rather
+  than late. All of it is inside the run, with no call to its host.
 - **Spend is told:** cumulative in each turn, and whole in the answer.
 
 ## 10. The answer
