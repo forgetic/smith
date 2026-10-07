@@ -239,9 +239,10 @@ fn a_model_failure_keeps_transport_evidence_and_cooldown() {
 fn the_start_keeps_workspace_paths_saved_answers_and_grant_values_below_the_domain() {
     let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
     world.settle();
-    world.send_start_with_context(Box::from(
-        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
-    ));
+    world.send_start_with_context(
+        Box::from(&include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..]),
+        smith_host_domain::SavedReply::Host { error: false, body: Box::from(*b"ok") },
+    );
     world.settle();
     assert!(world.observations().contains(&Observation::AgentContext {
         path: Box::from(*b"/tmp/src"),
@@ -249,4 +250,16 @@ fn the_start_keeps_workspace_paths_saved_answers_and_grant_values_below_the_doma
         credential: Box::from(*b"secret"),
         window: 2,
     }));
+}
+
+#[test]
+fn a_saved_oversized_answer_reaches_the_agent_as_a_settled_decision() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start_with_context(
+        Box::from(&include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..]),
+        smith_host_domain::SavedReply::TooLarge,
+    );
+    world.settle();
+    assert!(world.observations().contains(&Observation::AgentSavedTooLarge));
 }

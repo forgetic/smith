@@ -17,6 +17,29 @@ use crate::llm::{Block, Completion, Decoded, Message, Problem, Prompt, Returned,
 use crate::tools::{self, Call, Name, Op, Part, Path, Place};
 use crate::{Domain, Event, Fact, Limits, Request, fire, max_out, resume, step, worst_case};
 
+#[test]
+fn oversized_saved_answer_says_the_call_was_decided() {
+    let answered = Box::from([crate::AnsweredCall {
+        name: run::CallName { activation: 2, completion: 3, position: 1 },
+        tool: Box::from(&b"check"[..]),
+        answer: crate::Answered::TooLarge,
+    }]);
+    let prompt = crate::waking::render(answered, &LIMITS).expect("bounded waking text");
+    let mut decided = false;
+    let mut oversized = false;
+    for part in prompt.windows(b"host decided this call".len()) {
+        if part == b"host decided this call" {
+            decided = true;
+        }
+    }
+    for part in prompt.windows(b"answer was too large to give".len()) {
+        if part == b"answer was too large to give" {
+            oversized = true;
+        }
+    }
+    assert!(decided && oversized);
+}
+
 const BUDGET: run::Budget = run::Budget { turns: 10, spend: 1, time: Duration::from_secs(600) };
 
 const CEILING: session::Budget = session::Budget {

@@ -33,8 +33,8 @@ pub use boundary::{Bounce, End, Event, Fault, Invalid, Request, Signal};
 
 pub use channel::{
     Answer, AnsweredCall, Ask, CallName, CompletionEvidence, CompletionFailure, Directory, Down, Effect, Exhausted,
-    Grant, ModelFault, Overflow, Policy, ReceivingLimit, Refusal, Reply, RunFailure, RunInvalid, RunResult, Start,
-    TranscriptRefusal, Turn, Up, Window,
+    Grant, ModelFault, Overflow, Policy, ReceivingLimit, Refusal, Reply, RunFailure, RunInvalid, RunResult, SavedReply,
+    Start, TranscriptRefusal, Turn, Up, Window,
 };
 
 pub use delivery::{

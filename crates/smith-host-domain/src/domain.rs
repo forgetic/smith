@@ -598,13 +598,13 @@ fn answered_bytes(calls: &[AnsweredCall], name_bytes: u32) -> Option<u64> {
         }
         total = total.checked_add(u64::try_from(call.tool.len()).ok()?)?;
         let reply = match &call.reply {
-            Reply::Host { body, .. } => u64::try_from(body.len()).ok()?,
-            Reply::Delivery(delivery) => match delivery {
+            crate::SavedReply::Host { body, .. } => u64::try_from(body.len()).ok()?,
+            crate::SavedReply::Delivery(delivery) => match delivery.as_ref() {
                 Delivery::Delivered(delivered) => delivered.owned_bytes(),
                 Delivery::Refused(refusal) => refusal.owned_bytes(),
                 Delivery::Nothing | Delivery::Failed(_) | Delivery::Stale => 0,
             },
-            Reply::Busy | Reply::Unavailable | Reply::Withdrawn | Reply::TooLarge => return None,
+            crate::SavedReply::TooLarge => 0,
         };
         total = total.checked_add(reply)?;
     }

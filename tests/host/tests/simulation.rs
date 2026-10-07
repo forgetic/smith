@@ -148,7 +148,7 @@ fn admission_refusals_preserve_separate_process_rights() {
                 request.answered = Box::new([smith_host_domain::AnsweredCall {
                     name: smith_host_domain::CallName { activation: 1, completion: 1, position: 0 },
                     tool: Box::from(&b"tool"[..]),
-                    reply: smith_host_domain::Reply::Host { error: false, body: vec![0; 257].into_boxed_slice() },
+                    reply: smith_host_domain::SavedReply::Host { error: false, body: vec![0; 257].into_boxed_slice() },
                 }]);
                 Invalid::Answered
             }

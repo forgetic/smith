@@ -142,7 +142,10 @@ pub fn start() -> Start {
         answered: Box::new([smith_host_domain::AnsweredCall {
             name: smith_host_domain::CallName { activation: 1, completion: 1, position: 0 },
             tool: Box::from(&b"tool"[..]),
-            reply: smith_host_domain::Reply::Host { error: false, body: Box::from(&b"post-transcript answers"[..]) },
+            reply: smith_host_domain::SavedReply::Host {
+                error: false,
+                body: Box::from(&b"post-transcript answers"[..]),
+            },
         }]),
         directories: Box::new([]),
         grants: Box::new([Grant { account: 1, generation: 1, valid: Duration::from_secs(60) }]),

@@ -30,7 +30,7 @@ fn a_start_keeps_host_bytes_and_service_values_in_order() {
         answered: Box::from([channel::AnsweredCall {
             name: channel::CallName { activation: 1, completion: 2, position: 3 },
             tool: Box::from(*b"check"),
-            reply: channel::Reply::Host { error: false, body: Box::from(*b"ok") },
+            reply: channel::SavedReply::Host { error: false, body: Box::from(*b"ok") },
         }]),
         directories: Box::from([channel::Directory {
             name: Box::from(*b"src"),

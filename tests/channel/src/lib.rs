@@ -29,6 +29,8 @@ pub enum Observation {
     AgentStart,
     /// Agent Start kept mount paths, post-transcript answers and credential values below the domain.
     AgentContext { path: Box<[u8]>, answered: usize, credential: Box<[u8]>, window: u32 },
+    /// A settled oversized answer survived Start translation.
+    AgentSavedTooLarge,
     /// Host received an invalid Start answer.
     InvalidStart { why: smith_channel::InvalidStart, turns: u32, spent: u64 },
     /// Host received admission before the final answer.
@@ -157,6 +159,9 @@ impl Peer {
                 agent::OpenEvent::Opened { version } => output.push(Observation::AgentOpened(version)),
                 agent::OpenEvent::Start { start } => {
                     output.push(Observation::AgentStart);
+                    if start.answered.iter().any(|call| matches!(call.reply(), smith_channel::SavedReply::TooLarge)) {
+                        output.push(Observation::AgentSavedTooLarge);
+                    }
                     if let Some(mounts) = &start.mounts
                         && let Some(mount) = mounts.first()
                         && let Some(grant) = start.grants.first()
@@ -252,7 +257,7 @@ impl World {
     }
 
     /// Send one Start with a mount, a saved host decision and a grant value.
-    pub fn send_start_with_context(&mut self, charter: Box<[u8]>) {
+    pub fn send_start_with_context(&mut self, charter: Box<[u8]>, reply: smith_host_domain::SavedReply) {
         let start = smith_host_domain::channel::Start {
             logical_run: skein_lib::Token::new(1),
             activation: 7,
@@ -262,7 +267,7 @@ impl World {
             answered: Box::from([smith_host_domain::channel::AnsweredCall {
                 name: smith_host_domain::channel::CallName { activation: 6, completion: 1, position: 0 },
                 tool: Box::from(*b"check"),
-                reply: smith_host_domain::channel::Reply::Host { error: false, body: Box::from(*b"ok") },
+                reply,
             }]),
             directories: Box::from([smith_host_domain::channel::Directory {
                 name: Box::from(*b"src"),

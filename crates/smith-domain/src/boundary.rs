@@ -73,6 +73,8 @@ pub enum Answered {
     Host(run::HostAnswer),
     /// The host answered a delivery in smith's delivery vocabulary.
     Delivery(Box<run::Delivery>),
+    /// The host decided the call, but its answer exceeded the receiving bound.
+    TooLarge,
 }
 
 /// A credential name, never its value.

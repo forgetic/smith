@@ -41,7 +41,8 @@ enum Delivery {
 record HostReply { error: bool text: text 1048576 }
 record DeliveryReply { value: Delivery }
 enum Reply { host: HostReply, delivery: DeliveryReply, busy, unavailable, withdrawn, too_large }
-record AnsweredCall { name: CallName tool: text 64 reply: Reply }
+enum SavedReply { host: HostReply, delivery: DeliveryReply, too_large }
+record AnsweredCall { name: CallName tool: text 64 reply: SavedReply }
 
 # Start has all values required to resume; the transcript consists of the
 # exact opaque versioned turn bytes told on earlier activations.

@@ -37,7 +37,18 @@ pub struct AnsweredCall {
     /// The host tool name from the call, kept as text bytes.
     pub tool: Box<[u8]>,
     /// The settled host or delivery answer, never a temporary refusal.
-    pub reply: Reply,
+    pub reply: SavedReply,
+}
+
+/// One settled answer retained across activations.
+#[derive(PartialEq, Eq, Debug)]
+pub enum SavedReply {
+    /// A host tool's result or error text.
+    Host { error: bool, body: Box<[u8]> },
+    /// A delivery's terminal disposition.
+    Delivery(Box<Delivery>),
+    /// The host decided the call but its answer exceeded the receiving bound.
+    TooLarge,
 }
 
 /// Host credit sent with the start for turns awaiting durable acknowledgement.

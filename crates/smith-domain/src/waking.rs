@@ -19,17 +19,6 @@ pub(crate) fn render(answered: Box<[AnsweredCall]>, limits: &Limits) -> Option<B
     let mut text = List::with_capacity(limits.run.answered_bytes);
     put(&mut text, b"Earlier host answers absent from the saved transcript:\n")?;
     for AnsweredCall { name, tool, answer } in answered {
-        let returned = match answer {
-            Answered::Host(answer) => run::Returned::HostAnswered(answer),
-            Answered::Delivery(delivery) => match *delivery {
-                run::Delivery::Delivered(receipts) => run::Returned::Delivered(receipts),
-                run::Delivery::Nothing => run::Returned::Nothing,
-                run::Delivery::Refused(refusal) => run::Returned::DeliveryRefused(refusal),
-                run::Delivery::Failed(failure) => run::Returned::DeliveryFailed { failure },
-                run::Delivery::Stale => run::Returned::Stale,
-            },
-        };
-        let feedback = crate::feedback(returned, limits.session.delegated_result_bytes).ok()?;
         put(&mut text, b"call activation=")?;
         number(&mut text, name.activation)?;
         put(&mut text, b" completion=")?;
@@ -38,8 +27,29 @@ pub(crate) fn render(answered: Box<[AnsweredCall]>, limits: &Limits) -> Option<B
         number(&mut text, u64::from(name.position))?;
         put(&mut text, b" tool=")?;
         put(&mut text, &tool)?;
-        put(&mut text, if feedback.error { b" error: " } else { b" result: " })?;
-        put(&mut text, &feedback.text)?;
+        match answer {
+            Answered::TooLarge => {
+                put(&mut text, b" error: the host decided this call; its answer was too large to give")?;
+            }
+            Answered::Host(answer) => {
+                let feedback =
+                    crate::feedback(run::Returned::HostAnswered(answer), limits.session.delegated_result_bytes).ok()?;
+                put(&mut text, if feedback.error { b" error: " } else { b" result: " })?;
+                put(&mut text, &feedback.text)?;
+            }
+            Answered::Delivery(delivery) => {
+                let returned = match *delivery {
+                    run::Delivery::Delivered(receipts) => run::Returned::Delivered(receipts),
+                    run::Delivery::Nothing => run::Returned::Nothing,
+                    run::Delivery::Refused(refusal) => run::Returned::DeliveryRefused(refusal),
+                    run::Delivery::Failed(failure) => run::Returned::DeliveryFailed { failure },
+                    run::Delivery::Stale => run::Returned::Stale,
+                };
+                let feedback = crate::feedback(returned, limits.session.delegated_result_bytes).ok()?;
+                put(&mut text, if feedback.error { b" error: " } else { b" result: " })?;
+                put(&mut text, &feedback.text)?;
+            }
+        }
         put(&mut text, b"\n")?;
     }
     put(&mut text, b"\n")?;

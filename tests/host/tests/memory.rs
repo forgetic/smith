@@ -24,7 +24,7 @@ fn maximum_start(limits: Limits) -> Start {
             Box::new([AnsweredCall {
                 name: CallName { activation: 1, completion: 1, position: 0 },
                 tool: Box::from(&b"x"[..]),
-                reply: Reply::Host { error: false, body: bytes(limits.answered_bytes - 1) },
+                reply: smith_host_domain::SavedReply::Host { error: false, body: bytes(limits.answered_bytes - 1) },
             }])
         } else {
             Box::new([])

@@ -41,7 +41,7 @@ pub fn encode_start(
                 position: call.name.position,
             },
         )?;
-        let reply = encode_reply(call.reply, limits)?;
+        let reply = encode_saved_reply(call.reply, limits)?;
         let item = wire::AnsweredCall::new(limits, wire::AnsweredCallParts { name, tool: call.tool, reply })?;
         if answered.push(item).is_err() {
             return Err(Error::MissingValue);
@@ -120,21 +120,18 @@ fn encode_workspace(
     Ok(Some(wire::Workspace::new(limits, wire::WorkspaceParts { directories: items })?))
 }
 
-fn encode_reply(reply: channel::Reply, limits: &wire::Limits) -> Result<wire::Reply, Error> {
+fn encode_saved_reply(reply: channel::SavedReply, limits: &wire::Limits) -> Result<wire::SavedReply, Error> {
     let result = match reply {
-        channel::Reply::Host { error, body } => {
-            wire::Reply::Host(wire::HostReply::new(limits, wire::HostReplyParts { error, text: body })?)
+        channel::SavedReply::Host { error, body } => {
+            wire::SavedReply::Host(wire::HostReply::new(limits, wire::HostReplyParts { error, text: body })?)
         }
-        channel::Reply::Delivery(delivery) => {
-            let value = encode_delivery(delivery, limits)?;
-            wire::Reply::Delivery(wire::DeliveryReply::new(limits, wire::DeliveryReplyParts { value })?)
+        channel::SavedReply::Delivery(delivery) => {
+            let value = encode_delivery(*delivery, limits)?;
+            wire::SavedReply::Delivery(wire::DeliveryReply::new(limits, wire::DeliveryReplyParts { value })?)
         }
-        channel::Reply::Busy => wire::Reply::Busy,
-        channel::Reply::Unavailable => wire::Reply::Unavailable,
-        channel::Reply::Withdrawn => wire::Reply::Withdrawn,
-        channel::Reply::TooLarge => wire::Reply::TooLarge,
+        channel::SavedReply::TooLarge => wire::SavedReply::TooLarge,
     };
-    Ok(wire::Reply::new(limits, result)?)
+    Ok(wire::SavedReply::new(limits, result)?)
 }
 
 fn encode_delivery(delivery: host::Delivery, limits: &wire::Limits) -> Result<wire::Delivery, Error> {

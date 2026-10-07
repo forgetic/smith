@@ -221,6 +221,29 @@ fn a_resumed_run_is_told_of_each_answer_its_transcript_lacks() {
 }
 
 #[test]
+fn a_resumed_run_is_told_its_saved_answer_was_too_large() {
+    let mut world = World::with_history_answers(
+        Settings { job: Job::HostTools, resume: true, ..Settings::calm(908) },
+        None,
+        Box::from([AnsweredCall {
+            name: run::CallName { activation: 1, completion: 1, position: 0 },
+            tool: b"check".as_slice().into(),
+            answer: Answered::TooLarge,
+        }]),
+    );
+    world.run(2000);
+    let prompt = &world.prompts()[0];
+    assert!(prompt.messages.iter().any(|message| message.parts.iter().any(|part| {
+        matches!(part, Part::Text { text } if text.windows(b"host decided this call".len())
+            .any(|window| window == b"host decided this call"))
+    })));
+    assert!(prompt.messages.iter().any(|message| message.parts.iter().any(|part| {
+        matches!(part, Part::Text { text } if text.windows(b"answer was too large to give".len())
+            .any(|window| window == b"answer was too large to give"))
+    })));
+}
+
+#[test]
 fn answers_too_many_or_too_long_are_refused_before_a_completion() {
     let answer = AnsweredCall {
         name: run::CallName { activation: 1, completion: 1, position: 0 },

@@ -161,6 +161,8 @@ pub enum Path {
     DeliveryReplyTail,
     /// The tag of `Reply`.
     ReplyTag,
+    /// The tag of `SavedReply`.
+    SavedReplyTag,
     /// The `name` field of `AnsweredCall`.
     AnsweredCallName,
     /// The `tool` field of `AnsweredCall`.
@@ -1523,6 +1525,61 @@ impl Reply {
     }
 }
 
+/// `SavedReply` in this codec family.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SavedReply {
+    /// `host` carrying `HostReply`.
+    Host(HostReply),
+    /// `delivery` carrying `DeliveryReply`.
+    Delivery(DeliveryReply),
+    /// `too_large` without a payload.
+    TooLarge,
+}
+
+impl SavedReply {
+    /// Checks the payload against the given limits.
+    pub fn new(limits: &Limits, value: Self) -> Result<Self, Problem> {
+        value.check(limits)?;
+        Ok(value)
+    }
+
+    fn check(&self, limits: &Limits) -> Result<(), Problem> {
+        match self {
+            Self::Host(record) => HostReply::check(record, limits),
+            Self::Delivery(record) => DeliveryReply::check(record, limits),
+            Self::TooLarge => Ok(()),
+        }?;
+        if limits.directory_name > CEILINGS.directory_name { return Err(Problem { path: Path::DirectoryName, reason: skein_codec::Reason::Bound }); }
+        if limits.directory_path > CEILINGS.directory_path { return Err(Problem { path: Path::DirectoryPath, reason: skein_codec::Reason::Bound }); }
+        if limits.directory_conflicts > CEILINGS.directory_conflicts { return Err(Problem { path: Path::DirectoryConflicts, reason: skein_codec::Reason::Bound }); }
+        if limits.directory_conflicts_item > CEILINGS.directory_conflicts_item { return Err(Problem { path: Path::DirectoryConflicts, reason: skein_codec::Reason::Bound }); }
+        if limits.workspace_directories > CEILINGS.workspace_directories { return Err(Problem { path: Path::WorkspaceDirectories, reason: skein_codec::Reason::Bound }); }
+        if limits.grant_value_credential > CEILINGS.grant_value_credential { return Err(Problem { path: Path::GrantValueCredential, reason: skein_codec::Reason::Bound }); }
+        if limits.receipt_text > CEILINGS.receipt_text { return Err(Problem { path: Path::ReceiptText, reason: skein_codec::Reason::Bound }); }
+        if limits.delivered_receipts > CEILINGS.delivered_receipts { return Err(Problem { path: Path::DeliveredReceipts, reason: skein_codec::Reason::Bound }); }
+        if limits.marker_path > CEILINGS.marker_path { return Err(Problem { path: Path::MarkerPath, reason: skein_codec::Reason::Bound }); }
+        if limits.delivery_refusal_explanation > CEILINGS.delivery_refusal_explanation { return Err(Problem { path: Path::DeliveryRefusalExplanation, reason: skein_codec::Reason::Bound }); }
+        if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
+        if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
+        if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
+        if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
+        if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
+        if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
+        if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
+        if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
+        if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
+        if limits.field_text > CEILINGS.field_text { return Err(Problem { path: Path::FieldText, reason: skein_codec::Reason::Bound }); }
+        if limits.deliver_ask_fields > CEILINGS.deliver_ask_fields { return Err(Problem { path: Path::DeliverAskFields, reason: skein_codec::Reason::Bound }); }
+        if limits.turn_body > CEILINGS.turn_body { return Err(Problem { path: Path::TurnBody, reason: skein_codec::Reason::Bound }); }
+        if limits.accepted_result > CEILINGS.accepted_result { return Err(Problem { path: Path::AcceptedResult, reason: skein_codec::Reason::Bound }); }
+        Ok(())
+    }
+}
+
 /// Movable fields of `AnsweredCall`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AnsweredCallParts {
@@ -1531,7 +1588,7 @@ pub struct AnsweredCallParts {
     /// The `tool` field.
     pub tool: Box<[u8]>,
     /// The `reply` field.
-    pub reply: Reply,
+    pub reply: SavedReply,
 }
 
 /// `AnsweredCall` in this codec family.
@@ -1539,7 +1596,7 @@ pub struct AnsweredCallParts {
 pub struct AnsweredCall {
     name: CallName,
     tool: Box<[u8]>,
-    reply: Reply,
+    reply: SavedReply,
 }
 
 impl AnsweredCall {
@@ -1561,7 +1618,7 @@ impl AnsweredCall {
 
     /// Reads the `reply` field.
     #[must_use]
-    pub fn reply(&self) -> &Reply { &self.reply }
+    pub fn reply(&self) -> &SavedReply { &self.reply }
 
     /// Moves the fields out without copying.
     #[must_use]
@@ -5220,6 +5277,46 @@ impl Reply {
     }
 }
 
+impl SavedReply {
+    /// Measures this variant's wire encoding.
+    #[must_use]
+    pub fn measure(&self) -> u32 {
+        match self {
+            Self::Host(record) => 1_u32.checked_add(HostReply::measure(record)).expect("schema ceilings fit u32"),
+            Self::Delivery(record) => 1_u32.checked_add(DeliveryReply::measure(record)).expect("schema ceilings fit u32"),
+            Self::TooLarge => 1,
+        }
+    }
+
+    /// Writes this variant's tag and payload.
+    pub fn encode(&self, writer: &mut skein_lib::Writer) -> Result<(), skein_lib::Overflow> {
+        match self {
+            Self::Host(record) => { writer.put(&[0_u8])?; record.encode(writer)?; }
+            Self::Delivery(record) => { writer.put(&[1_u8])?; record.encode(writer)?; }
+            Self::TooLarge => writer.put(&[2_u8])?,
+        }
+        Ok(())
+    }
+
+    /// Reads a whole variant and refuses trailing bytes.
+    pub fn decode(limits: &Limits, reader: &mut skein_lib::Reader<'_>) -> Result<Self, Problem> {
+        let value = Self::decode_from(limits, reader)?;
+        if !reader.is_empty() { return Err(Problem { path: Path::SavedReplyTag, reason: skein_codec::Reason::Trailing }); }
+        Ok(value)
+    }
+
+    fn decode_from(limits: &Limits, reader: &mut skein_lib::Reader<'_>) -> Result<Self, Problem> {
+        let tag = reader.u8().ok_or(Problem { path: Path::SavedReplyTag, reason: skein_codec::Reason::Short })?;
+        let value = match tag {
+            0 => Self::Host(HostReply::decode_from(limits, reader)?),
+            1 => Self::Delivery(DeliveryReply::decode_from(limits, reader)?),
+            2 => Self::TooLarge,
+            _ => return Err(Problem { path: Path::SavedReplyTag, reason: skein_codec::Reason::Tag }),
+        };
+        Self::new(limits, value)
+    }
+}
+
 impl AnsweredCall {
     /// Measures this record's wire encoding.
     #[must_use]
@@ -5257,7 +5354,7 @@ impl AnsweredCall {
     fn decode_from(limits: &Limits, reader: &mut skein_lib::Reader<'_>) -> Result<Self, Problem> {
         let decoded_name = CallName::decode_from(limits, reader)?;
         let decoded_tool = match skein_codec::read_text(reader, limits.answered_call_tool.min(CEILINGS.answered_call_tool)) { Ok(text) => text, Err(reason) => return Err(Problem { path: Path::AnsweredCallTool, reason }), };
-        let decoded_reply = Reply::decode_from(limits, reader)?;
+        let decoded_reply = SavedReply::decode_from(limits, reader)?;
         Self::new(limits, AnsweredCallParts { name: decoded_name, tool: decoded_tool, reply: decoded_reply })
     }
 }
@@ -7337,6 +7434,28 @@ impl Reply {
     }
 }
 
+impl SavedReply {
+    /// Maximum encoded bytes among variants.
+    #[must_use]
+    pub fn worst_case_bytes(limits: &Limits) -> Option<u64> {
+        if !limits_valid(limits) { return None; }
+        let mut biggest = 0_u64;
+        biggest = biggest.max(HostReply::worst_case_bytes(limits)?);
+        biggest = biggest.max(DeliveryReply::worst_case_bytes(limits)?);
+        1_u64.checked_add(biggest)
+    }
+
+    /// Maximum heap held by any decoded variant.
+    #[must_use]
+    pub fn worst_case_heap(limits: &Limits) -> Option<u64> {
+        if !limits_valid(limits) { return None; }
+        let mut biggest = 0_u64;
+        biggest = biggest.max(HostReply::worst_case_heap(limits)?);
+        biggest = biggest.max(DeliveryReply::worst_case_heap(limits)?);
+        Some(biggest)
+    }
+}
+
 impl AnsweredCall {
     /// Maximum encoded bytes under these limits.
     #[must_use]
@@ -7345,7 +7464,7 @@ impl AnsweredCall {
         let mut size = 0_u64;
         size = size.checked_add(CallName::worst_case_bytes(limits)?)?;
         size = size.checked_add(4_u64.checked_add(u64::from(limits.answered_call_tool))?)?;
-        size = size.checked_add(Reply::worst_case_bytes(limits)?)?;
+        size = size.checked_add(SavedReply::worst_case_bytes(limits)?)?;
         Some(size)
     }
 
@@ -7356,7 +7475,7 @@ impl AnsweredCall {
         let mut heap = 0_u64;
         heap = heap.checked_add(CallName::worst_case_heap(limits)?)?;
         heap = heap.checked_add(u64::from(limits.answered_call_tool))?;
-        heap = heap.checked_add(Reply::worst_case_heap(limits)?)?;
+        heap = heap.checked_add(SavedReply::worst_case_heap(limits)?)?;
         Some(heap)
     }
 }
@@ -8326,6 +8445,7 @@ pub fn worst_case_bytes(limits: &Limits) -> Option<u64> {
     biggest = biggest.max(HostReply::worst_case_bytes(limits)?);
     biggest = biggest.max(DeliveryReply::worst_case_bytes(limits)?);
     biggest = biggest.max(Reply::worst_case_bytes(limits)?);
+    biggest = biggest.max(SavedReply::worst_case_bytes(limits)?);
     biggest = biggest.max(AnsweredCall::worst_case_bytes(limits)?);
     biggest = biggest.max(Start::worst_case_bytes(limits)?);
     biggest = biggest.max(Message::worst_case_bytes(limits)?);
@@ -8396,6 +8516,7 @@ pub fn worst_case_heap(limits: &Limits) -> Option<u64> {
     biggest = biggest.max(HostReply::worst_case_heap(limits)?);
     biggest = biggest.max(DeliveryReply::worst_case_heap(limits)?);
     biggest = biggest.max(Reply::worst_case_heap(limits)?);
+    biggest = biggest.max(SavedReply::worst_case_heap(limits)?);
     biggest = biggest.max(AnsweredCall::worst_case_heap(limits)?);
     biggest = biggest.max(Start::worst_case_heap(limits)?);
     biggest = biggest.max(Message::worst_case_heap(limits)?);
@@ -8447,7 +8568,7 @@ pub fn worst_case_heap(limits: &Limits) -> Option<u64> {
 
 #[cfg(test)]
 mod golden_tests {
-    use super::{CEILINGS, Path, CallName, CallNameParts, Window, WindowParts, Directory, DirectoryParts, Workspace, WorkspaceParts, GrantValue, GrantValueParts, Grant, GrantParts, Receipt, ReceiptParts, Delivered, DeliveredParts, Marker, MarkerParts, DeliveryRefusal, DeliveryRefusalParts, DeliveryReason, DeliveryFailure, DeliveryFailureParts, Delivery, HostReply, HostReplyParts, DeliveryReply, DeliveryReplyParts, Reply, AnsweredCall, AnsweredCallParts, Start, StartParts, Message, MessageParts, HostAnswer, HostAnswerParts, Acknowledge, AcknowledgeParts, GrantRefresh, GrantRefreshParts, Cancel, CancelParts, Admitted, AdmittedParts, Effect, HostAsk, HostAskParts, Field, FieldParts, DeliverAsk, DeliverAskParts, Ask, Call, CallParts, Withdraw, WithdrawParts, Turn, TurnParts, Waiting, WaitingParts, Long, LongParts, LongDone, LongDoneParts, Rejected, RejectedParts, Exhausted, ExhaustedParts, FactKind, Fact, FactParts, ReceivingLimit, Overflow, ReceivingLimitValue, ReceivingLimitValueParts, OverflowValue, OverflowValueParts, BudgetFailure, CompletionFailure, CompletionEvidence, CompletionFault, CompletionFaultParts, ModelFault, TranscriptRefusal, TranscriptRefusalValue, TranscriptRefusalValueParts, ModelFaultValue, ModelFaultValueParts, BudgetFailureValue, BudgetFailureValueParts, PolicyFailure, PolicyFailureParts, RunFailure, InvalidStart, InvalidStartValue, InvalidStartValueParts, StartRefusal, Accepted, AcceptedParts, Failed, FailedParts, Refused, RefusedParts, RunResult, Answer, AnswerParts};
+    use super::{CEILINGS, Path, CallName, CallNameParts, Window, WindowParts, Directory, DirectoryParts, Workspace, WorkspaceParts, GrantValue, GrantValueParts, Grant, GrantParts, Receipt, ReceiptParts, Delivered, DeliveredParts, Marker, MarkerParts, DeliveryRefusal, DeliveryRefusalParts, DeliveryReason, DeliveryFailure, DeliveryFailureParts, Delivery, HostReply, HostReplyParts, DeliveryReply, DeliveryReplyParts, Reply, SavedReply, AnsweredCall, AnsweredCallParts, Start, StartParts, Message, MessageParts, HostAnswer, HostAnswerParts, Acknowledge, AcknowledgeParts, GrantRefresh, GrantRefreshParts, Cancel, CancelParts, Admitted, AdmittedParts, Effect, HostAsk, HostAskParts, Field, FieldParts, DeliverAsk, DeliverAskParts, Ask, Call, CallParts, Withdraw, WithdrawParts, Turn, TurnParts, Waiting, WaitingParts, Long, LongParts, LongDone, LongDoneParts, Rejected, RejectedParts, Exhausted, ExhaustedParts, FactKind, Fact, FactParts, ReceivingLimit, Overflow, ReceivingLimitValue, ReceivingLimitValueParts, OverflowValue, OverflowValueParts, BudgetFailure, CompletionFailure, CompletionEvidence, CompletionFault, CompletionFaultParts, ModelFault, TranscriptRefusal, TranscriptRefusalValue, TranscriptRefusalValueParts, ModelFaultValue, ModelFaultValueParts, BudgetFailureValue, BudgetFailureValueParts, PolicyFailure, PolicyFailureParts, RunFailure, InvalidStart, InvalidStartValue, InvalidStartValueParts, StartRefusal, Accepted, AcceptedParts, Failed, FailedParts, Refused, RefusedParts, RunResult, Answer, AnswerParts};
     use alloc::boxed::Box;
 
     #[test]
@@ -9131,8 +9252,68 @@ mod golden_tests {
     }
 
     #[test]
+    fn enum_saved_reply_host_smallest() {
+        let value = SavedReply::Host(HostReply::new(&CEILINGS, HostReplyParts { error: false, text: Box::from([].as_slice()) }).expect("golden within ceilings"));
+        let golden: &[u8] = &[0, 0, 0, 0, 0, 0];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(SavedReply::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_saved_reply_host_full() {
+        let value = SavedReply::Host(HostReply::new(&CEILINGS, HostReplyParts { error: true, text: Box::from([97_u8, 98_u8, 99_u8].as_slice()) }).expect("golden within ceilings"));
+        let golden: &[u8] = &[0, 1, 0, 0, 0, 3, 97, 98, 99];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(SavedReply::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_saved_reply_delivery_smallest() {
+        let value = SavedReply::Delivery(DeliveryReply::new(&CEILINGS, DeliveryReplyParts { value: Delivery::Delivered(Delivered::new(&CEILINGS, DeliveredParts { receipts: skein_lib::List::with_capacity(0) }).expect("golden within ceilings")) }).expect("golden within ceilings"));
+        let golden: &[u8] = &[1, 0, 0, 0, 0, 0];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(SavedReply::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_saved_reply_delivery_full() {
+        let value = SavedReply::Delivery(DeliveryReply::new(&CEILINGS, DeliveryReplyParts { value: Delivery::Delivered(Delivered::new(&CEILINGS, DeliveredParts { receipts: { let mut items = skein_lib::List::with_capacity(1); items.push(Receipt::new(&CEILINGS, ReceiptParts { directory: u32::MAX, text: Box::from([0_u8, 127_u8, 255_u8].as_slice()) }).expect("golden within ceilings")).expect("one slot"); items } }).expect("golden within ceilings")) }).expect("golden within ceilings"));
+        let golden: &[u8] = &[1, 0, 0, 0, 0, 1, 255, 255, 255, 255, 0, 0, 0, 3, 0, 127, 255];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(SavedReply::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_saved_reply_too_large_smallest() {
+        let value = SavedReply::TooLarge;
+        let golden: &[u8] = &[2];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(SavedReply::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_saved_reply_too_large_full() {
+        let value = SavedReply::TooLarge;
+        let golden: &[u8] = &[2];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(SavedReply::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
     fn record_answered_call_smallest() {
-        let value = AnsweredCall::new(&CEILINGS, AnsweredCallParts { name: CallName::new(&CEILINGS, CallNameParts { activation: 0_u64, completion: 0_u32, position: 0_u32 }).expect("golden within ceilings"), tool: Box::from([].as_slice()), reply: Reply::Host(HostReply::new(&CEILINGS, HostReplyParts { error: false, text: Box::from([].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings");
+        let value = AnsweredCall::new(&CEILINGS, AnsweredCallParts { name: CallName::new(&CEILINGS, CallNameParts { activation: 0_u64, completion: 0_u32, position: 0_u32 }).expect("golden within ceilings"), tool: Box::from([].as_slice()), reply: SavedReply::Host(HostReply::new(&CEILINGS, HostReplyParts { error: false, text: Box::from([].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings");
         let golden: &[u8] = &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
@@ -9142,7 +9323,7 @@ mod golden_tests {
 
     #[test]
     fn record_answered_call_full() {
-        let value = AnsweredCall::new(&CEILINGS, AnsweredCallParts { name: CallName::new(&CEILINGS, CallNameParts { activation: u64::MAX, completion: u32::MAX, position: u32::MAX }).expect("golden within ceilings"), tool: Box::from([97_u8, 98_u8, 99_u8].as_slice()), reply: Reply::Host(HostReply::new(&CEILINGS, HostReplyParts { error: true, text: Box::from([97_u8, 98_u8, 99_u8].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings");
+        let value = AnsweredCall::new(&CEILINGS, AnsweredCallParts { name: CallName::new(&CEILINGS, CallNameParts { activation: u64::MAX, completion: u32::MAX, position: u32::MAX }).expect("golden within ceilings"), tool: Box::from([97_u8, 98_u8, 99_u8].as_slice()), reply: SavedReply::Host(HostReply::new(&CEILINGS, HostReplyParts { error: true, text: Box::from([97_u8, 98_u8, 99_u8].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings");
         let golden: &[u8] = &[255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 97, 98, 99, 0, 1, 0, 0, 0, 3, 97, 98, 99];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
@@ -9162,7 +9343,7 @@ mod golden_tests {
 
     #[test]
     fn record_start_full() {
-        let value = Start::new(&CEILINGS, StartParts { activation: u64::MAX, charter: Box::from([0_u8, 127_u8, 255_u8].as_slice()), workspace: Some(Workspace::new(&CEILINGS, WorkspaceParts { directories: { let mut items = skein_lib::List::with_capacity(1); items.push(Directory::new(&CEILINGS, DirectoryParts { name: Box::from([97_u8, 98_u8, 99_u8].as_slice()), path: Box::from([97_u8, 98_u8, 99_u8].as_slice()), writable: true, git: true, conflicts: { let mut items = skein_lib::List::with_capacity(1); items.push(Box::from([97_u8, 98_u8, 99_u8].as_slice())).expect("one slot"); items } }).expect("golden within ceilings")).expect("one slot"); items } }).expect("golden within ceilings")), transcript: { let mut items = skein_lib::List::with_capacity(1); items.push(Box::from([0_u8, 127_u8, 255_u8].as_slice())).expect("one slot"); items }, answered: { let mut items = skein_lib::List::with_capacity(1); items.push(AnsweredCall::new(&CEILINGS, AnsweredCallParts { name: CallName::new(&CEILINGS, CallNameParts { activation: u64::MAX, completion: u32::MAX, position: u32::MAX }).expect("golden within ceilings"), tool: Box::from([97_u8, 98_u8, 99_u8].as_slice()), reply: Reply::Host(HostReply::new(&CEILINGS, HostReplyParts { error: true, text: Box::from([97_u8, 98_u8, 99_u8].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings")).expect("one slot"); items }, grants: { let mut items = skein_lib::List::with_capacity(1); items.push(Grant::new(&CEILINGS, GrantParts { account: u32::MAX, generation: u64::MAX, valid: skein_lib::Duration::from_nanos(u64::MAX), value: GrantValue::new(&CEILINGS, GrantValueParts { credential: Box::from([0_u8, 127_u8, 255_u8].as_slice()) }).expect("golden within ceilings") }).expect("golden within ceilings")).expect("one slot"); items }, window: Window::new(&CEILINGS, WindowParts { turns: u32::MAX, bytes: u64::MAX }).expect("golden within ceilings") }).expect("golden within ceilings");
+        let value = Start::new(&CEILINGS, StartParts { activation: u64::MAX, charter: Box::from([0_u8, 127_u8, 255_u8].as_slice()), workspace: Some(Workspace::new(&CEILINGS, WorkspaceParts { directories: { let mut items = skein_lib::List::with_capacity(1); items.push(Directory::new(&CEILINGS, DirectoryParts { name: Box::from([97_u8, 98_u8, 99_u8].as_slice()), path: Box::from([97_u8, 98_u8, 99_u8].as_slice()), writable: true, git: true, conflicts: { let mut items = skein_lib::List::with_capacity(1); items.push(Box::from([97_u8, 98_u8, 99_u8].as_slice())).expect("one slot"); items } }).expect("golden within ceilings")).expect("one slot"); items } }).expect("golden within ceilings")), transcript: { let mut items = skein_lib::List::with_capacity(1); items.push(Box::from([0_u8, 127_u8, 255_u8].as_slice())).expect("one slot"); items }, answered: { let mut items = skein_lib::List::with_capacity(1); items.push(AnsweredCall::new(&CEILINGS, AnsweredCallParts { name: CallName::new(&CEILINGS, CallNameParts { activation: u64::MAX, completion: u32::MAX, position: u32::MAX }).expect("golden within ceilings"), tool: Box::from([97_u8, 98_u8, 99_u8].as_slice()), reply: SavedReply::Host(HostReply::new(&CEILINGS, HostReplyParts { error: true, text: Box::from([97_u8, 98_u8, 99_u8].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings")).expect("one slot"); items }, grants: { let mut items = skein_lib::List::with_capacity(1); items.push(Grant::new(&CEILINGS, GrantParts { account: u32::MAX, generation: u64::MAX, valid: skein_lib::Duration::from_nanos(u64::MAX), value: GrantValue::new(&CEILINGS, GrantValueParts { credential: Box::from([0_u8, 127_u8, 255_u8].as_slice()) }).expect("golden within ceilings") }).expect("golden within ceilings")).expect("one slot"); items }, window: Window::new(&CEILINGS, WindowParts { turns: u32::MAX, bytes: u64::MAX }).expect("golden within ceilings") }).expect("golden within ceilings");
         let golden: &[u8] = &[255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 0, 127, 255, 1, 0, 0, 0, 1, 0, 0, 0, 3, 97, 98, 99, 0, 0, 0, 3, 97, 98, 99, 1, 1, 0, 0, 0, 1, 0, 0, 0, 3, 97, 98, 99, 0, 0, 0, 1, 0, 0, 0, 3, 0, 127, 255, 0, 0, 0, 1, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 97, 98, 99, 0, 1, 0, 0, 0, 3, 97, 98, 99, 0, 0, 0, 1, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 0, 127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
