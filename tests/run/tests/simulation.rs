@@ -120,6 +120,120 @@ fn crash_open(
     (run, conversation)
 }
 
+fn reserved_start(host: &mut CrashHost, spend: u64) -> run::Event {
+    let mut start = host.start(1);
+    let run::Event::Start { charter, .. } = &mut start else { panic!("scripted host starts a run") };
+    charter.budget.spend = spend;
+    charter.grants.agents = true;
+    start
+}
+
+#[test]
+fn a_completion_whose_maximum_does_not_fit_is_not_made_and_the_run_ends_for_its_budget() {
+    let mut host = CrashHost::new();
+    let limits = Settings::calm(606).run;
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut out = Queue::with_capacity(run::MAX_OUT);
+    let mut domain = run::Domain::new(&limits);
+    let (_, main) = crash_open(&mut domain, &env, &mut out, reserved_start(&mut host, 100), 1);
+    assert_eq!(run::reserve(&mut domain, main, Token::new(801), 101), Err(Exhausted::Spend));
+    let ended = crash_take(
+        &mut domain,
+        &env,
+        &mut out,
+        run::Event::Ended { conversation: main, end: run::End::Budget(Exhausted::Spend), spend: run::Spend::ZERO },
+    );
+    assert!(matches!(ended.as_slice(), [run::Request::Answer {
+        answer: Answer::Failed { failure: Failure::Budget(Exhausted::Spend), spent, .. }, ..
+    }] if *spent == run::Spend::ZERO));
+}
+
+#[test]
+fn sub_agents_reserve_from_the_runs_budget_and_spend_never_passes_it() {
+    let mut host = CrashHost::new();
+    let limits = Settings::calm(606).run;
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut out = Queue::with_capacity(run::MAX_OUT);
+    let mut domain = run::Domain::new(&limits);
+    let (_, main) = crash_open(&mut domain, &env, &mut out, reserved_start(&mut host, 100), 1);
+    let asked = crash_take(
+        &mut domain,
+        &env,
+        &mut out,
+        run::Event::Delegated {
+            conversation: main,
+            call: Token::new(7),
+            name: run::CallName { activation: 1, completion: 1, position: 0 },
+            ask: run::Ask::SubAgent {
+                brief: b"review".as_slice().into(),
+                families: run::charter::Families {
+                    tools: run::charter::Tools { inspect: false, modify: false, shell: false },
+                    agents: false,
+                },
+                llm: None,
+                share: None,
+            },
+            deadline: Time::ZERO.saturating_add(Duration::from_secs(30)),
+        },
+    );
+    let [run::Request::Open { conversation: child, .. }] = asked.as_slice() else {
+        panic!("the run opened its child: {asked:?}")
+    };
+    let child = *child;
+    assert!(
+        crash_take(&mut domain, &env, &mut out, run::Event::Started { conversation: child, peer: Token::new(101) })
+            .is_empty()
+    );
+
+    let first = Token::new(801);
+    let second = Token::new(802);
+    assert_eq!(run::reserve(&mut domain, main, first, 60), Ok(()));
+    assert_eq!(run::reserve(&mut domain, child, second, 50), Err(Exhausted::Spend));
+    assert!(run::settle_reservation(&mut domain, main, first, 20));
+    assert!(
+        crash_take(
+            &mut domain,
+            &env,
+            &mut out,
+            run::Event::Priced { conversation: main, own_spent: 20, subtree_spent: 20 },
+        )
+        .is_empty()
+    );
+    assert_eq!(run::reserve(&mut domain, child, second, 50), Ok(()));
+    assert!(run::settle_reservation(&mut domain, child, second, 30));
+    assert!(
+        crash_take(
+            &mut domain,
+            &env,
+            &mut out,
+            run::Event::Priced { conversation: child, own_spent: 30, subtree_spent: 30 },
+        )
+        .is_empty()
+    );
+    let child_spend = run::Spend { turns: 1, units: 30, ..run::Spend::ZERO };
+    let returned = crash_take(
+        &mut domain,
+        &env,
+        &mut out,
+        run::Event::Ended { conversation: child, end: run::End::Closed, spend: child_spend },
+    );
+    assert!(matches!(returned.as_slice(), [run::Request::Return { spent: 30, .. }]));
+    assert_eq!(run::reserve(&mut domain, main, Token::new(803), 51), Err(Exhausted::Spend));
+    let ended = crash_take(
+        &mut domain,
+        &env,
+        &mut out,
+        run::Event::Ended {
+            conversation: main,
+            end: run::End::Budget(Exhausted::Spend),
+            spend: run::Spend { turns: 1, units: 20, ..run::Spend::ZERO },
+        },
+    );
+    assert!(matches!(ended.as_slice(), [run::Request::Answer {
+        answer: Answer::Failed { failure: Failure::Budget(Exhausted::Spend), spent, .. }, ..
+    }] if spent.units == 50 && spent.units <= 100));
+}
+
 #[test]
 fn answered_host_call_before_turn_crash_wakes_as_host_text_with_new_call_namespace() {
     let mut host = CrashHost::new();

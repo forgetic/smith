@@ -212,6 +212,19 @@ impl Peer {
         }
     }
 
+    /// Bytes of opaque host declarations copied into the protocol prompt.
+    /// They are absent from the session's ticket-only prompt count.
+    pub(crate) fn declaration_bytes(&self) -> Option<u64> {
+        let mut bytes = 0_u64;
+        for tool in &self.offered.host_tools {
+            bytes = bytes
+                .checked_add(u64::try_from(tool.name.len()).ok()?)?
+                .checked_add(u64::try_from(tool.description.len()).ok()?)?
+                .checked_add(u64::try_from(tool.schema.len()).ok()?)?;
+        }
+        Some(bytes)
+    }
+
     fn block(block: sllm::Block) -> Block {
         match block {
             sllm::Block::Text { text, replay } => Block::Text { text, replay },

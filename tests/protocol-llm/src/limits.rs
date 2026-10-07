@@ -66,6 +66,7 @@ pub const LIMITS: Limits = Limits {
     session: session::Limits {
         sessions: 6,
         spend: 1,
+        protocol_allowance: 0,
         messages: 64,
         session_bytes: 33_554_432,
         completion_bytes: 4096,
@@ -127,6 +128,7 @@ pub const TIGHT: Limits = Limits {
     session: session::Limits {
         sessions: 4,
         spend: 1,
+        protocol_allowance: 0,
         messages: 32,
         session_bytes: 33_554_432,
         completion_bytes: 4096,

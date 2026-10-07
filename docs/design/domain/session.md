@@ -101,10 +101,12 @@ What is still open is listed in section 11.
 
 - **Budgets:** turns, tokens (input, output, cache reads and writes, as
   the provider counts them), spend in the host's unit, and time, given by
-  the opener at open; bytes held, against the agent's limits. Crossing a
-  budget stops the next completion, not the turn in flight: the calls of
-  the completion that crossed it still run and settle. Time is the
-  exception: when it runs out, the session closes at once.
+  the opener at open; bytes held, against the agent's limits. Crossing
+  a turn, token or byte budget stops the next completion, not the turn
+  in flight: the calls of the completion that crossed it still run and
+  settle. For spend, the session reserves each completion's maximum first
+  (run.md, section 9), so spend never crosses it. Time is the exception:
+  when it runs out, the session closes at once.
 - **Prices** are integer input, cached and output amounts per positive
   `unit` tokens. New input and cache writes use the input rate; cache
   reads use the cached rate. The combined rational charge of **each

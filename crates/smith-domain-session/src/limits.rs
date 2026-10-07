@@ -24,6 +24,9 @@ pub struct Limits {
     pub sessions: u32,
     /// Largest deployment-unit budget admitted by the parent opening.
     pub spend: u64,
+    /// Maximum provider input tokens added beyond the domain request's bytes:
+    /// protocol schemas, framing and provider template, configured by the agent.
+    pub protocol_allowance: u64,
     /// Messages a session's transcript holds, the spec's prompt included: at
     /// least two, the prompt and an answer.
     pub messages: u32,

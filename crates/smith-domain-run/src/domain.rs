@@ -169,6 +169,16 @@ pub fn completion_permit(domain: &Domain, conversation: Token) -> crate::Complet
     run::completion_permit(domain, conversation)
 }
 
+/// Reserve a provider completion's priced maximum from the run's one budget.
+pub fn reserve(domain: &mut Domain, conversation: Token, owner: Token, most: u64) -> Result<(), crate::Exhausted> {
+    run::reserve(domain, conversation, owner, most)
+}
+
+/// Settle one provider terminal, returning whether its charge obeyed its reservation.
+pub fn settle_reservation(domain: &mut Domain, conversation: Token, owner: Token, charge: u64) -> bool {
+    run::settle_reservation(domain, conversation, owner, charge)
+}
+
 /// Live run that owns this conversation, for its parent's acknowledgement routing.
 #[must_use]
 pub fn owner(domain: &Domain, conversation: Token) -> Option<Token> {
