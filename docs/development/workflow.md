@@ -472,3 +472,14 @@ After a machine freeze, these gates used one build job, a shared repository
 nextest workers. Heavy commands ran sequentially in a user systemd scope with
 `MemoryHigh=6G`, `MemoryMax=8G` and `MemorySwapMax=0`, after checking at least
 6 GiB available RAM. No memory-pressure or scope-limit failure occurred.
+
+## 5. Opt-in live suite
+
+The `live` profile runs the shipped binary against real backends, serially,
+without retries or fail-fast, with a ten-minute suite timeout. It is excluded
+from the default and fuzzy profiles; the merge gate never runs it. Its
+credentials and durable test-only token directory are supplied by the caller.
+
+```sh
+cargo nextest run --workspace --profile live
+```

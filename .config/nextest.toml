@@ -5,7 +5,7 @@
 # slow period is flagged SLOW as it runs.
 
 [profile.default]
-default-filter = "not binary(/^fuzzy_/)"
+default-filter = "not binary(/^fuzzy_/) and not binary(=live)"
 global-timeout = "15s"
 slow-timeout = { period = "3s" }
 
@@ -16,7 +16,7 @@ filter = "kind(test)"
 priority = 10
 
 [profile.fuzzy]
-default-filter = "binary(/^fuzzy_/)"
+default-filter = "binary(/^fuzzy_/) and not binary(=live)"
 global-timeout = "60s"
 slow-timeout = { period = "20s" }
 
@@ -34,3 +34,12 @@ max-threads = 1
 [[profile.default.overrides]]
 filter = "package(smith-real-world) or binary(end_to_end)"
 test-group = "real-local"
+
+# Real backends are opt-in and never part of the merge gate.
+[profile.live]
+default-filter = "binary(=live)"
+global-timeout = "10m"
+slow-timeout = { period = "60s" }
+test-threads = 1
+retries = 0
+fail-fast = false
