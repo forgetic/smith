@@ -302,3 +302,12 @@ seconds. The twelve new component, identity and fake-peer stories contributed
 0.060 seconds of reported individual test durations, including both dialects,
 typed calls, grants, phase deadlines and a full pool memory measurement. This
 world has no fuzzy binary. The workspace budgets are unchanged.
+
+The protocol agent process world was measured serially on 2026-10-08 with
+`measure -j 1`: three focused tests passed in 0.027 seconds, and its 64-seed
+fuzzy sweep passed in 0.224 seconds. Its focused tests cover the actual Start
+to Answer exchange through a TLS fake LLM peer, signal cancellation, and
+service construction against the checked memory bound. The binary's startup
+integration tests cover a configuration that cannot be read and the final
+standard-error line for an unanswered run. The one-second focused and
+five-second fuzzy world shares remain intact.

@@ -345,7 +345,7 @@ fn standard_limits(memory: u64) -> Result<service::Limits, String> {
                 max_completion_bytes: completion,
                 max_completion_blocks: client.dialect.parts,
                 decoded_call_bytes,
-                max_failure_bytes: client.dialect.detail_bytes,
+                max_failure_bytes: domain.session.failure_bytes,
             },
             contract_bytes: 4096,
             accounts: ACCOUNTS,

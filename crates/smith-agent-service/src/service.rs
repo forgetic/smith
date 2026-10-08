@@ -17,6 +17,7 @@ use smith_protocol_llm as llm;
 use smith_protocol_machine as machine;
 
 const TRACE_PROMPT_BYTES: u32 = 65_536;
+const COMPONENT_OWNER_BIT: u64 = 1 << 63;
 
 /// Fixed limits for one agent process and every stage it owns.
 #[derive(Clone, Copy, Debug)]
@@ -810,7 +811,7 @@ fn route_owned_io(service: &mut Service, event: io::Event) {
         }
         return;
     }
-    let id = Id::<Owner>::from_token(owner);
+    let id = Id::<Owner>::from_token(Token::new(owner.raw() & !COMPONENT_OWNER_BIT));
     let route = *service.owners.get(id).expect("IO event has a live component route");
     let closed = match &event {
         io::Event::Closed { .. } => true,
@@ -864,6 +865,11 @@ fn io_event_owner(event: &io::Event) -> Option<Token> {
         | io::Event::Closed { owner } => Some(*owner),
         io::Event::Shutdown { .. } => None,
     }
+}
+
+fn component_owner(route: Token) -> Token {
+    assert!(route.raw() & COMPONENT_OWNER_BIT == 0, "one process cannot exhaust the component owner namespace");
+    Token::new(route.raw() | COMPONENT_OWNER_BIT)
 }
 
 fn remap_io_owner(event: io::Event, owner: Token) -> io::Event {
@@ -1409,7 +1415,7 @@ fn component_down(service: &mut Service) {
         match request {
             io::Request::Connect { owner, addr } => {
                 let route = service.owners.insert(Owner::Llm(owner)).expect("LLM connection route capacity");
-                service.io_requests.push(io::Request::Connect { owner: route.token(), addr });
+                service.io_requests.push(io::Request::Connect { owner: component_owner(route.token()), addr });
             }
             other @ (io::Request::Listen { .. }
             | io::Request::Bind { .. }
@@ -1473,7 +1479,7 @@ fn component_down(service: &mut Service) {
                     pipes: spawn.pipes,
                 };
                 let route = service.owners.insert(Owner::Machine(owner)).expect("process route capacity");
-                service.io_requests.push(io::Request::Spawn { owner: route.token(), spawn });
+                service.io_requests.push(io::Request::Spawn { owner: component_owner(route.token()), spawn });
             }
             machine::Below::Process(request) => service.io_requests.push(request),
         }
@@ -1789,7 +1795,7 @@ mod tests {
     fn io_routes_preserve_component_owner_and_retire_on_close() {
         let mut service = service();
         let route = service.owners.insert(Owner::Llm(Token::new(42))).expect("route");
-        route_owned_io(&mut service, io::Event::Closed { owner: route.token() });
+        route_owned_io(&mut service, io::Event::Closed { owner: component_owner(route.token()) });
         assert_eq!(service.owners.len(), 1);
         service.owners.reclaim();
         assert!(service.owners.is_empty());
