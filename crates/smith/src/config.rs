@@ -256,15 +256,27 @@ fn resolve(address: &str) -> Result<SocketAddr, String> {
     resolved.next().ok_or_else(|| format!("endpoint address {address:?} has no result"))
 }
 
-fn trust(der: Option<&str>) -> Result<tls::Config, String> {
+// Startup trust material and decoded configuration are bounded together.
+pub(crate) const TRUST_BYTES: u64 = 16_777_216;
+
+pub(crate) fn trust(der: Option<&str>) -> Result<tls::Config, String> {
     let mut roots = tls::RootCertStore::empty();
     match der {
         Some(path) => {
+            if fs::metadata(path).map_err(|error| format!("trust certificate metadata: {error}"))?.len() > 65_536 {
+                return Err("trust certificate exceeds 65536 bytes".into());
+            }
             let bytes = fs::read(path).map_err(|error| format!("trust certificate {path:?}: {error}"))?;
+            if bytes.len() > 65_536 {
+                return Err("trust certificate exceeds 65536 bytes".into());
+            }
             roots.add(tls::CertificateDer::from(bytes)).map_err(|error| format!("trust certificate: {error}"))?;
         }
         None => {
             let native = rustls_native_certs::load_native_certs();
+            if native.certs.len() > 512 || native.certs.iter().any(|cert| cert.len() > 8192) {
+                return Err("native trust store exceeds its certificate bounds".into());
+            }
             for cert in native.certs {
                 roots.add(cert).map_err(|error| format!("native trust certificate: {error}"))?;
             }

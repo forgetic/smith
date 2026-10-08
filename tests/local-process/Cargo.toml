@@ -1,0 +1,20 @@
+[package]
+name = "smith-local-process-world"
+description = "The local Smith host and its neighbours over a simulated kernel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+skein-fake-oauth.workspace = true
+skein-io.workspace = true
+skein-lib.workspace = true
+skein-oauth.workspace = true
+skein-tls-world.workspace = true
+skein-world.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+elided_lifetimes_in_paths = "deny"
+unused_must_use = "deny"

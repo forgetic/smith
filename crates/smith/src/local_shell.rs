@@ -92,6 +92,11 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
     };
     let signals =
         skein_shell::open_termination_signals().map_err(|error| format!("local signals failed (errno {error})"))?;
+    let mut oauth_entropy = [0_u8; 32];
+    for part in oauth_entropy.chunks_exact_mut(8) {
+        let seed = skein_shell::seed().map_err(|error| format!("OAuth entropy failed (errno {error})"))?;
+        part.copy_from_slice(&seed.to_be_bytes());
+    }
     let lower = settings.in_process.then_some(agent_config.service);
     let mut local_service = Local::new(
         local_config,
@@ -107,6 +112,7 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
             delivery_environment: settings.delivery_environment.iter().map(|entry| entry.as_bytes().into()).collect(),
             accounts: settings.accounts.into(),
             seed,
+            oauth_entropy,
         },
     )?;
     let worst = local_service.worst_case();

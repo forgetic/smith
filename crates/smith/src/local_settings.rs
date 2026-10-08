@@ -120,6 +120,26 @@ pub struct Settings {
 pub struct Account {
     pub number: u32,
     pub account_id: String,
+    #[serde(default)]
+    pub oauth: Option<OAuth>,
+}
+
+/// Public-client registration and the token endpoint's startup destination.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OAuth {
+    pub authorization_url: String,
+    pub token_endpoint: String,
+    pub client_id: String,
+    pub redirect_uri: String,
+    #[serde(default)]
+    pub scope: String,
+    pub address: String,
+    pub server_name: String,
+    #[serde(default)]
+    pub trust_der: Option<String>,
+    #[serde(default)]
+    pub json: bool,
 }
 
 /// One explicitly configured push destination for local git deliveries.

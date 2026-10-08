@@ -108,8 +108,9 @@ impl Invocation {
                 delivery_roots: Box::new([]),
                 effect_roots: Box::new([]),
                 delivery_environment: Box::new([]),
-                accounts: Box::new([local_settings::Account { number: 0, account_id: "acc".into() }]),
+                accounts: Box::new([local_settings::Account { number: 0, account_id: "acc".into(), oauth: None }]),
                 seed,
+                oauth_entropy: [17; 32],
             },
         )
         .expect("shared local shell");

@@ -472,6 +472,7 @@ dependencies = [
  "serde_json",
  "skein-channel",
  "skein-fake-machine",
+ "skein-fake-oauth",
  "skein-http",
  "skein-io",
  "skein-lib",
@@ -492,6 +493,7 @@ dependencies = [
  "smith-host-protocol",
  "smith-host-world",
  "smith-local-domain",
+ "smith-local-process-world",
  "smith-local-protocol",
  "smith-local-service",
  "smith-protocol-channel",
@@ -699,6 +701,18 @@ dependencies = [
  "skein-lib",
  "smith-agent-world",
  "smith-domain",
+]
+
+[[package]]
+name = "smith-local-process-world"
+version = "0.0.0"
+dependencies = [
+ "skein-fake-oauth",
+ "skein-io",
+ "skein-lib",
+ "skein-oauth",
+ "skein-tls-world",
+ "skein-world",
 ]
 
 [[package]]

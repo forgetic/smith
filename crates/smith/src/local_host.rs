@@ -8,14 +8,18 @@ use std::path::PathBuf;
 
 use skein_io::{self as io, kernel};
 use skein_lib::stream::{OutputDown, OutputOutcome, OutputUp};
-use skein_lib::{Duration, Env, Map, Queue, Time, Token, Wall};
+use skein_lib::{Env, Map, Queue, Time, Token, Wall};
 use skein_world::Host;
 use smith_agent_service as agent;
-use smith_domain::{Grant, GrantName};
 use smith_local_domain as domain;
 use smith_local_service as service;
 
-use crate::{local_settings::Account, local_store::Store, local_tokens::Tokens};
+use crate::{
+    local_auth::{self, Auth},
+    local_settings::Account,
+    local_store::Store,
+    local_tokens::Tokens,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Route {
@@ -36,6 +40,8 @@ pub struct Resources {
     pub delivery_environment: Box<[Box<[u8]>]>,
     pub accounts: Box<[Account]>,
     pub seed: u64,
+    /// Unpredictable bytes from the binary shell; worlds supply deterministic bytes.
+    pub oauth_entropy: [u8; 32],
 }
 
 /// The local service and its shell effects, independent of the driving loop.
@@ -43,7 +49,7 @@ pub struct Local {
     service: service::Service,
     store: Store,
     tokens: Tokens,
-    accounts: Box<[Account]>,
+    accounts: Box<[Auth]>,
     writer: io::Io,
     env: Env<io::Limits>,
     output: Token,
@@ -90,6 +96,16 @@ impl Local {
         let outer_queue = queue.checked_mul(2).ok_or("shell queue count overflowed")?;
         let show_bytes = config.limits.local.show_bytes;
         let io_limits = config.limits.process.io;
+        if !resources.accounts.is_empty() && !crate::local_auth_http::fits(&io_limits) {
+            return Err("local IO limits cannot carry OAuth TLS records".into());
+        }
+        worst = worst
+            .checked_add(
+                local_auth::worst_case()
+                    .and_then(|bound| bound.checked_mul(u64::try_from(resources.accounts.len()).ok()?))
+                    .ok_or("account memory calculation overflowed")?,
+            )
+            .ok_or("account memory calculation overflowed")?;
         let operations = io::operations(&io_limits)
             .and_then(|count| count.checked_mul(2))
             .and_then(|count| count.checked_add(64))
@@ -109,7 +125,7 @@ impl Local {
         let requests = Queue::with_capacity(queue);
         worst = worst
             .checked_add(io::worst_case(&io_limits).ok_or("terminal memory overflowed")?)
-            .and_then(|count| count.checked_add(u64::from(queue).checked_mul(u64::from(show_bytes))?))
+            .and_then(|count| count.checked_add(u64::from(queue).checked_mul(u64::from(show_bytes.max(8192)))?))
             .and_then(|count| count.checked_add(Queue::<kernel::Complete>::worst_case(queue)?.checked_mul(3)?))
             .and_then(|count| count.checked_add(Queue::<kernel::Submit>::worst_case(queue)?.checked_mul(3)?))
             .and_then(|count| count.checked_add(Queue::<io::Event>::worst_case(queue)?))
@@ -117,11 +133,18 @@ impl Local {
             .and_then(|count| count.checked_add(Map::<Token, Route>::worst_case(operations)?))
             .and_then(|count| count.checked_add(u64::try_from(std::mem::size_of::<Self>()).ok()?))
             .ok_or("shell memory calculation overflowed")?;
+        let accounts = resources
+            .accounts
+            .into_vec()
+            .into_iter()
+            .enumerate()
+            .map(|(position, account)| Auth::new(account, position, resources.oauth_entropy))
+            .collect::<Result<Vec<_>, _>>()?;
         let mut local = Self {
             service,
             store,
             tokens,
-            accounts: resources.accounts,
+            accounts: accounts.into(),
             writer,
             env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits: io_limits },
             output,
@@ -206,39 +229,75 @@ impl Local {
     }
 
     fn credential(&mut self, account: u32) {
-        let Some(settings) = self.accounts.iter().find(|settings| settings.number == account) else {
-            self.unavailable(account);
-            return;
-        };
-        let record = match self.tokens.load(account) {
-            Ok(Some(record)) if record.remaining(self.env.wall) > Duration::from_secs(60) => record,
-            Ok(Some(_) | None) | Err(_) => {
-                self.unavailable(account);
-                return;
-            }
-        };
-        let Ok(length) = u16::try_from(settings.account_id.len()) else {
-            self.unavailable(account);
-            return;
-        };
-        let mut envelope = Vec::with_capacity(2 + settings.account_id.len() + record.access_token.len());
-        envelope.extend_from_slice(&length.to_be_bytes());
-        envelope.extend_from_slice(settings.account_id.as_bytes());
-        envelope.extend_from_slice(&record.access_token);
-        self.service.credential(
-            Grant {
-                name: GrantName { account, generation: record.generation },
-                valid: record.remaining(self.env.wall),
-            },
-            envelope.into(),
-        );
+        if let Some(auth) = self.accounts.iter_mut().find(|auth| auth.account() == account) {
+            auth.request();
+        } else {
+            self.service
+                .local_event(domain::Event::NoCredential { account, reason: domain::CredentialFailure::Missing });
+        }
     }
 
-    fn unavailable(&mut self, account: u32) {
-        self.service.local_event(domain::Event::NoCredential { account, reason: domain::CredentialFailure::Missing });
+    fn authentication(&mut self) {
+        for auth in &mut self.accounts {
+            if self.exit.is_some() {
+                auth.close(self.env.now, self.env.wall, &mut self.requests);
+            }
+            auth.due(self.env.now);
+            if auth.wants() {
+                match self.tokens.load(auth.account()) {
+                    Ok(saved) => auth.begin(saved, self.env.now, self.env.wall),
+                    Err(_) => {
+                        auth.load_failed();
+                        self.service.local_event(domain::Event::NoCredential {
+                            account: auth.account(),
+                            reason: domain::CredentialFailure::Missing,
+                        });
+                    }
+                }
+            }
+            auth.tick(self.env.now, self.env.wall, &mut self.requests);
+            if let Some(url) = auth.shown_url() {
+                let mut text = b"Sign in: ".to_vec();
+                text.extend_from_slice(&url);
+                text.push(b'\n');
+                self.service.output().push(text.into());
+            }
+            for _ in 0..8 {
+                let Some(request) = auth.take() else { break };
+                match request {
+                    smith_local_protocol::CredentialRequest::Visit { url } => auth.visit(url, &mut self.requests),
+                    smith_local_protocol::CredentialRequest::Http(request) => auth.http(request),
+                    smith_local_protocol::CredentialRequest::Save { account, bytes } => {
+                        match self.tokens.save(account, &bytes) {
+                            Ok(()) => auth.stored(self.env.wall),
+                            Err(_) => auth.store_failed(),
+                        }
+                    }
+                    smith_local_protocol::CredentialRequest::Ready {
+                        event: domain::Event::Credential { grant },
+                        value,
+                    } => {
+                        let length = u16::try_from(auth.account_id().len()).expect("bounded account identifier");
+                        let mut envelope = Vec::with_capacity(2 + auth.account_id().len() + value.len());
+                        envelope.extend_from_slice(&length.to_be_bytes());
+                        envelope.extend_from_slice(auth.account_id());
+                        envelope.extend_from_slice(&value);
+                        auth.lent(grant.valid, self.env.now);
+                        self.service.credential(grant, envelope.into());
+                    }
+                    smith_local_protocol::CredentialRequest::Failed { event } => self.service.local_event(event),
+                    smith_local_protocol::CredentialRequest::Ready { .. } => {
+                        unreachable!("credential translator lends only a grant")
+                    }
+                }
+            }
+        }
     }
 
     fn writer_up(&mut self) {
+        while self.writer.is_ready() {
+            io::resume(&mut self.writer, &self.env, &mut self.events, &mut self.local_submissions);
+        }
         for _ in 0..self.local_completions.capacity() {
             let Some(complete) = self.local_completions.pop() else { break };
             io::up(&mut self.writer, &self.env, complete, &mut self.events, &mut self.local_submissions);
@@ -252,6 +311,11 @@ impl Local {
             }
         }
         while let Some(event) = self.events.pop() {
+            let owner = local_auth::event_owner(&event);
+            if let Some(auth) = self.accounts.iter_mut().find(|auth| auth.owns(owner)) {
+                auth.event(event, self.env.now, self.env.wall, &mut self.requests);
+                continue;
+            }
             match event {
                 io::Event::Output { owner, up: OutputUp::Settled { right, outcome } } if owner == self.output => {
                     let (wanted, text) = self.pending.take().expect("terminal has one output right");
@@ -354,6 +418,7 @@ impl Host for Local {
         self.writer_up();
         service::iterate(&mut self.service, now, wall);
         self.files();
+        self.authentication();
         self.writer_down();
         while let Some(submit) = self.service.submissions().pop() {
             let op = submit.op;
@@ -372,6 +437,7 @@ impl Host for Local {
     }
     fn work_pending(&self, now: Time) -> bool {
         self.service.work_pending(now)
+            || self.accounts.iter().any(Auth::pending)
             || self.writer.is_ready()
             || self.writer.is_due(now)
             || !self.completions.is_empty()
@@ -381,7 +447,11 @@ impl Host for Local {
             || !self.requests.is_empty()
     }
     fn next_deadline(&self) -> Option<Time> {
-        [self.service.next_deadline(), self.writer.next_deadline()].into_iter().flatten().min()
+        [self.service.next_deadline(), self.writer.next_deadline()]
+            .into_iter()
+            .flatten()
+            .chain(self.accounts.iter().filter_map(Auth::deadline))
+            .min()
     }
     fn is_empty(&self) -> bool {
         self.exit.is_some()

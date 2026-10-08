@@ -4,6 +4,8 @@
 //! simulator, neighbour and fault state belong to the caller.
 
 mod limits;
+mod local_auth;
+mod local_auth_http;
 
 pub mod config;
 pub mod local_host;
@@ -12,3 +14,6 @@ pub mod local_shell;
 pub mod local_store;
 pub mod local_tokens;
 pub mod trace;
+
+#[cfg(test)]
+mod local_auth_tests;
