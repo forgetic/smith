@@ -4,6 +4,8 @@ How work reaches main. Work happens on local branches; main moves only by
 merging a branch that passed every check below, or that changes only
 documentation.
 
+For the executable's local mode, see [local-host settings and commands](local-host.md).
+
 ## 1. Before merging to main
 
 On the branch's tip, rebased on main, so that what is checked is what main
