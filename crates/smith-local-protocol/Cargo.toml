@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 skein-lib.workspace = true
 smith-local-domain.workspace = true
+smith-host-domain.workspace = true
 smith-domain.workspace = true
 smith-protocol-channel.workspace = true
 smith-transcript.workspace = true

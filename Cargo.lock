@@ -696,6 +696,7 @@ dependencies = [
  "skein-lib",
  "skein-oauth",
  "smith-domain",
+ "smith-host-domain",
  "smith-local-domain",
  "smith-protocol-channel",
  "smith-transcript",
