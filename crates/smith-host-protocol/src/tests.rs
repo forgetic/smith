@@ -127,7 +127,7 @@ fn spawn_has_three_credential_free_standard_pipes() {
     let Some(IoRequest::Spawn { owner, spawn }) = below.pop() else {
         panic!("one lower spawn");
     };
-    assert_eq!(owner, agent);
+    assert_eq!(owner, process.io_owner());
     assert_eq!(&*spawn.program, b"smith");
     assert_eq!(&*spawn.args[0], b"agent");
     assert_eq!(&*spawn.env[0], b"LANG=C");
@@ -145,17 +145,18 @@ fn refused_spawn_reports_one_unspawned_terminal() {
 
     let agent = Token::new(7);
     let mut process = crate::Process::new(agent, &process_limits(), 8).expect("channel");
+    let io_owner = process.io_owner();
     let mut below = Queue::with_capacity(8);
     let mut above = Queue::with_capacity(8);
     process.spawn(launch(), Time::from_nanos(100), &mut below);
     below.pop();
     process.from_io(
         Time::from_nanos(2),
-        IoEvent::Failed { owner: agent, error: IoError::Busy },
+        IoEvent::Failed { owner: io_owner, error: IoError::Busy },
         &mut above,
         &mut below,
     );
-    process.from_io(Time::from_nanos(2), IoEvent::Closed { owner: agent }, &mut above, &mut below);
+    process.from_io(Time::from_nanos(2), IoEvent::Closed { owner: io_owner }, &mut above, &mut below);
     match above.pop().expect("one terminal") {
         crate::ProcessEvent::Unspawned { agent: observed, detail } => {
             assert_eq!(observed, agent);
@@ -179,13 +180,14 @@ fn expired_opening_kills_child_and_keeps_errors_tail() {
     let output = Token::new(10);
     let error = Token::new(11);
     let mut process = crate::Process::new(agent, &process_limits(), 4).expect("channel");
+    let io_owner = process.io_owner();
     let mut below = Queue::with_capacity(16);
     let mut above = Queue::with_capacity(8);
     process.spawn(launch(), Time::from_nanos(100), &mut below);
     below.pop();
     process.from_io(
         Time::from_nanos(101),
-        IoEvent::Spawned { owner: agent, child, pipes: Box::from([input, output, error]) },
+        IoEvent::Spawned { owner: io_owner, child, pipes: Box::from([input, output, error]) },
         &mut above,
         &mut below,
     );
@@ -213,13 +215,13 @@ fn expired_opening_kills_child_and_keeps_errors_tail() {
     assert_eq!(below.pop(), Some(IoRequest::Close { entity: error }));
     process.from_io(
         Time::from_nanos(103),
-        IoEvent::Exited { owner: agent, exit: skein_io::kernel::Exit::Code(1) },
+        IoEvent::Exited { owner: io_owner, exit: skein_io::kernel::Exit::Code(1) },
         &mut above,
         &mut below,
     );
     below.pop();
     below.pop();
-    for owner in [input, output, error, child] {
+    for owner in [input, output, error, io_owner] {
         process.from_io(Time::from_nanos(104), IoEvent::Closed { owner }, &mut above, &mut below);
     }
     match above.pop().expect("unspawned") {
@@ -241,13 +243,14 @@ fn host_stop_signals_keep_the_child_identity() {
     let agent = Token::new(7);
     let child = Token::new(8);
     let mut process = crate::Process::new(agent, &process_limits(), 4).expect("channel");
+    let io_owner = process.io_owner();
     let mut below = Queue::with_capacity(16);
     let mut above = Queue::with_capacity(8);
     process.spawn(launch(), Time::from_nanos(100), &mut below);
     below.pop();
     process.from_io(
         Time::from_nanos(1),
-        IoEvent::Spawned { owner: agent, child, pipes: Box::from([Token::new(9), Token::new(10), Token::new(11)]) },
+        IoEvent::Spawned { owner: io_owner, child, pipes: Box::from([Token::new(9), Token::new(10), Token::new(11)]) },
         &mut above,
         &mut below,
     );

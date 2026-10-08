@@ -12,9 +12,11 @@ use smith_protocol_channel as channel;
 use smith_protocol_llm as llm;
 use smith_protocol_machine as machine;
 
-mod peer;
+pub mod peer;
 
-fn limits() -> agent::Limits {
+/// Bounded agent-process settings shared by its direct and hosted worlds.
+#[must_use]
+pub fn limits() -> agent::Limits {
     let client = skein_llm_world::limits();
     let completion = llm::completion_worst_case(&client, 4096).expect("receiving bound");
     let mut domain = smith_agent_world::LIMITS;
@@ -108,7 +110,9 @@ fn limits() -> agent::Limits {
     }
 }
 
-fn service(seed: u64) -> agent::Service {
+/// Build the same agent service for a direct or spawned process world.
+#[must_use]
+pub fn service(seed: u64) -> agent::Service {
     let mut endpoints = List::with_capacity(1);
     endpoints
         .push(channel::Endpoint { name: Box::default(), number: 0, dialect: 0, account: 0 })

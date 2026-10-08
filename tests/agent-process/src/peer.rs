@@ -34,22 +34,27 @@ pub struct Peer {
 }
 
 impl Peer {
+    #[must_use]
     pub fn work_pending(&self) -> bool {
         self.io.is_ready() || !self.events.is_empty() || !self.requests.is_empty() || !self.completions.is_empty()
     }
 
+    #[must_use]
     pub fn next_deadline(&self) -> Option<Time> {
         self.io.next_deadline()
     }
 
+    #[must_use]
     pub fn replied(&self) -> bool {
         self.replied
     }
 
+    #[must_use]
     pub fn received(&self) -> &[u8] {
         &self.tls.received
     }
 
+    #[must_use]
     pub fn new() -> Peer {
         let limits = io::Limits {
             sockets: 2,
@@ -205,5 +210,11 @@ impl Peer {
         let bytes = u32::try_from(self.outgoing.len()).expect("bounded TLS response");
         self.right = Some(right);
         self.requests.push(io::Request::Output { stream: socket, down: OutputDown::Room { right, bytes } });
+    }
+}
+
+impl Default for Peer {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -55,6 +55,7 @@ enum Phase {
 pub struct Process {
     channel: Component,
     agent: Token,
+    io_owner: Token,
     phase: Phase,
     deadline: Time,
     child: Option<Token>,
@@ -86,9 +87,11 @@ pub fn process_worst_case(limits: &Limits, detail_bytes: u32) -> Option<u64> {
 impl Process {
     /// Construct one process half, including its framed pipe channel.
     pub fn new(agent: Token, limits: &Limits, detail_bytes: u32) -> Result<Process, Error> {
+        assert!(agent.raw() < (1_u64 << 63_u32), "domain owner fits the process-owner namespace");
         Ok(Process {
             channel: Component::new(limits, StreamMode::Two)?,
             agent,
+            io_owner: Token::new(agent.raw() | (1_u64 << 63_u32)),
             phase: Phase::Idle,
             deadline: Time::ZERO,
             child: None,
@@ -114,7 +117,7 @@ impl Process {
         self.phase = Phase::Spawning;
         self.deadline = deadline;
         below.push(IoRequest::Spawn {
-            owner: self.agent,
+            owner: self.io_owner,
             spawn: kernel::Spawn {
                 program: launch.program,
                 args: launch.arguments,
@@ -128,6 +131,12 @@ impl Process {
                 ]),
             },
         });
+    }
+
+    /// The separate Skein IO owner for child lifecycle events.
+    #[must_use]
+    pub const fn io_owner(&self) -> Token {
+        self.io_owner
     }
 
     /// Send the run's Start once the child channel is ready.
@@ -244,8 +253,9 @@ impl Process {
         above: &mut Queue<ProcessEvent>,
         below: &mut Queue<IoRequest>,
     ) {
+        self.channel.set_now(now);
         match event {
-            IoEvent::Spawned { owner, child, pipes } if owner == self.agent => {
+            IoEvent::Spawned { owner, child, pipes } if owner == self.io_owner => {
                 assert!(
                     (self.phase == Phase::Spawning || self.phase == Phase::Failing) && pipes.len() == 3,
                     "three standard pipes"
@@ -264,10 +274,10 @@ impl Process {
                     self.read_stderr(below);
                 }
             }
-            IoEvent::Failed { owner, .. } if owner == self.agent && self.child.is_none() => {
+            IoEvent::Failed { owner, .. } if owner == self.io_owner && self.child.is_none() => {
                 self.phase = Phase::Failing;
             }
-            IoEvent::Failed { owner, .. } if owner == self.agent => {
+            IoEvent::Failed { owner, .. } if owner == self.io_owner => {
                 if self.phase == Phase::Opening {
                     self.fail(below);
                 }
@@ -282,11 +292,11 @@ impl Process {
                     below.push(IoRequest::Close { entity: child });
                 }
             }
-            IoEvent::Closed { owner } if owner == self.agent && self.child.is_none() => {
+            IoEvent::Closed { owner } if owner == self.io_owner => {
                 self.child_closed = true;
                 self.finish(above);
             }
-            IoEvent::Exited { owner, .. } if owner == self.agent => {
+            IoEvent::Exited { owner, .. } if owner == self.io_owner => {
                 self.exited = true;
                 if self.phase == Phase::Ready {
                     above.push(ProcessEvent::Exited { agent: self.agent });
@@ -297,10 +307,6 @@ impl Process {
                 if let Some(child) = self.child {
                     below.push(IoRequest::Close { entity: child });
                 }
-            }
-            IoEvent::Closed { owner } if Some(owner) == self.child => {
-                self.child_closed = true;
-                self.finish(above);
             }
             IoEvent::Stream { owner, up } if Some(owner) == self.output => {
                 self.channel.from_below(LowerEvent::Read(up), &mut self.channel_events, &mut self.channel_below);
@@ -365,6 +371,7 @@ impl Process {
 
     /// Expire the opening deadline and progress the channel's output queues.
     pub fn fire(&mut self, now: Time, above: &mut Queue<ProcessEvent>, below: &mut Queue<IoRequest>) {
+        self.channel.set_now(now);
         if (self.phase == Phase::Spawning || self.phase == Phase::Opening) && now >= self.deadline {
             self.fail(below);
         }
@@ -412,11 +419,16 @@ impl Process {
                     }
                     above.push(ProcessEvent::Channel { agent: self.agent, event });
                 }
+                event @ OpenEvent::Answer { .. } => {
+                    if let Some(input) = self.input {
+                        below.push(IoRequest::Stream { stream: input, down: stream::Down::Finish });
+                    }
+                    above.push(ProcessEvent::Channel { agent: self.agent, event });
+                }
                 event @ (OpenEvent::Opened { .. }
                 | OpenEvent::Hangup { .. }
                 | OpenEvent::Sent { .. }
                 | OpenEvent::Unsent { .. }
-                | OpenEvent::Answer { .. }
                 | OpenEvent::Admitted
                 | OpenEvent::Waiting { .. }
                 | OpenEvent::Long { .. }

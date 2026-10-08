@@ -643,6 +643,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-hosts-world"
+version = "0.0.0"
+dependencies = [
+ "skein-fake-machine",
+ "skein-io",
+ "skein-lib",
+ "skein-sim",
+ "skein-tls-world",
+ "skein-world",
+ "smith-agent-process-world",
+ "smith-agent-service",
+ "smith-channel",
+ "smith-host-domain",
+ "smith-host-protocol",
+ "smith-host-world",
+]
+
+[[package]]
 name = "smith-local-domain"
 version = "0.0.0"
 dependencies = [

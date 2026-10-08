@@ -311,3 +311,11 @@ service construction against the checked memory bound. The binary's startup
 integration tests cover a configuration that cannot be read and the final
 standard-error line for an unanswered run. The one-second focused and
 five-second fuzzy world shares remain intact.
+
+The host process world was measured serially on 2026-10-08 with
+`cargo nextest run -p smith-hosts-world --profile measure -j 1` before its
+first merge. Five focused stories passed in 0.039 seconds: a hosted agent
+service answering through a fake LLM, refused spawn, an error tail, an opening
+deadline, and cancel followed by terminate and kill. Its fuzzy sweep and
+memory test arrive in the next increment. The one-second focused share and
+workspace budgets are unchanged.
