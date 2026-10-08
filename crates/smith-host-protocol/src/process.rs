@@ -244,6 +244,18 @@ impl Process {
         below.push(IoRequest::Signal { child, signal });
     }
 
+    /// Request an immediate operator stop once the child handle exists.
+    /// The host domain still waits for exit, pipe EOF and reap before Gone.
+    pub fn kill_if_spawned(&self, below: &mut Queue<IoRequest>) -> bool {
+        match self.child {
+            Some(child) => {
+                below.push(IoRequest::Signal { child, signal: kernel::Signal::Kill });
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Consume an io observation for this child or one of its pipes.
     #[expect(clippy::too_many_lines, reason = "one exhaustive owner routing table")]
     pub fn from_io(

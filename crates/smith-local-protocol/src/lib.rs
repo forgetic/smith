@@ -33,4 +33,7 @@ pub use host_bridge::{
     prepare_start, saved_reply_to_host,
 };
 pub use store::{File, StoreError, decode_state, decode_turns, save_state, save_turn, turn_name};
-pub use terminal::{Event, Limits, Terminal, max_out, worst_case};
+pub use terminal::{
+    Event as TerminalEvent, Limits as TerminalLimits, Terminal, max_out as terminal_max_out,
+    worst_case as terminal_worst_case,
+};

@@ -58,6 +58,7 @@ pub(crate) struct ProcessAdapter {
     completions: Queue<kernel::Complete>,
     send: u64,
     failed: bool,
+    force_pending: bool,
 }
 
 impl ProcessAdapter {
@@ -77,6 +78,7 @@ impl ProcessAdapter {
             completions: Queue::with_capacity(limits.queue),
             send: 1,
             failed: false,
+            force_pending: false,
         })
     }
 
@@ -124,6 +126,22 @@ impl ProcessAdapter {
         self.failed
     }
 
+    pub(crate) fn force_stop(&mut self) {
+        self.force_pending = true;
+        self.flush_force();
+    }
+
+    fn flush_force(&mut self) {
+        if !self.force_pending {
+            return;
+        }
+        if let Some(process) = &self.process
+            && process.kill_if_spawned(&mut self.io_requests)
+        {
+            self.force_pending = false;
+        }
+    }
+
     pub(crate) fn up(&mut self, now: Time, wall: Wall, host_events: &mut Queue<host::Event>) {
         let env = Env { now, wall, limits: self.limits.io };
         for _ in 0..self.completions.capacity() {
@@ -147,6 +165,7 @@ impl ProcessAdapter {
                 &mut self.io_requests,
             );
         }
+        self.flush_force();
         if let Some(process) = &mut self.process {
             process.fire(now, &mut self.process_events, &mut self.io_requests);
         }

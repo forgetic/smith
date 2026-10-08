@@ -90,7 +90,9 @@ fn the_local_service_loads_then_routes_durable_start_requests_to_the_shell() {
     iterate(&mut service, Time::ZERO, Wall::EPOCH);
     let Some(local::Request::Load) = service.shell_requests().pop() else { panic!("load first") };
     service.local_event(local::Event::Loaded { state: None, transcript: None, deliveries: Box::new([]) });
-    service.local_event(local::Event::Line { text: Box::from(&b"hello"[..]) });
+    for byte in b"hello\n" {
+        service.feed(*byte);
+    }
     iterate(&mut service, Time::ZERO, Wall::EPOCH);
     let Some(local::Request::Credential { account: 7 }) = service.shell_requests().pop() else {
         panic!("credential before start")

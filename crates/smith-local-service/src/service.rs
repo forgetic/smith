@@ -46,12 +46,18 @@ pub enum Error {
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     local::worst_case(&limits.local)?
+        .checked_add(protocol::terminal_worst_case(&protocol::TerminalLimits {
+            line_bytes: limits.local.line_bytes,
+            show_bytes: limits.local.show_bytes,
+        })?)?
         .checked_add(host::worst_case(&limits.host)?)?
         .checked_add(ProcessAdapter::worst_case(&limits.process)?)?
         .checked_add(Queue::<local::Event>::worst_case(limits.queue)?)?
         .checked_add(Queue::<local::Request>::worst_case(limits.queue)?.checked_mul(2)?)?
         .checked_add(Queue::<host::Event>::worst_case(limits.queue)?)?
         .checked_add(Queue::<host::Request>::worst_case(limits.queue)?.checked_mul(2)?)?
+        .checked_add(Queue::<protocol::TerminalEvent>::worst_case(limits.queue)?)?
+        .checked_add(Queue::<Box<[u8]>>::worst_case(limits.queue)?)?
         .checked_add(Map::<u32, Box<[u8]>>::worst_case(limits.local.agent.accounts)?)?
         .checked_add(u64::from(limits.local.agent.accounts).checked_mul(limits.host.answer_bytes)?)?
         .checked_add(u64::try_from(size_of::<Service>()).ok()?)
@@ -64,6 +70,9 @@ pub struct Service {
     local: local::Domain,
     host: host::Domain,
     process: ProcessAdapter,
+    terminal: protocol::Terminal,
+    terminal_events: Queue<protocol::TerminalEvent>,
+    output: Queue<Box<[u8]>>,
     local_events: Queue<local::Event>,
     local_requests: Queue<local::Request>,
     host_events: Queue<host::Event>,
@@ -102,6 +111,11 @@ impl Service {
         };
         let host = host::Domain::new(&config.limits.host);
         let process = ProcessAdapter::new(config.limits.process, config.launch).ok_or(Error::Process)?;
+        let terminal = protocol::Terminal::new(protocol::TerminalLimits {
+            line_bytes: config.limits.local.line_bytes,
+            show_bytes: config.limits.local.show_bytes,
+        })
+        .ok_or(Error::Memory)?;
         let queue = config.limits.queue;
         let accounts = config.limits.local.agent.accounts;
         Ok(Self {
@@ -109,6 +123,9 @@ impl Service {
             local,
             host,
             process,
+            terminal,
+            terminal_events: Queue::with_capacity(queue),
+            output: Queue::with_capacity(queue),
             local_events: Queue::with_capacity(queue),
             local_requests: Queue::with_capacity(queue),
             host_events: Queue::with_capacity(queue),
@@ -128,6 +145,26 @@ impl Service {
     /// Queue a terminal, store, git or OAuth outcome from the shell.
     pub fn local_event(&mut self, event: local::Event) {
         self.local_events.push(event);
+    }
+
+    /// Feed one standard-input byte to the bounded line translator.
+    pub fn feed(&mut self, byte: u8) {
+        self.terminal.feed(byte, &mut self.terminal_events);
+    }
+
+    /// Deliver a terminal interrupt to the run or stop its child on a repeat.
+    pub fn interrupt(&mut self) {
+        self.terminal.interrupt(&mut self.terminal_events);
+    }
+
+    /// Report standard-input closure to local policy.
+    pub fn closed(&mut self) {
+        self.terminal.closed(&mut self.terminal_events);
+    }
+
+    /// Text ready for the terminal writer.
+    pub fn output(&mut self) -> &mut Queue<Box<[u8]>> {
+        &mut self.output
     }
 
     /// Lend a credential value only beside the domain's grant name.
@@ -179,6 +216,7 @@ impl Service {
             || !self.local_requests.is_empty()
             || !self.host_events.is_empty()
             || !self.host_requests.is_empty()
+            || !self.terminal_events.is_empty()
             || self.process.work_pending(now)
     }
 
@@ -201,15 +239,29 @@ impl Service {
         match request {
             local::Request::External(external) => self.route_external(*external),
             local::Request::Agent(_) => unreachable!("spawned local service has no in-process agent IO"),
-            other @ (local::Request::Show { .. }
-            | local::Request::Load
-            | local::Request::SaveState { .. }
+            local::Request::Show { text } => self.terminal.show(text, &mut self.terminal_events),
+            local::Request::Load => {
+                self.terminal.answer_finished();
+                self.shell.push(local::Request::Load);
+            }
+            other @ (local::Request::SaveState { .. }
             | local::Request::SaveTurn { .. }
             | local::Request::SaveDelivery { .. }
             | local::Request::Git { .. }
             | local::Request::PlainStatus { .. }
             | local::Request::Credential { .. }
             | local::Request::Exit { .. }) => self.shell.push(other),
+        }
+    }
+
+    fn drain_terminal(&mut self) {
+        for _ in 0..self.terminal_events.capacity() {
+            let Some(event) = self.terminal_events.pop() else { break };
+            match event {
+                protocol::TerminalEvent::Domain(event) => self.local_events.push(event),
+                protocol::TerminalEvent::StopProcess => self.process.force_stop(),
+                protocol::TerminalEvent::Write(text) => self.output.push(text),
+            }
         }
     }
 
@@ -369,6 +421,7 @@ impl Service {
 /// One bounded up pass followed by one bounded down pass.
 pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
     service.process.up(now, wall, &mut service.host_events);
+    service.drain_terminal();
     let local_env = Env { now, wall, limits: service.limits.local.clone() };
     let host_env = Env { now, wall, limits: service.limits.host };
     for _ in 0..service.local_events.capacity() {
@@ -385,6 +438,7 @@ pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
         let Some(request) = service.local_requests.pop() else { break };
         service.route_local(request);
     }
+    service.drain_terminal();
     for _ in 0..service.host_events.capacity() {
         let Some(event) = service.host_events.pop() else { break };
         host::step(&mut service.host, &host_env, event, &mut service.host_requests);
