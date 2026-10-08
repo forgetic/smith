@@ -132,9 +132,9 @@ fn spawn_has_three_credential_free_standard_pipes() {
     assert_eq!(&*spawn.args[0], b"agent");
     assert_eq!(&*spawn.env[0], b"LANG=C");
     assert_eq!(spawn.pipes.len(), 3);
-    assert_eq!(spawn.pipes[0], kernel::Pipe { child: 0, way: kernel::Way::In });
-    assert_eq!(spawn.pipes[1], kernel::Pipe { child: 1, way: kernel::Way::Out });
-    assert_eq!(spawn.pipes[2], kernel::Pipe { child: 2, way: kernel::Way::Out });
+    assert_eq!(spawn.pipes[0], kernel::Pipe { child: 0, way: kernel::Way::In, parent: None });
+    assert_eq!(spawn.pipes[1], kernel::Pipe { child: 1, way: kernel::Way::Out, parent: None });
+    assert_eq!(spawn.pipes[2], kernel::Pipe { child: 2, way: kernel::Way::Out, parent: None });
 }
 
 #[test]

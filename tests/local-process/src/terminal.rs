@@ -83,9 +83,9 @@ impl Terminal {
                 root,
                 dir: b".".as_slice().into(),
                 pipes: Box::new([
-                    kernel::Pipe { child: 0, way: kernel::Way::In },
-                    kernel::Pipe { child: 1, way: kernel::Way::Out },
-                    kernel::Pipe { child: 2, way: kernel::Way::Out },
+                    kernel::Pipe { child: 0, way: kernel::Way::In, parent: None },
+                    kernel::Pipe { child: 1, way: kernel::Way::Out, parent: None },
+                    kernel::Pipe { child: 2, way: kernel::Way::Out, parent: None },
                 ]),
             },
         });

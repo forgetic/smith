@@ -308,7 +308,10 @@ fn run_exit(exit: Option<kernel::Exit>, timed_out: bool, failed: bool) -> run::E
 }
 
 fn pipes() -> Box<[kernel::Pipe]> {
-    Box::new([kernel::Pipe { child: 1, way: kernel::Way::Out }, kernel::Pipe { child: 2, way: kernel::Way::Out }])
+    Box::new([
+        kernel::Pipe { child: 1, way: kernel::Way::Out, parent: None },
+        kernel::Pipe { child: 2, way: kernel::Way::Out, parent: None },
+    ])
 }
 
 fn environment(vars: &[tools::Var], max_bytes: u32) -> Option<Box<[Box<[u8]>]>> {
