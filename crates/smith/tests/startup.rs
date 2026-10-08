@@ -33,3 +33,28 @@ fn the_last_line_of_standard_error_says_why_a_run_could_not_answer() {
     let stderr = String::from_utf8(output.stderr).expect("UTF-8 diagnostics");
     assert_eq!(stderr.lines().last(), Some("smith: the run could not answer: Some(ChannelEnded)"));
 }
+
+#[test]
+fn plaintext_outside_loopback_refuses_before_opening_the_channel() {
+    let path = std::env::temp_dir().join(format!("smith-plaintext-refusal-{}", std::process::id()));
+    std::fs::write(
+        &path,
+        r#"{"profile":"standard","memory_bytes":1099511627776,"grace_ms":10,
+        "endpoints":[{"name":"invalid","number":1,"dialect":1,"account":0,"provider":"codex",
+        "address":"192.0.2.1:8080","transport":"plaintext"}],"environment":[]}"#,
+    )
+    .expect("write configuration");
+    let output = Command::new(env!("CARGO_BIN_EXE_smith"))
+        .arg("agent")
+        .arg(&path)
+        .stdin(Stdio::null())
+        .output()
+        .expect("start smith");
+    std::fs::remove_file(path).expect("remove configuration");
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty(), "refusal opens no channel");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr).lines().last(),
+        Some("smith: plaintext endpoint address must be loopback")
+    );
+}

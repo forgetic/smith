@@ -129,8 +129,11 @@ an OAuth descriptor. To support fresh sign-in and refresh, supply `oauth`:
 
 Replace the example registration and destinations with the issuer's values.
 `address` is the token connection's startup-resolved destination;
-`server_name` is its TLS name. `token_endpoint` must use HTTPS and contain a
-path. The redirect must use HTTP to a loopback address with a fixed nonzero
+`server_name` is its TLS name. `token_endpoint` uses HTTPS, or HTTP to a
+numeric loopback issuer, and contains a path. Both issuer URLs may use HTTP
+when their authority is numeric loopback; HTTP also requires `address` to
+resolve to loopback. Omit `server_name` and `trust_der` for an HTTP token
+endpoint, which uses plaintext. The redirect must use HTTP to a loopback address with a fixed nonzero
 port and a path, without a query or fragment. `scope` defaults to an empty
 string. `json` selects JSON token requests; omitted or `false` uses form
 encoding. Optional `trust_der` names one DER trust certificate; omitted uses

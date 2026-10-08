@@ -87,8 +87,14 @@ impl Auth {
                 {
                     return Err("OAuth settings exceed their bounds".into());
                 }
-                let authority_and_path =
-                    config.token_endpoint.strip_prefix("https://").ok_or("token endpoint must use https")?;
+                // The binary resolves destinations; HTTP issuer names themselves
+                // must be numeric loopback (skein oauth.md, section 1).
+                issuer_transport(&config.authorization_url)?;
+                let plaintext = issuer_transport(&config.token_endpoint)?;
+                let authority_and_path = config
+                    .token_endpoint
+                    .strip_prefix(if plaintext { "http://" } else { "https://" })
+                    .expect("validated token endpoint scheme");
                 let (authority, target) = authority_and_path.split_once('/').ok_or("token endpoint requires a path")?;
                 if authority.is_empty() || authority.contains('@') || authority.contains('#') || target.contains('#') {
                     return Err("invalid token endpoint".into());
@@ -99,10 +105,23 @@ impl Auth {
                     .map_err(|error| format!("OAuth address: {error}"))?
                     .next()
                     .ok_or("OAuth address resolved to no destination")?;
+                let transport = if plaintext {
+                    if !address.ip().is_loopback() {
+                        return Err("plaintext OAuth address must be loopback".into());
+                    }
+                    if !config.server_name.is_empty() || config.trust_der.is_some() {
+                        return Err("HTTP OAuth endpoint cannot name TLS server_name or trust_der".into());
+                    }
+                    skein_llm_connection::Transport::Plaintext
+                } else {
+                    skein_llm_connection::Transport::Tls {
+                        server_name: skein_tls::Name::new(&config.server_name).ok_or("invalid OAuth server name")?,
+                        trust: crate::config::trust(config.trust_der.as_deref())?,
+                    }
+                };
                 let destination = Destination {
                     address: kernel::Addr::from(address),
-                    server_name: skein_tls::Name::new(&config.server_name).ok_or("invalid OAuth server name")?,
-                    trust: crate::config::trust(config.trust_der.as_deref())?,
+                    transport,
                     authority: authority.as_bytes().into(),
                     target: format!("/{target}").into_bytes().into(),
                 };
@@ -387,6 +406,41 @@ impl Auth {
             .flatten()
             .min()
     }
+}
+
+// Resolve no names here: an HTTP issuer URI proves loopback numerically.
+fn issuer_transport(uri: &str) -> Result<bool, String> {
+    if let Some(rest) = uri.strip_prefix("https://") {
+        if rest.is_empty() || rest.contains(['\r', '\n', '#']) {
+            return Err("invalid OAuth issuer endpoint".into());
+        }
+        return Ok(false);
+    }
+    let rest = uri.strip_prefix("http://").ok_or("OAuth issuer endpoint must use https or loopback http")?;
+    let authority = rest.split(['/', '?', '#']).next().ok_or("invalid OAuth issuer authority")?;
+    let address = if authority.starts_with('[') && authority.ends_with(']') {
+        authority
+            .strip_prefix('[')
+            .and_then(|rest| rest.strip_suffix(']'))
+            .ok_or("invalid HTTP OAuth authority")?
+            .parse::<std::net::Ipv6Addr>()
+            .map(std::net::IpAddr::V6)
+            .map_err(|_| "HTTP OAuth issuer must name numeric loopback")?
+    } else if let Ok(address) = authority.parse::<SocketAddr>() {
+        if address.port() == 0 {
+            return Err("HTTP OAuth issuer port must be nonzero".into());
+        }
+        address.ip()
+    } else {
+        authority
+            .parse::<std::net::Ipv4Addr>()
+            .map(std::net::IpAddr::V4)
+            .map_err(|_| "HTTP OAuth issuer must name numeric loopback")?
+    };
+    if !address.is_loopback() || rest.contains(['\r', '\n', '#']) {
+        return Err("HTTP OAuth issuer must name numeric loopback".into());
+    }
+    Ok(true)
 }
 
 fn registration(config: &OAuth) -> oauth::Registration {

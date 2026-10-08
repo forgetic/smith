@@ -1,4 +1,4 @@
-//! One token POST over Skein's HTTP and TLS clients. The connection retains
+//! One token POST over Skein's HTTP client, with TLS or loopback plaintext. The connection retains
 //! bounded upload and response bytes and never logs credentials. Its owner
 //! supplies io events and clock values; failures preserve whether a request
 //! may have been sent (protocol/hosts.md, section 5.4; skein oauth.md).
@@ -10,11 +10,10 @@ use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 use skein_oauth as oauth;
 use skein_tls::client as tls;
 
-/// Startup TLS and HTTP destination for one configured account.
+/// Startup transport and HTTP destination for one configured account.
 pub(crate) struct Destination {
     pub address: kernel::Addr,
-    pub server_name: skein_tls::Name,
-    pub trust: skein_tls::Config,
+    pub transport: skein_llm_connection::Transport,
     pub authority: Box<[u8]>,
     pub target: Box<[u8]>,
 }
@@ -23,7 +22,7 @@ pub(crate) struct Post {
     id: u64,
     deadline: Time,
     socket: Option<Token>,
-    tls: tls::Client,
+    tls: Option<tls::Client>,
     http: client::Client,
     call: Option<client::Call>,
     upload: Option<Box<[u8]>>,
@@ -79,7 +78,12 @@ impl Post {
             id: request.id,
             deadline: request.deadline,
             socket: None,
-            tls: tls::Client::new(&destination.trust, destination.server_name.clone(), &tls_limits()),
+            tls: match &destination.transport {
+                skein_llm_connection::Transport::Tls { server_name, trust } => {
+                    Some(tls::Client::new(trust, server_name.clone(), &tls_limits()))
+                }
+                skein_llm_connection::Transport::Plaintext => None,
+            },
             http: client::Client::new(&http_limits()),
             call: Some(client::Call {
                 method: http::Method::Post,
@@ -119,12 +123,20 @@ impl Post {
                     out.push(io::Request::Abort { entity: socket });
                 }
             }
-            io::Event::Connected { .. } if !self.closing => {
-                tls::down(&mut self.tls, &env, tls::Request::Handshake, &mut self.tls_up, &mut self.cipher_down);
-            }
-            io::Event::Stream { up, .. } if !self.closing => {
-                tls::up(&mut self.tls, &env, up, &mut self.tls_up, &mut self.cipher_down);
-            }
+            io::Event::Connected { .. } if !self.closing => match &mut self.tls {
+                Some(tls) => tls::down(tls, &env, tls::Request::Handshake, &mut self.tls_up, &mut self.cipher_down),
+                None => self.begin_http(now, wall),
+            },
+            io::Event::Stream { up, .. } if !self.closing => match &mut self.tls {
+                Some(tls) => tls::up(tls, &env, up, &mut self.tls_up, &mut self.cipher_down),
+                None => client::up(
+                    &mut self.http,
+                    &Env { now, wall, limits: http_limits() },
+                    up,
+                    &mut self.http_up,
+                    &mut self.plain_down,
+                ),
+            },
             io::Event::Failed { .. } => {
                 self.fail(now, wall, out);
                 if self.socket.is_none() {
@@ -183,26 +195,20 @@ impl Post {
                 {
                     self.sent = true;
                 }
-                tls::down(&mut self.tls, &tls_env, tls::Request::Stream(down), &mut self.tls_up, &mut self.cipher_down);
+                match &mut self.tls {
+                    Some(tls) => {
+                        tls::down(tls, &tls_env, tls::Request::Stream(down), &mut self.tls_up, &mut self.cipher_down)
+                    }
+                    None => {
+                        if let Some(socket) = self.socket {
+                            out.push(io::Request::Stream { stream: socket, down });
+                        }
+                    }
+                }
             } else if let Some(event) = self.tls_up.pop() {
                 match event {
                     tls::Event::Ready(_) => {
-                        client::down(
-                            &mut self.http,
-                            &http_env,
-                            client::Request::Call(self.call.take().expect("one token POST")),
-                            &mut self.http_up,
-                            &mut self.plain_down,
-                        );
-                        let length = u32::try_from(self.upload.as_ref().expect("request upload").len())
-                            .expect("bounded request");
-                        client::down(
-                            &mut self.http,
-                            &http_env,
-                            client::Request::Upload(Down::Demand { read: Read::Nothing, room: length }),
-                            &mut self.http_up,
-                            &mut self.plain_down,
-                        );
+                        self.begin_http(now, wall);
                     }
                     tls::Event::Stream(up) => {
                         client::up(&mut self.http, &http_env, up, &mut self.http_up, &mut self.plain_down)
@@ -218,6 +224,25 @@ impl Post {
                 break;
             }
         }
+    }
+
+    fn begin_http(&mut self, now: Time, wall: Wall) {
+        let env = Env { now, wall, limits: http_limits() };
+        client::down(
+            &mut self.http,
+            &env,
+            client::Request::Call(self.call.take().expect("one token POST")),
+            &mut self.http_up,
+            &mut self.plain_down,
+        );
+        let length = u32::try_from(self.upload.as_ref().expect("request upload").len()).expect("bounded request");
+        client::down(
+            &mut self.http,
+            &env,
+            client::Request::Upload(Down::Demand { read: Read::Nothing, room: length }),
+            &mut self.http_up,
+            &mut self.plain_down,
+        );
     }
 
     fn http_event(&mut self, event: client::Event, now: Time, wall: Wall, out: &mut Queue<io::Request>) {
@@ -325,5 +350,89 @@ impl Post {
         if let Some(socket) = self.socket {
             out.push(io::Request::Abort { entity: socket });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loopback_plaintext_posts_http_and_preserves_the_response_evidence() {
+        let destination = Destination {
+            address: kernel::Addr::from((std::net::Ipv4Addr::LOCALHOST, 8080)),
+            transport: skein_llm_connection::Transport::Plaintext,
+            authority: b"127.0.0.1:8080".as_slice().into(),
+            target: b"/token".as_slice().into(),
+        };
+        let owner = Token::new(1);
+        let socket = Token::new(2);
+        let mut out = Queue::with_capacity(256);
+        let mut post = Post::new(
+            &destination,
+            owner,
+            oauth::HttpRequest {
+                id: 7,
+                endpoint: b"http://127.0.0.1:8080/token".as_slice().into(),
+                content_type: b"application/x-www-form-urlencoded",
+                body: b"grant_type=refresh_token&refresh_token=opaque".as_slice().into(),
+                deadline: Time::ZERO.checked_add(Duration::from_secs(1)).expect("deadline"),
+            },
+            &mut out,
+        )
+        .expect("plaintext POST");
+        assert!(post.tls.is_none(), "plaintext creates no TLS state");
+        assert!(matches!(out.pop(), Some(io::Request::Connect { .. })));
+        post.event(io::Event::Connecting { owner, socket }, Time::ZERO, Wall::EPOCH, &mut out);
+        post.event(io::Event::Connected { owner }, Time::ZERO, Wall::EPOCH, &mut out);
+        let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+        let mut received = 0;
+        let mut sent = Vec::new();
+        for _ in 0..128 {
+            let Some(request) = out.pop() else { break };
+            match request {
+                io::Request::Stream { down: Down::Demand { read, room }, .. } => {
+                    let up = if room > 0 {
+                        Some(Up::Room)
+                    } else {
+                        let count = match read {
+                            Read::Nothing => 0,
+                            Read::Fill(count) => usize::try_from(count).expect("count"),
+                            Read::Scan { until, .. } => {
+                                let remaining = &response[received..];
+                                remaining
+                                    .windows(until.as_bytes().len())
+                                    .position(|bytes| bytes == until.as_bytes())
+                                    .expect("response delimiter")
+                                    + until.as_bytes().len()
+                            }
+                            Read::Line { .. } => panic!("HTTP scans CRLF"),
+                        };
+                        if count == 0 {
+                            None
+                        } else {
+                            let bytes = response[received..received + count].into();
+                            received += count;
+                            Some(Up::Bytes(bytes))
+                        }
+                    };
+                    if let Some(up) = up {
+                        post.event(io::Event::Stream { owner, up }, Time::ZERO, Wall::EPOCH, &mut out);
+                    }
+                }
+                io::Request::Stream { down: Down::Send(bytes), .. } => sent.extend_from_slice(&bytes),
+                io::Request::Abort { .. } => post.event(io::Event::Closed { owner }, Time::ZERO, Wall::EPOCH, &mut out),
+                _ => panic!("unexpected POST operation {request:?}"),
+            }
+        }
+        assert!(sent.starts_with(b"POST /token HTTP/1.1\r\n"));
+        assert!(sent.ends_with(b"grant_type=refresh_token&refresh_token=opaque"));
+        let terminal = post.terminal().expect("one response");
+        assert_eq!(terminal.id, 7);
+        assert_eq!(terminal.status, 200);
+        assert_eq!(terminal.body.as_ref(), b"{}");
+        assert_eq!(terminal.evidence, oauth::HttpEvidence::Response);
+        assert!(post.terminal().is_none(), "one terminal");
+        assert!(post.closed() && out.is_empty(), "plaintext socket settles");
     }
 }

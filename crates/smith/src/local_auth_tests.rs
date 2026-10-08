@@ -288,3 +288,53 @@ fn a_lost_refresh_response_is_uncertain_and_is_never_repeated() {
     assert_eq!(world.peer.posts(), 1);
     assert!(world.saved.is_none());
 }
+
+#[test]
+fn loopback_http_issuer_configuration_needs_no_tls_trust() {
+    for address in ["127.0.0.1:8080", "[::1]:8080"] {
+        let account = Account {
+            number: 0,
+            account_id: "local".into(),
+            oauth: Some(OAuth {
+                authorization_url: format!("http://{address}/authorize"),
+                token_endpoint: format!("http://{address}/token"),
+                client_id: "client".into(),
+                redirect_uri: "http://127.0.0.1:2345/callback".into(),
+                scope: String::new(),
+                address: address.into(),
+                server_name: String::new(),
+                trust_der: None,
+                json: false,
+            }),
+        };
+        Auth::new(account, 0, [1; 32]).expect("numeric loopback HTTP issuer");
+    }
+}
+
+#[test]
+fn plaintext_issuer_refuses_nonloopback_uris_and_destinations_before_startup() {
+    for (uri, destination) in [
+        ("http://192.0.2.1:8080/token", "127.0.0.1:8080"),
+        ("http://localhost:8080/token", "127.0.0.1:8080"),
+        ("http://127.0.0.1:8080/token", "192.0.2.1:8080"),
+        ("http://[::1]:0/token", "[::1]:8080"),
+        ("http://127.0.0.1:8080@evil.test/token", "127.0.0.1:8080"),
+    ] {
+        let account = Account {
+            number: 0,
+            account_id: "local".into(),
+            oauth: Some(OAuth {
+                authorization_url: uri.into(),
+                token_endpoint: uri.into(),
+                client_id: "client".into(),
+                redirect_uri: "http://127.0.0.1:2345/callback".into(),
+                scope: String::new(),
+                address: destination.into(),
+                server_name: String::new(),
+                trust_der: None,
+                json: false,
+            }),
+        };
+        assert!(Auth::new(account, 0, [1; 32]).is_err(), "invalid plaintext issuer {uri} -> {destination}");
+    }
+}

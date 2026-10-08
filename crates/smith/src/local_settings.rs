@@ -135,6 +135,7 @@ pub struct OAuth {
     #[serde(default)]
     pub scope: String,
     pub address: String,
+    #[serde(default)]
     pub server_name: String,
     #[serde(default)]
     pub trust_der: Option<String>,

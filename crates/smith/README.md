@@ -18,6 +18,7 @@ startup with a reason on standard error.
       "account": 0,
       "provider": "codex",
       "address": "chatgpt.com:443",
+      "transport": "tls",
       "server_name": "chatgpt.com"
     }
   ],
@@ -38,7 +39,13 @@ available. An endpoint may additionally set `authority`,
 `target`, `headers` (an array of `{ "name", "value" }`), `reasoning_effort`,
 `cache_key`, and `identity` (`plain` or `claude-code`). `trust_der` is an optional
 path to one DER root certificate; without it, the system trust store is loaded.
-Addresses are resolved before the channel opens. The file contains no bearer
+`transport` is `"tls"` by default, requiring `server_name` and using the
+configured trust. For a server on this machine, set `"transport": "plaintext"`
+and an address resolving to loopback (IPv4 or IPv6); omit `server_name` and
+`trust_der`. Any non-loopback plaintext destination, unknown transport or
+TLS-only field on plaintext refuses startup before the channel opens.
+The local host carries the same inline endpoint settings into its child's
+configuration. Addresses are resolved before the channel opens. The file contains no bearer
 tokens; the host sends grant values over the channel.
 
 The optional trace appends JSON lines on a bounded writer thread. `none`

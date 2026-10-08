@@ -65,7 +65,10 @@ struct Endpoint {
     account: u32,
     provider: String,
     address: String,
-    server_name: String,
+    #[serde(default = "tls_transport")]
+    transport: String,
+    #[serde(default)]
+    server_name: Option<String>,
     #[serde(default)]
     authority: Option<String>,
     #[serde(default)]
@@ -162,8 +165,25 @@ fn build(document: Document) -> Result<Configuration, String> {
             return Err("duplicate endpoint name or number".into());
         }
         let address = resolve(&endpoint.address)?;
-        let server_name = tls::Name::new(&endpoint.server_name).ok_or("invalid TLS server name")?;
-        let trust = trust(endpoint.trust_der.as_deref())?;
+        let transport = match endpoint.transport.as_str() {
+            "tls" => connection::Transport::Tls {
+                server_name: tls::Name::new(
+                    endpoint.server_name.as_deref().ok_or("TLS endpoint requires server_name")?,
+                )
+                .ok_or("invalid TLS server name")?,
+                trust: trust(endpoint.trust_der.as_deref())?,
+            },
+            "plaintext" => {
+                if !address.ip().is_loopback() {
+                    return Err("plaintext endpoint address must be loopback".into());
+                }
+                if endpoint.server_name.is_some() || endpoint.trust_der.is_some() {
+                    return Err("plaintext endpoint cannot name TLS server_name or trust_der".into());
+                }
+                connection::Transport::Plaintext
+            }
+            _ => return Err("endpoint transport must be tls or plaintext".into()),
+        };
         let mut llm_endpoint = match endpoint.provider.as_str() {
             "codex" => shared::Endpoint::codex(),
             "anthropic" => shared::Endpoint::anthropic(),
@@ -206,11 +226,7 @@ fn build(document: Document) -> Result<Configuration, String> {
             .map_err(|_| "too many channel endpoints")?;
         llm_endpoints.push(llm::ConfiguredEndpoint {
             name: domain::llm::Endpoint(endpoint.number),
-            destination: connection::Endpoint {
-                address,
-                transport: connection::Transport::Tls { server_name, trust },
-                llm: llm_endpoint,
-            },
+            destination: connection::Endpoint { address, transport, llm: llm_endpoint },
             account: endpoint.account,
             reasoning_effort: endpoint.reasoning_effort.map(|value| value.into_bytes().into()),
             cache_key: endpoint.cache_key.map(|value| value.into_bytes().into()),
@@ -255,6 +271,10 @@ fn build(document: Document) -> Result<Configuration, String> {
         return Err("agent plus trace exceeds memory_bytes".into());
     }
     Ok(Configuration { service: config, memory: document.memory_bytes, trace })
+}
+
+fn tls_transport() -> String {
+    "tls".into()
 }
 
 fn resolve(address: &str) -> Result<SocketAddr, String> {
@@ -449,7 +469,8 @@ mod tests {
             account: 0,
             provider: "codex".into(),
             address: "127.0.0.1:443".into(),
-            server_name: "example.test".into(),
+            transport: "tls".into(),
+            server_name: Some("example.test".into()),
             authority: None,
             target: None,
             trust_der: Some(format!("{}/../../tests/protocol-llm/fixtures/root.der", env!("CARGO_MANIFEST_DIR"))),
@@ -460,6 +481,44 @@ mod tests {
         });
         let configuration = build(document).expect("resolved endpoint");
         service::Service::new(configuration.service, 1).expect("LLM and channel endpoints");
+    }
+
+    #[test]
+    fn plaintext_configuration_names_its_transport_and_admits_only_loopback() {
+        for address in ["127.0.0.1:8080", "[::1]:8080"] {
+            let json = format!(
+                r#"{{"profile":"standard","memory_bytes":1099511627776,"grace_ms":10,
+                "endpoints":[{{"name":"local","number":1,"dialect":1,"account":0,"provider":"codex",
+                "address":"{address}","transport":"plaintext"}}],"environment":[]}}"#
+            );
+            let configuration = parse(json.as_bytes()).expect("loopback plaintext configuration");
+            service::Service::new(configuration.service, 1).expect("loopback plaintext service");
+        }
+        for address in ["192.0.2.1:8080", "[2001:db8::1]:8080"] {
+            let json = format!(
+                r#"{{"profile":"standard","memory_bytes":1099511627776,"grace_ms":10,
+                "endpoints":[{{"name":"local","number":1,"dialect":1,"account":0,"provider":"codex",
+                "address":"{address}","transport":"plaintext"}}],"environment":[]}}"#
+            );
+            assert_eq!(parse(json.as_bytes()).err().as_deref(), Some("plaintext endpoint address must be loopback"));
+        }
+    }
+
+    #[test]
+    fn ambiguous_or_unknown_endpoint_transports_refuse_at_configuration() {
+        for extra in [
+            r#""transport":"plaintext","server_name":"example.test""#,
+            r#""transport":"plaintext","trust_der":"missing.der""#,
+            r#""transport":"unknown""#,
+            r#""transport":"tls""#,
+        ] {
+            let json = format!(
+                r#"{{"profile":"standard","memory_bytes":1099511627776,"grace_ms":10,
+                "endpoints":[{{"name":"local","number":1,"dialect":1,"account":0,"provider":"codex",
+                "address":"127.0.0.1:8080",{extra}}}],"environment":[]}}"#
+            );
+            assert!(parse(json.as_bytes()).is_err(), "invalid transport {extra}");
+        }
     }
 
     #[test]
