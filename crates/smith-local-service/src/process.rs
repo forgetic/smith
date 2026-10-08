@@ -52,6 +52,9 @@ pub(crate) struct ProcessAdapter {
     launch: Launch,
     io: io::Io,
     process: Option<protocol::Process>,
+    git: Option<local_protocol::GitChild>,
+    delivery_roots: Box<[kernel::Fd]>,
+    git_environment: Box<[Box<[u8]>]>,
     io_events: Queue<io::Event>,
     io_requests: Queue<io::Request>,
     process_events: Queue<protocol::ProcessEvent>,
@@ -74,6 +77,9 @@ impl ProcessAdapter {
             limits,
             launch,
             process: None,
+            git: None,
+            delivery_roots: Box::new([]),
+            git_environment: Box::new([]),
             io_events: Queue::with_capacity(limits.queue),
             io_requests: Queue::with_capacity(limits.queue),
             process_events: Queue::with_capacity(limits.queue),
@@ -89,6 +95,9 @@ impl ProcessAdapter {
 
     pub(crate) fn worst_case(limits: &ProcessLimits) -> Option<u64> {
         io::worst_case(&limits.io)?
+            .checked_add(local_protocol::git_child_worst_case(&git_limits(limits))?)?
+            .checked_add(4096)?
+            .checked_add(skein_lib::List::<Box<[u8]>>::worst_case(64)?)?
             .checked_add(protocol::process_worst_case(&limits.channel, limits.detail_bytes)?)?
             .checked_add(Queue::<io::Event>::worst_case(limits.queue)?)?
             .checked_add(Queue::<io::Request>::worst_case(limits.queue)?)?
@@ -111,25 +120,74 @@ impl ProcessAdapter {
         Ok(())
     }
 
+    pub(crate) fn adopt_delivery_roots(&mut self, roots: Box<[kernel::Fd]>, environment: Box<[Box<[u8]>]>) {
+        self.delivery_roots = roots;
+        self.git_environment = environment;
+    }
+
+    pub(crate) fn start_git(
+        &mut self,
+        owner: Token,
+        directory: u32,
+        op: smith_local_domain::GitOp,
+        deadline: Time,
+        events: &mut Queue<smith_local_domain::Event>,
+    ) {
+        assert!(self.git.is_none(), "the local domain serializes git operations");
+        let root = match usize::try_from(directory) {
+            Ok(index) => self.delivery_roots.get(index).copied(),
+            Err(_) => None,
+        };
+        self.git = match root {
+            Some(root) => local_protocol::GitChild::new(
+                owner,
+                Token::new(1 << 62),
+                root,
+                self.git_environment.clone(),
+                op,
+                deadline,
+                git_limits(&self.limits),
+                &mut self.io_requests,
+            ),
+            None => None,
+        };
+        if self.git.is_none() {
+            events.push(smith_local_domain::Event::Git {
+                owner,
+                result: smith_local_domain::GitResult::Failed {
+                    reason: smith_domain::run::DeliveryReason::Broken,
+                    diagnostic: Box::new(smith_domain::run::Diagnostic::empty()),
+                },
+            });
+        }
+    }
+
     pub(crate) fn submissions(&mut self) -> &mut Queue<kernel::Submit> {
         &mut self.submissions
     }
 
     pub(crate) fn next_deadline(&self) -> Option<Time> {
+        let git_deadline = match &self.git {
+            Some(git) => git.next_deadline(),
+            None => None,
+        };
         let process_deadline = match &self.process {
             Some(process) => process.next_deadline(),
             None => None,
         };
-        match (self.io.next_deadline(), process_deadline) {
-            (Some(io), Some(process)) => Some(io.min(process)),
-            (Some(io), None) => Some(io),
-            (None, Some(process)) => Some(process),
-            (None, None) => None,
+        let mut next: Option<Time> = None;
+        for deadline in [self.io.next_deadline(), process_deadline, git_deadline].into_iter().flatten() {
+            next = Some(match next {
+                Some(current) => current.min(deadline),
+                None => deadline,
+            });
         }
+        next
     }
 
     pub(crate) fn work_pending(&self, now: Time) -> bool {
-        self.io.is_ready()
+        self.force_pending
+            || self.io.is_ready()
             || self.io.is_due(now)
             || !self.io_events.is_empty()
             || !self.io_requests.is_empty()
@@ -141,9 +199,15 @@ impl ProcessAdapter {
         self.failed
     }
 
+    pub(crate) fn output_room(&self) -> bool {
+        self.io_requests.room() >= 64 && self.process_events.room() >= 64
+    }
+
     pub(crate) fn force_stop(&mut self) {
         self.force_pending = true;
-        self.flush_force();
+        if self.output_room() {
+            self.flush_force();
+        }
     }
 
     fn flush_force(&mut self) {
@@ -164,22 +228,49 @@ impl ProcessAdapter {
         host_events: &mut Queue<host::Event>,
         terminal: &mut local_protocol::Terminal,
         terminal_events: &mut Queue<local_protocol::TerminalEvent>,
+        local_events: &mut Queue<smith_local_domain::Event>,
     ) {
         let env = Env { now, wall, limits: self.limits.io };
         for _ in 0..self.completions.capacity() {
+            if self.io_events.room() < io::MAX_OUT_UP.events || self.submissions.room() < io::MAX_OUT_UP.submissions {
+                break;
+            }
             let Some(complete) = self.completions.pop() else { break };
             io::up(&mut self.io, &env, complete, &mut self.io_events, &mut self.submissions);
         }
         for _ in 0..self.limits.io.sockets {
+            if self.io_events.room() < io::MAX_OUT_UP.events || self.submissions.room() < io::MAX_OUT_UP.submissions {
+                break;
+            }
             if self.io.is_ready() {
                 io::resume(&mut self.io, &env, &mut self.io_events, &mut self.submissions);
             }
-            if self.io.is_due(now) {
+            if self.io.is_due(now)
+                && self.io_events.room() >= io::MAX_OUT_UP.events
+                && self.submissions.room() >= io::MAX_OUT_UP.submissions
+            {
                 io::fire(&mut self.io, &env, &mut self.io_events, &mut self.submissions);
             }
         }
         for _ in 0..self.io_events.capacity() {
+            if !self.output_room()
+                || terminal_events.room() < local_protocol::terminal_max_out()
+                || local_events.room() == 0
+            {
+                break;
+            }
             let Some(event) = self.io_events.pop() else { break };
+            let git_owned = match &self.git {
+                Some(git) => match io_owner(&event) {
+                    Some(owner) => git.owns(owner),
+                    None => false,
+                },
+                None => false,
+            };
+            if git_owned {
+                self.git.as_mut().expect("git route exists").from_io(event, local_events, &mut self.io_requests);
+                continue;
+            }
             match event {
                 io::Event::Shutdown { .. } => terminal.interrupt(terminal_events),
                 io::Event::Stream { owner, up } if Some(owner) == self.terminal_input => match up {
@@ -213,11 +304,28 @@ impl ProcessAdapter {
                 ),
             }
         }
-        self.flush_force();
-        if let Some(process) = &mut self.process {
-            process.fire(now, &mut self.process_events, &mut self.io_requests);
+        if self.output_room()
+            && let Some(git) = &mut self.git
+        {
+            git.fire(now, &mut self.io_requests);
+        }
+        let git_done = match &self.git {
+            Some(git) => git.done(),
+            None => false,
+        };
+        if git_done {
+            self.git = None;
+        }
+        if self.output_room() {
+            self.flush_force();
+            if let Some(process) = &mut self.process {
+                process.fire(now, &mut self.process_events, &mut self.io_requests);
+            }
         }
         for _ in 0..self.process_events.capacity() {
+            if host_events.room() == 0 {
+                break;
+            }
             let Some(event) = self.process_events.pop() else { break };
             host_events.push(to_host_event(event));
         }
@@ -233,17 +341,26 @@ impl ProcessAdapter {
         host_events: &mut Queue<host::Event>,
     ) {
         for _ in 0..requests.capacity() {
+            if !self.output_room() || host_events.room() == 0 {
+                break;
+            }
             let Some(request) = requests.pop() else { break };
             self.request(request, start_values, grant_values, host_events);
         }
         if let Some(process) = &mut self.process {
             for _ in 0..self.limits.queue {
+                if self.io_requests.room() < 64 {
+                    break;
+                }
                 let Some(request) = process.next_channel_down() else { break };
                 process.channel_down(request, &mut self.io_requests);
             }
         }
         let env = Env { now, wall, limits: self.limits.io };
         for _ in 0..self.io_requests.capacity() {
+            if self.submissions.room() < io::MAX_OUT_DOWN.submissions || !self.io.takes() {
+                break;
+            }
             let Some(request) = self.io_requests.pop() else { break };
             io::down(&mut self.io, &env, request, &mut self.submissions);
         }
@@ -380,5 +497,30 @@ fn channel_event(agent: Token, event: protocol::OpenEvent) -> host::Event {
             host::Event::Received { owner: agent, message: host::Up::Call { call, name, deadline, ask } }
         }
         OpenEvent::Withdraw { call } => host::Event::Received { owner: agent, message: host::Up::Withdraw { call } },
+    }
+}
+
+fn git_limits(limits: &ProcessLimits) -> local_protocol::GitLimits {
+    local_protocol::GitLimits {
+        output_bytes: 65_536,
+        conflicts: 64,
+        path_bytes: 4096,
+        detail_bytes: limits.detail_bytes,
+    }
+}
+
+fn io_owner(event: &io::Event) -> Option<Token> {
+    match event {
+        io::Event::Listening { owner, .. }
+        | io::Event::Accepted { owner, .. }
+        | io::Event::Connecting { owner, .. }
+        | io::Event::Connected { owner }
+        | io::Event::Stream { owner, .. }
+        | io::Event::Output { owner, .. }
+        | io::Event::Spawned { owner, .. }
+        | io::Event::Exited { owner, .. }
+        | io::Event::Failed { owner, .. }
+        | io::Event::Closed { owner } => Some(*owner),
+        io::Event::Shutdown { .. } => None,
     }
 }

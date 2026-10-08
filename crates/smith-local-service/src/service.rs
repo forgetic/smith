@@ -60,6 +60,9 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(Queue::<Box<[u8]>>::worst_case(limits.queue)?)?
         .checked_add(Map::<u32, Box<[u8]>>::worst_case(limits.local.agent.accounts)?)?
         .checked_add(u64::from(limits.local.agent.accounts).checked_mul(limits.host.answer_bytes)?)?
+        .checked_add(
+            u64::from(limits.local.agent.run.directories).checked_mul(u64::try_from(size_of::<kernel::Fd>()).ok()?)?,
+        )?
         .checked_add(u64::try_from(size_of::<Service>()).ok()?)
 }
 
@@ -98,7 +101,7 @@ pub struct StartValues {
 impl Service {
     /// Construct one spawned-agent local chat without touching files or processes.
     pub fn new(config: Config, seed: u64) -> Result<Self, Error> {
-        let required = local::max_out(&config.limits.local).max(host::max_out(&config.limits.host));
+        let required = local::max_out(&config.limits.local).max(host::max_out(&config.limits.host)).max(64);
         if config.limits.queue < required {
             return Err(Error::Queue);
         }
@@ -235,6 +238,28 @@ impl Service {
         self.process.adopt_terminal(input, signals)
     }
 
+    /// Adopt workspace roots for git children launched by the host, with its explicit environment.
+    pub fn adopt_delivery_roots(
+        &mut self,
+        roots: Box<[kernel::Fd]>,
+        environment: Box<[Box<[u8]>]>,
+    ) -> Result<(), Error> {
+        if roots.len() > usize::try_from(self.limits.local.agent.run.directories).expect("directory bound fits")
+            || environment.len() > 64
+        {
+            return Err(Error::Memory);
+        }
+        let mut bytes = 0_usize;
+        for entry in &environment {
+            bytes = bytes.checked_add(entry.len()).ok_or(Error::Memory)?;
+            if bytes > 4096 || !entry.contains(&b'=') || entry.contains(&0) {
+                return Err(Error::Memory);
+            }
+        }
+        self.process.adopt_delivery_roots(roots, environment);
+        Ok(())
+    }
+
     /// Kernel work submitted by the supervised child process.
     pub fn submissions(&mut self) -> &mut Queue<kernel::Submit> {
         self.process.submissions()
@@ -243,6 +268,21 @@ impl Service {
     fn route_local(&mut self, request: local::Request) {
         match request {
             local::Request::External(external) => self.route_external(*external),
+            local::Request::Git { owner, directory, op, deadline } => match op {
+                local::GitOp::Markers { paths } => self.shell.push(local::Request::Git {
+                    owner,
+                    directory,
+                    op: local::GitOp::Markers { paths },
+                    deadline,
+                }),
+                op @ (local::GitOp::Head
+                | local::GitOp::Status
+                | local::GitOp::Inspect { .. }
+                | local::GitOp::Commit { .. }
+                | local::GitOp::Push { .. }) => {
+                    self.process.start_git(owner, directory, op, deadline, &mut self.local_events);
+                }
+            },
             local::Request::Agent(_) => unreachable!("spawned local service has no in-process agent IO"),
             local::Request::Show { text } => self.terminal.show(text, &mut self.terminal_events),
             local::Request::Load => {
@@ -252,7 +292,6 @@ impl Service {
             other @ (local::Request::SaveState { .. }
             | local::Request::SaveTurn { .. }
             | local::Request::SaveDelivery { .. }
-            | local::Request::Git { .. }
             | local::Request::PlainStatus { .. }
             | local::Request::Credential { .. }
             | local::Request::Exit { .. }) => self.shell.push(other),
@@ -261,6 +300,9 @@ impl Service {
 
     fn drain_terminal(&mut self) {
         for _ in 0..self.terminal_events.capacity() {
+            if self.local_events.room() == 0 || self.output.room() == 0 || !self.process.output_room() {
+                break;
+            }
             let Some(event) = self.terminal_events.pop() else { break };
             match event {
                 protocol::TerminalEvent::Domain(event) => self.local_events.push(event),
@@ -425,33 +467,57 @@ impl Service {
 
 /// One bounded up pass followed by one bounded down pass.
 pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
-    service.process.up(now, wall, &mut service.host_events, &mut service.terminal, &mut service.terminal_events);
+    service.process.up(
+        now,
+        wall,
+        &mut service.host_events,
+        &mut service.terminal,
+        &mut service.terminal_events,
+        &mut service.local_events,
+    );
     service.drain_terminal();
     let local_env = Env { now, wall, limits: service.limits.local.clone() };
     let host_env = Env { now, wall, limits: service.limits.host };
     for _ in 0..service.local_events.capacity() {
+        if service.local_requests.room() < local::max_out(&service.limits.local) {
+            break;
+        }
         let Some(event) = service.local_events.pop() else { break };
         local::step(&mut service.local, &local_env, event, &mut service.local_requests);
     }
-    if service.local.is_due(now) {
+    if service.local.is_due(now) && service.local_requests.room() >= local::max_out(&service.limits.local) {
         local::fire(&mut service.local, &local_env, &mut service.local_requests);
     }
-    if service.local.is_ready() {
+    if service.local.is_ready() && service.local_requests.room() >= local::max_out(&service.limits.local) {
         local::resume(&mut service.local, &local_env, &mut service.local_requests);
     }
     for _ in 0..service.local_requests.capacity() {
+        if service.shell.room() == 0
+            || service.host_events.room() == 0
+            || service.local_events.room() == 0
+            || service.terminal_events.room() < protocol::terminal_max_out()
+            || !service.process.output_room()
+        {
+            break;
+        }
         let Some(request) = service.local_requests.pop() else { break };
         service.route_local(request);
     }
     service.drain_terminal();
     for _ in 0..service.host_events.capacity() {
+        if service.host_requests.room() < host::max_out(&service.limits.host) {
+            break;
+        }
         let Some(event) = service.host_events.pop() else { break };
         host::step(&mut service.host, &host_env, event, &mut service.host_requests);
     }
-    if service.host.is_due(now) {
+    if service.host.is_due(now) && service.host_requests.room() >= host::max_out(&service.limits.host) {
         host::fire(&mut service.host, &host_env, &mut service.host_requests);
     }
     for _ in 0..service.host_requests.capacity() {
+        if service.local_events.room() == 0 || service.lower.room() == 0 || service.host_events.room() == 0 {
+            break;
+        }
         let Some(request) = service.host_requests.pop() else { break };
         service.route_host(request);
     }

@@ -21,6 +21,7 @@ extern crate alloc;
 mod credential;
 mod delivery_store;
 mod git;
+mod git_child;
 mod host_bridge;
 mod store;
 mod terminal;
@@ -28,6 +29,7 @@ mod terminal;
 pub use credential::{Begin, Credential, CredentialEvent, CredentialLimits, CredentialRequest, credential_worst_case};
 pub use delivery_store::{decode_delivery, save_delivery};
 pub use git::{Git, GitAction, GitCompletion, GitLimits, git_worst_case};
+pub use git_child::{GitChild, git_child_worst_case};
 pub use host_bridge::{
     BridgeError, PreparedStart, answer_to_local, decode_change, decode_declared, delivery_to_host, name_to_host,
     prepare_start, saved_reply_to_host,

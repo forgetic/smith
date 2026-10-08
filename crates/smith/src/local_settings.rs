@@ -102,6 +102,8 @@ pub struct Settings {
     pub deliver: Option<Vec<Field>>,
     #[serde(default = "default_title")]
     pub title_field: String,
+    #[serde(default)]
+    pub delivery_environment: Vec<String>,
 }
 
 /// Build bounded local policy and parallel workspace paths from settings.
@@ -499,6 +501,7 @@ mod tests {
             contract: None,
             deliver: None,
             title_field: "title".into(),
+            delivery_environment: vec![],
         };
         let prepared = policy(&settings, &endpoints, crate::limits::LIMITS).expect("bounded policy");
         assert!(prepared.paths.is_empty());

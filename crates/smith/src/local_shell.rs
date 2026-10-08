@@ -20,6 +20,19 @@ use crate::{config, local_settings, local_store};
 
 pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&Path>) -> Result<(), String> {
     let settings = local_settings::read(settings_path, workspace_settings)?;
+    if settings.delivery_environment.len() > 64
+        || settings.delivery_environment.iter().map(String::len).sum::<usize>() > 4096
+        || settings.delivery_environment.iter().any(|entry| !entry.contains('=') || entry.contains('\0'))
+    {
+        return Err("delivery environment exceeds its bounds or has invalid entries".into());
+    }
+    let mut delivery_roots = Vec::with_capacity(settings.directories.len());
+    for directory in &settings.directories {
+        delivery_roots.push(
+            skein_shell::open_root(Path::new(&directory.path))
+                .map_err(|error| format!("delivery root {}: {error}", directory.path))?,
+        );
+    }
     let agent_bytes =
         serde_json::to_vec(&settings.agent).map_err(|error| format!("agent configuration JSON: {error}"))?;
     let agent_config = config::parse(&agent_bytes)?;
@@ -67,6 +80,12 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
         seed,
     )
     .map_err(|error| format!("local service: {error:?}"))?;
+    local_service
+        .adopt_delivery_roots(
+            delivery_roots.into(),
+            settings.delivery_environment.iter().map(|entry| entry.as_bytes().into()).collect(),
+        )
+        .map_err(|error| format!("delivery directories: {error:?}"))?;
     let signals =
         skein_shell::open_termination_signals().map_err(|error| format!("local signals failed (errno {error})"))?;
     local_service

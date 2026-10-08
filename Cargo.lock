@@ -700,6 +700,7 @@ name = "smith-local-protocol"
 version = "0.0.0"
 dependencies = [
  "skein-fake-oauth",
+ "skein-io",
  "skein-lib",
  "skein-oauth",
  "smith-charter",
