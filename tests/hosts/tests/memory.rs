@@ -40,4 +40,16 @@ mod tests {
         assert!(peak > 0, "the counting allocator saw process state");
         drop((process, below));
     }
+
+    #[test]
+    fn hosted_parent_agent_and_peer_are_metered_at_every_iteration_and_drop() {
+        use smith_hosts_world::{Program, World};
+        for program in [Program::Service, Program::ErrorTail] {
+            let mut world = World::new(7, program);
+            world.check_memory();
+            world.settle();
+            assert!(world.seen().gone.is_some(), "the parent releases its slot");
+            drop(world);
+        }
+    }
 }

@@ -1,18 +1,19 @@
 //! A sample host service supervising the real Smith agent service over Skein's
 //! simulated child pipes (protocol/hosts.md, sections 3 and 7). The parent
-//! keeps domain and process state; the world owns the simulator, fake machine
-//! and fake LLM peer. The host routing below is the part another host copies.
+//! keeps domain and process state; Skein's harness owns scheduling and child
+//! lifetime, beside the scenario's fake machine and independent LLM peer. The host routing below is the part another host copies.
 
 use skein_io::{self as io, kernel};
 use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
-use skein_sim::{Config as SimConfig, Pid, Sim};
-use skein_world::Host;
 use smith_agent_process_world as agent_fixture;
-use smith_agent_service as agent;
 use smith_host_domain as host;
 use smith_host_protocol as protocol;
 
 pub mod referee;
+
+mod world;
+
+pub use world::World;
 
 /// Which child program the scripted machine supplies for the host's spawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +66,7 @@ pub enum Observation {
 
 /// The copied host composition: domain, process adapter, io and their queues.
 #[expect(missing_debug_implementations, reason = "world service holds a non-Debug simulated kernel queue")]
+#[expect(clippy::struct_excessive_bools, reason = "independent referee requests and startup-root close flags")]
 pub struct HostService {
     domain: host::Domain,
     domain_env: Env<host::Limits>,
@@ -83,6 +85,11 @@ pub struct HostService {
     completions: Queue<kernel::Complete>,
     seen: Seen,
     observations: Vec<Observation>,
+    root_closing: bool,
+    root_closed: bool,
+    stop_requested: bool,
+    crash_requested: bool,
+    crashed: bool,
 }
 
 fn host_limits() -> host::Limits {
@@ -158,7 +165,12 @@ impl HostService {
             submissions: Queue::with_capacity(256),
             completions: Queue::with_capacity(256),
             seen: Seen::default(),
-            observations: Vec::new(),
+            observations: Vec::with_capacity(256),
+            root_closing: false,
+            root_closed: false,
+            stop_requested: false,
+            crash_requested: false,
+            crashed: false,
         };
         service.domain_events.push(host::Event::Spawn { client: Token::new(1), start: start() });
         service
@@ -166,13 +178,27 @@ impl HostService {
 
     /// One up pass and one down pass; the world supplies the injected clocks.
     pub fn iterate(&mut self, now: Time, wall: Wall) {
+        if self.stop_requested {
+            self.stop_requested = false;
+            self.stop();
+        }
+        if self.crash_requested {
+            self.crash_requested = false;
+            self.crashed = true;
+            self.process.as_ref().expect("started child").signal(kernel::Signal::Kill, &mut self.io_requests);
+        }
         self.domain_env.now = now;
         self.domain_env.wall = wall;
         self.io_env.now = now;
         self.io_env.wall = wall;
         for _ in 0..self.completions.capacity() {
             let Some(complete) = self.completions.pop() else { break };
-            io::up(&mut self.io, &self.io_env, complete, &mut self.io_events, &mut self.submissions);
+            if complete.op == Token::new(u64::MAX) {
+                assert!(complete.result.is_ok(), "parent root closes");
+                self.root_closed = true;
+            } else {
+                io::up(&mut self.io, &self.io_env, complete, &mut self.io_events, &mut self.submissions);
+            }
         }
         for _ in 0..self.io_env.limits.sockets {
             if self.io.is_ready() {
@@ -221,6 +247,11 @@ impl HostService {
             let Some(request) = self.io_requests.pop() else { break };
             io::down(&mut self.io, &self.io_env, request, &mut self.submissions);
         }
+        if self.seen.gone.is_some() && !self.root_closing {
+            self.root_closing = true;
+            self.submissions
+                .push(kernel::Submit { op: Token::new(u64::MAX), kind: kernel::Op::Close { fd: self.root } });
+        }
         self.io.reclaim();
         self.domain.reclaim();
     }
@@ -253,7 +284,9 @@ impl HostService {
     fn route_channel(&mut self, agent: Token, event: protocol::OpenEvent) {
         use protocol::OpenEvent;
         let event = match event {
-            OpenEvent::Opened { .. } => return,
+            // Opened is transport-only. A failed write already settles its
+            // send via Unsent; the independent read still owns Hangup.
+            OpenEvent::Opened { .. } | OpenEvent::WriteFailed => return,
             OpenEvent::Hangup { .. } => host::Event::Hangup { owner: agent },
             OpenEvent::Sent { .. } => host::Event::Sent { owner: agent },
             OpenEvent::Unsent { .. } => host::Event::Unsent { owner: agent },
@@ -272,7 +305,6 @@ impl HostService {
             OpenEvent::Exhausted { account, retry_after } => {
                 host::Event::Received { owner: agent, message: host::Up::Exhausted { account, retry_after } }
             }
-            OpenEvent::WriteFailed => host::Event::Malformed { owner: agent },
             OpenEvent::Call { call, name, deadline, ask } => {
                 host::Event::Received { owner: agent, message: host::Up::Call { call, name, deadline, ask } }
             }
@@ -454,225 +486,5 @@ impl HostService {
     #[must_use]
     pub fn io_empty(&self) -> bool {
         self.io.is_empty()
-    }
-}
-
-/// The simulated parent, agent child, fake LLM process, and machine.
-#[expect(missing_debug_implementations, reason = "the shared fake peer has no Debug implementation")]
-pub struct World {
-    sim: Sim,
-    parent: Pid,
-    agent: Option<(Pid, agent::Service)>,
-    peer_pid: Pid,
-    peer: skein_fake_peers::llm::Peer,
-    host: HostService,
-    machine: skein_fake_machine::Machine,
-    program: Program,
-    stopped_child: bool,
-}
-
-impl World {
-    #[must_use]
-    pub fn new(seed: u64, program: Program) -> World {
-        let mut config = SimConfig::calm();
-        config.wall = skein_tls_world::pki::VALID;
-        let mut sim = Sim::new(seed, config);
-        let parent = sim.spawn_process();
-        let peer_pid = sim.spawn_process();
-        let mut machine = skein_fake_machine::Machine::new();
-        let root = machine.lay(&[]);
-        let root_fd = sim.root(parent, skein_sim::Handle::new(root.raw()));
-        let host = HostService::new(root_fd, sim.now(), sim.wall());
-        World {
-            sim,
-            parent,
-            agent: None,
-            peer_pid,
-            peer: agent_fixture::fake::peer(),
-            host,
-            machine,
-            program,
-            stopped_child: false,
-        }
-    }
-
-    pub fn step(&mut self) {
-        self.sim.reap(self.peer_pid, self.peer.completions());
-        self.peer.iterate(self.sim.now(), self.sim.wall());
-        self.sim.submit(self.peer_pid, self.peer.submissions());
-        if let Some((pid, service)) = &mut self.agent
-            && self.sim.service_running(*pid)
-            && !self.stopped_child
-        {
-            self.sim.reap(*pid, service.completions());
-            agent::iterate(service, self.sim.now(), self.sim.wall());
-            self.sim.submit(*pid, service.submissions());
-            if let Some(success) = agent::done(service) {
-                self.sim.finish_service(*pid, kernel::Exit::Code(u8::from(!success)));
-            }
-        }
-        let mut arrived = Queue::with_capacity(256);
-        self.sim.reap(self.parent, &mut arrived);
-        for _ in 0..arrived.capacity() {
-            let Some(complete) = arrived.pop() else { break };
-            if let Ok(kernel::Done::Spawned { pidfd, .. }) = &complete.result
-                && (self.program == Program::Service || self.program == Program::ErrorTail)
-            {
-                let (pid, pipes) = self.sim.bind_service(self.parent, *pidfd);
-                match self.program {
-                    Program::Service => {
-                        let mut service = agent_fixture::service(7);
-                        let input = pipes.iter().find(|(child, _)| *child == 0).expect("stdin").1;
-                        let output = pipes.iter().find(|(child, _)| *child == 1).expect("stdout").1;
-                        let signal = self.sim.open_signal_source(pid);
-                        service.adopt_streams(input, output, signal).expect("bound child descriptors");
-                        self.agent = Some((pid, service));
-                    }
-                    Program::ErrorTail => {
-                        let error = pipes.iter().find(|(child, _)| *child == 2).expect("stderr").1;
-                        let mut writes = Queue::with_capacity(1);
-                        writes.push(kernel::Submit {
-                            op: Token::new(1),
-                            kind: kernel::Op::PipeWrite {
-                                fd: error,
-                                bytes: Box::from(&b"agent configuration failed"[..]),
-                                from: 0,
-                            },
-                        });
-                        self.sim.submit(pid, &mut writes);
-                    }
-                    Program::Refused | Program::Silent => unreachable!("only service programs bind"),
-                }
-            }
-            self.host.completions().push(complete);
-        }
-        self.host.iterate(self.sim.now(), self.sim.wall());
-        self.sim.submit(self.parent, self.host.submissions());
-        self.serve_machine();
-        if !self.host.work_pending(self.sim.now())
-            && self.sim.ready(self.parent) == 0
-            && self.sim.ready(self.peer_pid) == 0
-            && !self.peer.work_pending(self.sim.now())
-            && self.agent.as_ref().is_none_or(|(pid, service)| {
-                self.stopped_child
-                    || !self.sim.service_running(*pid)
-                    || (self.sim.ready(*pid) == 0 && !agent::work_pending(service, self.sim.now()))
-            })
-        {
-            let at = [
-                self.sim.next_due(),
-                self.host.next_deadline(),
-                self.peer.next_deadline(),
-                self.agent
-                    .as_ref()
-                    .filter(|(pid, _)| !self.stopped_child && self.sim.service_running(*pid))
-                    .and_then(|(_, service)| agent::next_deadline(service)),
-            ]
-            .into_iter()
-            .flatten()
-            .min();
-            if let Some(at) = at {
-                self.sim.advance_to(at);
-            }
-        }
-    }
-
-    /// Stop driving the hosted agent after admission to model one that ignores Cancel.
-    pub fn ignore_cancel(&mut self) {
-        assert!(self.host.seen().admitted, "the agent opened before becoming unresponsive");
-        self.stopped_child = true;
-        self.host.stop();
-    }
-
-    /// Crash the hosted child at this scheduling cut, if it is still live.
-    pub fn crash_agent(&mut self) -> bool {
-        match &self.agent {
-            Some((pid, _)) if self.sim.service_running(*pid) => {
-                self.sim.finish_service(*pid, kernel::Exit::Code(1));
-                true
-            }
-            Some(_) | None => false,
-        }
-    }
-
-    /// Whether the hosted child can still be cut by a simulated crash.
-    #[must_use]
-    pub fn child_running(&self) -> bool {
-        self.agent.as_ref().is_some_and(|(pid, _)| self.sim.service_running(*pid))
-    }
-
-    fn serve_machine(&mut self) {
-        let mut calls = Queue::with_capacity(256);
-        let mut answers = Queue::with_capacity(256);
-        self.sim.calls(&mut calls);
-        for _ in 0..calls.capacity() {
-            let Some(call) = calls.pop() else { break };
-            match &call.ask {
-                skein_sim::Ask::Spawn { program, .. } if program.as_ref() == b"smith" => {
-                    let result = match self.program {
-                        Program::Service | Program::ErrorTail => {
-                            Ok(skein_sim::Reply::Program(skein_sim::Program::Service))
-                        }
-                        Program::Refused => Err(kernel::Error::NotFound),
-                        Program::Silent => Ok(skein_sim::Reply::Program(skein_sim::Program::Never)),
-                    };
-                    answers.push(skein_sim::Answer { ticket: call.ticket, result });
-                }
-                skein_sim::Ask::Spawn { .. }
-                | skein_sim::Ask::Open { .. }
-                | skein_sim::Ask::Read { .. }
-                | skein_sim::Ask::Write { .. }
-                | skein_sim::Ask::Sync { .. }
-                | skein_sim::Ask::Stat { .. }
-                | skein_sim::Ask::Rename { .. }
-                | skein_sim::Ask::Remove { .. }
-                | skein_sim::Ask::MakeDirectory { .. }
-                | skein_sim::Ask::List { .. }
-                | skein_sim::Ask::Close { .. } => skein_fake_machine::step(&mut self.machine, call, &mut answers),
-            }
-        }
-        self.sim.answer(&mut answers);
-    }
-
-    #[must_use]
-    pub fn seen(&self) -> &Seen {
-        self.host.seen()
-    }
-
-    /// Ordered process and domain boundary events for a referee.
-    #[must_use]
-    pub fn observations(&self) -> &[Observation] {
-        self.host.observations()
-    }
-
-    #[must_use]
-    pub fn peer_replied(&self) -> bool {
-        agent_fixture::fake::replied(&self.peer)
-    }
-
-    #[must_use]
-    pub fn done(&self) -> bool {
-        self.host.seen().gone.is_some()
-    }
-
-    pub fn settle(&mut self) {
-        for _ in 0..10_000_u32 {
-            self.step();
-            if self.done() {
-                return;
-            }
-        }
-        assert!(
-            self.done(),
-            "host did not settle: {:?}; at {:?}\n{}",
-            self.host.seen(),
-            self.sim.now(),
-            self.sim.render_trace()
-        );
-    }
-
-    #[must_use]
-    pub fn trace(&self) -> String {
-        self.sim.render_trace()
     }
 }

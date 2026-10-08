@@ -48,13 +48,6 @@ mod tests {
     #[test]
     fn an_agent_that_ignores_the_cancel_is_killed_after_the_grace() {
         let mut world = World::new(11, Program::Service);
-        for _ in 0..100_u32 {
-            world.step();
-            if world.seen().admitted {
-                break;
-            }
-        }
-        assert!(world.seen().admitted, "child admitted before the parent stopped it");
         world.ignore_cancel();
         world.settle();
         let seen = world.seen();
@@ -62,5 +55,16 @@ mod tests {
         assert_eq!(seen.signals, [smith_host_domain::Signal::Terminate, smith_host_domain::Signal::Kill]);
         assert_eq!(seen.exits, 1);
         assert_eq!(seen.reaps, 1);
+    }
+
+    #[test]
+    fn a_child_killed_during_start_settles_the_write_and_the_independent_read_once() {
+        let mut world = World::new(7, Program::Service);
+        world.crash_after(0);
+        world.settle();
+        assert!(world.crashed());
+        assert!(world.seen().gone.is_some());
+        assert_eq!(world.seen().exits, 1);
+        assert_eq!(world.seen().reaps, 1);
     }
 }
