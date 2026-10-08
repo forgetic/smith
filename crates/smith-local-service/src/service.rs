@@ -690,7 +690,14 @@ impl Service {
             host::Request::Exhausted { .. } => {
                 self.local_events.push(local::Event::External(local::ExternalEvent::Exhausted));
             }
-            host::Request::Faulted { .. } | host::Request::Bounced { .. } => {
+            host::Request::Bounced { bounce: host::Bounce::Ending, name, .. } => {
+                self.local_events.push(local::Event::External(local::ExternalEvent::MessageBounced { name }));
+            }
+            host::Request::Faulted { .. }
+            | host::Request::Bounced {
+                bounce: host::Bounce::Full | host::Bounce::TooLarge | host::Bounce::ReusedName,
+                ..
+            } => {
                 self.failed = true;
                 self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
             }

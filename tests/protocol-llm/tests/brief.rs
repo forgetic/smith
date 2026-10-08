@@ -35,7 +35,7 @@ const SECTIONS: &str = "## Zulu PARENT-TITLE-Z\n\nPARENT-BODY-ONE: café\nline o
 const GUIDES: &str = "## AGENTS.md in `work`\n\nWORK-GUIDE: inspect data.txt.\n\n\
 ## AGENTS.md in `archive`\n\nARCHIVE-GUIDE: keep every byte.\n\n";
 const MAIN_MECHANICS: &str = "## Tools\n\n\
-You can read, list and search the files in the checkout.\n\
+You can read, list and search the files in the checkout.\nPaths are relative to the first directory, or use `/directory-name/path` for a named directory. Use `.` to list the first directory.\n\
 You can write and edit files in its writable repositories.\n\n\
 ## Checkout\n\n\
 - `work`, which you may change, a git working tree, with checks (`.temper/pre-pr`)\n\
@@ -55,7 +55,7 @@ Report: text up to 1024 bytes, with these host-required fields:\n\
 - `source`: nonempty, at most 128 bytes\n\
 Extra fields are allowed within the aggregate result byte limit; no field name may repeat.\n";
 const CHILD_MECHANICS: &str = "## Tools\n\n\
-You can read, list and search the files in the checkout.\n\n\
+You can read, list and search the files in the checkout.\nPaths are relative to the first directory, or use `/directory-name/path` for a named directory. Use `.` to list the first directory.\n\n\
 ## Checkout\n\n\
 - `work`, which you may change, a git working tree, with checks (`.temper/pre-pr`)\n\
 - `archive`, which you may only read, a plain directory\n\n\

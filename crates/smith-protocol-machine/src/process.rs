@@ -341,6 +341,7 @@ pub(crate) fn shell(
     cwd: tools::Place,
     command: Box<[u8]>,
     vars: Box<[tools::Var]>,
+    defaults: &[tools::Var],
     head: u32,
     tail: u32,
     deadline: Time,
@@ -349,7 +350,26 @@ pub(crate) fn shell(
     if head > limits.output_bytes || tail > limits.output_bytes || command.contains(&0) {
         return None;
     }
-    let env = environment(&vars, limits.env_bytes)?;
+    let capacity = u32::try_from(defaults.len().checked_add(vars.len())?).ok()?;
+    if capacity > limits.env_bytes {
+        return None;
+    }
+    let mut combined = List::with_capacity(capacity);
+    for default in defaults {
+        let mut overridden = false;
+        for variable in &vars {
+            if variable.name == default.name {
+                overridden = true;
+            }
+        }
+        if !overridden {
+            combined.push(default.clone()).ok()?;
+        }
+    }
+    for variable in vars {
+        combined.push(variable).ok()?;
+    }
+    let env = environment(combined.as_slice(), limits.env_bytes)?;
     let args = Box::new([Box::from(&b"-c"[..]), command]);
     let dir = if cwd.path.is_empty() { Box::from(&b"."[..]) } else { cwd.path };
     let spawn = Spawn { program: Box::from(&b"/bin/sh"[..]), args, env, dir, pipes: pipes() };

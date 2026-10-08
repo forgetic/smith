@@ -129,6 +129,67 @@ fn reserved_start(host: &mut CrashHost, spend: u64) -> run::Event {
 }
 
 #[test]
+fn a_message_queued_during_preparation_opens_main_and_is_acknowledged_by_its_actual_turn() {
+    let mut host = CrashHost::new();
+    let limits = Settings::calm(606).run;
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut out = Queue::with_capacity(run::MAX_OUT);
+    let mut domain = run::Domain::new(&limits);
+    let started = crash_take(&mut domain, &env, &mut out, host.start(1));
+    let Some(run::Request::Read { owner, .. }) =
+        started.iter().find(|request| matches!(request, run::Request::Read { .. }))
+    else {
+        panic!("main prepares")
+    };
+    let owner = *owner;
+    for (name, text) in
+        [(Token::new(5), b"person: hello".as_slice()), (Token::new(6), b"person: run the tests".as_slice())]
+    {
+        assert!(
+            crash_take(&mut domain, &env, &mut out, run::Event::Message { run: owner, name, text: text.into() })
+                .is_empty()
+        );
+    }
+    let mut prepared = crash_take(&mut domain, &env, &mut out, run::Event::Read { owner, read: run::Read::Missing });
+    for _ in 0..8 {
+        let event = match prepared.as_slice() {
+            [run::Request::Read { owner, .. }] => run::Event::Read { owner: *owner, read: run::Read::Missing },
+            [run::Request::Probe { owner, .. }] => run::Event::Probed { owner: *owner, executable: false },
+            [run::Request::Open { .. }] => break,
+            _ => panic!("preparation: {prepared:?}"),
+        };
+        prepared = crash_take(&mut domain, &env, &mut out, event);
+    }
+    let [run::Request::Open { conversation, opening }] = prepared.as_slice() else { panic!("main opens") };
+    assert_eq!(opening.prompt.as_ref(), b"person: hello");
+    let conversation = *conversation;
+    assert!(
+        crash_take(&mut domain, &env, &mut out, run::Event::Started { conversation, peer: Token::new(99) }).is_empty()
+    );
+    let first = crash_take(
+        &mut domain,
+        &env,
+        &mut out,
+        run::Event::Turn { conversation, record: Token::new(101), sequence: 1 },
+    );
+    assert!(matches!(first.as_slice(), [run::Request::Turn { read: Some(name), .. }] if *name == Token::new(5)));
+    let next = crash_take(
+        &mut domain,
+        &env,
+        &mut out,
+        run::Event::Yielded { conversation, stop: run::Stop::EndTurn, text: b"hello".as_slice().into() },
+    );
+    assert!(matches!(next.as_slice(), [run::Request::Say { text, .. }] if text.as_ref() == b"person: run the tests"));
+    let second = crash_take(
+        &mut domain,
+        &env,
+        &mut out,
+        run::Event::Turn { conversation, record: Token::new(102), sequence: 2 },
+    );
+    assert!(matches!(second.as_slice(), [run::Request::Turn { read: Some(name), .. }] if *name == Token::new(6)));
+}
+
+#[test]
 fn a_completion_whose_maximum_does_not_fit_is_not_made_and_the_run_ends_for_its_budget() {
     let mut host = CrashHost::new();
     let limits = Settings::calm(606).run;

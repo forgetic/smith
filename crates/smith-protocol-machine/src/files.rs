@@ -1,6 +1,8 @@
 //! Whole files, conditional stores, and bounded scans over skein's file io
 //! (protocol/agent.md, section 2; domain/tools.md, sections 4 and 6).
 
+use alloc::boxed::Box;
+
 use skein_io::{digest, file, kernel};
 use skein_lib::{List, Token};
 use smith_domain::tools;
@@ -30,7 +32,14 @@ pub(crate) fn request(
             }
             Ok((
                 Kind::Scan,
-                file::Request::Scan { owner, root: at.root, path: at.path, max, max_bytes, no_follow: false },
+                file::Request::Scan {
+                    owner,
+                    root: at.root,
+                    path: if at.path.is_empty() { Box::from(&b"."[..]) } else { at.path },
+                    max,
+                    max_bytes,
+                    no_follow: false,
+                },
             ))
         }
         tools::Op::Store { at, content, expect } => {

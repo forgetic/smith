@@ -321,22 +321,22 @@ pub(crate) fn trust(der: Option<&str>) -> Result<tls::Config, String> {
 fn standard_limits(memory: u64) -> Result<service::Limits, String> {
     let client = shared::client::Limits {
         http: http::client::Limits { request: 4096, head: 4096, headers: 64, read: 256, send: 31 },
-        sse: http::sse::Limits { line: 16_384, event: 32_768, field: 128, chunk: 128 },
+        sse: http::sse::Limits { line: 65_536, event: 65_536, field: 128, chunk: 128 },
         dialect: openai::Limits {
-            request_bytes: 65_536,
-            document_bytes: 32_768,
+            request_bytes: 262_144,
+            document_bytes: 65_536,
             string_bytes: 32_768,
             depth: 32,
-            tokens: 1024,
-            parts: 64,
+            tokens: 4096,
+            parts: 256,
             input_bytes: 2048,
-            opaque_bytes: 2048,
+            opaque_bytes: 8192,
             answer_bytes: 8192,
             detail_bytes: 256,
         },
         error_bytes: 4096,
     };
-    let decoded_call_bytes = 16_384;
+    let decoded_call_bytes = 65_536;
     let completion = llm::completion_worst_case(&client, decoded_call_bytes).ok_or("LLM receiving bound overflows")?;
     let bodies = smith_channel::CEILINGS;
     let schema = smith_channel::schema(&bodies).map_err(|error| format!("channel schema: {error:?}"))?;
@@ -362,6 +362,9 @@ fn standard_limits(memory: u64) -> Result<service::Limits, String> {
     domain.decoded_call_bytes = decoded_call_bytes;
     domain.session.completion_bytes = completion;
     domain.session.completion_blocks = client.dialect.parts;
+    domain.session.messages = 256;
+    domain.session.tools.shell_head = 2048;
+    domain.session.tools.shell_tail = 4096;
     let queue = domain::max_out(&domain).max(256);
     let routes = io::operations(&io).and_then(|count| count.checked_add(64)).ok_or("IO route count overflows")?;
     Ok(service::Limits {
@@ -380,13 +383,13 @@ fn standard_limits(memory: u64) -> Result<service::Limits, String> {
             },
             endpoints: ENDPOINTS,
             calls: 16,
-            turns: 64,
+            turns: 128,
             fact_reserve_frames: 1,
             fact_reserve_bytes: 128,
             grants: 8,
         },
         llm: llm::ComponentLimits {
-            adapter: llm::Limits { client, tool_bytes: 32_768, result_bytes: 32_768 },
+            adapter: llm::Limits { client, tool_bytes: 32_768, result_bytes: 262_144 },
             connection: connection::Limits {
                 endpoints: ENDPOINTS,
                 connections: 6,
@@ -418,7 +421,7 @@ fn standard_limits(memory: u64) -> Result<service::Limits, String> {
             entries: 64,
             entry_bytes: 4096,
             processes: 8,
-            output_bytes: 1024,
+            output_bytes: 4096,
             search_hits: 16,
             search_bytes: 1024,
             search_line_bytes: 4096,
@@ -482,7 +485,7 @@ mod tests {
     fn standard_profile_accepts_conversation_history_with_workspace_results() {
         let limits = standard_limits(u64::MAX).expect("standard limits").llm.connection.llm.dialect;
         let mut input = Vec::new();
-        for index in 0..12 {
+        for index in 0..48 {
             let call_id = format!("read_{index}").into_bytes().into_boxed_slice();
             input.push(openai::Input::FunctionCall {
                 call_id: call_id.clone(),
@@ -502,6 +505,15 @@ mod tests {
         };
         let encoded = openai::encode_request(&request, &limits).expect("workspace results fit the request");
         assert!(encoded.len() > 8192, "workspace history exceeds the old request bound");
+    }
+
+    #[test]
+    fn standard_profile_accepts_completed_events_with_metadata_and_tool_schemas() {
+        let limits = standard_limits(u64::MAX).expect("standard limits").llm.connection.llm.dialect;
+        let payload = include_bytes!("../tests/fixtures/provider-completed.json");
+        let json = openai::Json::from_bytes(payload, &limits).expect("completed provider document");
+        assert!(json.as_tokens().len() > 1024, "real response structure exceeds the old token bound");
+        assert!(matches!(openai::decode_event(&json, &limits), Ok(openai::Event::Completed { .. })));
     }
 
     #[test]

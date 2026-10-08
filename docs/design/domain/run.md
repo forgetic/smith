@@ -121,6 +121,14 @@ conventions name,
 as text, UTF-8 cut at a character boundary within a limit; a file that is
 not text counts as no guide.
 
+If a host message is already queued when preparation finishes, it becomes
+the main session's opening user message instead of the generic instruction
+to begin the brief. Its name is acknowledged only with the first actual
+turn. Further messages remain queued in order for subsequent yields.
+When no message is queued, a main with waiting enabled and no brief opens
+with an explicit request to wait for the next host message; other mains
+open with the instruction to begin their brief.
+
 ## 4. What a run does
 
 1. **Admits** a start, or refuses it at the entrance: busy, or invalid

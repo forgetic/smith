@@ -44,6 +44,7 @@ pub struct Domain {
     head_survey: HeadSurvey,
     raw_lines: Queue<Box<[u8]>>,
     line: Option<Line>,
+    line_state: LineState,
     grants: Grants,
     grant_failed: bool,
     run: Option<Token>,
@@ -56,6 +57,19 @@ pub struct Domain {
     wall_deadline: Option<Time>,
     facts: Queue<Fact>,
     facts_lost: u64,
+}
+
+/// Lifecycle of the one retained terminal line.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum LineState {
+    /// Named durably but not yet sent to an admitted run.
+    Ready,
+    /// A follow-up named while a previous request is still running.
+    Followup,
+    /// Offered once, awaiting an actual read watermark.
+    Offered,
+    /// An unread follow-up or bounced line, owed to the next activation.
+    Retry,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -146,6 +160,7 @@ impl Domain {
             head_survey: HeadSurvey::NotStarted,
             raw_lines: Queue::with_capacity(limits.lines),
             line: None,
+            line_state: LineState::Ready,
             grants: Grants::new(limits.agent.accounts),
             grant_failed: false,
             run: None,
@@ -312,21 +327,25 @@ fn receive_line(domain: &mut Domain, env: &Env<Limits>, text: Box<[u8]>, out: &m
 }
 
 fn dispatch_line(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
-    if domain.line.is_some() || domain.chat.state_pending || domain.chat.closed {
+    if domain.chat.state_pending || (domain.line.is_some() && domain.chat.phase != Phase::Idle) {
         return;
     }
     match domain.chat.phase {
         Phase::Idle | Phase::Running => {}
         Phase::Loading | Phase::Starting | Phase::Ending | Phase::Done => return,
     }
-    let Some(text) = domain.raw_lines.pop() else { return };
-    let Some(next_message) = domain.chat.state.next_message.checked_add(1) else {
-        stop_names(domain, out);
-        return;
-    };
-    domain.chat.state.next_message = next_message;
-    domain.line = Some(Line { name: Token::new(next_message), text });
+    if domain.line.is_none() {
+        let Some(text) = domain.raw_lines.pop() else { return };
+        let Some(next_message) = domain.chat.state.next_message.checked_add(1) else {
+            stop_names(domain, out);
+            return;
+        };
+        domain.chat.state.next_message = next_message;
+        domain.line = Some(Line { name: Token::new(next_message), text });
+        domain.line_state = if domain.chat.phase == Phase::Running { LineState::Followup } else { LineState::Ready };
+    }
     if domain.chat.phase == Phase::Idle {
+        domain.line_state = LineState::Ready;
         let Some(activation) = domain.chat.state.activation.checked_add(1) else {
             stop_names(domain, out);
             return;
@@ -392,7 +411,7 @@ fn resume_loading(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Reques
     }
     domain.chat.phase = Phase::Idle;
     domain.chat.load_requested = false;
-    if domain.chat.closed {
+    if domain.chat.closed && domain.line.is_none() && domain.raw_lines.is_empty() {
         domain.chat.phase = Phase::Done;
         out.push(Request::Exit { status: ExitStatus::Success });
     } else {
@@ -409,8 +428,14 @@ fn state_saved(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
             maybe_start(domain, env, out);
         }
         Phase::Running => {
-            send_line(domain, env, out);
-            dispatch_line(domain, env, out);
+            if domain.turns.answer.is_some() {
+                if domain.turns.unsaved.is_empty() {
+                    finish_answer(domain, out);
+                }
+            } else {
+                send_line(domain, env, out);
+                dispatch_line(domain, env, out);
+            }
         }
         Phase::Loading | Phase::Idle | Phase::Ending | Phase::Done => {
             unreachable!("SaveState is emitted only while starting or running");
@@ -586,20 +611,31 @@ fn head_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: Git
 }
 
 fn send_line(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
+    match domain.line_state {
+        LineState::Ready | LineState::Followup => {}
+        LineState::Offered | LineState::Retry => return,
+    }
     let Some(run) = domain.run else { return };
-    let Some(line) = domain.line.take() else { return };
+    let Some(line) = &domain.line else { return };
+    let name = line.name;
+    let text = line.text.clone();
+    domain.line_state = match domain.line_state {
+        LineState::Ready => LineState::Offered,
+        LineState::Followup => LineState::Retry,
+        LineState::Offered | LineState::Retry => unreachable!("only an unsent line is offered"),
+    };
     match domain.placement {
         Placement::InProcess => agent::step(
             domain.agent.as_mut().expect("in-process agent"),
             &agent_env(env),
-            agent::Event::Message { run, name: line.name, text: line.text },
+            agent::Event::Message { run, name, text },
             &mut domain.agent_out,
         ),
         Placement::External => {
-            out.push(Request::External(Box::new(ExternalRequest::Message { run, name: line.name, text: line.text })));
+            out.push(Request::External(Box::new(ExternalRequest::Message { run, name, text })));
         }
     }
-    observe(domain, Fact::Message { name: line.name });
+    observe(domain, Fact::Message { name });
 }
 
 fn turn_saved(domain: &mut Domain, env: &Env<Limits>, number: u32, out: &mut Queue<Request>) {
@@ -796,11 +832,18 @@ fn accept_turn(
     let shown = crate::person::turn_text(&turn, env.limits.show_bytes);
     domain.turns.unsaved.push((number, turn.sequence));
     domain.chat.state.read = read;
+    if let Some(line) = &domain.line
+        && read == Some(line.name)
+    {
+        domain.line = None;
+        domain.line_state = LineState::Ready;
+    }
     observe(domain, Fact::Turn { number });
     out.push(Request::SaveTurn { number, read, turn });
     if !shown.is_empty() {
         out.push(Request::Show { text: shown });
     }
+    dispatch_line(domain, env, out);
 }
 
 fn accept_answer(domain: &mut Domain, answer: agent::run::Answer, out: &mut Queue<Request>) {
@@ -817,6 +860,14 @@ fn external_event(domain: &mut Domain, env: &Env<Limits>, event: ExternalEvent, 
         ExternalEvent::Admitted { run } => {
             domain.run = Some(run);
             send_line(domain, env, out);
+        }
+        ExternalEvent::MessageBounced { name } => {
+            if let Some(line) = &domain.line
+                && line.name == name
+                && domain.chat.phase == Phase::Running
+            {
+                domain.line_state = LineState::Retry;
+            }
         }
         ExternalEvent::Turn { number, read, turn } => accept_turn(domain, env, number, read, turn, out),
         ExternalEvent::Answer { answer } => {
@@ -862,6 +913,9 @@ fn external_event(domain: &mut Domain, env: &Env<Limits>, event: ExternalEvent, 
 }
 
 fn finish_answer(domain: &mut Domain, out: &mut Queue<Request>) {
+    if domain.chat.state_pending {
+        return;
+    }
     if domain.placement == Placement::External && domain.external_life != ExternalLife::Gone {
         return;
     }
@@ -900,10 +954,14 @@ fn finish_answer(domain: &mut Domain, out: &mut Queue<Request>) {
         },
     };
     out.push(Request::Show { text: crate::person::bounded_text(&text, domain.show_bytes) });
+    match domain.line_state {
+        LineState::Ready | LineState::Offered => domain.line = None,
+        LineState::Followup | LineState::Retry => {}
+    }
     domain.run = None;
     domain.wall_deadline = None;
-    domain.line = None;
-    if domain.chat.closed {
+    domain.line_state = LineState::Ready;
+    if domain.chat.closed && domain.line.is_none() && domain.raw_lines.is_empty() {
         domain.chat.phase = Phase::Done;
         let status = if domain.stop_failed { ExitStatus::Failed } else { ExitStatus::Success };
         out.push(Request::Exit { status });

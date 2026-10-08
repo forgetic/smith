@@ -961,10 +961,10 @@ impl World {
                 if text.as_ref() == b"Waiting for a message" {
                     self.reached.insert(Goal::Waiting);
                 }
-                if text.as_ref() == b"Chat parked" {
+                if text.as_ref() == b"Chat parked\n" {
                     self.reached.insert(Goal::Parked);
                 }
-                if text.as_ref() == b"Run cancelled" {
+                if text.as_ref() == b"Run cancelled\n" {
                     self.reached.insert(Goal::Cancelled);
                 }
                 self.shown.push(text);

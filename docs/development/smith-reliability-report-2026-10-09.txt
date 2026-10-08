@@ -1,0 +1,141 @@
+Smith interactive reliability report — 2026-10-09 (Europe/Lisbon)
+
+Result
+
+The requested workflow now passes through the shipped Smith binary using
+Codex authentication, gpt-6-luna, and medium reasoning effort. In one terminal
+invocation, a copy of the original saved chat received "how are you?", answered,
+then received a request to run the project's checks. Smith actually executed:
+
+  cargo fmt --check
+  cargo clippy --workspace --all-targets -- -D warnings
+  cargo nextest run --workspace
+  cargo nextest run --workspace --profile fuzzy
+
+All four shell results had exit code zero in the outside trace. Smith reported
+1,449 focused tests and 17 fuzzy tests passing, then exited successfully on EOF.
+The original ~/.local/state/smith chat was preserved; this trial used
+/tmp/smith-project-session-ynw4vo7l and its trace.jsonl.
+
+Changes remain uncommitted on fix/interactive-reliability-2026-10-08.
+HEAD remains 6136dc4. Nothing was pushed or merged.
+
+Causes found and fixes
+
+1. A valid provider response.completed event exceeded the configured JSON
+   parser token count: 1,036 tokens versus the old 1,024 limit. The captured
+   event was approximately 12 KB; instructions, schemas and metadata count
+   even when the assistant's actual answer is short. Standard receiving limits
+   now accept the event, with a sanitized structural regression fixture.
+
+2. The standard history limits were too small for a modest tool session.
+   Requests could fail locally before reaching the provider after several
+   tool calls or when restoring history. Raised bounded request, history,
+   opaque reasoning, decoded-call and channel capacities together; a regression
+   encodes 48 function-call/result pairs. Limits remain finite and checked.
+
+3. The model could begin a generic brief before receiving the first terminal
+   request. A message queued during preparation now becomes the opening user
+   prompt and is acknowledged by its first actual turn. Without a queued
+   message, an empty interactive brief explicitly asks the model to wait.
+
+4. Terminal follow-ups were discarded during activation shutdown. Offering a
+   message is not proof that the model read it. Smith retains the line until
+   the turn's read watermark acknowledges its name, and carries an unread
+   follow-up into the next activation with its original name. A state save
+   must settle before the old answer completes. An ending-child message bounce
+   is handled as an unread message instead of an agent failure. Regressions
+   cover both an offered follow-up and a follow-up saved after the old answer,
+   including a stale bounce. EOF drains already received lines.
+
+5. Configured environment variables reached checks but not shell tools. Shell
+   commands now inherit the explicitly configured defaults; per-command values
+   override them. The merged environment is bounded and its memory is priced.
+   Tests cover inheritance, overrides and refusal beyond the merged bound.
+
+6. Listing "." produced an empty native path and failed. Root scans now map
+   that path to ".". Tool guidance explains relative and named-directory paths.
+
+7. Final reports lacked a newline. Reports now reserve a newline within the
+   display cap, keeping the next terminal input separate.
+
+Why the previous live suite missed this
+
+Its stories covered refresh, a checked change, a separate invocation restoring
+history, and optional push. They did not exercise a greeting followed by a
+second request in the same terminal while the first child was shutting down.
+The small scripted workloads also did not represent the actual completed-event
+metadata or the accumulated history of a coding session. Forced startup-wait
+instructions hid the generic-opening problem. Passing those stories did not
+establish that the user's interactive workflow worked.
+
+A new opt-in live story sends the test request as soon as the greeting's finish
+call appears. It requires two finish calls, an actual shell call, the prescribed
+test marker, the configured environment variable, unchanged test script and
+unchanged git history. It reuses Skein's existing terminal and real harness.
+The outcome checks now verify requested working files for report tasks too.
+
+Validation
+
+Formatting and workspace all-target Clippy passed. The final focused gate
+passed 1,449/1,449 tests in 8.840 seconds; the fuzzy gate passed 17/17 in
+7.532 seconds. Both stay within the existing 15-second and 60-second budgets.
+The new Luna live interactive story passed in 31.787 seconds. These times
+exclude builds. Serial measurements are recorded in docs/development/workflow.md.
+
+Three coding tasks were assigned to Smith in disposable standalone fixtures:
+
+  Python clamp: replace a broken implementation with inclusive bounds and
+  ValueError for reversed bounds; Smith edited the function and ran five tests.
+
+  Python unique_in_order: add a function that retains first occurrences,
+  preserves order and does not mutate input; this was a second request in the
+  same session, sent during the preceding finish. Smith edited the file and
+  ran all nine tests. Both requests completed in 41.21 seconds, with two finish
+  calls, no "Run failed", and process exit zero. An independent rerun passed
+  all nine tests, and the test file's hash remained unchanged.
+
+  Rust gcd: replace an incorrect sum with Euclid's algorithm; Smith used its
+  read/edit/shell tools and ran cargo test --offline. All five tests passed,
+  including zero and maximum-u64 cases. The session completed in 45.87 seconds
+  and exited zero. An independent cargo test rerun also passed all five tests.
+
+Relevant experiment artifacts:
+  /tmp/smith-python-experiment-3.log
+  /tmp/smith-experiment-i29jcyj7/trace.jsonl
+  /tmp/smith-rust-experiment.log
+  /tmp/smith-experiment-5bsrjymb/trace.jsonl
+  /tmp/smith-live-interactive-3.log
+  /tmp/smith-focused.log
+  /tmp/smith-fuzzy.log
+  /tmp/smith-clippy.log
+
+Earlier live and multi-request trials reproduced the dropped-message failure;
+those failed trials were followed by the successful runs above. A generic
+"hello" can legitimately produce a waiting reply rather than finish; a trial
+script that only waits for finish cannot grade that interaction. The actual
+terminal flow and the new live story are the success evidence.
+
+Configuration and running Smith
+
+~/.config/smith/settings-codex.json selects gpt-6-luna / medium, a 64-turn,
+600-second run budget, and explicit shell defaults including an empty
+RUSTC_WRAPPER and CARGO_BUILD_JOBS=2. These avoid a stale cached build artifact
+encountered during validation and limit concurrent compiler work. The checked
+memory allowance was raised to accommodate the expanded finite capacities;
+the printed worst-case value is an upper bound, not eager RAM allocation.
+
+Credentials stay outside the repository. The importer copies the current
+Codex access token only; it does not copy Codex's rotating refresh token.
+Refresh the imported access token when needed, then run:
+
+  python3 ~/.config/smith/import-codex-access.py
+  cargo run --offline -p smith -- local ~/.config/smith/settings-codex.json ~/.local/state/smith
+
+Scope of the result
+
+These checks validate the requested workflow and the three coding tasks, not
+unbounded histories or arbitrary projects. The full issuer-refresh and push
+live stories were not claimed as passing in this session: validation selected
+the interactive story and used a private access-only test record. No real
+refresh token was copied and no remote push was performed.

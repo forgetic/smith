@@ -36,6 +36,46 @@ use support::live_run::{Expectation, run};
 
 const CHANGE: &str = "In repository repo, read original.txt, replace its content with exactly edited followed by one newline, create result.txt containing exactly new followed by one newline, and use the command tool to create command.txt containing exactly ran followed by one newline. Run the configured .smith-test/check checks without modifying that script. Finish with a change result, a short title and body, so the host delivers the checked commit. Do not run git commit or push yourself.";
 
+#[test]
+fn a_greeting_then_a_test_request_runs_the_suite_in_the_same_terminal() {
+    if !live::enabled() {
+        return;
+    }
+    for backend in live::Environment::load(false).backends {
+        let scratch = Scratch::new();
+        let script = b"#!/bin/sh\nset -eu\ntest \"$SMITH_TEST_ENVIRONMENT\" = configured\ntest \"$(cat original.txt)\" = original\nprintf 'passed\\n' > suite-ran.txt\n";
+        std::fs::write(scratch.path().join("repo/test-suite.sh"), script).expect("test suite");
+        let mut settings = backend.settings(scratch.path(), false);
+        settings["directories"] = serde_json::json!([{
+            "name":"repo","path":scratch.path().join("repo"),"writable":true,"git":false
+        }]);
+        settings["agent"]["environment"] = serde_json::json!([
+            {"name":"PATH","value":"/usr/bin:/bin"},
+            {"name":"SMITH_TEST_ENVIRONMENT","value":"configured"}
+        ]);
+        settings["agent"]["endpoints"][0]["reasoning_effort"] = serde_json::json!("medium");
+        std::fs::write(scratch.path().join("settings.json"), serde_json::to_vec(&settings).expect("settings JSON"))
+            .expect("interactive settings");
+        let before = scratch.checkout().head();
+        support::live_run::run_interactive(
+            &scratch,
+            "How are you? Call finish with a short report.",
+            "Please run this project's test suite with the shell command `/bin/sh test-suite.sh`, confirm whether it passes, and call finish with a report. Do not change the script, original.txt, or any git history.",
+            Expectation { before: None, files: vec![(b"suite-ran.txt".to_vec(), b"passed\n".to_vec())] },
+        );
+        assert_eq!(std::fs::read(scratch.path().join("repo/test-suite.sh")).expect("original suite"), script);
+        assert_eq!(scratch.checkout().head(), before, "the report task creates no commit");
+        let trace = std::fs::read_to_string(scratch.path().join("agent-trace.jsonl")).expect("live trace");
+        assert!(
+            trace
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("trace JSON"))
+                .any(|record| record["type"] == "call" && record["name"] == "7368656c6c"),
+            "the actual shell tool ran"
+        );
+    }
+}
+
 fn changed_files() -> Vec<(Vec<u8>, Vec<u8>)> {
     [("original.txt", "edited\n"), ("result.txt", "new\n"), ("command.txt", "ran\n"), ("checks-ran.txt", "checked\n")]
         .into_iter()
@@ -80,6 +120,7 @@ fn a_run_refreshes_its_grant_at_the_issuer() {
     let environment = live::Environment::load(false);
     for backend in environment.backends {
         eprintln!("live refresh provider={}", backend.name);
+        backend.require_refresh();
         let store = smith::local_tokens::Tokens::new(&backend.tokens, smith::local_host::token_limits())
             .expect("dedicated token store");
         let mut saved = store.load(0).expect("read dedicated grant").expect("sign in by hand first");

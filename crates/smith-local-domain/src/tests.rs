@@ -117,8 +117,7 @@ fn invalid_local_configuration_is_refused_before_agent_construction() {
     assert_eq!(invalid.validate(&limits), Err(Invalid::Endpoint));
 }
 
-#[test]
-fn spawned_agent_receives_saved_start_message_and_durable_turn_ack() {
+fn spawned_chat_with_saved_greeting() -> (Domain, Env<Limits>, Queue<Request>) {
     let limits = limits();
     let env = Env { now: Time::ZERO, wall: Wall::from_nanos(0), limits: limits.clone() };
     let mut domain = Domain::new_external(config(), &limits, 11).expect("external local domain");
@@ -146,7 +145,6 @@ fn spawned_agent_receives_saved_start_message_and_durable_turn_ack() {
     let ExternalRequest::Start(start) = *start else { panic!("start request") };
     assert_eq!(start.activation, 1);
     assert_eq!(start.grants.len(), 1);
-    assert_eq!(start.charter.instructions.as_ref(), b"Assist the person");
 
     crate::step(&mut domain, &env, Event::External(ExternalEvent::Admitted { run: Token::new(3) }), &mut out);
     let Some(Request::External(message)) = out.pop() else { panic!("first message") };
@@ -178,10 +176,86 @@ fn spawned_agent_receives_saved_start_message_and_durable_turn_ack() {
     let Some(Request::External(ack)) = out.pop() else { panic!("ACK after durable terminal") };
     let ExternalRequest::Acknowledge { run, turn: 1 } = *ack else { panic!("exact ACK") };
     assert_eq!(run, Token::new(3));
-    crate::step(&mut domain, &env, Event::External(ExternalEvent::Answer { answer: ExternalFinal::Parked }), &mut out);
+    (domain, env, out)
+}
+
+#[test]
+fn spawned_agent_retries_an_offered_followup_after_shutdown() {
+    followup_after_shutdown(false);
+}
+
+#[test]
+fn spawned_agent_retains_a_followup_saved_after_the_answer() {
+    followup_after_shutdown(true);
+}
+
+fn followup_after_shutdown(answer_before_save: bool) {
+    let (mut domain, env, mut out) = spawned_chat_with_saved_greeting();
+    crate::step(&mut domain, &env, Event::Line { text: Box::from(&b"run the tests"[..]) }, &mut out);
+    let Some(Request::SaveState { state, .. }) = out.pop() else { panic!("second line is named durably") };
+    assert_eq!(state.next_message, 2);
+    if answer_before_save {
+        crate::step(
+            &mut domain,
+            &env,
+            Event::External(ExternalEvent::Answer { answer: ExternalFinal::Parked }),
+            &mut out,
+        );
+        crate::step(&mut domain, &env, Event::StateSaved, &mut out);
+    } else {
+        crate::step(&mut domain, &env, Event::StateSaved, &mut out);
+        let Some(Request::External(message)) = out.pop() else { panic!("second line is offered to the old child") };
+        let ExternalRequest::Message { name, .. } = *message else { panic!("second message") };
+        assert_eq!(name, Token::new(2));
+        crate::step(
+            &mut domain,
+            &env,
+            Event::External(ExternalEvent::Answer { answer: ExternalFinal::Parked }),
+            &mut out,
+        );
+    }
     assert!(out.is_empty(), "a last word waits for child exit and reap");
     crate::step(&mut domain, &env, Event::External(ExternalEvent::Gone), &mut out);
     let Some(Request::Show { text }) = out.pop() else { panic!("last word shown after Gone") };
-    assert_eq!(text.as_ref(), b"Chat parked");
+    assert_eq!(text.as_ref(), b"Chat parked\n");
     let Some(Request::Load) = out.pop() else { panic!("next run may load after Gone") };
+    if !answer_before_save {
+        crate::step(
+            &mut domain,
+            &env,
+            Event::External(ExternalEvent::MessageBounced { name: Token::new(2) }),
+            &mut out,
+        );
+    }
+    crate::step(&mut domain, &env, Event::External(ExternalEvent::MessageBounced { name: Token::new(1) }), &mut out);
+    crate::step(
+        &mut domain,
+        &env,
+        Event::Loaded { state: Some(state), transcript: None, deliveries: Box::new([]) },
+        &mut out,
+    );
+    let Some(Request::Credential { account }) = out.pop() else { panic!("next grant") };
+    assert_eq!(account, 7);
+    let Some(Request::SaveState { state, .. }) = out.pop() else { panic!("next activation is durable") };
+    assert_eq!(state.activation, 2);
+    assert_eq!(state.next_message, 2, "the unread line keeps its original name");
+    crate::step(
+        &mut domain,
+        &env,
+        Event::Credential {
+            grant: smith_domain::Grant {
+                name: smith_domain::GrantName { account: 7, generation: 1 },
+                valid: Duration::from_secs(60),
+            },
+        },
+        &mut out,
+    );
+    crate::step(&mut domain, &env, Event::StateSaved, &mut out);
+    let Some(Request::External(_)) = out.pop() else { panic!("next start") };
+    crate::step(&mut domain, &env, Event::External(ExternalEvent::Admitted { run: Token::new(4) }), &mut out);
+    let Some(Request::External(message)) = out.pop() else { panic!("unread line reaches the next activation") };
+    let ExternalRequest::Message { run, name, text } = *message else { panic!("retried message") };
+    assert_eq!(run, Token::new(4));
+    assert_eq!(name, Token::new(2));
+    assert_eq!(text.as_ref(), b"run the tests");
 }

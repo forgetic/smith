@@ -22,6 +22,10 @@ use crate::workspace::{self, Directory, Workspace};
 /// The first user message of a main conversation.
 pub(crate) const BEGIN: &[u8] = b"Begin the work your brief describes.";
 
+/// A message-driven opening with no task brief yet.
+pub(crate) const AWAIT: &[u8] =
+    b"Call wait, then end this turn without further tool calls to receive the host's next message.";
+
 /// The system text of a run's main conversation, given what the run found in
 /// its checkout.
 pub(crate) fn system(charter: &Charter, mounted: Option<&Workspace>, found: &Found) -> Box<[u8]> {
@@ -195,6 +199,8 @@ fn render_tools(text: &mut Text, tools: Tools) {
     text.put(b"## Tools\n\n");
     if inspect {
         text.put(b"You can read, list and search the files in the checkout.\n");
+        text.put(b"Paths are relative to the first directory, or use `/directory-name/path` for a named directory. ");
+        text.put(b"Use `.` to list the first directory.\n");
     }
     if modify {
         text.put(b"You can write and edit files in its writable repositories.\n");
@@ -500,6 +506,7 @@ mod tests {
 ## Tools
 
 You can read, list and search the files in the checkout.
+Paths are relative to the first directory, or use `/directory-name/path` for a named directory. Use `.` to list the first directory.
 
 ## Checkout
 

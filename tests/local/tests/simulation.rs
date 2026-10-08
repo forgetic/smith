@@ -10,7 +10,7 @@ fn a_question_is_answered_and_the_chat_waits_for_the_next() {
     assert_eq!(world.saved_turns(), 3, "the reply, yield and wait turns are durable in order");
     assert!(world.waiting(), "the run asked to wait for another person message");
     assert!(world.completions() >= 2, "the fake provider served the reply and wait");
-    assert!(world.shown().iter().any(|text| text.as_ref() == b"Hello from the agent."));
+    assert!(world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Hello from the agent."));
 }
 
 #[test]
@@ -20,7 +20,7 @@ fn a_chat_reads_and_edits_files_in_a_workspace_directory() {
     world.drive(400);
     let (content, _) = world.disk().load(1, b"src/lib.rs", 4096).expect("workspace source remains present");
     assert_eq!(content, b"pub fn answer() -> u32 { 43 }\n");
-    assert!(world.shown().iter().any(|text| text.as_ref() == b"The answer is 43."));
+    assert!(world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"The answer is 43."));
 }
 
 #[test]
@@ -30,7 +30,7 @@ fn a_change_to_a_plain_directory_keeps_its_files() {
     world.drive(400);
     let (content, _) = world.disk().load(1, b"src/lib.rs", 4096).expect("plain file is kept");
     assert_eq!(content, b"pub fn answer() -> u32 { 43 }\n");
-    assert!(world.shown().iter().any(|text| text.as_ref() == b"Change delivered"));
+    assert!(world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Change delivered"));
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn a_cancel_during_a_delivery_waits_for_it_and_still_answers_cancelled() {
     }
     assert!(world.commit_message().is_some(), "the in-flight delivery completed");
     assert!(
-        world.shown().iter().any(|text| text.as_ref() == b"Run cancelled"),
+        world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Run cancelled"),
         "shown: {:?}, delivery: {:?}",
         world.shown(),
         world.delivery()
@@ -104,7 +104,7 @@ fn a_change_is_checked_and_committed_in_place() {
         world.commit_message(),
         Some(b"Make the answer 43\n\nThe answer is 43 now.\n\nSmith-Delivery: 1/3/0".as_slice())
     );
-    assert!(world.shown().iter().any(|text| text.as_ref() == b"Change delivered"));
+    assert!(world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Change delivered"));
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn a_configured_push_lands_after_the_local_commit() {
     world.drive(500);
     assert_eq!(world.remote_head(), Some(2), "the remote branch names the committed change");
     assert!(matches!(world.delivery(), Some(smith_domain::run::Delivery::Delivered(_))));
-    assert!(world.shown().iter().any(|text| text.as_ref() == b"Change delivered"));
+    assert!(world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Change delivered"));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn a_moved_remote_makes_a_configured_push_stale() {
     world.drive(500);
     assert_eq!(world.remote_head(), Some(2), "the remote stayed on its outside commit");
     assert!(matches!(world.delivery(), Some(smith_domain::run::Delivery::Stale)));
-    assert!(world.shown().iter().any(|text| text.as_ref() == b"Run failed"));
+    assert!(world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Run failed"));
 }
 
 #[test]
@@ -401,7 +401,7 @@ fn a_chat_with_no_workspace_waits_parks_and_resumes_on_the_next_invocation() {
     assert!(second.drive(300), "a fresh domain resumes from {prior_turns} stored turns");
     assert_eq!(second.activation(), 2, "the next activation is durable before its agent runs");
     assert_eq!(second.prompt_assistants().first(), Some(&3), "provider sees the saved assistant history");
-    assert!(second.shown().iter().any(|text| text.as_ref() == b"Welcome back."));
+    assert!(second.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Welcome back."));
 }
 
 #[test]
@@ -461,7 +461,7 @@ fn a_transcript_the_agent_refuses_is_reported_and_nothing_starts() {
     second.line(b"Continue");
     assert!(!second.drive(300), "a refused transcript cannot reach a wait");
     assert_eq!(second.completions(), 0, "refusal precedes provider effects");
-    assert!(second.shown().iter().any(|text| text.as_ref() == b"Saved transcript was refused"));
+    assert!(second.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Saved transcript was refused"));
 
     let stored = second.into_store();
     let mut fresh = World::with_store_fresh(31, stored);
@@ -483,7 +483,7 @@ fn an_expired_credential_is_refreshed_and_the_completion_retried() {
     assert!(world.drive(300), "the provider retry reaches the next wait");
     assert_eq!(world.credential_requests(), 2, "the rejected generation triggers one refresh");
     assert!(world.completions() >= 3, "the rejected completion was retried");
-    assert!(world.shown().iter().any(|text| text.as_ref() == b"Hello from the agent."));
+    assert!(world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Hello from the agent."));
 }
 
 #[test]
@@ -492,7 +492,7 @@ fn an_exhausted_account_is_shown_to_the_person() {
     world.exhaust_first_account();
     world.line(b"Hello");
     world.drive(300);
-    assert!(world.shown().iter().any(|text| text.as_ref() == b"A model account is exhausted"));
+    assert!(world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"A model account is exhausted"));
 }
 
 #[test]
@@ -504,7 +504,7 @@ fn a_run_cancelled_at_the_terminal_answers_cancelled_after_its_last_turn_is_save
     assert!(world.delayed_turns() > 0);
     world.interrupt();
     assert!(!world.drive_to_cancelled(300), "the cancelled answer waits for the store");
-    assert!(!world.shown().iter().any(|text| text.as_ref() == b"Run cancelled"));
+    assert!(!world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Run cancelled"));
     for _ in 0..4 {
         assert!(world.release_turn(), "a stalled turn must be acknowledged");
         if world.drive_to_cancelled(300) {
@@ -512,7 +512,7 @@ fn a_run_cancelled_at_the_terminal_answers_cancelled_after_its_last_turn_is_save
         }
     }
     assert!(
-        world.shown().iter().any(|text| text.as_ref() == b"Run cancelled"),
+        world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Run cancelled"),
         "the answer follows the last saved turn"
     );
     assert!(world.saved_turns() > 0);
@@ -586,7 +586,7 @@ fn a_store_failure_stops_the_chat_and_tells_the_person() {
         world.line(b"Hello");
         world.drive(300);
         assert_eq!(world.exit(), Some(ExitStatus::Failed), "{fault:?} failure exits");
-        assert!(world.shown().iter().any(|text| text.as_ref() == b"The chat could not be saved"));
+        assert!(world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"The chat could not be saved"));
     }
 }
 

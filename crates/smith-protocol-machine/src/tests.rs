@@ -48,6 +48,92 @@ fn place(path: &[u8]) -> tools::Place {
 }
 
 #[test]
+fn listing_the_workspace_root_uses_dot_at_the_file_boundary() {
+    let mut component = component();
+    let mut to_domain = Queue::with_capacity(2);
+    let mut below = Queue::with_capacity(2);
+    component.from_domain(
+        &env(),
+        FromDomain::Op {
+            owner: Token::new(1),
+            op: tools::Op::Scan { at: place(b""), max: 2, max_bytes: 512 },
+            deadline: Time::from_nanos(u64::MAX),
+        },
+        &mut to_domain,
+        &mut below,
+    );
+    assert!(to_domain.is_empty());
+    let Some(Below::File { request: file::Request::Scan { path, .. }, .. }) = below.pop() else {
+        panic!("root scan is admitted")
+    };
+    assert_eq!(path.as_ref(), b".");
+}
+
+#[test]
+fn shell_inherits_configured_defaults_and_explicit_variables_override_them() {
+    let mut component = component();
+    component.configure_environment(Box::new([
+        tools::Var { name: Box::from(&b"HOME"[..]), value: Box::from(&b"/home/operator"[..]) },
+        tools::Var { name: Box::from(&b"PATH"[..]), value: Box::from(&b"/usr/bin"[..]) },
+    ]));
+    let mut to_domain = Queue::with_capacity(2);
+    let mut below = Queue::with_capacity(2);
+    component.from_domain(
+        &env(),
+        FromDomain::Op {
+            owner: Token::new(1),
+            op: tools::Op::Spawn {
+                cwd: place(b""),
+                command: Box::from(&b"cargo test"[..]),
+                env: Box::new([tools::Var { name: Box::from(&b"PATH"[..]), value: Box::from(&b"/custom/bin"[..]) }]),
+                roots: Box::new([]),
+                head: 32,
+                tail: 32,
+            },
+            deadline: Time::from_nanos(u64::MAX),
+        },
+        &mut to_domain,
+        &mut below,
+    );
+    assert!(to_domain.is_empty());
+    let Some(Below::Spawn { spawn, .. }) = below.pop() else { panic!("shell is admitted") };
+    assert_eq!(spawn.env.as_ref(), [Box::from(&b"HOME=/home/operator"[..]), Box::from(&b"PATH=/custom/bin"[..])]);
+}
+
+#[test]
+fn shell_refuses_a_merged_environment_over_its_byte_limit() {
+    let mut component = component();
+    component.configure_environment(Box::new([tools::Var {
+        name: Box::from(&b"HOME"[..]),
+        value: Box::from(&b"/home/operator"[..]),
+    }]));
+    let mut to_domain = Queue::with_capacity(2);
+    let mut below = Queue::with_capacity(2);
+    component.from_domain(
+        &env(),
+        FromDomain::Op {
+            owner: Token::new(1),
+            op: tools::Op::Spawn {
+                cwd: place(b""),
+                command: Box::from(&b"cargo test"[..]),
+                env: Box::new([tools::Var { name: Box::from(&b"EXTRA"[..]), value: Box::new([b'x'; 500]) }]),
+                roots: Box::new([]),
+                head: 32,
+                tail: 32,
+            },
+            deadline: Time::from_nanos(u64::MAX),
+        },
+        &mut to_domain,
+        &mut below,
+    );
+    assert!(below.is_empty());
+    assert_eq!(
+        to_domain.pop(),
+        Some(ToDomain::Done { owner: Token::new(1), done: tools::Done::Failed { fault: tools::Fault::Other } })
+    );
+}
+
+#[test]
 fn git_part_and_unknown_root_are_refused_before_io() {
     let mut component = component();
     let mut to_domain = Queue::with_capacity(2);

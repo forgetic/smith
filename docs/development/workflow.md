@@ -507,6 +507,11 @@ both the provider and issuer; no fixture certificates are used. Provider
 identity headers come from Skein; Anthropic opts into its Claude Code profile
 and only the basic OAuth betas used by Skein's live reference.
 
+An access-only account may omit `oauth` when running only the interactive
+story below. It still uses an explicitly supplied, private test token
+directory. The issuer-refresh story requires public OAuth registration and
+a dedicated refresh-capable login before it changes the saved expiry.
+
 `SMITH_TEST_LIVE_CODEX_MODEL` defaults to `gpt-5.5` and
 `SMITH_TEST_LIVE_ANTHROPIC_MODEL` to `claude-haiku-4-5`, matching Skein's live
 reference. `SMITH_TEST_LIVE_GIT_REMOTE` is optional. It authorizes the configured
@@ -545,8 +550,9 @@ no story silently substitutes a fake or falls back to an ordinary token store.
 
 ### Live stories and observations
 
-The four named stories run every selected provider: issuer refresh, checked
-in-place commit, durable second invocation, and optional configured push. The
+The five named stories run every selected provider: issuer refresh, checked
+in-place commit, durable second invocation, an interactive greeting followed
+by a test request, and optional configured push. The
 refresh story expires only the dedicated test record, then requires a higher
 persisted generation and a usable new grant. The commit story checks exact
 committed contents and runs the prescribed check independently. Resume asks the
@@ -555,6 +561,17 @@ it in a file without receiving the code again; earlier turn files must remain
 unchanged. Each binary drains and is reaped, with a fresh finish call and an
 accepted or delivered finish terminal in its outside trace. No assertion depends on the model's reply
 wording. Credential-bearing stderr and command diagnostics are withheld.
+
+The interactive story sends its second request as soon as the greeting's
+finish call appears, covering the shutdown race. It requires two finish
+calls, an actual shell call, the test script's expected marker, unchanged
+script bytes and unchanged git history. Its script also requires a configured
+environment variable. This is one terminal invocation, distinct from the
+durable second-invocation story.
+
+```sh
+SMITH_TEST_LIVE_CODEX_MODEL=gpt-6-luna cargo nextest run -p smith --test live --profile live -E 'test(=a_greeting_then_a_test_request_runs_the_suite_in_the_same_terminal)'
+```
 
 When `SMITH_TEST_LIVE_GIT_REMOTE` is set, the optional story uses a unique
 `smith-live-<provider>-<pid>-<clock>` branch, verifies its remote head equals the
@@ -571,3 +588,21 @@ cargo nextest run -p smith --test live --profile live -E 'test(=a_run_refreshes_
 cargo nextest run -p smith --test live --profile live -E 'test(=a_chat_ends_with_a_commit_in_place)'
 cargo nextest run -p smith --test live --profile live -E 'test(=a_second_run_resumes_the_chat_from_its_files)'
 ```
+
+
+### Interactive reliability validation, 2026-10-08
+
+The retained follow-up regressions cover an offered line bounced at shutdown
+and a line whose state save completes after the previous answer. The standard
+profile also checks a sanitized completed provider event beyond the old
+1,024-token parser ceiling and a 48-call history. The opt-in interactive live
+story passed with `gpt-6-luna` at medium effort in 31.787 seconds.
+
+Idle serial `measure -j 1` runs measured 31 focused tests across the affected
+agent-process, local-process and machine worlds in 1.126 seconds, and their
+three fuzzy sweeps in 4.084 seconds. Nine shipped-binary and local-process
+simulation stories passed serially in 0.816 seconds. The final workspace gate
+passed 1,449 focused tests in 8.840 seconds and 17 fuzzy tests in 7.532 seconds;
+formatting and workspace all-target Clippy also passed. Existing budgets
+remain unchanged. The actual saved-chat greeting followed by all four gate
+commands passed through the shipped binary, with each command exiting zero.

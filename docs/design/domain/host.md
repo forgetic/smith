@@ -184,6 +184,11 @@ the agent it is the `smith` binary:
 - **A person at a terminal:** their words are messages; a chat's run
   waits for them, and parks past its waiting time, to resume when they
   return.
+  The local host retains each offered line until a turn acknowledges its
+  name. An unread follow-up survives the previous run's final answer and
+  is offered to the next activation with the same name. Its pending state
+  save must finish before that activation starts. Closing terminal input
+  still drains lines already received.
 - **Charters from configuration:** instructions, models, prices, a
   budget, conventions, and a result contract (a report, by default, or a
   change).

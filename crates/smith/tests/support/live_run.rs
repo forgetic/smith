@@ -31,6 +31,7 @@ struct Judge {
     directory: PathBuf,
     trace_prefix: Vec<u8>,
     reviewed: bool,
+    minimum_finishes: usize,
 }
 
 impl Referee<Process> for Judge {
@@ -77,9 +78,18 @@ impl Referee<Process> for Judge {
             .map(|line| serde_json::from_str(line).expect("trace JSONL"))
             .collect();
         assert!(
-            records.iter().any(|record| record["type"] == "call" && record["name"] == "66696e697368"),
+            records.iter().filter(|record| record["type"] == "call" && record["name"] == "66696e697368").count()
+                >= self.minimum_finishes,
             "the shipped live agent actually called finish"
         );
+        for (path, expected) in &self.expectation.files {
+            assert_eq!(
+                std::fs::read(self.directory.join("repo").join(std::str::from_utf8(path).expect("test path")))
+                    .expect("live requested file"),
+                *expected,
+                "the live working file has its prescribed content"
+            );
+        }
         assert!(
             records.iter().any(|record| record["type"] == "fact"
                 && record["fact"].as_str().is_some_and(|fact| fact.starts_with("Run { fact: Returned {")
@@ -133,7 +143,25 @@ impl Referee<Process> for Judge {
 }
 
 pub fn run(scratch: &Scratch, prompt: &str, change: bool, expectation: Expectation) {
-    run_with_peer(scratch, prompt, change, expectation, None);
+    run_with_peer(scratch, prompt, change, expectation, None, None);
+}
+
+/// Exercise a second request as soon as the first finish call is visible.
+pub fn run_interactive(scratch: &Scratch, greeting: &str, task: &str, expectation: Expectation) {
+    run_with_peer(
+        scratch,
+        task,
+        false,
+        expectation,
+        None,
+        Some(vec![
+            Action::Send(format!("{greeting}\n").into_bytes().into()),
+            Action::Wait(b"Tool: finish".as_slice().into()),
+            Action::Send(format!("{task}\n").into_bytes().into()),
+            Action::Wait(b"Tool: shell".as_slice().into()),
+            Action::Eof,
+        ]),
+    );
 }
 
 /// Offline control of exactly the live outcome policy and shared binary driver.
@@ -159,6 +187,7 @@ pub fn run_fake(scratch: &Scratch, scenario: smith_local_process_world::world::S
         change,
         Expectation { before: change.then(|| scratch.checkout().head().expect("initial head")), files },
         Some(scenario.provider()),
+        None,
     );
 }
 
@@ -168,6 +197,7 @@ fn run_with_peer(
     change: bool,
     expectation: Expectation,
     peer: Option<smith_local_process_world::llm::Peer>,
+    commands: Option<Vec<Action>>,
 ) {
     assert_no_children();
     let clock = Clock::new();
@@ -189,20 +219,23 @@ fn run_with_peer(
         directory: scratch.path().into(),
         trace_prefix: std::fs::read(scratch.path().join("agent-trace.jsonl")).unwrap_or_default(),
         reviewed: false,
+        minimum_finishes: if commands.is_some() { 2 } else { 1 },
     });
     world.spawn_with_fds(binary.descriptors(), || Process::Binary(binary));
     world.spawn_with_fds(descriptors, || {
         Process::Script(Proc::Terminal(Box::new(Terminal::attached(
             stream,
-            vec![
-                Action::Send(format!("{prompt}\n").into_bytes().into()),
-                Action::Wait(if change {
-                    b"Change delivered".as_slice().into()
-                } else {
-                    b"Tool: finish".as_slice().into()
-                }),
-                Action::Eof,
-            ],
+            commands.unwrap_or_else(|| {
+                vec![
+                    Action::Send(format!("{prompt}\n").into_bytes().into()),
+                    Action::Wait(if change {
+                        b"Change delivered".as_slice().into()
+                    } else {
+                        b"Tool: finish".as_slice().into()
+                    }),
+                    Action::Eof,
+                ]
+            }),
         ))))
     });
     if let Some(peer) = peer {

@@ -87,8 +87,8 @@ impl Environment {
                 serde_json::from_slice(&std::fs::read(account_file).expect("public account registration"))
                     .expect("account registration must be JSON");
             assert!(
-                account["account_id"].is_string() && account["oauth"].is_object(),
-                "registration requires account_id and oauth"
+                account["account_id"].is_string() && (account["oauth"].is_null() || account["oauth"].is_object()),
+                "registration requires account_id and optional public oauth"
             );
             assert!(
                 account
@@ -99,7 +99,7 @@ impl Environment {
                 "public account registration has unknown fields"
             );
             assert!(
-                account["oauth"].as_object().expect("OAuth object").keys().all(|key| matches!(
+                account["oauth"].as_object().is_none_or(|oauth| oauth.keys().all(|key| matches!(
                     key.as_str(),
                     "authorization_url"
                         | "token_endpoint"
@@ -109,7 +109,7 @@ impl Environment {
                         | "address"
                         | "server_name"
                         | "json"
-                )),
+                ))),
                 "public OAuth registration cannot contain credentials or unknown fields"
             );
             account["number"] = serde_json::json!(0);
@@ -147,6 +147,10 @@ impl Environment {
 }
 
 impl Backend {
+    pub fn require_refresh(&self) {
+        assert!(self.account["oauth"].is_object(), "live issuer refresh requires public oauth registration");
+    }
+
     pub fn settings(&self, directory: &Path, change: bool) -> serde_json::Value {
         let (host, identity, headers) = if self.name == "codex" {
             ("chatgpt.com", "plain", skein_llm::openai::identity::headers().iter().map(|header| serde_json::json!({"name":String::from_utf8_lossy(&header.name),"value":String::from_utf8_lossy(&header.value)})).collect::<Vec<_>>())
@@ -163,7 +167,7 @@ impl Backend {
             "agent":{"profile":"standard","memory_bytes":1099511627776_u64,"grace_ms":1000,
                 "endpoints":[{"name":self.name,"number":0,"dialect":0,"account":0,"provider":self.name,"address":format!("{host}:443"),"server_name":host,"transport":"tls","identity":identity,"headers":headers,"reasoning_effort":if self.name == "codex" { Some("low") } else { None }}],
                 "environment":[],"trace":{"path":directory.join("agent-trace.jsonl"),"capture":"calls"}},
-            "chat":"chat","instructions":"@local-shell Begin each activation by calling wait and ending your turn to receive the queued user message. Follow the user's requested outcome exactly. Use the tools and call finish when done.",
+            "chat":"chat","instructions":"@local-shell Follow the user's requested outcome exactly. Use the tools and call finish when done.",
             "models":[{"endpoint":self.name,"name":self.model,"max_tokens":4096,"input_price":0,"cached_price":0,"output_price":0,"price_unit":1}],
             "budget":{"turns":12,"spend":1,"seconds":120},"waiting_seconds":30,
             "contract":{"form":"report","max":4096},"token_directory":self.tokens,"accounts":[self.account]

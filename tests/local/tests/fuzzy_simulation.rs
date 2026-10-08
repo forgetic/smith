@@ -46,7 +46,7 @@ fn random_local_chats_settle_against_the_boundary_referee() {
                 assert!(
                     world.waiting()
                         || world.exit().is_some()
-                        || world.shown().iter().any(|text| text.as_ref() == b"Run cancelled")
+                        || world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"Run cancelled")
                 );
             }
             5..=7 => {
@@ -55,7 +55,9 @@ fn random_local_chats_settle_against_the_boundary_referee() {
             }
             2 => {
                 world.drive(300);
-                assert!(world.shown().iter().any(|text| text.as_ref() == b"A model account is exhausted"));
+                assert!(
+                    world.shown().iter().any(|text| text.as_ref().trim_ascii_end() == b"A model account is exhausted")
+                );
             }
             8 | 9 => {
                 let cut = if mode == 8 { Cut::BeforeSaveTurn(2) } else { Cut::AfterTurnSaved(2) };

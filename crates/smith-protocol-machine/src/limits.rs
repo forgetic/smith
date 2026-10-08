@@ -78,7 +78,9 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_mul(u64::from(limits.processes))?;
     let variables =
         u64::from(limits.env_bytes / 2).checked_mul(u64::try_from(size_of::<smith_domain::tools::Var>()).ok()?)?;
-    let environment = variables.checked_add(u64::from(limits.env_bytes))?;
+    // Configured defaults coexist with the merged shell variables and encoded
+    // entries. The merged list reserves both input counts before overrides.
+    let environment = variables.checked_add(u64::from(limits.env_bytes))?.checked_mul(4)?;
     let tokenizer_limits = tokenizer::Limits {
         depth: 8,
         string: limits.search_line_bytes.max(1),

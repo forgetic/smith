@@ -1268,6 +1268,11 @@ fn open(
         run.deadline.saturating_since(now),
     );
     opening.transcript = run.transcript.take();
+    if let Some(message) = run.inbox.pop() {
+        assert!(run.offered.is_none(), "main has not produced a turn before opening");
+        run.offered = Some(message.name);
+        opening.prompt = message.text;
+    }
     out.push(Request::Open { conversation: main.token(), opening });
     State::Working { reply_to, main }
 }
@@ -1629,7 +1634,11 @@ fn opening(
         deliver: charter.grants.deliver.is_some(),
         llm: charter.llm.clone(),
         system: prompt::system(charter, workspace, found),
-        prompt: copy_of(prompt::BEGIN),
+        prompt: copy_of(if charter.grants.wait && charter.brief.sections.is_empty() {
+            prompt::AWAIT
+        } else {
+            prompt::BEGIN
+        }),
         tools: workspace::families(workspace, Families::of(&charter.grants)).tools,
         workspace: workspace.cloned(),
         budget: charter.budget.remainder(spent, left),

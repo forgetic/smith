@@ -23,6 +23,8 @@ pub struct ExternalStart {
 pub enum ExternalEvent {
     /// The child accepted this run and can receive the person's first message.
     Admitted { run: Token },
+    /// The old child is ending; keep this unread line for the next activation.
+    MessageBounced { name: Token },
     /// One concrete turn told by the child and awaiting durable acknowledgement.
     Turn { number: u32, read: Option<Token>, turn: agent::Turn },
     /// The child's last word, shown only after every turn is saved.

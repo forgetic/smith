@@ -73,6 +73,8 @@ Its channel and its LLM calls are channel.md's and llm.md's.
 - **The commands' environment** is the configuration's, whole: what a build
   needs (a `PATH`, a home, a locale) and never a credential. It answers
   domain/tools.md, section 8's open question.
+  A shell call's explicit variables override defaults with the same name;
+  the combined environment must still fit the configured byte bound.
 
 ## 4. Configuration
 

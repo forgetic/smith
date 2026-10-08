@@ -78,7 +78,7 @@ impl Component {
         }
     }
 
-    /// Install the check process environment for this run.
+    /// Install explicit shell and check process defaults for this run.
     pub fn configure_environment(&mut self, environment: Box<[tools::Var]>) {
         assert!(self.processes.is_empty(), "configure only between runs");
         let mut bytes = 0_u64;
@@ -96,6 +96,7 @@ impl Component {
     }
 
     /// Translate one domain request; the caller reserves one cell per output.
+    #[expect(clippy::too_many_lines, reason = "one exhaustive routing boundary covers all file and process requests")]
     pub fn from_domain(
         &mut self,
         env: &Env<Limits>,
@@ -123,13 +124,18 @@ impl Component {
                     }
                     tools::Op::Spawn { cwd, command, env: vars, roots: _, head, tail } => {
                         let admissible = crate::files::check(&self.roots, &env.limits, cwd.root, &cwd.path, false);
-                        self.start_tool(
+                        let prepared = crate::process::shell(
                             owner,
-                            admissible,
-                            crate::process::shell(owner, cwd, command, vars, head, tail, deadline, &env.limits),
-                            to_domain,
-                            below,
+                            cwd,
+                            command,
+                            vars,
+                            &self.environment,
+                            head,
+                            tail,
+                            deadline,
+                            &env.limits,
                         );
+                        self.start_tool(owner, admissible, prepared, to_domain, below);
                     }
                     tools::Op::Search { at, pattern, glob, hits, bytes } => {
                         let admissible = crate::files::check(&self.roots, &env.limits, at.root, &at.path, false);
@@ -187,7 +193,9 @@ impl Component {
                 let admissible = crate::files::check(&self.roots, &env.limits, program.root, &program.path, false);
                 match admissible {
                     Ok(()) => {
-                        match crate::process::check(owner, program, &self.environment, tail, deadline, &env.limits) {
+                        let prepared =
+                            crate::process::check(owner, program, &self.environment, tail, deadline, &env.limits);
+                        match prepared {
                             Some((process, request)) => self.start_process(owner, process, request, below, to_domain),
                             None => failed_check(owner, to_domain),
                         }

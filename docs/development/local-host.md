@@ -42,7 +42,7 @@ while inheriting the global agent, model, budget and account settings:
 ```json
 {
   "chat": "review",
-  "instructions": "Begin each activation by calling wait and ending your turn to receive the queued user message. Make the requested change and explain it.",
+  "instructions": "Follow the user's requested change, explain the result, and call finish when done.",
   "directories": [
     { "name": "project", "path": ".", "writable": true, "git": true }
   ],
@@ -78,10 +78,11 @@ while inheriting the global agent, model, budget and account settings:
 | `accounts` | Account descriptors, described below; default `[]`. |
 | `push` | Optional ordered array matching `directories`, each entry `null` or `{ "remote", "branch" }`. Omitted means no push. |
 
-The opening asks the model to begin its brief. Terminal messages are queued
-until the model ends a turn without tool calls. For an interactive chat, the
-instructions should first ask it to call `wait` and end its turn, as above,
-so it receives the first terminal message before doing the requested work.
+When the first terminal message arrives during preparation, it is the opening
+user message. An empty brief with waiting enabled otherwise opens by asking
+the model to call `wait` and end the turn. Later terminal messages are queued
+until the model ends a turn without tool calls. Instructions need not force
+a startup `wait` when the requested task is already present.
 
 Each model has this shape:
 

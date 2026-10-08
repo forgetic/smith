@@ -104,6 +104,9 @@ what its host's protocol layer would do:
 
 - **The person's words are messages.** A line the person enters is one
   message, and a line ending in a backslash continues it.
+  The local host keeps the line until an actual turn acknowledges its name.
+  A message bounced during shutdown is retained for the next activation
+  with the same line and name rather than treated as an agent failure.
 - **The run's words are shown** as its turns arrive: the LLM's text, each
   tool it calls by name, and how each ended.
 - **While the run waits,** a prompt says so.

@@ -79,14 +79,21 @@ fn tool_end(result: &session::llm::Returned) -> &'static [u8] {
     }
 }
 
-/// Copy attested UTF-8 text within the person's display cap.
+/// Copy a complete notice within the display cap, reserving its terminal newline.
 pub(crate) fn bounded_text(text: &[u8], cap: u32) -> Box<[u8]> {
     let mut shown = List::with_capacity(cap);
-    append_text(&mut shown, text);
+    append_text_reserved(&mut shown, text, 1);
+    if shown.room() > 0 && shown.as_slice().last() != Some(&b'\n') {
+        shown.push(b'\n').expect("notice reserved its final newline");
+    }
     shown.into_boxed()
 }
 
 fn append_text(shown: &mut List<u8>, text: &[u8]) {
+    append_text_reserved(shown, text, 0);
+}
+
+fn append_text_reserved(shown: &mut List<u8>, text: &[u8], reserved: u32) {
     let mut skip = 0_u8;
     for (index, byte) in text.iter().enumerate() {
         if skip > 0 {
@@ -103,7 +110,11 @@ fn append_text(shown: &mut List<u8>, text: &[u8]) {
             4_usize
         };
         let Some(bytes) = text.get(index..index.saturating_add(width)) else { return };
-        if shown.room() < u32::try_from(width).expect("UTF-8 character width fits u32") {
+        let needed = u32::try_from(width)
+            .expect("UTF-8 character width fits u32")
+            .checked_add(reserved)
+            .expect("character width and reserved newline fit u32");
+        if shown.room() < needed {
             return;
         }
         for value in bytes {
