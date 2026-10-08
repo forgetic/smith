@@ -65,9 +65,8 @@ cargo nextest run --workspace --profile fuzzy
 Focused tests have a 15-second workspace budget; fuzzy tests have 60
 seconds. `--profile measure -j 1` measures a suite serially without the
 gate's timeout. Each world keeps its own fakes and independent
-expectations; generic harness mechanisms are reused from `skein_world::domain`.
-`tests/world` checks that shared kit as a consumer; it adds no harness
-implementation or agent behavior.
+expectations; generic harness mechanisms are reused from `skein_world::domain`
+and tested in skein.
 
 Dependencies on skein use `https://git.ekanayaka.io/ai/skein.git`, with
 canonical URLs in the workspace manifest and the revision pinned in `Cargo.lock`.

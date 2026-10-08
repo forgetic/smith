@@ -905,14 +905,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "smith-world-tests"
-version = "0.0.0"
-dependencies = [
- "skein-lib",
- "skein-world",
-]
-
-[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
