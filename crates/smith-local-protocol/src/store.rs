@@ -15,7 +15,7 @@ use smith_transcript as transcript;
 const STATE_BYTES: usize = 4 + 8 + 8 + 1 + 8;
 
 /// One file replacement; the service acknowledges it only after a durable store terminal.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct File {
     /// Path relative to the selected chat directory.
     pub name: Box<[u8]>,
@@ -30,6 +30,8 @@ pub enum StoreError {
     Malformed,
     /// A typed turn cannot be encoded under these configured endpoints.
     Turn,
+    /// The record exceeds the configured file bound.
+    TooLarge,
 }
 
 /// The metadata file after the caller has durably stored it.

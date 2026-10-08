@@ -18,8 +18,10 @@
 
 extern crate alloc;
 
+mod delivery_store;
 mod store;
 mod terminal;
 
+pub use delivery_store::{decode_delivery, save_delivery};
 pub use store::{File, StoreError, decode_state, decode_turns, save_state, save_turn, turn_name};
 pub use terminal::{Event, Limits, Terminal, max_out, worst_case};
