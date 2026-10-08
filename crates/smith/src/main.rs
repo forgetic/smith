@@ -6,6 +6,8 @@
 
 mod config;
 mod limits;
+mod local_settings;
+mod local_shell;
 pub mod local_store;
 mod trace;
 
@@ -17,15 +19,19 @@ use skein_io::kernel::Fd;
 use skein_shell::{Clock, Config as KernelConfig, Kernel, Now, Wait};
 use smith_agent_service as service;
 
-const USAGE: &str = "usage: smith agent CONFIG.json";
+const USAGE: &str = "usage: smith agent CONFIG.json | smith local SETTINGS.json STATE_DIR [WORKSPACE_SETTINGS.json]";
 
 fn main() -> ExitCode {
     let args: Vec<_> = env::args_os().collect();
-    if args.len() != 3 || args[1] != "agent" {
+    let result = if args.len() == 3 && args[1] == "agent" {
+        run(Path::new(&args[2]))
+    } else if (args.len() == 4 || args.len() == 5) && args[1] == "local" {
+        local_shell::run(Path::new(&args[2]), Path::new(&args[3]), args.get(4).map(Path::new))
+    } else {
         eprintln!("smith: {USAGE}");
         return ExitCode::FAILURE;
-    }
-    match run(Path::new(&args[2])) {
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(why) => {
             eprintln!("smith: {why}");

@@ -8,9 +8,10 @@
 
 use alloc::boxed::Box;
 use skein_io::{self as io, kernel};
-use skein_lib::{Env, Map, Queue, Time, Token, Wall};
+use skein_lib::{Env, Map, Queue, Time, Token, Wall, stream};
 use smith_host_domain as host;
 use smith_host_protocol as protocol;
+use smith_local_protocol as local_protocol;
 
 use crate::StartValues;
 
@@ -59,6 +60,8 @@ pub(crate) struct ProcessAdapter {
     send: u64,
     failed: bool,
     force_pending: bool,
+    terminal_input: Option<Token>,
+    signals: Option<Token>,
 }
 
 impl ProcessAdapter {
@@ -79,6 +82,8 @@ impl ProcessAdapter {
             send: 1,
             failed: false,
             force_pending: false,
+            terminal_input: None,
+            signals: None,
         })
     }
 
@@ -94,6 +99,16 @@ impl ProcessAdapter {
 
     pub(crate) fn completions(&mut self) -> &mut Queue<kernel::Complete> {
         &mut self.completions
+    }
+
+    pub(crate) fn adopt_terminal(&mut self, input: kernel::Fd, signals: kernel::Fd) -> Result<(), kernel::Fd> {
+        let stream = self.io.adopt_read_pipe(input)?;
+        self.terminal_input = Some(stream);
+        let signal = self.io.adopt_signals(signals)?;
+        self.signals = Some(signal);
+        self.io_requests
+            .push(io::Request::Stream { stream, down: stream::Down::Demand { read: stream::Read::Fill(1), room: 0 } });
+        Ok(())
     }
 
     pub(crate) fn submissions(&mut self) -> &mut Queue<kernel::Submit> {
@@ -142,7 +157,14 @@ impl ProcessAdapter {
         }
     }
 
-    pub(crate) fn up(&mut self, now: Time, wall: Wall, host_events: &mut Queue<host::Event>) {
+    pub(crate) fn up(
+        &mut self,
+        now: Time,
+        wall: Wall,
+        host_events: &mut Queue<host::Event>,
+        terminal: &mut local_protocol::Terminal,
+        terminal_events: &mut Queue<local_protocol::TerminalEvent>,
+    ) {
         let env = Env { now, wall, limits: self.limits.io };
         for _ in 0..self.completions.capacity() {
             let Some(complete) = self.completions.pop() else { break };
@@ -158,12 +180,38 @@ impl ProcessAdapter {
         }
         for _ in 0..self.io_events.capacity() {
             let Some(event) = self.io_events.pop() else { break };
-            self.process.as_mut().expect("spawn precedes process IO").from_io(
-                now,
-                event,
-                &mut self.process_events,
-                &mut self.io_requests,
-            );
+            match event {
+                io::Event::Shutdown { .. } => terminal.interrupt(terminal_events),
+                io::Event::Stream { owner, up } if Some(owner) == self.terminal_input => match up {
+                    stream::Up::Bytes(bytes) => {
+                        for byte in bytes {
+                            terminal.feed(byte, terminal_events);
+                        }
+                        self.io_requests.push(io::Request::Stream {
+                            stream: owner,
+                            down: stream::Down::Demand { read: stream::Read::Fill(1), room: 0 },
+                        });
+                    }
+                    stream::Up::End | stream::Up::Failed(_) => terminal.closed(terminal_events),
+                    stream::Up::Room => unreachable!("read-only terminal asks for no output room"),
+                },
+                io::Event::Closed { owner } if Some(owner) == self.terminal_input || Some(owner) == self.signals => {}
+                other @ (io::Event::Listening { .. }
+                | io::Event::Accepted { .. }
+                | io::Event::Connecting { .. }
+                | io::Event::Connected { .. }
+                | io::Event::Stream { .. }
+                | io::Event::Output { .. }
+                | io::Event::Spawned { .. }
+                | io::Event::Exited { .. }
+                | io::Event::Failed { .. }
+                | io::Event::Closed { .. }) => self.process.as_mut().expect("spawn precedes process IO").from_io(
+                    now,
+                    other,
+                    &mut self.process_events,
+                    &mut self.io_requests,
+                ),
+            }
         }
         self.flush_force();
         if let Some(process) = &mut self.process {

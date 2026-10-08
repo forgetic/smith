@@ -105,7 +105,15 @@ pub fn read(path: &Path) -> Result<Configuration, String> {
     if bytes.len() as u64 > CONFIG_BYTES {
         return Err(format!("configuration is larger than {CONFIG_BYTES} bytes"));
     }
-    let document: Document = serde_json::from_slice(&bytes).map_err(|error| format!("configuration JSON: {error}"))?;
+    parse(&bytes)
+}
+
+/// Validate generated child configuration before the local host spawns it.
+pub fn parse(bytes: &[u8]) -> Result<Configuration, String> {
+    if bytes.len() as u64 > CONFIG_BYTES {
+        return Err(format!("configuration is larger than {CONFIG_BYTES} bytes"));
+    }
+    let document: Document = serde_json::from_slice(bytes).map_err(|error| format!("configuration JSON: {error}"))?;
     build(document)
 }
 

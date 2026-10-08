@@ -230,6 +230,11 @@ impl Service {
         self.process.completions()
     }
 
+    /// Adopt terminal input and blocked termination signals into the IO pass.
+    pub fn adopt_terminal(&mut self, input: kernel::Fd, signals: kernel::Fd) -> Result<(), kernel::Fd> {
+        self.process.adopt_terminal(input, signals)
+    }
+
     /// Kernel work submitted by the supervised child process.
     pub fn submissions(&mut self) -> &mut Queue<kernel::Submit> {
         self.process.submissions()
@@ -420,7 +425,7 @@ impl Service {
 
 /// One bounded up pass followed by one bounded down pass.
 pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
-    service.process.up(now, wall, &mut service.host_events);
+    service.process.up(now, wall, &mut service.host_events, &mut service.terminal, &mut service.terminal_events);
     service.drain_terminal();
     let local_env = Env { now, wall, limits: service.limits.local.clone() };
     let host_env = Env { now, wall, limits: service.limits.host };
