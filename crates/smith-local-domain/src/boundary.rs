@@ -7,6 +7,61 @@ use alloc::boxed::Box;
 use skein_lib::Token;
 use smith_domain::{self as agent, run, tools};
 
+/// One start handed to an agent process rather than the in-process child.
+#[derive(Debug)]
+pub struct ExternalStart {
+    pub activation: u64,
+    pub charter: run::charter::Charter,
+    pub workspace: Option<run::Workspace>,
+    pub transcript: Option<agent::Transcript>,
+    pub answered: Box<[agent::AnsweredCall]>,
+    pub grants: Box<[agent::Grant]>,
+}
+
+/// Agent records translated from a spawned child's host channel.
+#[derive(Debug)]
+pub enum ExternalEvent {
+    /// The child accepted this run and can receive the person's first message.
+    Admitted { run: Token },
+    /// One concrete turn told by the child and awaiting durable acknowledgement.
+    Turn { number: u32, read: Option<Token>, turn: agent::Turn },
+    /// The child's last word, shown only after every turn is saved.
+    Answer { answer: run::Answer },
+    /// The child waits for another person message.
+    Waiting,
+    /// The child began a bounded check operation.
+    Checking,
+    /// The child's bounded checks have ended.
+    ChecksEnded,
+    /// The child rejected a grant and needs a refreshed account.
+    Rejected { account: u32 },
+    /// The child exhausted an account.
+    Exhausted,
+    /// The child asks this host to deliver a checked change.
+    Deliver { name: run::CallName, owner: Token, change: run::outcome::Change, deadline: skein_lib::Time },
+    /// The child failed before a last word.
+    Failed,
+    /// The child exited, its channel ended, and its process tree was reaped.
+    Gone,
+}
+
+/// Local policy requests carried out by a spawned agent service.
+#[derive(Debug)]
+pub enum ExternalRequest {
+    /// Spawn one agent with the local host's durable start.
+    Start(ExternalStart),
+    /// Forward a saved person message to the admitted child.
+    Message { run: Token, name: Token, text: Box<[u8]> },
+    /// Acknowledge a concrete turn only after its file and directory sync.
+    Acknowledge { run: Token, turn: u32 },
+    /// Replace a rejected or expiring grant.
+    Grant { run: Token, grant: agent::Grant },
+    /// Answer one named delivery after its decision file is durable.
+    Delivery { owner: Token, delivery: run::Delivery },
+    /// Politely cancel the child before its process tree is stopped.
+    Cancel { run: Token },
+}
+
 /// One writable directory recorded before a delivery can commit.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct IntentDirectory {
@@ -206,6 +261,8 @@ pub enum Event {
     NoCredential { account: u32, reason: CredentialFailure },
     /// Terminal for a forwarded agent IO or LLM request.
     Agent(AgentIo),
+    /// One translated spawned-agent observation.
+    External(ExternalEvent),
 }
 
 /// One request to the person, store, credential source or agent IO.
@@ -230,6 +287,8 @@ pub enum Request {
     Credential { account: u32 },
     /// Forward one agent IO or LLM request unchanged.
     Agent(agent::Request),
+    /// One request carried out through the spawned host process.
+    External(Box<ExternalRequest>),
     /// The caller may terminate this invocation.
     Exit { status: ExitStatus },
 }

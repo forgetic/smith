@@ -862,7 +862,8 @@ impl World {
                     | Event::StoreFailed { .. }
                     | Event::Credential { .. }
                     | Event::NoCredential { .. }
-                    | Event::Agent(_) => None,
+                    | Event::Agent(_)
+                    | Event::External(_) => None,
                 };
                 local::step(&mut self.domain, &self.env, event, &mut self.out);
                 self.gather_facts();
@@ -1147,6 +1148,7 @@ impl World {
                 }
             }
             Request::Agent(request) => self.agent_request(request),
+            Request::External(_) => panic!("in-process local world cannot spawn an external agent"),
             Request::Exit { status } => self.exit = Some(status),
         }
     }

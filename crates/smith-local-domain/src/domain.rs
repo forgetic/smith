@@ -8,7 +8,8 @@ use skein_lib::{Env, List, Map, Queue, ReplyTo, Time, Token};
 use smith_domain as agent;
 
 use crate::boundary::{
-    AgentIo, ChatState, DeliveryIntent, DeliveryRecord, DeliveryState, Event, ExitStatus, GitOp, GitResult, Request,
+    AgentIo, ChatState, DeliveryIntent, DeliveryRecord, DeliveryState, Event, ExitStatus, ExternalEvent,
+    ExternalRequest, ExternalStart, GitOp, GitResult, Request,
 };
 use crate::chat::{Chat, Phase};
 use crate::credentials::Grants;
@@ -27,7 +28,8 @@ pub const fn max_out(limits: &Limits) -> u32 {
 #[derive(Debug)]
 pub struct Domain {
     config: Config,
-    agent: agent::Domain,
+    placement: Placement,
+    agent: Option<agent::Domain>,
     agent_out: Queue<agent::Request>,
     chat: Chat,
     transcript: Option<agent::Transcript>,
@@ -48,10 +50,24 @@ pub struct Domain {
     turns: Turns,
     held: Queue<AgentIo>,
     stop_failed: bool,
+    agent_failed: bool,
+    external_life: ExternalLife,
     show_bytes: u32,
     wall_deadline: Option<Time>,
     facts: Queue<Fact>,
     facts_lost: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Placement {
+    InProcess,
+    External,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ExternalLife {
+    Starting,
+    Gone,
 }
 
 #[derive(Debug)]
@@ -91,11 +107,24 @@ impl Reconcile {
 impl Domain {
     /// Validate local choices and build the agent with the configured endpoints.
     pub fn new(config: Config, limits: &Limits, seed: u64) -> Result<Domain, Invalid> {
+        Self::with_placement(config, limits, seed, Placement::InProcess)
+    }
+
+    /// Build the same local policy with a spawned agent as its child boundary.
+    pub fn new_external(config: Config, limits: &Limits, seed: u64) -> Result<Domain, Invalid> {
+        Self::with_placement(config, limits, seed, Placement::External)
+    }
+
+    fn with_placement(config: Config, limits: &Limits, seed: u64, placement: Placement) -> Result<Domain, Invalid> {
         config.validate(limits)?;
         let agent_config = agent::Config { endpoints: Box::from(limits.endpoints.as_ref()) };
         Ok(Domain {
             config,
-            agent: agent::Domain::new(&limits.agent, agent_config, seed),
+            placement,
+            agent: match placement {
+                Placement::InProcess => Some(agent::Domain::new(&limits.agent, agent_config, seed)),
+                Placement::External => None,
+            },
             agent_out: Queue::with_capacity(agent::max_out(&limits.agent)),
             chat: Chat::new(),
             transcript: None,
@@ -116,6 +145,8 @@ impl Domain {
             turns: Turns::new(limits.unsaved),
             held: Queue::with_capacity(1),
             stop_failed: false,
+            agent_failed: false,
+            external_life: ExternalLife::Starting,
             show_bytes: limits.show_bytes,
             wall_deadline: None,
             facts: Queue::with_capacity(limits.facts),
@@ -126,13 +157,18 @@ impl Domain {
     /// Whether initial loading or the child has deferred work.
     #[must_use]
     pub fn is_ready(&self) -> bool {
-        (self.chat.phase == Phase::Loading && !self.chat.load_requested) || self.agent.is_ready()
+        (self.chat.phase == Phase::Loading && !self.chat.load_requested)
+            || (self.placement == Placement::InProcess && self.agent.as_ref().expect("in-process agent").is_ready())
     }
 
     /// Earliest child deadline.
     #[must_use]
     pub fn next_deadline(&self) -> Option<Time> {
-        if self.pressured() { self.wall_deadline } else { self.agent.next_deadline() }
+        if self.pressured() || self.placement == Placement::External {
+            self.wall_deadline
+        } else {
+            self.agent.as_ref().expect("in-process agent").next_deadline()
+        }
     }
 
     /// Whether the child has a deadline due at `now`.
@@ -146,7 +182,9 @@ impl Domain {
 
     /// Reclaim child slots after delivering one iteration's output.
     pub fn reclaim(&mut self) {
-        self.agent.reclaim();
+        if self.placement == Placement::InProcess {
+            self.agent.as_mut().expect("in-process agent").reclaim();
+        }
     }
 
     /// Oldest content-free observation, if the caller wants it.
@@ -181,12 +219,14 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
         Event::Credential { grant } => credential(domain, env, grant, out),
         Event::NoCredential { account: _, reason: _ } => no_credential(domain, env, out),
         Event::Agent(io) => agent_terminal(domain, env, io),
+        Event::External(external) => external_event(domain, env, external, out),
     }
     route_agent(domain, env, out);
     release_held(domain, env, out);
 }
 
 fn agent_terminal(domain: &mut Domain, env: &Env<Limits>, io: AgentIo) {
+    assert!(domain.placement == Placement::InProcess, "agent IO belongs to in-process mode");
     let completion = match &io {
         AgentIo::Completed { .. } | AgentIo::Failed { .. } | AgentIo::Cancelled { .. } => true,
         AgentIo::Done { .. }
@@ -198,7 +238,12 @@ fn agent_terminal(domain: &mut Domain, env: &Env<Limits>, io: AgentIo) {
     if completion && domain.turns.unsaved.room() == 0 {
         domain.held.push(io);
     } else {
-        agent::step(&mut domain.agent, &agent_env(env), io.into_event(), &mut domain.agent_out);
+        agent::step(
+            domain.agent.as_mut().expect("in-process agent"),
+            &agent_env(env),
+            io.into_event(),
+            &mut domain.agent_out,
+        );
     }
 }
 
@@ -207,7 +252,12 @@ fn release_held(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>
         return;
     }
     let Some(io) = domain.held.pop() else { return };
-    agent::step(&mut domain.agent, &agent_env(env), io.into_event(), &mut domain.agent_out);
+    agent::step(
+        domain.agent.as_mut().expect("in-process agent"),
+        &agent_env(env),
+        io.into_event(),
+        &mut domain.agent_out,
+    );
     route_agent(domain, env, out);
 }
 
@@ -221,8 +271,8 @@ pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
             interrupt(domain, env, out);
             domain.wall_deadline = None;
         }
-    } else {
-        agent::fire(&mut domain.agent, &agent_env(env), &mut domain.agent_out);
+    } else if domain.placement == Placement::InProcess {
+        agent::fire(domain.agent.as_mut().expect("in-process agent"), &agent_env(env), &mut domain.agent_out);
     }
     route_agent(domain, env, out);
 }
@@ -232,8 +282,8 @@ pub fn resume(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) 
     if domain.chat.phase == Phase::Loading && !domain.chat.load_requested {
         domain.chat.load_requested = true;
         out.push(Request::Load);
-    } else if domain.agent.is_ready() {
-        agent::resume(&mut domain.agent, &agent_env(env), &mut domain.agent_out);
+    } else if domain.placement == Placement::InProcess && domain.agent.as_ref().expect("in-process agent").is_ready() {
+        agent::resume(domain.agent.as_mut().expect("in-process agent"), &agent_env(env), &mut domain.agent_out);
         route_agent(domain, env, out);
     }
 }
@@ -352,7 +402,7 @@ fn state_saved(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
             maybe_start(domain, env, out);
         }
         Phase::Running => {
-            send_line(domain, env);
+            send_line(domain, env, out);
             dispatch_line(domain, env, out);
         }
         Phase::Loading | Phase::Idle | Phase::Ending | Phase::Done => {
@@ -370,9 +420,20 @@ fn credential(domain: &mut Domain, env: &Env<Limits>, grant: agent::Grant, out: 
             domain.grants.values.push(grant).expect("validated account capacity");
             maybe_start(domain, env, out);
         }
-        Phase::Running | Phase::Ending => {
-            agent::step(&mut domain.agent, &agent_env(env), agent::Event::Grant { grant }, &mut domain.agent_out);
-        }
+        Phase::Running | Phase::Ending => match domain.placement {
+            Placement::InProcess => {
+                agent::step(
+                    domain.agent.as_mut().expect("in-process agent"),
+                    &agent_env(env),
+                    agent::Event::Grant { grant },
+                    &mut domain.agent_out,
+                );
+            }
+            Placement::External => out.push(Request::External(Box::new(ExternalRequest::Grant {
+                run: domain.run.expect("admitted external run"),
+                grant,
+            }))),
+        },
         Phase::Loading | Phase::Idle | Phase::Done => unreachable!("grant answers a live account request"),
     }
 }
@@ -431,22 +492,34 @@ fn maybe_start(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
         domain.records = Map::with_capacity(env.limits.agent.run.answered_calls);
     }
     domain.wall_deadline = Some(env.now.saturating_add(domain.config.budget.time));
-    agent::step(
-        &mut domain.agent,
-        &agent_env(env),
-        agent::Event::Start {
-            answered: answered.into_boxed(),
-            reply_to: ReplyTo::new(Token::new(domain.chat.state.activation)),
-            host_run: Token::new(1),
+    domain.external_life = ExternalLife::Starting;
+    domain.agent_failed = false;
+    match domain.placement {
+        Placement::InProcess => agent::step(
+            domain.agent.as_mut().expect("in-process agent"),
+            &agent_env(env),
+            agent::Event::Start {
+                answered: answered.into_boxed(),
+                reply_to: ReplyTo::new(Token::new(domain.chat.state.activation)),
+                host_run: Token::new(1),
+                activation: domain.chat.state.activation,
+                window: agent::Window { turns: 1, bytes: u64::MAX },
+                charter: charter(&domain.config),
+                workspace: domain.config.workspace.clone(),
+                transcript: history,
+                grants,
+            },
+            &mut domain.agent_out,
+        ),
+        Placement::External => out.push(Request::External(Box::new(ExternalRequest::Start(ExternalStart {
             activation: domain.chat.state.activation,
-            window: agent::Window { turns: 1, bytes: u64::MAX },
             charter: charter(&domain.config),
             workspace: domain.config.workspace.clone(),
             transcript: history,
+            answered: answered.into_boxed(),
             grants,
-        },
-        &mut domain.agent_out,
-    );
+        })))),
+    }
     domain.chat.phase = Phase::Running;
     observe(domain, Fact::Started { activation: domain.chat.state.activation });
 }
@@ -503,15 +576,20 @@ fn head_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: Git
     }
 }
 
-fn send_line(domain: &mut Domain, env: &Env<Limits>) {
+fn send_line(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     let Some(run) = domain.run else { return };
     let Some(line) = domain.line.take() else { return };
-    agent::step(
-        &mut domain.agent,
-        &agent_env(env),
-        agent::Event::Message { run, name: line.name, text: line.text },
-        &mut domain.agent_out,
-    );
+    match domain.placement {
+        Placement::InProcess => agent::step(
+            domain.agent.as_mut().expect("in-process agent"),
+            &agent_env(env),
+            agent::Event::Message { run, name: line.name, text: line.text },
+            &mut domain.agent_out,
+        ),
+        Placement::External => {
+            out.push(Request::External(Box::new(ExternalRequest::Message { run, name: line.name, text: line.text })));
+        }
+    }
     observe(domain, Fact::Message { name: line.name });
 }
 
@@ -522,12 +600,17 @@ fn turn_saved(domain: &mut Domain, env: &Env<Limits>, number: u32, out: &mut Que
     let (pending, sequence) = domain.turns.unsaved.pop().expect("TurnSaved answers a pending SaveTurn");
     assert_eq!(number, pending, "turns become durable in order");
     if let Some(run) = domain.run {
-        agent::step(
-            &mut domain.agent,
-            &agent_env(env),
-            agent::Event::Acknowledge { run, turn: number },
-            &mut domain.agent_out,
-        );
+        match domain.placement {
+            Placement::InProcess => agent::step(
+                domain.agent.as_mut().expect("in-process agent"),
+                &agent_env(env),
+                agent::Event::Acknowledge { run, turn: number },
+                &mut domain.agent_out,
+            ),
+            Placement::External => {
+                out.push(Request::External(Box::new(ExternalRequest::Acknowledge { run, turn: number })));
+            }
+        }
     }
     let mut retired = List::with_capacity(env.limits.agent.run.answered_calls);
     for (name, _) in &domain.records {
@@ -539,7 +622,14 @@ fn turn_saved(domain: &mut Domain, env: &Env<Limits>, number: u32, out: &mut Que
         domain.records.remove(name);
     }
     if domain.turns.unsaved.is_empty() {
-        finish_answer(domain, out);
+        if domain.agent_failed
+            && (domain.placement == Placement::InProcess || domain.external_life == ExternalLife::Gone)
+        {
+            domain.chat.phase = Phase::Done;
+            out.push(Request::Exit { status: ExitStatus::Failed });
+        } else {
+            finish_answer(domain, out);
+        }
     }
 }
 
@@ -553,7 +643,15 @@ fn interrupt(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
             domain.chat.phase = Phase::Ending;
             domain.wall_deadline = None;
             if let Some(run) = domain.run {
-                agent::step(&mut domain.agent, &agent_env(env), agent::Event::Cancel { run }, &mut domain.agent_out);
+                match domain.placement {
+                    Placement::InProcess => agent::step(
+                        domain.agent.as_mut().expect("in-process agent"),
+                        &agent_env(env),
+                        agent::Event::Cancel { run },
+                        &mut domain.agent_out,
+                    ),
+                    Placement::External => out.push(Request::External(Box::new(ExternalRequest::Cancel { run }))),
+                }
             }
         }
         Phase::Loading | Phase::Starting | Phase::Ending | Phase::Done => domain.chat.closed = true,
@@ -598,16 +696,21 @@ fn store_failed(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>
             DeliveryState::Answer(delivery) => delivery,
         };
         if let Some(owner) = owner {
-            agent::step(
-                &mut domain.agent,
-                &agent_env(env),
-                agent::Event::Delivered { owner, delivery },
-                &mut domain.agent_out,
-            );
+            deliver_to_agent(domain, env, owner, delivery, out);
         }
     }
     if let Some(run) = domain.run {
-        agent::step(&mut domain.agent, &agent_env(env), agent::Event::Cancel { run }, &mut domain.agent_out);
+        match domain.placement {
+            Placement::InProcess => {
+                agent::step(
+                    domain.agent.as_mut().expect("in-process agent"),
+                    &agent_env(env),
+                    agent::Event::Cancel { run },
+                    &mut domain.agent_out,
+                );
+            }
+            Placement::External => out.push(Request::External(Box::new(ExternalRequest::Cancel { run }))),
+        }
         domain.chat.phase = Phase::Ending;
     } else {
         domain.chat.phase = Phase::Done;
@@ -621,28 +724,13 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
         match request {
             agent::Request::Admitted { host_run: _, run } => {
                 domain.run = Some(run);
-                send_line(domain, env);
+                send_line(domain, env, out);
             }
             agent::Request::Turn { host_run: _, number, position: _, read, spent: _, turn } => {
-                if domain.stop_failed {
-                    continue;
-                }
-                assert!(domain.turns.unsaved.room() > 0, "store backpressure bounds unsaved turns");
-                let shown = crate::person::turn_text(&turn, env.limits.show_bytes);
-                domain.turns.unsaved.push((number, turn.sequence));
-                domain.chat.state.read = read;
-                observe(domain, Fact::Turn { number });
-                out.push(Request::SaveTurn { number, read, turn });
-                if !shown.is_empty() {
-                    out.push(Request::Show { text: shown });
-                }
+                accept_turn(domain, env, number, read, turn, out);
             }
             agent::Request::Answer { to: _, answer } => {
-                observe(domain, Fact::Answered { activation: domain.chat.state.activation });
-                domain.turns.answer = Some(answer);
-                if domain.turns.unsaved.is_empty() {
-                    finish_answer(domain, out);
-                }
+                accept_answer(domain, answer, out);
             }
             agent::Request::Waiting { host_run: _, read: _ } => {
                 out.push(Request::Show { text: Box::from(&b"Waiting for a message"[..]) });
@@ -680,7 +768,84 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
     assert!(domain.agent_out.is_empty(), "one agent step stays within its output bound");
 }
 
+fn accept_turn(
+    domain: &mut Domain,
+    env: &Env<Limits>,
+    number: u32,
+    read: Option<Token>,
+    turn: agent::Turn,
+    out: &mut Queue<Request>,
+) {
+    if domain.stop_failed || domain.agent_failed {
+        return;
+    }
+    assert!(domain.turns.unsaved.room() > 0, "store backpressure bounds unsaved turns");
+    let shown = crate::person::turn_text(&turn, env.limits.show_bytes);
+    domain.turns.unsaved.push((number, turn.sequence));
+    domain.chat.state.read = read;
+    observe(domain, Fact::Turn { number });
+    out.push(Request::SaveTurn { number, read, turn });
+    if !shown.is_empty() {
+        out.push(Request::Show { text: shown });
+    }
+}
+
+fn accept_answer(domain: &mut Domain, answer: agent::run::Answer, out: &mut Queue<Request>) {
+    observe(domain, Fact::Answered { activation: domain.chat.state.activation });
+    domain.turns.answer = Some(answer);
+    if domain.turns.unsaved.is_empty() {
+        finish_answer(domain, out);
+    }
+}
+
+fn external_event(domain: &mut Domain, env: &Env<Limits>, event: ExternalEvent, out: &mut Queue<Request>) {
+    assert!(domain.placement == Placement::External, "spawned observations belong to external mode");
+    match event {
+        ExternalEvent::Admitted { run } => {
+            domain.run = Some(run);
+            send_line(domain, env, out);
+        }
+        ExternalEvent::Turn { number, read, turn } => accept_turn(domain, env, number, read, turn, out),
+        ExternalEvent::Answer { answer } => accept_answer(domain, answer, out),
+        ExternalEvent::Waiting => out.push(Request::Show { text: Box::from(&b"Waiting for a message"[..]) }),
+        ExternalEvent::Checking => out.push(Request::Show { text: Box::from(&b"Running checks"[..]) }),
+        ExternalEvent::ChecksEnded => out.push(Request::Show { text: Box::from(&b"Checks finished"[..]) }),
+        ExternalEvent::Rejected { account } => out.push(Request::Credential { account }),
+        ExternalEvent::Exhausted => out.push(Request::Show { text: Box::from(&b"A model account is exhausted"[..]) }),
+        ExternalEvent::Deliver { name, owner, change, deadline } => {
+            begin_delivery(domain, env, name, owner, change, deadline, out);
+        }
+        ExternalEvent::Failed => {
+            domain.agent_failed = true;
+            out.push(Request::Show { text: Box::from(&b"Agent process failed"[..]) });
+            if domain.turns.unsaved.is_empty() && domain.external_life == ExternalLife::Gone {
+                domain.chat.phase = Phase::Done;
+                out.push(Request::Exit { status: ExitStatus::Failed });
+            }
+        }
+        ExternalEvent::Gone => {
+            domain.external_life = ExternalLife::Gone;
+            domain.run = None;
+            if domain.turns.answer.is_none() && !domain.agent_failed {
+                domain.agent_failed = true;
+                out.push(Request::Show { text: Box::from(&b"Agent process ended without an answer"[..]) });
+            }
+            if domain.turns.unsaved.is_empty() {
+                if domain.agent_failed {
+                    domain.chat.phase = Phase::Done;
+                    out.push(Request::Exit { status: ExitStatus::Failed });
+                } else if domain.turns.answer.is_some() {
+                    finish_answer(domain, out);
+                }
+            }
+        }
+    }
+}
+
 fn finish_answer(domain: &mut Domain, out: &mut Queue<Request>) {
+    if domain.placement == Placement::External && domain.external_life != ExternalLife::Gone {
+        return;
+    }
     let Some(answer) = domain.turns.answer.take() else { return };
     if domain.stop_failed {
         domain.run = None;
@@ -759,12 +924,7 @@ fn begin_delivery(
     assert!(domain.delivery.is_none() && domain.saving.is_none(), "one delivery in flight");
     domain.landed = List::with_capacity(agent::run::MAX_DIRECTORIES);
     if let Some(delivery) = crate::delivery::cached(&domain.records, name) {
-        agent::step(
-            &mut domain.agent,
-            &agent_env(env),
-            agent::Event::Delivered { owner, delivery },
-            &mut domain.agent_out,
-        );
+        deliver_to_agent(domain, env, owner, delivery, out);
         return;
     }
     let rules = match &domain.config.contract {
@@ -1224,16 +1384,29 @@ fn delivery_saved(domain: &mut Domain, env: &Env<Limits>, name: agent::run::Call
         DeliveryState::Answer(delivery) => {
             if let Some(owner) = domain.delivery_owner.take() {
                 observe(domain, Fact::DeliveryReturned { name });
-                agent::step(
-                    &mut domain.agent,
-                    &agent_env(env),
-                    agent::Event::Delivered { owner, delivery },
-                    &mut domain.agent_out,
-                );
+                deliver_to_agent(domain, env, owner, delivery, out);
             } else {
                 resume_loading(domain, env, out);
             }
         }
+    }
+}
+
+fn deliver_to_agent(
+    domain: &mut Domain,
+    env: &Env<Limits>,
+    owner: Token,
+    delivery: agent::run::Delivery,
+    out: &mut Queue<Request>,
+) {
+    match domain.placement {
+        Placement::InProcess => agent::step(
+            domain.agent.as_mut().expect("in-process agent"),
+            &agent_env(env),
+            agent::Event::Delivered { owner, delivery },
+            &mut domain.agent_out,
+        ),
+        Placement::External => out.push(Request::External(Box::new(ExternalRequest::Delivery { owner, delivery }))),
     }
 }
 

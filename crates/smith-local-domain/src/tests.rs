@@ -1,8 +1,8 @@
 use alloc::boxed::Box;
-use skein_lib::Duration;
+use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 use smith_domain::run::{self, charter::Endpoint, outcome};
 
-use crate::{Config, Contract, Domain, Invalid, Limits, charter};
+use crate::{Config, Contract, Domain, Event, ExternalEvent, ExternalRequest, Invalid, Limits, Request, charter};
 
 fn limits() -> Limits {
     Limits {
@@ -113,4 +113,67 @@ fn invalid_local_configuration_is_refused_before_agent_construction() {
     let mut invalid = config();
     invalid.models[0].endpoint = Endpoint(99);
     assert_eq!(invalid.validate(&limits), Err(Invalid::Endpoint));
+}
+
+#[test]
+fn spawned_agent_receives_saved_start_message_and_durable_turn_ack() {
+    let limits = limits();
+    let env = Env { now: Time::ZERO, wall: Wall::from_nanos(0), limits: limits.clone() };
+    let mut domain = Domain::new_external(config(), &limits, 11).expect("external local domain");
+    let mut out = Queue::with_capacity(crate::max_out(&limits));
+    crate::resume(&mut domain, &env, &mut out);
+    let Some(Request::Load) = out.pop() else { panic!("load first") };
+    crate::step(&mut domain, &env, Event::Loaded { state: None, transcript: None, deliveries: Box::new([]) }, &mut out);
+    crate::step(&mut domain, &env, Event::Line { text: Box::from(&b"hello"[..]) }, &mut out);
+    let Some(Request::Credential { account: 7 }) = out.pop() else { panic!("credential before start") };
+    let Some(Request::SaveState { state, fresh: false }) = out.pop() else { panic!("activation saved") };
+    assert_eq!(state.activation, 1);
+    crate::step(
+        &mut domain,
+        &env,
+        Event::Credential {
+            grant: smith_domain::Grant {
+                name: smith_domain::GrantName { account: 7, generation: 1 },
+                valid: Duration::from_secs(60),
+            },
+        },
+        &mut out,
+    );
+    crate::step(&mut domain, &env, Event::StateSaved, &mut out);
+    let Some(Request::External(start)) = out.pop() else { panic!("external start") };
+    let ExternalRequest::Start(start) = *start else { panic!("start request") };
+    assert_eq!(start.activation, 1);
+    assert_eq!(start.grants.len(), 1);
+    assert_eq!(start.charter.instructions.as_ref(), b"Assist the person");
+
+    crate::step(&mut domain, &env, Event::External(ExternalEvent::Admitted { run: Token::new(3) }), &mut out);
+    let Some(Request::External(message)) = out.pop() else { panic!("first message") };
+    let ExternalRequest::Message { run, name, text } = *message else { panic!("message request") };
+    assert_eq!(run, Token::new(3));
+    assert_eq!(name, Token::new(1));
+    assert_eq!(text.as_ref(), b"hello");
+
+    let turn = smith_domain::Turn {
+        version: smith_domain::session::record::VERSION,
+        endpoint: smith_domain::session::llm::Endpoint(4),
+        dialect: 1,
+        sequence: 1,
+        usage: smith_domain::session::llm::Usage::ZERO,
+        spent: 0,
+        messages: Box::new([]),
+    };
+    crate::step(
+        &mut domain,
+        &env,
+        Event::External(ExternalEvent::Turn { number: 1, read: Some(Token::new(1)), turn }),
+        &mut out,
+    );
+    let Some(Request::SaveTurn { number: 1, read: Some(read), .. }) = out.pop() else {
+        panic!("turn saved before ACK")
+    };
+    assert_eq!(read, Token::new(1));
+    crate::step(&mut domain, &env, Event::TurnSaved { number: 1 }, &mut out);
+    let Some(Request::External(ack)) = out.pop() else { panic!("ACK after durable terminal") };
+    let ExternalRequest::Acknowledge { run, turn: 1 } = *ack else { panic!("exact ACK") };
+    assert_eq!(run, Token::new(3));
 }
