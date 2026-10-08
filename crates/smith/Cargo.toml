@@ -7,6 +7,8 @@ publish.workspace = true
 
 [dependencies]
 skein-lib.workspace = true
+skein-oauth.workspace = true
+libc = "0.2"
 skein-io.workspace = true
 skein-shell.workspace = true
 skein-channel.workspace = true

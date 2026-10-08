@@ -466,6 +466,7 @@ dependencies = [
 name = "smith"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "rustls-native-certs",
  "serde",
  "serde_json",
@@ -475,6 +476,7 @@ dependencies = [
  "skein-lib",
  "skein-llm",
  "skein-llm-connection",
+ "skein-oauth",
  "skein-shell",
  "skein-tls",
  "smith-agent-service",
