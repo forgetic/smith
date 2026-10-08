@@ -206,7 +206,11 @@ fn build(document: Document) -> Result<Configuration, String> {
             .map_err(|_| "too many channel endpoints")?;
         llm_endpoints.push(llm::ConfiguredEndpoint {
             name: domain::llm::Endpoint(endpoint.number),
-            destination: connection::Endpoint { address, server_name, trust, llm: llm_endpoint },
+            destination: connection::Endpoint {
+                address,
+                transport: connection::Transport::Tls { server_name, trust },
+                llm: llm_endpoint,
+            },
             account: endpoint.account,
             reasoning_effort: endpoint.reasoning_effort.map(|value| value.into_bytes().into()),
             cache_key: endpoint.cache_key.map(|value| value.into_bytes().into()),

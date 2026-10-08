@@ -20,8 +20,10 @@ fn destination(name: u32, account: u32, provider: shared::Provider) -> Configure
         name: llm::Endpoint(name),
         destination: skein_llm_connection::Endpoint {
             address: SocketAddr::from(([127, 0, 0, 1], 443)),
-            server_name: skein_tls::Name::new("example.test").expect("server name"),
-            trust: skein_tls::Config::new(roots, &[]).expect("test trust"),
+            transport: skein_llm_connection::Transport::Tls {
+                server_name: skein_tls::Name::new("example.test").expect("server name"),
+                trust: skein_tls::Config::new(roots, &[]).expect("test trust"),
+            },
             llm,
         },
         account,

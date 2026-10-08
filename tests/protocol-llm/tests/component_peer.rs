@@ -109,8 +109,10 @@ fn run(dialect: Provider, calls: bool) {
             name: llm::Endpoint(1),
             destination: skein_llm_connection::Endpoint {
                 address: Addr::from((Ipv4Addr::LOCALHOST, 443)),
-                server_name: skein_tls::Name::new("skein.test").expect("test name"),
-                trust: pki::client(&[]),
+                transport: skein_llm_connection::Transport::Tls {
+                    server_name: skein_tls::Name::new("skein.test").expect("test name"),
+                    trust: pki::client(&[]),
+                },
                 llm: call.endpoint,
             },
             account: 0,

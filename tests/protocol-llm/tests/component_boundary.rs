@@ -64,8 +64,10 @@ fn endpoints() -> Endpoints {
             name: llm::Endpoint(42),
             destination: skein_llm_connection::Endpoint {
                 address: SocketAddr::from(([127, 0, 0, 1], 443)),
-                server_name: skein_tls::Name::new("example.test").expect("server name"),
-                trust: skein_tls::Config::new(roots, &[]).expect("test trust"),
+                transport: skein_llm_connection::Transport::Tls {
+                    server_name: skein_tls::Name::new("example.test").expect("server name"),
+                    trust: skein_tls::Config::new(roots, &[]).expect("test trust"),
+                },
                 llm: shared::Endpoint::codex(),
             },
             account: 0,

@@ -128,8 +128,10 @@ pub fn configuration() -> agent::Config {
             name: smith_domain::llm::Endpoint(0),
             destination: skein_llm_connection::Endpoint {
                 address: kernel::Addr::from((std::net::Ipv4Addr::LOCALHOST, 443)),
-                server_name: skein_tls::Name::new("skein.test").expect("server name"),
-                trust: skein_tls_world::pki::client(&[]),
+                transport: skein_llm_connection::Transport::Tls {
+                    server_name: skein_tls::Name::new("skein.test").expect("server name"),
+                    trust: skein_tls_world::pki::client(&[]),
+                },
                 llm: skein_llm_world::call(7).endpoint,
             },
             account: 0,
