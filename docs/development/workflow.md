@@ -541,3 +541,33 @@ cargo nextest run --workspace --profile live
 
 Missing required variables or signed-in records fail with a named prerequisite;
 no story silently substitutes a fake or falls back to an ordinary token store.
+
+
+### Live stories and observations
+
+The four named stories run every selected provider: issuer refresh, checked
+in-place commit, durable second invocation, and optional configured push. The
+refresh story expires only the dedicated test record, then requires a higher
+persisted generation and a usable new grant. The commit story checks exact
+committed contents and runs the prescribed check independently. Resume asks the
+first binary to remember a unique code and requires a second binary to deliver
+it in a file without receiving the code again; earlier turn files must remain
+unchanged. Each binary drains and is reaped, with a fresh finish call and an
+accepted or delivered finish terminal in its outside trace. No assertion depends on the model's reply
+wording. Credential-bearing stderr and command diagnostics are withheld.
+
+When `SMITH_TEST_LIVE_GIT_REMOTE` is set, the optional story uses a unique
+`smith-live-<provider>-<pid>-<clock>` branch, verifies its remote head equals the
+delivered commit, and removes that branch after success or a caught story
+failure. Cleanup failure fails the test. The host's push environment explicitly
+carries `HOME`, `PATH` and `SSH_AUTH_SOCK` when set, for existing git/SSH
+configuration; no credential is put in a prompt or trace. A run without the
+remote reports that push story as not run.
+
+Run only one path while setting up a provider, for example:
+
+```sh
+cargo nextest run -p smith --test live --profile live -E 'test(=a_run_refreshes_its_grant_at_the_issuer)'
+cargo nextest run -p smith --test live --profile live -E 'test(=a_chat_ends_with_a_commit_in_place)'
+cargo nextest run -p smith --test live --profile live -E 'test(=a_second_run_resumes_the_chat_from_its_files)'
+```

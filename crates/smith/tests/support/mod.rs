@@ -365,3 +365,6 @@ pub fn refusal(scratch: &Scratch, arguments: Vec<std::ffi::OsString>) -> Vec<u8>
     assert_no_children();
     binary.stderr().to_vec()
 }
+
+#[allow(dead_code)]
+pub mod live_run;

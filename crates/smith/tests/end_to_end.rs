@@ -83,3 +83,11 @@ fn the_startup_refusals_of_both_commands_are_observed_outside() {
     );
     assert!(!scratch.path().join("chat").exists(), "refusals leave no chat");
 }
+
+#[test]
+fn the_live_outcome_referee_runs_on_the_shared_fake_binary_harness() {
+    let report = Scratch::new();
+    support::live_run::run_fake(&report, World::new(35, &report, Placement::Spawned, b"First answer").scenario);
+    let change = Scratch::new();
+    support::live_run::run_fake(&change, World::changed(36, &change, Placement::Spawned).scenario);
+}

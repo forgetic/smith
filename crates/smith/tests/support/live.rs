@@ -181,6 +181,12 @@ impl Backend {
         let mut settings = self.settings(scratch.path(), change);
         if let Some((remote, branch)) = push {
             settings["push"] = serde_json::json!([{"remote":remote,"branch":branch}]);
+            settings["delivery_environment"] = serde_json::json!(
+                ["HOME", "PATH", "SSH_AUTH_SOCK"]
+                    .into_iter()
+                    .filter_map(|name| setting(name).map(|value| format!("{name}={value}")))
+                    .collect::<Vec<_>>()
+            );
         }
         std::fs::write(
             scratch.path().join("settings.json"),
