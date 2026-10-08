@@ -18,6 +18,8 @@
 
 extern crate alloc;
 
+mod store;
 mod terminal;
 
+pub use store::{File, StoreError, decode_state, decode_turns, save_state, save_turn, turn_name};
 pub use terminal::{Event, Limits, Terminal, max_out, worst_case};

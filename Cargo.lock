@@ -670,6 +670,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-local-protocol"
+version = "0.0.0"
+dependencies = [
+ "skein-lib",
+ "smith-domain",
+ "smith-local-domain",
+ "smith-protocol-channel",
+ "smith-transcript",
+]
+
+[[package]]
 name = "smith-local-world"
 version = "0.0.0"
 dependencies = [
