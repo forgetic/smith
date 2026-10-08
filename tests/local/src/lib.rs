@@ -6,4 +6,4 @@ mod git;
 pub mod referee;
 mod world;
 
-pub use world::{Cut, Store, StoreFault, World};
+pub use world::{Cut, GitFault, Store, StoreFault, World};

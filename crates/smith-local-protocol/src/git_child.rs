@@ -54,7 +54,7 @@ pub struct GitChild {
 #[must_use]
 pub fn git_child_worst_case(limits: &GitLimits) -> Option<u64> {
     crate::git_worst_case(limits)?
-        .checked_add(4096)?
+        .checked_add(8192)?
         .checked_add(List::<Box<[u8]>>::worst_case(64)?)?
         .checked_add(List::<u8>::worst_case(limits.output_bytes.checked_add(1)?)?)?
         .checked_add(List::<u8>::worst_case(limits.detail_bytes)?.checked_mul(2)?)?
@@ -307,6 +307,20 @@ fn diagnostic_cut(result: local::GitResult, cut: u64) -> local::GitResult {
                 diagnostic.cut().saturating_add(cut),
             )),
         },
+        local::GitResult::NoEffect { reason, diagnostic } => local::GitResult::NoEffect {
+            reason,
+            diagnostic: Box::new(smith_domain::run::Diagnostic::new(
+                diagnostic.output(),
+                diagnostic.cut().saturating_add(cut),
+            )),
+        },
+        local::GitResult::Uncertain { reason, diagnostic } => local::GitResult::Uncertain {
+            reason,
+            diagnostic: Box::new(smith_domain::run::Diagnostic::new(
+                diagnostic.output(),
+                diagnostic.cut().saturating_add(cut),
+            )),
+        },
         result @ (local::GitResult::Head { .. }
         | local::GitResult::Status { .. }
         | local::GitResult::Inspected { .. }
@@ -329,7 +343,7 @@ mod tests {
     const HASH: &[u8] = b"0123456789abcdef0123456789abcdef01234567\n";
 
     fn limits() -> GitLimits {
-        GitLimits { output_bytes: 64, conflicts: 2, path_bytes: 64, detail_bytes: 8 }
+        GitLimits { argument_bytes: 4096, output_bytes: 64, conflicts: 2, path_bytes: 64, detail_bytes: 8 }
     }
 
     fn make(op: local::GitOp) -> (GitChild, Queue<io::Request>, Queue<local::Event>) {

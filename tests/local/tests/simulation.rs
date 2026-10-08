@@ -589,3 +589,51 @@ fn a_store_failure_stops_the_chat_and_tells_the_person() {
         assert!(world.shown().iter().any(|text| text.as_ref() == b"The chat could not be saved"));
     }
 }
+
+#[test]
+fn a_deadline_racing_a_landed_commit_is_answered_with_its_receipt() {
+    let mut world = World::with_git_change(871);
+    world.uncertain_git(smith_local_world::GitFault::Deadline);
+    world.line(b"Make the answer 43");
+    world.drive(600);
+    assert_eq!(world.delivery_commits(), 1);
+    assert!(matches!(world.delivery(), Some(smith_domain::run::Delivery::Delivered(_))));
+}
+
+#[test]
+fn an_unreadable_head_after_commit_is_settled_by_the_delivery_trailer() {
+    let mut world = World::with_git_change(872);
+    world.uncertain_git(smith_local_world::GitFault::HeadUnreadable);
+    world.line(b"Make the answer 43");
+    world.drive(600);
+    assert_eq!(world.delivery_commits(), 1);
+    assert!(matches!(world.delivery(), Some(smith_domain::run::Delivery::Delivered(_))));
+}
+
+#[test]
+fn an_unknown_commit_keeps_its_intent_until_a_restart_finds_it() {
+    let mut first = World::with_git_change(873);
+    first.uncertain_git(smith_local_world::GitFault::InspectionUnreadable);
+    first.line(b"Make the answer 43");
+    first.drive(600);
+    assert_eq!(first.delivery_commits(), 1);
+    let store = first.into_store();
+    assert_eq!(store.delivery_answers(), 0, "unknown did not replace the saved intent");
+    assert!(store.delivery_name().is_some(), "the intent survives a later saved turn");
+    let mut second = World::with_git_change_store(874, store);
+    second.line(b"What landed?");
+    second.drive(600);
+    assert_eq!(second.delivery_commits(), 1, "reconciliation never committed again");
+    assert!(second.prompt_texts().iter().any(|text| text.windows(b"delivered".len()).any(|part| part == b"delivered")));
+}
+
+#[test]
+fn an_absent_delivery_trailer_and_unchanged_head_prove_no_effect() {
+    let mut world = World::with_git_change(875);
+    world.uncertain_git(smith_local_world::GitFault::NoEffect);
+    world.line(b"Make the answer 43");
+    world.drive(600);
+    assert_eq!(world.delivery_commits(), 0);
+    let Some(smith_domain::run::Delivery::Failed(failure)) = world.delivery() else { panic!("original failure") };
+    assert_eq!(failure.reason, smith_domain::run::DeliveryReason::TimedOut);
+}

@@ -26,6 +26,9 @@ mod host_bridge;
 mod store;
 mod terminal;
 
+#[cfg(test)]
+mod tests;
+
 pub use credential::{Begin, Credential, CredentialEvent, CredentialLimits, CredentialRequest, credential_worst_case};
 pub use delivery_store::{decode_delivery, save_delivery};
 pub use git::{Git, GitAction, GitCompletion, GitLimits, git_worst_case};

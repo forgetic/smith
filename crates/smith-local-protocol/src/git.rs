@@ -9,7 +9,7 @@
 //! |---|---|---|
 //! | Head | rev-parse HEAD | Head |
 //! | Status | rev-parse HEAD, status, verify MERGE_HEAD | Status |
-//! | Inspect | show HEAD | Inspected |
+//! | Inspect | log by trailer, rev-parse HEAD if absent | Inspected |
 //! | Markers | read named conflict files | Markers |
 //! | Commit | add, commit, rev-parse HEAD | Committed |
 //! | Push | push | Pushed, Stale or Failed |
@@ -23,6 +23,8 @@ use smith_local_domain::{GitOp, GitResult};
 /// Bounds for one git child adapter.
 #[derive(Clone, Copy, Debug)]
 pub struct GitLimits {
+    /// Maximum total owned message or push-target argument bytes.
+    pub argument_bytes: u32,
     /// Maximum status or inspection stdout bytes.
     pub output_bytes: u32,
     /// Maximum conflicted paths to retain.
@@ -41,6 +43,8 @@ pub fn git_worst_case(limits: &GitLimits) -> Option<u64> {
     }
     u64::try_from(size_of::<Git>())
         .ok()?
+        .checked_add(u64::from(limits.argument_bytes).checked_mul(2)?)?
+        .checked_add(u64::try_from(size_of::<Box<[u8]>>()).ok()?.checked_mul(8)?)?
         .checked_add(u64::from(limits.output_bytes))?
         .checked_add(u64::from(limits.conflicts).checked_mul(u64::from(limits.path_bytes))?)?
         .checked_add(u64::from(limits.detail_bytes))
@@ -73,6 +77,7 @@ enum Step {
     StatusBody { head: Box<[u8]> },
     StatusMerge { head: Box<[u8]>, changed: bool, paths: Box<[Box<[u8]>]> },
     Inspect { name: run::CallName },
+    InspectHead,
     Markers { paths: Box<[Box<[u8]>]> },
     Add { message: Box<[u8]> },
     Commit { message: Box<[u8]> },
@@ -93,6 +98,14 @@ impl Git {
     #[must_use]
     pub fn new(op: GitOp, limits: GitLimits) -> Option<(Self, GitAction)> {
         git_worst_case(&limits)?;
+        let arguments = match &op {
+            GitOp::Commit { message } => message.len(),
+            GitOp::Push { remote, branch } => remote.len().checked_add(branch.len())?,
+            GitOp::Head | GitOp::Status | GitOp::Inspect { .. } | GitOp::Markers { .. } => 0,
+        };
+        if arguments > usize::try_from(limits.argument_bytes).ok()? {
+            return None;
+        }
         let step = match op {
             GitOp::Head => Step::Head,
             GitOp::Status => Step::StatusHead,
@@ -117,6 +130,7 @@ impl Git {
                 | Step::StatusBody { .. }
                 | Step::StatusMerge { .. }
                 | Step::Inspect { .. }
+                | Step::InspectHead
                 | Step::Add { .. }
                 | Step::Commit { .. }
                 | Step::CommitHead
@@ -125,10 +139,10 @@ impl Git {
             },
             GitCompletion::Command { code, stdout, stderr, timed_out } => {
                 if timed_out {
-                    return GitAction::Done(failed(run::DeliveryReason::TimedOut, &stderr, &self.limits));
+                    return GitAction::Done(step_failure(&step, run::DeliveryReason::TimedOut, &stderr, &self.limits));
                 }
                 if stdout.len() > usize::try_from(self.limits.output_bytes).expect("u32 fits usize") {
-                    return GitAction::Done(failed(run::DeliveryReason::TooLarge, &stderr, &self.limits));
+                    return GitAction::Done(step_failure(&step, run::DeliveryReason::TooLarge, &stderr, &self.limits));
                 }
                 self.command_done(step, code, &stdout, &stderr)
             }
@@ -137,7 +151,7 @@ impl Git {
 
     fn request(&self) -> GitAction {
         let args: Box<[Box<[u8]>]> = match &self.step {
-            Step::Head | Step::StatusHead | Step::CommitHead => {
+            Step::Head | Step::StatusHead | Step::CommitHead | Step::InspectHead => {
                 Box::new([Box::from(&b"rev-parse"[..]), Box::from(&b"HEAD"[..])])
             }
             Step::StatusBody { .. } => Box::new([
@@ -152,12 +166,25 @@ impl Git {
                 Box::from(&b"--verify"[..]),
                 Box::from(&b"MERGE_HEAD"[..]),
             ]),
-            Step::Inspect { .. } => Box::new([
-                Box::from(&b"show"[..]),
-                Box::from(&b"-s"[..]),
-                Box::from(&b"--format=%H%x00%B"[..]),
-                Box::from(&b"HEAD"[..]),
-            ]),
+            Step::Inspect { name } => {
+                let mut pattern = List::with_capacity(96);
+                for byte in b"--grep=^Smith-Delivery: " {
+                    pattern.push(*byte).expect("trailer pattern bound");
+                }
+                decimal(&mut pattern, name.activation);
+                pattern.push(b'/').expect("trailer pattern bound");
+                decimal(&mut pattern, u64::from(name.completion));
+                pattern.push(b'/').expect("trailer pattern bound");
+                decimal(&mut pattern, u64::from(name.position));
+                pattern.push(b'$').expect("trailer pattern bound");
+                Box::new([
+                    Box::from(&b"log"[..]),
+                    Box::from(&b"-1"[..]),
+                    Box::from(&b"--format=%H%x00%B"[..]),
+                    pattern.into_boxed(),
+                    Box::from(&b"HEAD"[..]),
+                ])
+            }
             Step::Add { .. } => Box::new([Box::from(&b"add"[..]), Box::from(&b"-A"[..])]),
             Step::Commit { message } => Box::new([
                 Box::from(&b"-c"[..]),
@@ -196,9 +223,20 @@ impl Git {
                 self.advance(Step::StatusMerge { head, changed: !stdout.is_empty(), paths })
             }
             Step::StatusMerge { head, changed, paths } => {
-                let merging = if code == Some(0) { Some(paths) } else { None };
+                let merging = match code {
+                    Some(0) => Some(paths),
+                    Some(1) => None,
+                    Some(_) | None => {
+                        return GitAction::Done(failed(run::DeliveryReason::Broken, stderr, &self.limits));
+                    }
+                };
                 GitAction::Done(GitResult::Status { changed, merging, head })
             }
+            Step::InspectHead => match clean_head(code, stdout) {
+                Some(head) => GitAction::Done(GitResult::Inspected { head, named: false }),
+                None => GitAction::Done(failed(run::DeliveryReason::Broken, stderr, &self.limits)),
+            },
+            Step::Inspect { name: _ } if code == Some(0) && stdout.is_empty() => self.advance(Step::InspectHead),
             Step::Inspect { name } => match inspect(code, stdout, name) {
                 Some((head, named)) => GitAction::Done(GitResult::Inspected { head, named }),
                 None => GitAction::Done(failed(run::DeliveryReason::Broken, stderr, &self.limits)),
@@ -207,14 +245,14 @@ impl Git {
                 if code == Some(0) {
                     self.advance(Step::Commit { message })
                 } else {
-                    GitAction::Done(failed(run::DeliveryReason::Broken, stderr, &self.limits))
+                    GitAction::Done(no_effect(run::DeliveryReason::Broken, stderr, &self.limits))
                 }
             }
             Step::Commit { .. } => {
                 if code == Some(0) {
                     self.advance(Step::CommitHead)
                 } else {
-                    GitAction::Done(failed(run::DeliveryReason::Broken, stderr, &self.limits))
+                    GitAction::Done(uncertain(run::DeliveryReason::Broken, stderr, &self.limits))
                 }
             }
             Step::CommitHead => match clean_head(code, stdout) {
@@ -225,7 +263,7 @@ impl Git {
                     }
                     GitAction::Done(GitResult::Committed { receipt: text.into_boxed(), head })
                 }
-                None => GitAction::Done(failed(run::DeliveryReason::Broken, stderr, &self.limits)),
+                None => GitAction::Done(uncertain(run::DeliveryReason::Broken, stderr, &self.limits)),
             },
             Step::Push { .. } => {
                 if code == Some(0) {
@@ -286,7 +324,20 @@ fn inspect(code: Option<u8>, stdout: &[u8], name: run::CallName) -> Option<(Box<
     decimal(&mut trailer, u64::from(name.completion));
     trailer.push(b'/').expect("trailer bound");
     decimal(&mut trailer, u64::from(name.position));
-    Some((Box::from(head), bytes::find(message, trailer.as_slice()).is_some()))
+    let mut named = false;
+    let mut start = 0_usize;
+    for end in 0..message.len() {
+        if message.get(end) == Some(&b'\n') {
+            if message.get(start..end) == Some(trailer.as_slice()) {
+                named = true;
+            }
+            start = end.checked_add(1).expect("bounded message offset");
+        }
+    }
+    if message.get(start..) == Some(trailer.as_slice()) {
+        named = true;
+    }
+    Some((Box::from(head), named))
 }
 
 fn is_hex(bytes: &[u8]) -> bool {
@@ -345,7 +396,34 @@ fn conflicts(stdout: &[u8], limits: &GitLimits) -> Result<Box<[Box<[u8]>]>, ()> 
     Err(())
 }
 
+fn step_failure(step: &Step, reason: run::DeliveryReason, stderr: &[u8], limits: &GitLimits) -> GitResult {
+    match step {
+        Step::Add { .. } => no_effect(reason, stderr, limits),
+        Step::Commit { .. } | Step::CommitHead | Step::Push { .. } => uncertain(reason, stderr, limits),
+        Step::Head
+        | Step::StatusHead
+        | Step::StatusBody { .. }
+        | Step::StatusMerge { .. }
+        | Step::Inspect { .. }
+        | Step::InspectHead
+        | Step::Markers { .. }
+        | Step::Done => failed(reason, stderr, limits),
+    }
+}
+
+fn no_effect(reason: run::DeliveryReason, stderr: &[u8], limits: &GitLimits) -> GitResult {
+    GitResult::NoEffect { reason, diagnostic: diagnostic(stderr, limits) }
+}
+
+fn uncertain(reason: run::DeliveryReason, stderr: &[u8], limits: &GitLimits) -> GitResult {
+    GitResult::Uncertain { reason, diagnostic: diagnostic(stderr, limits) }
+}
+
 fn failed(reason: run::DeliveryReason, stderr: &[u8], limits: &GitLimits) -> GitResult {
+    GitResult::Failed { reason, diagnostic: diagnostic(stderr, limits) }
+}
+
+fn diagnostic(stderr: &[u8], limits: &GitLimits) -> Box<run::Diagnostic> {
     let tail = if stderr.len() > usize::try_from(limits.detail_bytes).expect("u32 fits usize") {
         stderr
             .get(stderr.len().saturating_sub(usize::try_from(limits.detail_bytes).expect("u32 fits usize"))..)
@@ -354,10 +432,7 @@ fn failed(reason: run::DeliveryReason, stderr: &[u8], limits: &GitLimits) -> Git
         stderr
     };
     let dropped = stderr.len().saturating_sub(tail.len());
-    GitResult::Failed {
-        reason,
-        diagnostic: Box::new(run::Diagnostic::new(tail, u64::try_from(dropped).unwrap_or(u64::MAX))),
-    }
+    Box::new(run::Diagnostic::new(tail, u64::try_from(dropped).unwrap_or(u64::MAX)))
 }
 
 #[cfg(test)]
@@ -367,7 +442,7 @@ mod tests {
     const HASH: &[u8] = b"0123456789abcdef0123456789abcdef01234567";
 
     fn limits() -> GitLimits {
-        GitLimits { output_bytes: 4096, conflicts: 4, path_bytes: 128, detail_bytes: 128 }
+        GitLimits { argument_bytes: 4096, output_bytes: 4096, conflicts: 4, path_bytes: 128, detail_bytes: 128 }
     }
 
     fn command(code: Option<u8>, stdout: &[u8], stderr: &[u8]) -> GitCompletion {

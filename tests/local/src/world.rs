@@ -154,6 +154,19 @@ enum PushFault {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// One scripted uncertainty at the git boundary, supplied by a local-world story.
+pub enum GitFault {
+    /// The deadline passes before a commit makes any effect.
+    NoEffect,
+    /// The commit lands as its child deadline passes.
+    Deadline,
+    /// The commit lands but its receipt head read fails.
+    HeadUnreadable,
+    /// The commit and all later inspections are unreadable this invocation.
+    InspectionUnreadable,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HeadChange {
     None,
     BeforeDelivery,
@@ -204,6 +217,7 @@ pub struct World {
     slow_git: bool,
     push_fault: PushFault,
     head_change: HeadChange,
+    git_fault: Option<GitFault>,
     held_git: VecDeque<(Token, GitResult)>,
     first_failure: FirstFailure,
     credential_requests: u32,
@@ -642,6 +656,7 @@ impl World {
             slow_git: false,
             push_fault: PushFault::None,
             head_change: HeadChange::None,
+            git_fault: None,
             held_git: VecDeque::new(),
             first_failure: FirstFailure::None,
             credential_requests: 0,
@@ -682,6 +697,11 @@ impl World {
     /// Delay typed git terminals until the story releases them.
     pub fn slow_git(&mut self) {
         self.slow_git = true;
+    }
+
+    /// Make a landed commit's terminal uncertain without issuing another commit.
+    pub fn uncertain_git(&mut self, fault: GitFault) {
+        self.git_fault = Some(fault);
     }
 
     /// Fail the next typed push operation.
@@ -1000,11 +1020,20 @@ impl World {
                 let activation = state.activation;
                 let sequence = turn.sequence;
                 self.store.turns.push(turn);
-                self.store.deliveries.retain(|name, _| name.activation == activation && name.completion > sequence);
+                self.store.deliveries.retain(|name, record| {
+                    matches!(record.state, DeliveryState::Intent(_))
+                        || (name.activation == activation && name.completion > sequence)
+                });
                 self.observe(Seen::StoredAnswers {
                     activation,
                     sequence,
-                    names: self.store.deliveries.keys().copied().collect(),
+                    names: self
+                        .store
+                        .deliveries
+                        .iter()
+                        .filter(|(_, record)| matches!(record.state, DeliveryState::Answer(_)))
+                        .map(|(name, _)| *name)
+                        .collect(),
                 });
                 if self.slow_store {
                     self.delayed_turns.push_back(number);
@@ -1094,7 +1123,19 @@ impl World {
                     self.head_change = HeadChange::None;
                 }
                 let pushing = matches!(op, GitOp::Push { .. });
-                let result = if self.env.now > deadline {
+                let committing = matches!(op, GitOp::Commit { .. });
+                let inspecting = matches!(op, GitOp::Inspect { .. });
+                let mut result = if committing && self.git_fault == Some(GitFault::NoEffect) {
+                    GitResult::Uncertain {
+                        reason: run::DeliveryReason::TimedOut,
+                        diagnostic: Box::new(run::Diagnostic::empty()),
+                    }
+                } else if inspecting && self.git_fault == Some(GitFault::InspectionUnreadable) {
+                    GitResult::Failed {
+                        reason: run::DeliveryReason::Broken,
+                        diagnostic: Box::new(run::Diagnostic::empty()),
+                    }
+                } else if self.env.now > deadline {
                     GitResult::Failed {
                         reason: run::DeliveryReason::TimedOut,
                         diagnostic: Box::new(run::Diagnostic::empty()),
@@ -1137,6 +1178,15 @@ impl World {
                     if self.cut == Some(Cut::AfterCommit(directory)) {
                         self.reached.insert(Goal::Cut);
                     }
+                }
+                if matches!(result, GitResult::Committed { .. })
+                    && let Some(fault) = self.git_fault
+                {
+                    let reason = match fault {
+                        GitFault::Deadline | GitFault::NoEffect => run::DeliveryReason::TimedOut,
+                        GitFault::HeadUnreadable | GitFault::InspectionUnreadable => run::DeliveryReason::Broken,
+                    };
+                    result = GitResult::Uncertain { reason, diagnostic: Box::new(run::Diagnostic::empty()) };
                 }
                 if pushing && matches!(result, GitResult::Pushed) && self.cut == Some(Cut::BeforePushTerminal) {
                     self.reached.insert(Goal::Cut);

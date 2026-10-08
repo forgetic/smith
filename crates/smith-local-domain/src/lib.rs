@@ -2,6 +2,8 @@
 //! It owns the in-process agent, typed chat metadata, queued person lines,
 //! credential names and turns awaiting a durable store terminal. It never
 //! knows terminal IO, file encoding, provider secrets or provider syntax.
+//! Uncertain writes retain their intent and inspect their stable delivery
+//! trailer before answering (protocol/hosts.md, section 5.5).
 //!
 //! `step`, `fire` and `resume` take the injected clock and limits. The caller
 //! reserves `max_out` slots and settles each store, credential and agent IO
@@ -17,6 +19,9 @@
 //! Running   Line                         Running    SaveState, then Message
 //! Running   agent Turn                   Running    SaveTurn, Show
 //! Running   agent Deliver                Running    survey, save intent, commit, save answer
+//! Running   uncertain commit             Running    inspect saved delivery trailer
+//! Running   unknown inspection           Running    fail unknown, retain intent
+//! Loading   unavailable inspection       Done       Exit failed, retain intent
 //! Running   TurnSaved                    Running    release held answer
 //! Running   Interrupt                    Ending     agent Cancel
 //! Running   agent Answer                 Loading    Show after saves, Load

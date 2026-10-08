@@ -22,6 +22,8 @@ pub(crate) enum Step {
     Status,
     Markers,
     Commit,
+    Inspect,
+    InspectPush,
     Push,
 }
 
@@ -44,6 +46,7 @@ pub(crate) struct InPlace {
     pub(crate) step: Step,
     pub(crate) stage: Stage,
     pub(crate) directories: List<IntentDirectory>,
+    pub(crate) uncertainty: Option<(run::DeliveryReason, run::Diagnostic)>,
     pub(crate) marker_head: Option<Box<[u8]>>,
 }
 
@@ -60,6 +63,7 @@ impl InPlace {
             stage: Stage::Survey,
             directories: List::with_capacity(run::MAX_DIRECTORIES),
             marker_head: None,
+            uncertainty: None,
         }
     }
 

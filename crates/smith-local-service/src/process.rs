@@ -502,6 +502,7 @@ fn channel_event(agent: Token, event: protocol::OpenEvent) -> host::Event {
 
 fn git_limits(limits: &ProcessLimits) -> local_protocol::GitLimits {
     local_protocol::GitLimits {
+        argument_bytes: 262_144,
         output_bytes: 65_536,
         conflicts: 64,
         path_bytes: 4096,

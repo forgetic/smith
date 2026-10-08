@@ -325,3 +325,12 @@ The completed host process world was measured serially on 2026-10-08 with
 test passed in 0.163 seconds. The seeded crash sweep, including every step of
 one complete hosted run, passed in 0.777 seconds. The world's one-second
 focused and five-second fuzzy shares, and the workspace budgets, are unchanged.
+
+The local uncertain-delivery stories were measured serially on 2026-10-08
+with the `measure -j 1` profile: 57 focused local-world tests passed in
+0.279 seconds, and its one fuzzy sweep passed in 0.038 seconds. A commit
+whose deadline races landing and a commit whose receipt head cannot be read
+are found by their delivery trailer. An unreadable inspection keeps the
+intent across later turns and a restart; an absent trailer with an unchanged
+head proves no effect. The world's one-second focused and five-second fuzzy
+shares, and the workspace budgets, remain unchanged.

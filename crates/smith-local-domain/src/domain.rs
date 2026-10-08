@@ -76,6 +76,7 @@ struct Reconcile {
     next: u32,
     receipts: List<agent::run::Receipt>,
     pushing: bool,
+    uncertain_push: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -87,7 +88,13 @@ enum HeadSurvey {
 
 impl Reconcile {
     fn new(record: DeliveryRecord) -> Self {
-        Self { record, next: 0, receipts: List::with_capacity(agent::run::MAX_DIRECTORIES), pushing: false }
+        Self {
+            record,
+            next: 0,
+            receipts: List::with_capacity(agent::run::MAX_DIRECTORIES),
+            pushing: false,
+            uncertain_push: false,
+        }
     }
 
     fn intent(&self) -> &DeliveryIntent {
@@ -572,7 +579,9 @@ fn head_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: Git
         | GitResult::Markers { .. }
         | GitResult::Committed { .. }
         | GitResult::Pushed
-        | GitResult::Stale => unreachable!("start head inspection has one terminal"),
+        | GitResult::Stale
+        | GitResult::NoEffect { .. }
+        | GitResult::Uncertain { .. } => unreachable!("start head inspection has one terminal"),
     }
 }
 
@@ -613,8 +622,12 @@ fn turn_saved(domain: &mut Domain, env: &Env<Limits>, number: u32, out: &mut Que
         }
     }
     let mut retired = List::with_capacity(env.limits.agent.run.answered_calls);
-    for (name, _) in &domain.records {
-        if name.activation != domain.chat.state.activation || name.completion <= sequence {
+    for (name, record) in &domain.records {
+        let answered = match record.state {
+            DeliveryState::Intent(_) => false,
+            DeliveryState::Answer(_) => true,
+        };
+        if answered && (name.activation != domain.chat.state.activation || name.completion <= sequence) {
             retired.push(*name).expect("bounded saved answers");
         }
     }
@@ -941,6 +954,10 @@ fn begin_delivery(
         deliver_to_agent(domain, env, owner, delivery, out);
         return;
     }
+    if domain.records.get(&name).is_some() {
+        deliver_unknown(domain, env, owner, 0, out);
+        return;
+    }
     let rules = match &domain.config.contract {
         crate::Contract::Change(spec) => &spec.fields,
         crate::Contract::Report(_) => match &domain.config.deliver {
@@ -1095,7 +1112,7 @@ fn plain_status(domain: &mut Domain, env: &Env<Limits>, owner: Token, changed: b
     clippy::too_many_lines,
     reason = "one exhaustive git terminal transition owns status, markers, commit and push"
 )]
-fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitResult, out: &mut Queue<Request>) {
+fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, mut result: GitResult, out: &mut Queue<Request>) {
     if domain.chat.phase == Phase::Starting && domain.head_survey != HeadSurvey::Complete {
         head_result(domain, env, owner, result, out);
         return;
@@ -1107,6 +1124,61 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
     let mut in_place = domain.delivery.take().expect("git terminal answers one delivery operation");
     assert_eq!(in_place.owner, owner, "git terminal matches active delivery");
     let directory = in_place.next;
+    if in_place.step == Step::InspectPush {
+        match result {
+            GitResult::Inspected { .. } | GitResult::Failed { .. } | GitResult::Uncertain { .. } => {
+                // A trailer proves the local commit, not the configured remote's head.
+                deliver_unknown(domain, env, owner, directory, out);
+            }
+            GitResult::Head { .. }
+            | GitResult::Status { .. }
+            | GitResult::Markers { .. }
+            | GitResult::Committed { .. }
+            | GitResult::Pushed
+            | GitResult::Stale
+            | GitResult::NoEffect { .. } => unreachable!("uncertain push awaits inspection"),
+        }
+        return;
+    }
+    if in_place.step == Step::Inspect {
+        result = match result {
+            GitResult::Inspected { head, named: true } => {
+                let capacity =
+                    u32::try_from(head.len()).expect("bounded inspected head").checked_add(7).expect("receipt bound");
+                let mut text = List::with_capacity(capacity);
+                for byte in b"commit ".iter().chain(head.iter()) {
+                    text.push(*byte).expect("receipt capacity");
+                }
+                GitResult::Committed { receipt: text.into_boxed(), head }
+            }
+            GitResult::Inspected { head, named: false } => {
+                let mut unchanged = false;
+                for entry in &in_place.directories {
+                    if entry.directory == directory && entry.head.as_deref() == Some(head.as_ref()) {
+                        unchanged = true;
+                    }
+                }
+                if !unchanged {
+                    deliver_unknown(domain, env, owner, directory, out);
+                    return;
+                }
+                let (reason, diagnostic) = in_place.uncertainty.take().expect("uncertain write diagnostic");
+                GitResult::NoEffect { reason, diagnostic: Box::new(diagnostic) }
+            }
+            GitResult::Failed { .. } | GitResult::Uncertain { .. } => {
+                deliver_unknown(domain, env, owner, directory, out);
+                return;
+            }
+            GitResult::Head { .. }
+            | GitResult::Status { .. }
+            | GitResult::Markers { .. }
+            | GitResult::Committed { .. }
+            | GitResult::Pushed
+            | GitResult::Stale
+            | GitResult::NoEffect { .. } => unreachable!("uncertain write awaits inspection"),
+        };
+        in_place.step = Step::Commit;
+    }
     if in_place.step == Step::Status {
         match &result {
             GitResult::Status { head, .. } if stale_head(domain, directory, head) => {
@@ -1120,7 +1192,9 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
             | GitResult::Committed { .. }
             | GitResult::Pushed
             | GitResult::Stale
-            | GitResult::Failed { .. } => {}
+            | GitResult::Failed { .. }
+            | GitResult::NoEffect { .. }
+            | GitResult::Uncertain { .. } => {}
         }
     }
     match in_place.step {
@@ -1193,7 +1267,7 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
                 in_place.next = directory.checked_add(1).expect("admitted directory position");
                 advance_delivery(domain, env, in_place, out);
             }
-            GitResult::Failed { reason, diagnostic } => {
+            GitResult::Failed { reason, diagnostic } | GitResult::NoEffect { reason, diagnostic } => {
                 delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
             }
             GitResult::Head { .. }
@@ -1201,7 +1275,8 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
             | GitResult::Committed { .. }
             | GitResult::Pushed
             | GitResult::Stale
-            | GitResult::Inspected { .. } => {
+            | GitResult::Inspected { .. }
+            | GitResult::Uncertain { .. } => {
                 unreachable!("status awaits a status terminal")
             }
         },
@@ -1229,7 +1304,7 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
                         .expect("bounded host explanation");
                 save_delivery(domain, in_place.name, owner, agent::run::Delivery::Refused(refusal), out);
             }
-            GitResult::Failed { reason, diagnostic } => {
+            GitResult::Failed { reason, diagnostic } | GitResult::NoEffect { reason, diagnostic } => {
                 delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
             }
             GitResult::Head { .. }
@@ -1237,7 +1312,8 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
             | GitResult::Committed { .. }
             | GitResult::Pushed
             | GitResult::Stale
-            | GitResult::Inspected { .. } => {
+            | GitResult::Inspected { .. }
+            | GitResult::Uncertain { .. } => {
                 unreachable!("markers await a marker terminal")
             }
         },
@@ -1281,8 +1357,19 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
                     advance_delivery(domain, env, in_place, out);
                 }
             }
-            GitResult::Failed { reason, diagnostic } => {
+            GitResult::Failed { reason, diagnostic } | GitResult::NoEffect { reason, diagnostic } => {
                 delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
+            }
+            GitResult::Uncertain { reason, diagnostic } => {
+                in_place.step = Step::Inspect;
+                in_place.uncertainty = Some((reason, *diagnostic));
+                out.push(Request::Git {
+                    owner,
+                    directory,
+                    op: GitOp::Inspect { name: in_place.name },
+                    deadline: env.now.saturating_add(domain.config.budget.time),
+                });
+                domain.delivery = Some(in_place);
             }
             GitResult::Head { .. }
             | GitResult::Status { .. }
@@ -1294,12 +1381,22 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
             }
         },
         Step::Push => match result {
+            GitResult::Uncertain { .. } => {
+                in_place.step = Step::InspectPush;
+                out.push(Request::Git {
+                    owner,
+                    directory,
+                    op: GitOp::Inspect { name: in_place.name },
+                    deadline: env.now.saturating_add(domain.config.budget.time),
+                });
+                domain.delivery = Some(in_place);
+            }
             GitResult::Pushed => {
                 in_place.next = directory.checked_add(1).expect("admitted directory position");
                 advance_delivery(domain, env, in_place, out);
             }
             GitResult::Stale => save_delivery(domain, in_place.name, owner, agent::run::Delivery::Stale, out),
-            GitResult::Failed { reason, diagnostic } => {
+            GitResult::Failed { reason, diagnostic } | GitResult::NoEffect { reason, diagnostic } => {
                 delivery_failed(domain, in_place.name, owner, directory, reason, &diagnostic, out);
             }
             GitResult::Head { .. }
@@ -1310,6 +1407,7 @@ fn git_result(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: GitR
                 unreachable!("push awaits a push terminal")
             }
         },
+        Step::Inspect | Step::InspectPush => unreachable!("inspection normalized to commit terminal"),
         Step::Plain => unreachable!("git terminal cannot answer a plain status"),
     }
 }
@@ -1334,6 +1432,17 @@ fn stale_head(domain: &Domain, directory: u32, head: &[u8]) -> bool {
         Some(own) => own.as_ref() != head,
         None => true,
     }
+}
+
+fn deliver_unknown(domain: &mut Domain, env: &Env<Limits>, owner: Token, directory: u32, out: &mut Queue<Request>) {
+    domain.delivery = None;
+    deliver_to_agent(
+        domain,
+        env,
+        owner,
+        agent::run::Delivery::Failed(agent::run::DeliveryFailure::new(directory, agent::run::DeliveryReason::Unknown)),
+        out,
+    );
 }
 
 fn delivery_failure(
@@ -1469,16 +1578,30 @@ fn reconcile_git(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: G
                 reconcile_next(domain, env, out);
             }
             GitResult::Stale => reconcile_terminal(domain, reconcile, agent::run::Delivery::Stale, out),
-            GitResult::Failed { reason, diagnostic } => reconcile_terminal(
-                domain,
-                reconcile,
-                agent::run::Delivery::Failed(agent::run::DeliveryFailure {
+            GitResult::Failed { reason, diagnostic } | GitResult::NoEffect { reason, diagnostic } => {
+                reconcile_terminal(
+                    domain,
+                    reconcile,
+                    agent::run::Delivery::Failed(agent::run::DeliveryFailure {
+                        directory: entry.directory,
+                        reason,
+                        diagnostic: *diagnostic,
+                    }),
+                    out,
+                );
+            }
+            GitResult::Uncertain { .. } => {
+                reconcile.pushing = false;
+                reconcile.uncertain_push = true;
+                let name = reconcile.record.name;
+                domain.reconciling = Some(reconcile);
+                out.push(Request::Git {
+                    owner,
                     directory: entry.directory,
-                    reason,
-                    diagnostic: *diagnostic,
-                }),
-                out,
-            ),
+                    op: GitOp::Inspect { name },
+                    deadline: env.now.saturating_add(domain.config.budget.time),
+                });
+            }
             GitResult::Head { .. }
             | GitResult::Status { .. }
             | GitResult::Inspected { .. }
@@ -1487,10 +1610,14 @@ fn reconcile_git(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: G
         }
         return;
     }
+    if reconcile.uncertain_push {
+        recovery_unknown(domain, out);
+        return;
+    }
     let before = entry.head.expect("inspection applies to a git directory");
     match result {
         GitResult::Inspected { head, named } => {
-            if head != before && named && !head.is_empty() && head.len() <= agent::run::Receipt::CAPACITY - 7 {
+            if named && !head.is_empty() && head.len() <= agent::run::Receipt::CAPACITY - 7 {
                 let mut text =
                     List::with_capacity(u32::try_from(agent::run::Receipt::CAPACITY).expect("fixed receipt bound"));
                 for byte in b"commit ".iter().chain(head.iter()) {
@@ -1514,20 +1641,29 @@ fn reconcile_git(domain: &mut Domain, env: &Env<Limits>, owner: Token, result: G
                         reconcile_next(domain, env, out);
                     }
                 }
-            } else {
+            } else if head == before && !named {
                 reconcile_answer(domain, reconcile, Some(entry.directory), out);
+            } else {
+                recovery_unknown(domain, out);
             }
         }
-        GitResult::Failed { .. } => reconcile_answer(domain, reconcile, Some(entry.directory), out),
+        GitResult::Failed { .. } | GitResult::Uncertain { .. } => recovery_unknown(domain, out),
         GitResult::Head { .. }
         | GitResult::Status { .. }
         | GitResult::Markers { .. }
         | GitResult::Committed { .. }
         | GitResult::Pushed
-        | GitResult::Stale => {
+        | GitResult::Stale
+        | GitResult::NoEffect { .. } => {
             unreachable!("recovery awaits one inspection terminal")
         }
     }
+}
+
+fn recovery_unknown(domain: &mut Domain, out: &mut Queue<Request>) {
+    domain.stop_failed = true;
+    domain.chat.phase = Phase::Done;
+    out.push(Request::Exit { status: ExitStatus::Failed });
 }
 
 fn reconcile_answer(domain: &mut Domain, reconcile: Reconcile, interrupted: Option<u32>, out: &mut Queue<Request>) {

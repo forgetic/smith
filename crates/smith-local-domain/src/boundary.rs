@@ -170,7 +170,11 @@ pub enum GitResult {
     Pushed,
     /// The remote branch moved since this checkout began.
     Stale,
-    /// Git operation failed with a bounded diagnostic tail.
+    /// A write made no commit; the host may fail with this diagnostic.
+    NoEffect { reason: run::DeliveryReason, diagnostic: Box<run::Diagnostic> },
+    /// A write may have landed; the host must inspect its saved delivery name.
+    Uncertain { reason: run::DeliveryReason, diagnostic: Box<run::Diagnostic> },
+    /// A read failed with a bounded diagnostic tail.
     Failed { reason: run::DeliveryReason, diagnostic: Box<run::Diagnostic> },
 }
 
