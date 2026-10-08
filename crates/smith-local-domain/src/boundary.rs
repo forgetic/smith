@@ -26,7 +26,7 @@ pub enum ExternalEvent {
     /// One concrete turn told by the child and awaiting durable acknowledgement.
     Turn { number: u32, read: Option<Token>, turn: agent::Turn },
     /// The child's last word, shown only after every turn is saved.
-    Answer { answer: run::Answer },
+    Answer { answer: ExternalFinal },
     /// The child waits for another person message.
     Waiting,
     /// The child began a bounded check operation.
@@ -43,6 +43,25 @@ pub enum ExternalEvent {
     Failed,
     /// The child exited, its channel ended, and its process tree was reaped.
     Gone,
+}
+
+/// The spawned agent's last word in the local host's display vocabulary.
+/// The channel carries host-unit spend, so this value never invents the
+/// in-process run's fuller token accounting.
+#[derive(Debug)]
+pub enum ExternalFinal {
+    /// The run finished with a contract-accepted result.
+    Accepted { outcome: run::outcome::Declared },
+    /// A waiting chat parked for a later activation.
+    Parked,
+    /// The agent refused this start before work.
+    Refused,
+    /// The parent cancelled the admitted run.
+    Cancelled,
+    /// The saved concrete history was refused before new work.
+    TranscriptRefused,
+    /// Another typed run failure ended the activation.
+    Failed,
 }
 
 /// Local policy requests carried out by a spawned agent service.

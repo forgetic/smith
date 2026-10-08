@@ -7,7 +7,7 @@ use alloc::boxed::Box;
 use skein_lib::{List, Reader};
 use smith_domain::{Answered, run};
 use smith_host_domain::{self as host, channel};
-use smith_local_domain::ExternalStart;
+use smith_local_domain::{ExternalFinal, ExternalStart};
 use smith_protocol_channel as protocol;
 
 /// A sealed local terminal did not fit the host's matching sealed vocabulary.
@@ -23,6 +23,24 @@ pub enum BridgeError {
     Values,
     /// The result body is malformed or does not have the expected form.
     Result,
+}
+
+/// Keep the local host's display classification without inventing token usage
+/// absent from the host channel's scalar spend.
+pub fn answer_to_local(answer: channel::Answer) -> Result<ExternalFinal, BridgeError> {
+    match answer.result {
+        channel::RunResult::Accepted { outcome } => Ok(ExternalFinal::Accepted { outcome: decode_declared(&outcome)? }),
+        channel::RunResult::Parked => Ok(ExternalFinal::Parked),
+        channel::RunResult::Refused { refusal: _ } => Ok(ExternalFinal::Refused),
+        channel::RunResult::Failed { failure } => match failure {
+            channel::RunFailure::Cancelled => Ok(ExternalFinal::Cancelled),
+            channel::RunFailure::Transcript(_) => Ok(ExternalFinal::TranscriptRefused),
+            channel::RunFailure::Model(_)
+            | channel::RunFailure::Budget(_)
+            | channel::RunFailure::Policy(_)
+            | channel::RunFailure::Stale => Ok(ExternalFinal::Failed),
+        },
+    }
 }
 
 /// Decode the accepted outcome body after the host channel has bounded it.
@@ -280,7 +298,24 @@ mod tests {
     use smith_domain::run;
     use smith_host_domain as host;
 
-    use super::{decode_change, decode_declared, delivery_to_host, name_to_host, prepare_start, saved_reply_to_host};
+    use super::{
+        answer_to_local, decode_change, decode_declared, delivery_to_host, name_to_host, prepare_start,
+        saved_reply_to_host,
+    };
+
+    #[test]
+    fn a_spawned_last_word_keeps_its_local_display_class() {
+        let final_word = answer_to_local(host::Answer { turns: 3, spent: 29, result: host::RunResult::Parked })
+            .expect("parked word");
+        let smith_local_domain::ExternalFinal::Parked = final_word else { panic!("parked local chat") };
+        let final_word = answer_to_local(host::Answer {
+            turns: 1,
+            spent: 7,
+            result: host::RunResult::Failed { failure: host::RunFailure::Cancelled },
+        })
+        .expect("cancelled word");
+        let smith_local_domain::ExternalFinal::Cancelled = final_word else { panic!("cancelled local chat") };
+    }
 
     #[test]
     fn a_change_and_report_decode_from_the_agent_result_body() {

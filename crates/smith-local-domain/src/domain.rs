@@ -8,14 +8,14 @@ use skein_lib::{Env, List, Map, Queue, ReplyTo, Time, Token};
 use smith_domain as agent;
 
 use crate::boundary::{
-    AgentIo, ChatState, DeliveryIntent, DeliveryRecord, DeliveryState, Event, ExitStatus, ExternalEvent,
+    AgentIo, ChatState, DeliveryIntent, DeliveryRecord, DeliveryState, Event, ExitStatus, ExternalEvent, ExternalFinal,
     ExternalRequest, ExternalStart, GitOp, GitResult, Request,
 };
 use crate::chat::{Chat, Phase};
 use crate::credentials::Grants;
 use crate::delivery::{InPlace, Stage, Step, commit_message};
 use crate::person::Line;
-use crate::turns::Turns;
+use crate::turns::{Final, Turns};
 use crate::{Config, Fact, Invalid, Limits, charter};
 
 /// Upper bound on local output from one event or ready child step.
@@ -792,7 +792,7 @@ fn accept_turn(
 
 fn accept_answer(domain: &mut Domain, answer: agent::run::Answer, out: &mut Queue<Request>) {
     observe(domain, Fact::Answered { activation: domain.chat.state.activation });
-    domain.turns.answer = Some(answer);
+    domain.turns.answer = Some(Final::InProcess(answer));
     if domain.turns.unsaved.is_empty() {
         finish_answer(domain, out);
     }
@@ -806,7 +806,13 @@ fn external_event(domain: &mut Domain, env: &Env<Limits>, event: ExternalEvent, 
             send_line(domain, env, out);
         }
         ExternalEvent::Turn { number, read, turn } => accept_turn(domain, env, number, read, turn, out),
-        ExternalEvent::Answer { answer } => accept_answer(domain, answer, out),
+        ExternalEvent::Answer { answer } => {
+            observe(domain, Fact::Answered { activation: domain.chat.state.activation });
+            domain.turns.answer = Some(Final::External(answer));
+            if domain.turns.unsaved.is_empty() {
+                finish_answer(domain, out);
+            }
+        }
         ExternalEvent::Waiting => out.push(Request::Show { text: Box::from(&b"Waiting for a message"[..]) }),
         ExternalEvent::Checking => out.push(Request::Show { text: Box::from(&b"Running checks"[..]) }),
         ExternalEvent::ChecksEnded => out.push(Request::Show { text: Box::from(&b"Checks finished"[..]) }),
@@ -855,15 +861,23 @@ fn finish_answer(domain: &mut Domain, out: &mut Queue<Request>) {
     }
     observe(domain, Fact::Shown { activation: domain.chat.state.activation });
     let text = match answer {
-        agent::run::Answer::Accepted { outcome, .. } => match outcome {
+        Final::InProcess(agent::run::Answer::Accepted { outcome, .. })
+        | Final::External(ExternalFinal::Accepted { outcome }) => match outcome {
             agent::run::outcome::Declared::Report(report) => report.text,
             agent::run::outcome::Declared::Failure(failure) => failure.reason,
             agent::run::outcome::Declared::Verdict(verdict) => verdict.text,
             agent::run::outcome::Declared::Change(_) => Box::from(&b"Change delivered"[..]),
         },
-        agent::run::Answer::Parked { .. } => Box::from(&b"Chat parked"[..]),
-        agent::run::Answer::Refused(_) => Box::from(&b"The agent refused this run"[..]),
-        agent::run::Answer::Failed { failure, .. } => match failure {
+        Final::InProcess(agent::run::Answer::Parked { .. }) | Final::External(ExternalFinal::Parked) => {
+            Box::from(&b"Chat parked"[..])
+        }
+        Final::InProcess(agent::run::Answer::Refused(_)) | Final::External(ExternalFinal::Refused) => {
+            Box::from(&b"The agent refused this run"[..])
+        }
+        Final::External(ExternalFinal::Cancelled) => Box::from(&b"Run cancelled"[..]),
+        Final::External(ExternalFinal::TranscriptRefused) => Box::from(&b"Saved transcript was refused"[..]),
+        Final::External(ExternalFinal::Failed) => Box::from(&b"Run failed"[..]),
+        Final::InProcess(agent::run::Answer::Failed { failure, .. }) => match failure {
             agent::run::Failure::Cancelled => Box::from(&b"Run cancelled"[..]),
             agent::run::Failure::Transcript(_) => Box::from(&b"Saved transcript was refused"[..]),
             agent::run::Failure::Model(_)

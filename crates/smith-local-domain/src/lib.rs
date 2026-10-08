@@ -45,7 +45,8 @@ mod tests;
 
 pub use boundary::{
     AgentIo, ChatState, CredentialFailure, DeliveryIntent, DeliveryRecord, DeliveryState, Event, ExitStatus,
-    ExternalEvent, ExternalRequest, ExternalStart, GitOp, GitResult, IntentDirectory, Request, StoreFailure,
+    ExternalEvent, ExternalFinal, ExternalRequest, ExternalStart, GitOp, GitResult, IntentDirectory, Request,
+    StoreFailure,
 };
 pub use config::{Config, Contract, Invalid, PushTarget, charter};
 pub use domain::{Domain, fire, max_out, resume, step};

@@ -2,7 +2,9 @@ use alloc::boxed::Box;
 use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 use smith_domain::run::{self, charter::Endpoint, outcome};
 
-use crate::{Config, Contract, Domain, Event, ExternalEvent, ExternalRequest, Invalid, Limits, Request, charter};
+use crate::{
+    Config, Contract, Domain, Event, ExternalEvent, ExternalFinal, ExternalRequest, Invalid, Limits, Request, charter,
+};
 
 fn limits() -> Limits {
     Limits {
@@ -176,4 +178,10 @@ fn spawned_agent_receives_saved_start_message_and_durable_turn_ack() {
     let Some(Request::External(ack)) = out.pop() else { panic!("ACK after durable terminal") };
     let ExternalRequest::Acknowledge { run, turn: 1 } = *ack else { panic!("exact ACK") };
     assert_eq!(run, Token::new(3));
+    crate::step(&mut domain, &env, Event::External(ExternalEvent::Answer { answer: ExternalFinal::Parked }), &mut out);
+    assert!(out.is_empty(), "a last word waits for child exit and reap");
+    crate::step(&mut domain, &env, Event::External(ExternalEvent::Gone), &mut out);
+    let Some(Request::Show { text }) = out.pop() else { panic!("last word shown after Gone") };
+    assert_eq!(text.as_ref(), b"Chat parked");
+    let Some(Request::Load) = out.pop() else { panic!("next run may load after Gone") };
 }
