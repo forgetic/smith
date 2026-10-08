@@ -1,47 +1,45 @@
-# Local process world
+# Shared local-process stories
 
-The scripted terminal, shared `smith::local_host::Local` shell, Skein fake LLM
-HTTP peer, OAuth peer and browser implement `skein_world::Host`. Each
-holds only process state and kernel queues. The binary and this world pass
-file directories, input/output descriptors and the signal source into the
-same shell. Its actual Store and Tokens implementations perform their file
-work; the world never substitutes transcript or credential handling.
+`process::Proc`, `process::Launch`, `terminal::Terminal`, `process::BrowserProcess`,
+`process::IssuerProcess` and `referee::Run` are independent of the simulator.
+`world::Scenario` holds the terminal script, expected ending and immutable
+launch configuration. The provider and issuer configuration uses Skein's
+shared peers, never a local transport implementation.
 
-The world loop owns the simulated kernel, fake machine, process binding and
-faults. It binds a spawned agent to the actual agent service, and a git child
-to a simulator-free output Host after carrying out its command against
-`skein-fake-checkout`. Both agent placements use the same production settings
-translation and lower components.
+For either backend, register `process::make_local` with `process::local_roots`
+and `process::make_agent` with `process::agent_roots`, using `host_roots`.
+The terminal starts `smith-local` with `Launch::arguments()`. Its launch,
+delivery and agent-effect descriptors are independently opened and closed;
+unused stderr and agent roots settle before hosted exit. A customized real
+scenario can build the shared shell and wrap it with `LocalProcess::new`,
+and configure its agent through the shared `smith_agent_process_world::process::configured`.
 
-The fake checkout has a synchronous world face rather than a hosted process
-face. Its machine-to-checkout adapter belongs to the world loop. A future
-real-loop world needs a process face for that peer in Skein; this session does
-not add one or implement real-loop tests.
+The real-loop tier sets `Launch::tls`, provides a private DER trust file in
+`Launch::trust_der`, and sets `Launch::root_path` to its scratch directory.
+Use `Scenario::provider()` and `IssuerProcess::configured(Transport::Tls)`
+inside the harness's metered process constructors. The same browser follows
+HTTPS authorization with the test root and HTTP loopback callbacks. A focused
+control exercises those transports and every process heap under simulation;
+TLS is kept out of seeded replay because its cryptography is nondeterministic.
 
-The referee accepts only observed terminal bytes, decoded provider requests
-and local facts. Repository inspection uses the head/message/files interface,
-answered here from the fake checkout's commit graph. Negative controls reject
-early or duplicate answers, wrong terminal text, wrong commit contents and an
-unconfigured push. Discarding facts changes no terminal or peer work.
+The simulated adapter alone registers `git::make` with `git::roots`. Exact
+git arguments select a bounded result directory in the fake filesystem
+namespace. The fake checkout computes the command there; the child reads its
+exit code and stdout through its own root and file descriptors, then writes
+the actual pipes. No process shares the checkout or simulator. The real loop
+leaves `/usr/bin/git` unregistered so the kernel executes it in the scratch
+repository. The referee uses only `CheckoutRead::{head,message,files}`; a
+real implementation supplies actual git observations through that same face.
 
-The required stories cover resume across invocations, a commit with the
-result fields as its message, interruption during a turn, and equivalent
-spawned/colocated operation. File write/sync crash cuts are in the shared
-Store's tests. The fuzzy world uses seeded kernel short IO, completion delays
-and cancellation races, and compares the full plaintext kernel trace with
-Skein's replay kit.
-The replaying tiers use shared `skein-fake-peers` over plaintext loopback.
+The harness owns iteration, replay traces, timing, hosted admission, normal
+exit and kill cleanup. `referee::Run` watches every emitted fact, terminal and
+peer observation, checks the saved token before the first observed grant use,
+and arms its browser, interrupt and shutdown flags without allocating any
+process storage. It supplies wakeups for those actions before the loop skips
+to a later deadline. An already accepted delayed provider reply may finish
+after a cancelled local invocation; local terminal liveness is checked when
+the invocation settles, independently of that peer's final cleanup.
 
-Authentication stories run through the shared token store in both placements:
-sign-in and loopback return, expired-token refresh, and refusal. A timed story
-also refreshes a lent grant while a provider response is pending, before its
-original expiry. The first provider request verifies the record was already
-saved. Refusal shows account unavailability and starts no run; EOF exits
-cleanly, following the local domain's existing idle-state behavior. These
-states are also part of the replayed seed sweep. The referee's checkout heads
-are opaque bytes, compatible with future real git object names.
-
-For the Responses dialect, Skein's fake document decoder reports its own
-model token ceiling in Query; it does not attest an output-token field on the
-wire. The referee checks the model and a positive peer ceiling; the agent's
-budget and receiving limits retain their independent tests.
+Use `Memory::Checked` with Skein's `Counting` allocator: construction, every
+iteration and final drop account separately for each process. Machine fixture
+state and the referee remain outside those process heaps.

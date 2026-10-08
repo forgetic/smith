@@ -12,11 +12,14 @@ skein-fake-peers.workspace = true
 skein-fake-oauth.workspace = true
 skein-fake-llm-domain.workspace = true
 skein-llm.workspace = true
+skein-llm-connection.workspace = true
+smith-protocol-llm.workspace = true
 skein-llm-world.workspace = true
 skein-io.workspace = true
 skein-lib.workspace = true
 skein-oauth.workspace = true
 skein-tls-world.workspace = true
+skein-tls.workspace = true
 skein-world.workspace = true
 skein-sim.workspace = true
 skein-fake-machine.workspace = true
@@ -34,6 +37,7 @@ smith-protocol-channel.workspace = true
 smith-domain.workspace = true
 smith-transcript.workspace = true
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 
 [lints.rust]
 unsafe_code = "forbid"

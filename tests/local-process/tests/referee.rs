@@ -89,4 +89,5 @@ fn discarding_service_facts_changes_no_terminal_or_peer_work() {
     assert_eq!(observed.shown(), silent.shown());
     assert_eq!(observed.queries(), silent.queries());
     assert_eq!(observed.exit(), silent.exit());
+    assert_eq!(observed.trace(), silent.trace(), "facts never change kernel work");
 }

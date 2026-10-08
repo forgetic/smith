@@ -58,6 +58,7 @@ pub enum Observation {
 /// Obligations and ordering from one invocation's visible facts.
 pub struct Meeting {
     ending: Ending,
+    require_facts: bool,
     activation: Option<u64>,
     next_turn: u32,
     answered: bool,
@@ -115,7 +116,7 @@ impl Expectations for Meeting {
                         self.activation.is_none() && !self.answered && !self.shown,
                         "a refused account starts no run",
                     );
-                } else {
+                } else if self.require_facts {
                     judge.check(self.shown && self.answered, "the invocation actually answered and showed it");
                 }
                 judge.check(exit == Some(kernel::Exit::Code(0)), "successful shell exit");
@@ -129,7 +130,7 @@ impl Expectations for Meeting {
                     !shown.windows(7).any(|part| part == b"refresh") && !shown.windows(5).any(|part| part == b"token"),
                     "terminal never reveals credentials",
                 );
-                if !matches!(self.ending, Ending::Unavailable) {
+                if self.require_facts && !matches!(self.ending, Ending::Unavailable) {
                     let met = judge.meet(&"terminal");
                     judge.check(met, "terminal settles the activation");
                 }
@@ -182,7 +183,14 @@ impl Expectations for Meeting {
 /// Judge only supplied observations and the checkout's narrow read interface.
 #[must_use]
 pub fn review(seen: &Seen, checkout: &impl CheckoutRead, ending: Ending) -> Referee<Meeting> {
-    let mut referee = Referee::new(Meeting { ending, activation: None, next_turn: 1, answered: false, shown: false });
+    let mut referee = Referee::new(Meeting {
+        ending,
+        require_facts: true,
+        activation: None,
+        next_turn: 1,
+        answered: false,
+        shown: false,
+    });
     let mut stimuli = Vec::new();
     for fact in &seen.facts {
         referee.observe(Time::ZERO, Observation::Fact(*fact), &mut stimuli);
@@ -214,4 +222,229 @@ pub fn review(seen: &Seen, checkout: &impl CheckoutRead, ending: Ending) -> Refe
         &mut stimuli,
     );
     referee
+}
+
+/// Capture only terminal, emitted facts and independent peer observations.
+#[must_use]
+pub fn seen(procs: &[crate::process::Proc], saved_before_query: bool, pushed: bool) -> Seen {
+    use crate::process::Proc;
+    let terminal =
+        procs.iter().find_map(|p| if let Proc::Terminal(p) = p { Some(p.as_ref()) } else { None }).expect("terminal");
+    let peer =
+        procs.iter().find_map(|p| if let Proc::Peer(p) = p { Some(p.as_ref()) } else { None }).expect("provider");
+    let facts = procs
+        .iter()
+        .find_map(|p| if let Proc::Local(p) = p { Some(p.facts().to_vec()) } else { None })
+        .unwrap_or_default();
+    let browser = procs.iter().find_map(|p| if let Proc::Browser(p) = p { Some(p.as_ref()) } else { None });
+    let issuer = procs.iter().find_map(|p| if let Proc::Issuer(p) = p { Some(p.as_ref()) } else { None });
+    Seen {
+        facts,
+        shown: terminal.shown().to_vec(),
+        errors: terminal.errors().to_vec(),
+        queries: crate::llm::queries(peer).cloned().collect(),
+        exit: terminal.exit(),
+        pushed,
+        oauth: issuer.map(|issuer| OAuthSeen {
+            posts: crate::oauth::posts(issuer.peer()),
+            pages: browser.map_or(0, crate::process::BrowserProcess::pages),
+            browser_replied: browser.is_some_and(crate::process::BrowserProcess::replied),
+            saved_before_query,
+        }),
+    }
+}
+
+/// The same outside referee driven beside processes in either kernel loop.
+pub struct Run {
+    seed: u64,
+    meeting: Referee<Meeting>,
+    checkout: Box<dyn CheckoutRead>,
+    token_directory: std::path::PathBuf,
+    interrupt_on_query: bool,
+    interrupted: bool,
+    facts: usize,
+    saved_before_query: bool,
+    reviewed: bool,
+    next_act: Option<Time>,
+    shutdown: bool,
+    end: Time,
+}
+impl Run {
+    /// Prepare the scenario's policy, repository face and observed-token check.
+    #[must_use]
+    pub fn new(
+        seed: u64,
+        ending: Ending,
+        checkout: Box<dyn CheckoutRead>,
+        token_directory: std::path::PathBuf,
+        interrupt_on_query: bool,
+        keep_facts: bool,
+    ) -> Self {
+        Self {
+            seed,
+            meeting: Referee::new(Meeting {
+                ending,
+                require_facts: keep_facts,
+                activation: None,
+                next_turn: 1,
+                answered: false,
+                shown: false,
+            }),
+            checkout,
+            token_directory,
+            interrupt_on_query,
+            interrupted: false,
+            facts: 0,
+            saved_before_query: false,
+            reviewed: false,
+            next_act: None,
+            shutdown: false,
+            end: Time::from_nanos(Duration::from_secs(120).as_nanos()),
+        }
+    }
+}
+impl skein_world::Referee<crate::process::Proc> for Run {
+    fn act(&mut self, _now: Time, procs: &mut [crate::process::Proc]) {
+        use crate::process::Proc;
+        self.next_act = None;
+        let query = procs.iter().any(|p| matches!(p, Proc::Peer(peer) if crate::llm::queries(peer).next().is_some()));
+        let exited = procs.iter().any(|p| matches!(p, Proc::Terminal(t) if t.exit().is_some()));
+        let url = procs.iter().find_map(|p| {
+            if let Proc::Terminal(t) = p {
+                let shown = t.shown();
+                shown.windows(9).position(|part| part == b"Sign in: ").and_then(|at| {
+                    let url = &shown[at + 9..];
+                    url.iter().position(|b| *b == b'\n').map(|end| &url[..end])
+                })
+            } else {
+                None
+            }
+        });
+        // Copy into the referee's stack; process storage was allocated at startup.
+        let mut bytes = [0; 8192];
+        let length = url.map_or(0, |url| {
+            assert!(url.len() <= bytes.len());
+            bytes[..url.len()].copy_from_slice(url);
+            url.len()
+        });
+        if exited {
+            self.shutdown = true;
+        }
+        for proc in procs {
+            match proc {
+                Proc::Terminal(t) => {
+                    if self.interrupt_on_query && query && !self.interrupted {
+                        t.interrupt();
+                        self.interrupted = true;
+                    }
+                }
+                Proc::Peer(peer) => {
+                    if exited {
+                        peer.shutdown();
+                    }
+                }
+                Proc::Issuer(issuer) => {
+                    if exited {
+                        issuer.shutdown();
+                    }
+                }
+                Proc::Browser(browser) => {
+                    if browser.pages() == 0 && length > 0 {
+                        browser.visit(&bytes[..length]);
+                    }
+                    if exited {
+                        browser.shutdown();
+                    }
+                }
+                Proc::Local(_) | Proc::Agent(_) | Proc::Git(_) => {}
+            }
+        }
+    }
+    fn observe(&mut self, now: Time, procs: &[crate::process::Proc]) {
+        use crate::process::Proc;
+        use skein_world::Host;
+        let mut stimuli = Vec::new();
+        if let Some(local) = procs.iter().find_map(|p| if let Proc::Local(p) = p { Some(p.as_ref()) } else { None }) {
+            for fact in &local.facts()[self.facts..] {
+                self.meeting.observe(now, Observation::Fact(*fact), &mut stimuli);
+            }
+            self.facts = local.facts().len();
+        }
+        let peer =
+            procs.iter().find_map(|p| if let Proc::Peer(p) = p { Some(p.as_ref()) } else { None }).expect("provider");
+        assert!(crate::llm::queries(peer).count() <= 64, "bounded provider work");
+        let authenticated = procs.iter().any(|p| matches!(p, Proc::Issuer(_)));
+        if authenticated && !self.saved_before_query && crate::llm::queries(peer).next().is_some() {
+            let tokens = smith::local_tokens::Tokens::new(&self.token_directory, smith::local_host::token_limits())
+                .expect("private store");
+            assert_eq!(
+                tokens.load(0).expect("record").expect("saved before grant use").access_token.as_ref(),
+                b"access-new"
+            );
+            self.saved_before_query = true;
+        }
+        let terminal = procs
+            .iter()
+            .find_map(|p| if let Proc::Terminal(p) = p { Some(p.as_ref()) } else { None })
+            .expect("terminal");
+        let visit = procs.iter().any(|p| matches!(p,Proc::Browser(browser) if browser.pages()==0))
+            && terminal
+                .shown()
+                .windows(9)
+                .position(|bytes| bytes == b"Sign in: ")
+                .is_some_and(|at| terminal.shown()[at + 9..].contains(&b'\n'));
+        if (self.interrupt_on_query && !self.interrupted && crate::llm::queries(peer).next().is_some())
+            || visit
+            || (terminal.exit().is_some() && !self.shutdown)
+        {
+            self.next_act = Some(now);
+        }
+        let local_settled = procs.iter().any(|p| matches!(p,Proc::Local(local) if local.is_empty()));
+        let browser_settled = procs.iter().filter(|p| matches!(p, Proc::Browser(_))).all(Host::is_empty);
+        if !self.reviewed && terminal.is_empty() && local_settled && browser_settled {
+            let observed = seen(procs, self.saved_before_query, false);
+            self.meeting.observe(
+                now,
+                Observation::Terminal {
+                    shown: observed.shown,
+                    errors: observed.errors,
+                    exit: observed.exit,
+                    queries: observed.queries.len(),
+                },
+                &mut stimuli,
+            );
+            self.meeting.observe(
+                now,
+                Observation::Peer { queries: observed.queries, oauth: observed.oauth },
+                &mut stimuli,
+            );
+            let head = self.checkout.head();
+            self.meeting.observe(
+                now,
+                Observation::Commit {
+                    message: head.as_ref().map_or_else(Vec::new, |head| self.checkout.message(head)),
+                    files: head.as_ref().map_or_else(Tree::new, |head| self.checkout.files(head)),
+                    head,
+                    pushed: false,
+                },
+                &mut stimuli,
+            );
+            self.reviewed = true;
+        }
+        if self.meeting.is_due(now) {
+            self.meeting.fire(now, &mut stimuli);
+        }
+        if let skein_world::domain::Verdict::Failed(why) = self.meeting.verdict() {
+            panic!("seed {}: {why:?}", self.seed);
+        }
+    }
+    fn next_deadline(&self) -> Option<Time> {
+        [self.next_act, self.meeting.next_deadline(), (!self.reviewed).then_some(self.end)].into_iter().flatten().min()
+    }
+    fn overdue(&self, now: Time) -> Option<String> {
+        (now >= self.end && !self.reviewed).then(|| "local invocation did not settle its observed terminal".into())
+    }
+    fn passed(&self) -> bool {
+        self.reviewed && matches!(self.meeting.verdict(), skein_world::domain::Verdict::Passed)
+    }
 }

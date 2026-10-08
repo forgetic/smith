@@ -16,6 +16,10 @@ pub struct Agent {
     stderr_closed: bool,
     facts: Vec<smith_domain::Fact>,
     keep_facts: bool,
+    roots: std::collections::VecDeque<kernel::Fd>,
+    root_closes: u32,
+    worst: u64,
+    operations: u32,
 }
 
 impl Host for Agent {
@@ -27,11 +31,26 @@ impl Host for Agent {
             if complete.op == Token::new(u64::MAX - 1) {
                 assert!(complete.result.is_ok(), "unused stderr closes");
                 self.stderr_closed = true;
+            } else if complete.op.raw() >= u64::MAX - 1024 {
+                assert!(complete.result.is_ok(), "unused root closes");
+                self.root_closes -= 1;
             } else {
                 self.service.completions().push(complete);
             }
         }
         agent::iterate(&mut self.service, now, wall);
+        while self.service.root_to_open().is_some() {
+            self.service.root_opened(self.roots.pop_front().ok_or(()));
+        }
+        if agent::done(&self.service).is_some() {
+            while let Some(fd) = self.roots.pop_front() {
+                self.submissions.push(kernel::Submit {
+                    op: Token::new(u64::MAX - 2 - u64::from(self.root_closes)),
+                    kind: kernel::Op::Close { fd },
+                });
+                self.root_closes += 1;
+            }
+        }
         while let Some(fact) = self.service.pop_trace_fact() {
             if self.keep_facts {
                 assert!(self.facts.len() < 1024, "finite scenario facts");
@@ -62,6 +81,8 @@ impl Host for Agent {
 
     fn is_empty(&self) -> bool {
         agent::done(&self.service).is_some()
+            && self.roots.is_empty()
+            && self.root_closes == 0
             && self.stderr_closed
             && self.completions.is_empty()
             && self.submissions.is_empty()
@@ -76,17 +97,11 @@ impl Host for Agent {
     }
 
     fn worst_case(&self) -> u64 {
-        agent::worst_case(&fixture::limits())
-            .and_then(|bound| bound.checked_add(16_777_216))
-            .and_then(|bound| {
-                bound.checked_add(u64::try_from(size_of::<smith_domain::Fact>()).ok()?.checked_mul(1024)?)
-            })
-            .and_then(|bound| bound.checked_add(u64::try_from(size_of::<Self>()).ok()?))
-            .expect("complete agent bound")
+        self.worst
     }
 
     fn operations(&self) -> u32 {
-        fixture::limits().routes.checked_add(1).expect("agent operations")
+        self.operations
     }
 }
 
@@ -111,7 +126,23 @@ impl Agent {
 /// Adopt the three child pipes and signal source in a hosted factory.
 #[must_use]
 pub fn make(_spawn: &kernel::Spawn, inherited: &Inherited) -> Agent {
-    let mut service = fixture::service(7);
+    configured(fixture::configuration(), 7, inherited)
+}
+
+/// Adopt scenario-specific service settings and mounts in Start order.
+#[must_use]
+pub fn configured(config: agent::Config, seed: u64, inherited: &Inherited) -> Agent {
+    let worst = agent::worst_case(&config.limits)
+        .and_then(|bound| bound.checked_add(16_777_216))
+        .and_then(|bound| bound.checked_add((size_of::<smith_domain::Fact>() * 1024 + size_of::<Agent>()) as u64))
+        .expect("complete agent bound");
+    let operations = config
+        .limits
+        .routes
+        .checked_add(1)
+        .and_then(|n| n.checked_add(u32::try_from(inherited.roots.len()).expect("bounded roots")))
+        .expect("operations");
+    let mut service = agent::Service::new(config, seed).expect("configured service");
     let input = inherited.pipes.iter().find(|(child, _)| *child == 0).expect("stdin").1;
     let output = inherited.pipes.iter().find(|(child, _)| *child == 1).expect("stdout").1;
     service.adopt_streams(input, output, inherited.signal).expect("child resources");
@@ -126,5 +157,9 @@ pub fn make(_spawn: &kernel::Spawn, inherited: &Inherited) -> Agent {
         stderr_closed: false,
         facts: Vec::with_capacity(1024),
         keep_facts: true,
+        roots: inherited.roots.iter().map(|(_, fd)| *fd).collect(),
+        root_closes: 0,
+        worst,
+        operations,
     }
 }

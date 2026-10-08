@@ -41,6 +41,7 @@ pub struct Terminal {
     errors: Vec<u8>,
     exit: Option<kernel::Exit>,
     right: u64,
+    interrupt: bool,
     completions: Queue<kernel::Complete>,
     submissions: Queue<kernel::Submit>,
     events: Queue<io::Event>,
@@ -50,6 +51,12 @@ pub struct Terminal {
 impl Terminal {
     #[must_use]
     pub fn new(root: kernel::Fd, commands: Vec<Action>) -> Self {
+        Self::configured(root, commands, Box::new([]))
+    }
+
+    /// Launch the same terminal story with immutable program arguments.
+    #[must_use]
+    pub fn configured(root: kernel::Fd, commands: Vec<Action>, arguments: Box<[Box<[u8]>]>) -> Self {
         assert!(commands.len() <= 16);
         assert!(
             commands
@@ -78,7 +85,7 @@ impl Terminal {
             owner: OWNER,
             spawn: kernel::Spawn {
                 program: b"smith-local".as_slice().into(),
-                args: Box::new([]),
+                args: arguments,
                 env: Box::new([]),
                 root,
                 dir: b".".as_slice().into(),
@@ -104,6 +111,7 @@ impl Terminal {
             errors: Vec::new(),
             exit: None,
             right: 1,
+            interrupt: false,
             completions: Queue::with_capacity(128),
             submissions: Queue::with_capacity(128),
             events: Queue::with_capacity(128),
@@ -128,8 +136,7 @@ impl Terminal {
 
     /// A story schedules the person's signal from a peer observation.
     pub fn interrupt(&mut self) {
-        let child = self.child.expect("terminal child opened before interrupt");
-        self.requests.push(io::Request::Signal { child, signal: kernel::Signal::Terminate });
+        self.interrupt = true;
     }
 
     fn read(&mut self, stream: Token) {
@@ -255,6 +262,12 @@ impl Host for Terminal {
             self.submissions.push(kernel::Submit { op: ROOT_CLOSE, kind: kernel::Op::Close { fd } });
         }
         self.commands();
+        if self.interrupt
+            && let Some(child) = self.child
+        {
+            self.interrupt = false;
+            self.requests.push(io::Request::Signal { child, signal: kernel::Signal::Terminate });
+        }
         while self.io.takes() {
             let Some(request) = self.requests.pop() else { break };
             io::down(&mut self.io, &self.env, request, &mut self.submissions);
@@ -273,6 +286,7 @@ impl Host for Terminal {
             || !self.completions.is_empty()
             || !self.events.is_empty()
             || !self.requests.is_empty()
+            || self.interrupt
     }
     fn next_deadline(&self) -> Option<Time> {
         self.io.next_deadline()

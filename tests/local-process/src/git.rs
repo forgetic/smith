@@ -102,3 +102,153 @@ impl Host for Child {
             + std::mem::size_of::<Self>() as u64
     }
 }
+
+/// Child startup reading a bounded fake-checkout result through its own root.
+/// The machine owns the checkout; this process owns only file and pipe IO.
+pub struct Prepared {
+    pipes: Vec<(u32, kernel::Fd)>,
+    root: Option<kernel::Fd>,
+    file: Option<kernel::Fd>,
+    bytes: Vec<u8>,
+    child: Option<Child>,
+    reading: bool,
+    closes: u32,
+    completions: Queue<kernel::Complete>,
+    submissions: Queue<kernel::Submit>,
+}
+impl Prepared {
+    /// Adopt independently owned result, signal and output descriptors.
+    #[must_use]
+    pub fn new(inherited: &skein_world::Inherited) -> Self {
+        let root = inherited.roots.iter().find(|(name, _)| name.as_ref() == b"result").expect("prepared git result").1;
+        let mut submissions = Queue::with_capacity(32);
+        submissions.push(kernel::Submit {
+            op: Token::new(101),
+            kind: kernel::Op::Open { root, path: b"result".as_slice().into(), how: kernel::OpenHow::Read },
+        });
+        submissions.push(kernel::Submit { op: Token::new(105), kind: kernel::Op::Close { fd: inherited.signal } });
+        Self {
+            pipes: inherited.pipes.clone(),
+            root: Some(root),
+            file: None,
+            bytes: Vec::with_capacity(32_769),
+            child: None,
+            reading: true,
+            closes: 1,
+            completions: Queue::with_capacity(32),
+            submissions,
+        }
+    }
+    fn read(&mut self) {
+        self.submissions.push(kernel::Submit {
+            op: Token::new(102),
+            kind: kernel::Op::Read {
+                fd: self.file.expect("result file"),
+                at: self.bytes.len() as u64,
+                buf: vec![0; 32_769].into_boxed_slice(),
+            },
+        });
+        self.reading = true;
+    }
+}
+impl Host for Prepared {
+    fn iterate(&mut self, now: Time, wall: Wall) {
+        while let Some(complete) = self.completions.pop() {
+            match complete.op.raw() {
+                101 => {
+                    let kernel::Done::Fd(fd) = complete.result.expect("open fake result") else {
+                        panic!("result is a file")
+                    };
+                    self.file = Some(fd);
+                    self.submissions.push(kernel::Submit {
+                        op: Token::new(103),
+                        kind: kernel::Op::Close { fd: self.root.take().expect("one result root") },
+                    });
+                    self.closes += 1;
+                    self.reading = false;
+                }
+                102 => {
+                    let kernel::Done::Count(count) = complete.result.expect("read fake result") else {
+                        panic!("result read count")
+                    };
+                    let kernel::Op::Read { buf, .. } = complete.kind else { unreachable!() };
+                    self.reading = false;
+                    if count == 0 {
+                        let mut bytes = std::mem::take(&mut self.bytes);
+                        assert!(!bytes.is_empty());
+                        let code = bytes.remove(0);
+                        self.child = Some(Child::new(&self.pipes, bytes.into_boxed_slice(), code));
+                        self.submissions.push(kernel::Submit {
+                            op: Token::new(104),
+                            kind: kernel::Op::Close { fd: self.file.take().expect("one result file") },
+                        });
+                        self.closes += 1;
+                    } else {
+                        assert!(self.bytes.len() + count as usize <= 32_769, "bounded fake stdout");
+                        self.bytes.extend_from_slice(&buf[..count as usize]);
+                    }
+                }
+                103..=105 => {
+                    assert!(complete.result.is_ok());
+                    self.closes -= 1;
+                }
+                _ => self.child.as_mut().expect("child output").completions().push(complete),
+            }
+        }
+        if self.file.is_some() && !self.reading {
+            self.read();
+        }
+        if let Some(child) = &mut self.child {
+            child.iterate(now, wall);
+            while let Some(submit) = child.submissions().pop() {
+                self.submissions.push(submit);
+            }
+        }
+    }
+    fn completions(&mut self) -> &mut Queue<kernel::Complete> {
+        &mut self.completions
+    }
+    fn submissions(&mut self) -> &mut Queue<kernel::Submit> {
+        &mut self.submissions
+    }
+    fn work_pending(&self, now: Time) -> bool {
+        (self.file.is_some() && !self.reading)
+            || self.child.as_ref().is_some_and(|c| c.work_pending(now))
+            || !self.completions.is_empty()
+            || !self.submissions.is_empty()
+    }
+    fn next_deadline(&self) -> Option<Time> {
+        None
+    }
+    fn is_empty(&self) -> bool {
+        self.child.as_ref().is_some_and(Host::is_empty)
+            && self.root.is_none()
+            && self.file.is_none()
+            && self.closes == 0
+            && self.completions.is_empty()
+            && self.submissions.is_empty()
+    }
+    fn exit(&self) -> Option<kernel::Exit> {
+        self.is_empty().then(|| kernel::Exit::Code(self.child.as_ref().expect("settled child").code()))
+    }
+    fn worst_case(&self) -> u64 {
+        400_000
+    }
+    fn operations(&self) -> u32 {
+        4
+    }
+}
+
+/// Exact git arguments select a private result directory in the fake namespace.
+#[must_use]
+pub fn roots(spawn: &kernel::Spawn) -> Vec<skein_world::StartupRoot> {
+    let mut path = b".smith-test/git/".to_vec();
+    path.extend_from_slice(&serde_json::to_vec(&spawn.args).expect("bounded git arguments"));
+    vec![skein_world::StartupRoot { name: b"result".as_slice().into(), path: path.into_boxed_slice() }]
+}
+
+/// Only the simulated backend registers this adapter; the real loop runs git.
+#[must_use]
+pub fn make(_spawn: &kernel::Spawn, inherited: &skein_world::Inherited) -> crate::process::Proc {
+    crate::process::Proc::Git(Box::new(Prepared::new(inherited)))
+}

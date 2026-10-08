@@ -1,6 +1,6 @@
-//! Local process neighbours, each owning no simulator state. Kernel binding,
-//! fake-machine answers and faults belong to the world loop. Contract:
-//! protocol/hosts.md, sections 5 and 7; programming-model.md, section 10.2.
+//! Reusable local host, terminal, browser, peer configuration and outside
+//! referee (testing.md, sections 2.1, 2.2 and 5). Processes keep only their IO
+//! and public observations; Skein owns the loop, hosting, replay and heaps.
 
 pub mod oauth;
 
@@ -11,6 +11,8 @@ pub mod llm;
 pub mod git;
 
 pub mod referee;
+
+pub mod process;
 
 pub mod world;
 pub use world::{Authentication, Files, Placement, World};

@@ -40,6 +40,17 @@ pub fn peer() -> llm::Peer {
 /// Build a seeded plaintext loopback peer for a local scenario.
 #[must_use]
 pub fn configured(scripts: Box<[api::Script]>, credential: skein_llm::Credential, latency: Duration) -> llm::Peer {
+    configured_transport(scripts, credential, latency, Transport::Plaintext)
+}
+
+/// Configure the same fake domain for plaintext replay or TLS in a real loop.
+#[must_use]
+pub fn configured_transport(
+    scripts: Box<[api::Script]>,
+    credential: skein_llm::Credential,
+    latency: Duration,
+    transport: Transport,
+) -> llm::Peer {
     let mut config = skein_llm_world::fake::config();
     config.latency_min = latency;
     config.latency_max = latency;
@@ -51,7 +62,7 @@ pub fn configured(scripts: Box<[api::Script]>, credential: skein_llm::Credential
     protocol.documents.openai.parts = 256;
     llm::Peer::new(
         (std::net::Ipv4Addr::LOCALHOST, 443).into(),
-        Transport::Plaintext,
+        transport,
         limits(),
         provider::Config {
             provider: documents::Provider::OpenAi,

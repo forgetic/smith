@@ -386,3 +386,17 @@ token ownership. Every hosted iteration and drop is metered. Its replay
 and fact-discard controls compare complete kernel traces. Checks used
 unoptimized profiles with debug information disabled to reduce build-cache
 storage; debug assertions and existing timing budgets remain enabled.
+
+Testing pass 02.4 moves the local-process world onto Skein's hosted harness.
+Idle serial `measure -j 1` runs on 2026-10-08 measured fifteen focused
+local-process tests / 0.882 seconds and its one sixteen-seed, two-placement
+replay sweep / 2.767 seconds. The shared agent adapter's affected siblings
+measured five focused agent-process tests / 0.115 seconds and one fuzzy /
+0.841 seconds; eleven focused host tests / 0.071 seconds and one fuzzy /
+2.114 seconds. Shares sum rounded PASS durations. Every local, agent,
+terminal, browser, issuer, provider and fake git process is individually
+metered through construction, iteration and drop. The TLS sign-in control
+uses the same process enum and referee, with transport configuration only;
+all seeded worlds remain plaintext. The default fifteen-second, fuzzy
+sixty-second and per-world budgets are unchanged. Unoptimized builds retain
+debug assertions with debug information disabled as in 02.3.
