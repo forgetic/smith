@@ -120,6 +120,17 @@ fn invalid_local_configuration_is_refused_before_agent_construction() {
     assert_eq!(invalid.validate(&limits), Err(Invalid::Endpoint));
 }
 
+#[test]
+fn person_line_and_sender_label_fit_the_agent_message_cap_before_admission() {
+    let mut limits = limits();
+    limits.line_bytes = limits.agent.run.message_bytes - 8;
+    assert_eq!(config().validate(&limits), Ok(()));
+    limits.line_bytes += 1;
+    assert_eq!(config().validate(&limits), Err(Invalid::Limits));
+    limits.line_bytes = u32::MAX;
+    assert_eq!(config().validate(&limits), Err(Invalid::Limits));
+}
+
 fn spawned_chat_with_saved_greeting() -> (Domain, Env<Limits>, Queue<Request>) {
     let limits = limits();
     let env = Env { now: Time::ZERO, wall: Wall::from_nanos(0), limits: limits.clone() };

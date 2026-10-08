@@ -39,6 +39,11 @@ fn a_chat_runs_the_same_with_its_agent_in_process() {
     assert_eq!(spawned.shown(), colocated.shown());
     assert_eq!(spawned.queries(), colocated.queries());
     assert_eq!(spawned.turns(), colocated.turns());
+    assert_eq!(
+        spawned.queries()[0].messages[0].parts.as_ref(),
+        [skein_fake_llm_domain::api::Part::Text { text: b"person: hello".as_slice().into() }],
+        "the actual person task reaches the first provider call directly"
+    );
 }
 
 #[test]

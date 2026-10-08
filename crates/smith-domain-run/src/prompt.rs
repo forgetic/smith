@@ -22,10 +22,6 @@ use crate::workspace::{self, Directory, Workspace};
 /// The first user message of a main conversation.
 pub(crate) const BEGIN: &[u8] = b"Begin the work your brief describes.";
 
-/// A message-driven opening with no task brief yet.
-pub(crate) const AWAIT: &[u8] =
-    b"Call wait, then end this turn without further tool calls to receive the host's next message.";
-
 /// The system text of a run's main conversation, given what the run found in
 /// its checkout.
 pub(crate) fn system(charter: &Charter, mounted: Option<&Workspace>, found: &Found) -> Box<[u8]> {

@@ -189,6 +189,8 @@ the agent it is the `smith` binary:
   is offered to the next activation with the same name. Its pending state
   save must finish before that activation starts. Closing terminal input
   still drains lines already received.
+  Both placements render the sender as `person: ` before the line. Admission
+  reserves those label bytes within the agent's message cap.
 - **Charters from configuration:** instructions, models, prices, a
   budget, conventions, and a result contract (a report, by default, or a
   change). Sub-agent authority is an explicit local choice, disabled by

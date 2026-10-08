@@ -1,7 +1,7 @@
 //! Lines, names and text shown to one terminal (domain/host.md, section 8).
 
 use alloc::boxed::Box;
-use skein_lib::{List, Token};
+use skein_lib::{List, Token, Writer};
 use smith_domain::{self as agent, session, tools};
 
 /// One person line whose saved name precedes delivery to the agent.
@@ -9,6 +9,27 @@ use smith_domain::{self as agent, session, tools};
 pub(crate) struct Line {
     pub(crate) name: Token,
     pub(crate) text: Box<[u8]>,
+}
+
+/// Bytes reserved for the local sender label in the agent's message cap.
+const MESSAGE_PREFIX_BYTES: u32 = 8;
+
+/// Whether a maximum person line and its sender label fit the agent's cap.
+pub(crate) fn message_fits(line_bytes: u32, message_bytes: u32) -> bool {
+    match line_bytes.checked_add(MESSAGE_PREFIX_BYTES) {
+        Some(length) => length <= message_bytes,
+        None => false,
+    }
+}
+
+/// Render the local host's sender label as the spawned channel does.
+pub(crate) fn message_text(text: &[u8]) -> Box<[u8]> {
+    let length =
+        text.len().checked_add(b"person: ".len()).expect("validated line and sender label fit the message cap");
+    let mut writer = Writer::new(length);
+    writer.put(b"person: ").expect("measured sender label");
+    writer.put(text).expect("measured person text");
+    writer.finish()
 }
 
 /// Render assistant text blocks up to a UTF-8 boundary under the display cap.
@@ -127,6 +148,12 @@ fn append_text_reserved(shown: &mut List<u8>, text: &[u8], reserved: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn person_message_has_the_same_label_for_empty_and_utf8_lines() {
+        assert_eq!(message_text(b"").as_ref(), b"person: ");
+        assert_eq!(message_text("hello 🙂".as_bytes()).as_ref(), "person: hello 🙂".as_bytes());
+    }
 
     #[test]
     fn a_turn_shows_the_tool_name_and_its_terminal() {

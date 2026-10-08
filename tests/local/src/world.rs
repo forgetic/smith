@@ -787,6 +787,7 @@ impl World {
 
     /// Type a person line; its name becomes durable before agent delivery.
     pub fn line(&mut self, text: &[u8]) {
+        self.reached.remove(&Goal::Waiting);
         self.events.push_back(Event::Line { text: text.into() });
     }
 
@@ -936,7 +937,8 @@ impl World {
             {
                 panic!("seed {}: {failure}; trace: {:?}", self.seed, self.trace.lines());
             }
-            let reached = self.reached.contains(&goal) && (goal != Goal::Waiting || self.saved_turns() > 0);
+            let reached = self.reached.contains(&goal)
+                && (goal != Goal::Waiting || (self.completions > 0 && self.saved_turns() > 0));
             if reached {
                 return true;
             }
@@ -1318,6 +1320,7 @@ impl World {
     fn agent_request(&mut self, request: agent::Request) {
         match request {
             agent::Request::Complete { owner, prompt, .. } => {
+                self.reached.remove(&Goal::Waiting);
                 self.observe(Seen::Complete { owner });
                 self.completions += 1;
                 self.prompt_assistants

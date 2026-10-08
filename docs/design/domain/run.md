@@ -125,9 +125,11 @@ If a host message is already queued when preparation finishes, it becomes
 the main session's opening user message instead of the generic instruction
 to begin the brief. Its name is acknowledged only with the first actual
 turn. Further messages remain queued in order for subsequent yields.
-When no message is queued, a main with waiting enabled and no brief opens
-with an explicit request to wait for the next host message; other mains
-open with the instruction to begin their brief.
+When no message is queued, a main with waiting enabled and no brief keeps
+its reserved conversation unopened and tells its host it is waiting. The
+first message opens the conversation directly, without a model call asking
+it to wait. Its restored transcript and absent host answers remain owned
+until that opening. Other mains open with the instruction to begin their brief.
 
 ## 4. What a run does
 
@@ -235,12 +237,17 @@ host tool for it, as temper's `delegate` does.
   read, so the host knows what was taken.
 - **A cancel is not a message.** It is the host's, and ends the run
   (section 10).
+- **Before the first message.** A prepared run with waiting enabled, no
+  brief and no queued message awaits its first message without opening a
+  session or spending model tokens. Its wall budget continues; its idle
+  parking interval has not started, even when that interval is zero. A
+  cancel or wall expiry releases its unopened main and answers once.
 - **Waiting.** A run whose work depends on what comes next (a chat on its
   person, a coordinator on its delegates) calls `wait`. It yields until a
   message arrives, and its host holds it meanwhile, the watchdog paused
   (host.md, section 4).
-- **Parking.** Past its charter's waiting time it parks: every turn it
-  took is sent, and it answers parked. Its state is its transcript, which
+- **Parking.** Past its charter's waiting time after an actual settled `wait`
+  it parks: every turn it took is sent, and it answers parked. Its state is its transcript, which
   the host already has, so it hands over nothing else.
 - **Resuming.** A run whose charter resumes opens its main session from
   the transcript in its start, its turns as they were, provider blocks

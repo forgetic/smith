@@ -273,7 +273,7 @@ pub fn policy(
         chat_bytes: 256,
         text_bytes: 1 << 16,
         models: 3,
-        line_bytes: 4096,
+        line_bytes: agent_limits.run.message_bytes.saturating_sub(8).min(4096),
         show_bytes: 8192,
         lines: 8,
         unsaved: 2,

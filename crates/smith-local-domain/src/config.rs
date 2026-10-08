@@ -96,7 +96,7 @@ impl Config {
         {
             return Err(Invalid::Text);
         }
-        if limits.line_bytes > limits.agent.run.message_bytes {
+        if !crate::person::message_fits(limits.line_bytes, limits.agent.run.message_bytes) {
             return Err(Invalid::Limits);
         }
         match &self.contract {

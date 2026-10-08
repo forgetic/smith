@@ -218,7 +218,7 @@ pub enum Event {
 #[derive(PartialEq, Eq, Debug)]
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Request {
-    /// Main yielded after a settled wait with an empty inbox. No terminal is owed.
+    /// Prepared main awaits its first message, or yielded after settled wait; no terminal is owed.
     Waiting {
         /// Stable parent logical run scope.
         host_run: Token,

@@ -618,7 +618,10 @@ fn send_line(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
     let Some(run) = domain.run else { return };
     let Some(line) = &domain.line else { return };
     let name = line.name;
-    let text = line.text.clone();
+    let text = match domain.placement {
+        Placement::InProcess => crate::person::message_text(&line.text),
+        Placement::External => line.text.clone(),
+    };
     domain.line_state = match domain.line_state {
         LineState::Ready => LineState::Offered,
         LineState::Followup => LineState::Retry,
