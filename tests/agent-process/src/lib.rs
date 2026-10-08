@@ -6,19 +6,24 @@ use skein_channel::{Role, StreamMode, frame_writer};
 use skein_fake_channel::ScriptedPeer;
 use skein_io::{self as io, kernel};
 use skein_lib::{Duration, List, Writer};
-use skein_sim::{Config as SimConfig, Pid, Sim};
 use smith_agent_service as agent;
 use smith_protocol_channel as channel;
 use smith_protocol_llm as llm;
 use smith_protocol_machine as machine;
 
-use skein_world::Host;
 pub mod fake;
+
+pub mod process;
 
 /// Bounded agent-process settings shared by its direct and hosted worlds.
 #[must_use]
 pub fn limits() -> agent::Limits {
-    let client = skein_llm_world::limits();
+    let mut client = skein_llm_world::limits();
+    // The full answer allowance coexists with its provider document wrappers.
+    client.dialect.document_bytes = 32_768;
+    client.dialect.tokens = 4096;
+    client.sse.line = 32_768;
+    client.sse.event = 65_536;
     let completion = llm::completion_worst_case(&client, 4096).expect("receiving bound");
     let mut domain = smith_agent_world::LIMITS;
     domain.session.completion_bytes = completion;
@@ -249,156 +254,9 @@ pub fn charter() -> Box<[u8]> {
     writer.finish()
 }
 
-/// The service's inherited descriptors and scripted peer on one simulated
-/// process. No wall clock, operating-system channel, or random scheduling is
-/// consulted by the driver.
-pub struct World {
-    sim: Sim,
-    pid: Pid,
-    service: agent::Service,
-    host: ScriptedPeer,
-    input: kernel::Fd,
-    output: kernel::Fd,
-    signals: kernel::Fd,
-    pending: Option<(Box<[u8]>, usize)>,
-    input_closed: bool,
-    peer: skein_fake_peers::llm::Peer,
-    peer_pid: Pid,
-    machine: skein_fake_machine::Machine,
-}
+pub use world::World;
 
-impl World {
-    #[must_use]
-    pub fn new(seed: u64, charter: &[u8]) -> World {
-        let mut sim_config = SimConfig::calm();
-        sim_config.wall = skein_tls_world::pki::VALID;
-        let mut sim = Sim::new(seed, sim_config);
-        let pid = sim.spawn_process();
-        let peer_pid = sim.spawn_process();
-        let input = sim.open_inherited_read(pid);
-        let output = sim.open_inherited_write(pid);
-        let signals = sim.open_signal_source(pid);
-        let mut service = service(seed);
-        service.adopt_streams(input, output, signals).expect("three inherited descriptors");
-        let mut host = host();
-        host.play(start(charter));
-        World {
-            sim,
-            pid,
-            service,
-            host,
-            input,
-            output,
-            signals,
-            pending: None,
-            input_closed: false,
-            peer: fake::peer(),
-            peer_pid,
-            machine: skein_fake_machine::Machine::new(),
-        }
-    }
-
-    pub fn signal(&mut self) {
-        self.sim.deliver_service_signal(self.pid, self.signals, kernel::ServiceSignal::Terminate);
-    }
-
-    pub fn step(&mut self) {
-        self.sim.reap(self.peer_pid, self.peer.completions());
-        self.peer.iterate(self.sim.now(), self.sim.wall());
-        self.sim.submit(self.peer_pid, self.peer.submissions());
-        self.sim.reap(self.pid, self.service.completions());
-        agent::iterate(&mut self.service, self.sim.now(), self.sim.wall());
-        self.sim.submit(self.pid, self.service.submissions());
-        skein_fake_machine::serve(&mut self.machine, &mut self.sim);
-        if self.pending.is_none() {
-            self.pending = self.host.pop_output().map(|bytes| (bytes, 0));
-        }
-        if let Some((bytes, offset)) = &mut self.pending {
-            let sent = self.sim.peer_feed(self.pid, self.input, &bytes[*offset..]);
-            *offset += sent;
-            if *offset == bytes.len() {
-                self.pending = None;
-            }
-        }
-        let received = self.sim.peer_drain(self.pid, self.output, 4096);
-        self.host.feed(&received).expect("valid agent channel frames");
-        if self.has_answer() && !self.input_closed {
-            self.sim.peer_close(self.pid, self.input);
-            self.input_closed = true;
-        }
-        if !agent::work_pending(&self.service, self.sim.now())
-            && !self.peer.work_pending(self.sim.now())
-            && self.sim.ready(self.pid) == 0
-            && self.sim.ready(self.peer_pid) == 0
-        {
-            let at = [self.sim.next_due(), agent::next_deadline(&self.service), self.peer.next_deadline()]
-                .into_iter()
-                .flatten()
-                .min();
-            if let Some(at) = at {
-                self.sim.advance_to(at);
-            }
-        }
-    }
-
-    #[must_use]
-    pub fn has_answer(&self) -> bool {
-        self.host.observed().iter().any(|frame| frame.kind == 0x0110)
-    }
-
-    #[must_use]
-    pub fn done(&self) -> Option<bool> {
-        agent::done(&self.service)
-    }
-
-    pub fn assert_agent_clean(&self) {
-        self.sim.assert_quiescent(self.pid);
-        self.sim.assert_no_open_fds(self.pid);
-    }
-
-    #[must_use]
-    pub fn observed(&self) -> &[skein_fake_channel::Observed] {
-        self.host.observed()
-    }
-
-    #[must_use]
-    pub fn answer(&self) -> Option<smith_channel::Answer> {
-        self.host.observed().iter().find(|frame| frame.kind == 0x0110).map(|frame| {
-            smith_channel::Answer::decode(&smith_channel::CEILINGS, &mut skein_lib::Reader::new(&frame.body))
-                .expect("validated answer")
-        })
-    }
-
-    #[must_use]
-    pub fn peer_observations(&self) -> &[skein_fake_peers::llm::Observation] {
-        self.peer.observations()
-    }
-
-    #[must_use]
-    pub fn peer_replied(&self) -> bool {
-        fake::replied(&self.peer)
-    }
-
-    #[must_use]
-    pub fn peer_queries(&self) -> Vec<&skein_fake_llm_domain::api::Query> {
-        fake::queries(&self.peer).collect()
-    }
-
-    #[must_use]
-    pub fn sim_trace(&self) -> String {
-        self.sim.render_trace()
-    }
-
-    pub fn settle(&mut self) -> bool {
-        for _ in 0..10_000 {
-            self.step();
-            if let Some(answered) = self.done() {
-                return answered;
-            }
-        }
-        panic!("agent did not settle: {:?}", self.host.observed());
-    }
-}
+mod world;
 
 #[cfg(test)]
 mod memory {

@@ -19,16 +19,34 @@ fn a_run_goes_from_start_to_answer_and_the_process_exits_with_success() {
 fn a_termination_signal_in_the_middle_of_a_turn_answers_cancelled() {
     let charter = charter();
     let mut world = World::new(8, &charter);
-    for _ in 0..100 {
-        world.step();
-        if world.observed().iter().any(|frame| frame.kind == 0x0106) {
-            break;
-        }
-    }
-    assert!(world.observed().iter().any(|frame| frame.kind == 0x0106), "run admitted before signal");
     world.signal();
     assert!(world.settle(), "cancellation was answered");
+    assert!(world.observed().iter().any(|frame| frame.kind == 0x0106), "run admitted before signal");
     let answer = world.answer().expect("host saw final answer");
     assert!(matches!(answer.result(), RunResult::Failed(failed) if failed.reason() == &RunFailure::Cancelled));
     world.assert_agent_clean();
+}
+
+#[test]
+fn full_kernel_replay_and_discarded_facts_leave_the_same_answer() {
+    for cancel in [false, true] {
+        skein_world::domain::assert_replays(7, 8, |seed| {
+            let mut world = World::new(seed, &charter());
+            if cancel {
+                world.signal();
+            }
+            assert!(world.settle());
+            (world.trace(), world.answer())
+        });
+        let mut kept = World::new(7, &charter());
+        let mut discarded = World::new(7, &charter());
+        discarded.discard_facts();
+        if cancel {
+            kept.signal();
+            discarded.signal();
+        }
+        assert!(kept.settle() && discarded.settle());
+        assert_eq!(kept.trace(), discarded.trace(), "outside facts change no operation");
+        assert_eq!(kept.observed(), discarded.observed());
+    }
 }

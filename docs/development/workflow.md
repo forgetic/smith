@@ -372,3 +372,17 @@ the whole shell package passed 36 focused tests in 0.214 seconds. The
 stories use the binary's `agent_shell::Agent` startup and `Host` pass with
 caller-supplied descriptors and deterministic seeds. Existing focused,
 fuzzy and per-world budgets remain unchanged.
+
+Testing pass 02.3 moves the agent-process world onto Skein's hosted harness,
+sharing its agent adapter with the host world. Idle `measure -j 1` runs on
+2026-10-08 measured five focused agent-process tests / 0.116 seconds and one
+fuzzy replay sweep / 0.822 seconds; eleven focused host tests / 0.066 seconds
+and one fuzzy crash sweep / 2.085 seconds; fourteen focused local-process
+tests / 0.613 seconds and one fuzzy sweep / 2.081 seconds. Shares sum rounded
+PASS durations. The agent memory driver attains the 65,536-byte admitted
+run context, its maximum section array, all sixteen provider output parts
+and the exact 8,192-byte client answer aggregate including observed replay
+token ownership. Every hosted iteration and drop is metered. Its replay
+and fact-discard controls compare complete kernel traces. Checks used
+unoptimized profiles with debug information disabled to reduce build-cache
+storage; debug assertions and existing timing budgets remain enabled.
