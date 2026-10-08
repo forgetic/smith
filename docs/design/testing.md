@@ -5,7 +5,7 @@ Provisional, 2026-10-08. How smith is tested. The strategy is skein's
 shares, what every world checks, scenarios and the referee, the two
 suites, and where a failure is fixed. This document keeps what is
 smith's:
-- its tiers, and its live tests (section 2);
+- its tiers, end to end included (section 2);
 - its neighbours and their faces (section 3);
 - its fakes (section 4);
 - its scenarios and referee (section 5);
@@ -36,9 +36,9 @@ document's "The world" section.
 - **Plaintext below the real loop.** The replaying tiers connect to their
   fakes in plaintext on loopback, so they replay. TLS runs in the real
   loop.
-- **Live tests run the real loop against real backends:** the
-  providers, their issuers and a git remote. They are opt-in, and never
-  part of the gate.
+- **End to end, smith runs as it ships:** the binary as processes,
+  against fakes in the focused suite, and against the real providers,
+  issuers and a git remote in a live suite run by choice.
 - **One scenario, every tier its fakes reach.** The local host's
   simulated world and the real loop run the same processes, scenarios
   and referee. Only the loop beneath them changes.
@@ -57,6 +57,7 @@ document's "The world" section.
 | io worlds | skein's: smith does not retest io |
 | simulated worlds | the machine component; the agent service; a host and the agent it spawns; the local host (2.1) |
 | real loop | the local host as it ships, with the agent it spawns (2.2) |
+| end to end | the `smith` binary as the local host, and the agent it starts by its program, against fakes or, live, real backends (2.3) |
 
 Domain worlds use domains and fakes only, never protocol crates.
 
@@ -111,45 +112,57 @@ Domain worlds use domains and fakes only, never protocol crates.
 - It runs in the focused suite, and fails, saying why, where `io_uring`,
   git, rg or sh is missing.
 
-### 2.3 Live tests
+### 2.3 End to end
 
-- **The real loop against real backends.** The world is 2.2's, with each
-  fake replaced:
+- **smith as it ships** (testing-strategy.md, section 2.9): `smith local`
+  runs as a process, started by the test. It starts `smith agent` by its
+  program. Each runs its own loop.
+- **The test's side is one loop on the real ring,** driving:
+  - the scripted person, on a pseudo-terminal;
+  - the browser;
+  - the fake provider and the fake issuer, serving TLS on loopback with
+    skein's test certificates.
+- **The scratch directory** is 2.2's.
+- **The referee reads what shows from outside:**
+  - the terminal's transcript;
+  - what the fakes saw;
+  - the files and git;
+  - the exit codes and standard error;
+  - the agent's trace file.
+- **Against fakes,** in the focused suite and within its budget. These
+  tests are few, one per path through `main`:
+  - the startup refusals, of both commands;
+  - a first run that signs in and ends with a commit in place;
+  - a second run that resumes the chat from its files;
+  - an interrupt at the terminal that cancels the run. It reaches the host
+    alone, not the agent it started (skein's `io.md`, section 6).
+- **Live,** the real backends replace the fakes:
   - the providers' endpoints, over TLS with the machine's roots and each
     provider's identity profile;
-  - the providers' OAuth issuers, for refresh;
+  - their OAuth issuers;
   - a git remote, for a configured push, when one is named.
-- **Opt-in.** They form a suite of their own, `live`, chosen by its
-  profile: one at a time, without retries, with a generous timeout.
-  Neither the focused nor the fuzzy suite runs them, so the gate never
-  does.
-- **Credentials come from the caller,** named by environment variables. A
-  test that lacks one fails, saying which.
-- **A token directory of their own.** Refresh tokens rotate, so the live
-  tests keep a durable token directory, signed in once by hand with the
-  binary's own sign-in, and refreshed by every run. It is never the
-  user's own directory.
-- **Stories,** for each provider:
-  - a run refreshes its grant against the issuer;
-  - a chat ends with a commit in place;
-  - a second run resumes the chat from its files;
-  - with a remote named, the push lands, and the test removes the branch
-    afterwards.
-- **Outcomes, not words.** An LLM's words vary, so a story asks for a
-  precise outcome, such as a file with given content, and the referee
-  checks that outcome.
-- **What they show:** each provider's wire as it is today (its dialect,
-  identity headers, TLS and roots), refresh and rotation at the issuer,
-  and a push to a real forge. A failure is captured as a recorded
-  exchange for skein's fakes, and rerun lower down
-  (testing-strategy.md, section 9).
 
-### 2.4 Beside the tiers
-
-The binary's own tests run `smith` as a process:
-- its startup refusals;
-- under a pseudo-terminal, a person's interrupt reaching the host alone,
-  not the agent it spawned (skein's `io.md`, section 6).
+  The live tests form a suite of their own, `live`, chosen by its
+  profile: one at a time, without retries, never at the gate.
+  - **Credentials come from the caller,** named by environment variables.
+    A test that lacks one fails, saying which.
+  - **A token directory of their own.** Refresh tokens rotate, so the live
+    tests keep a durable token directory, signed in once by hand with the
+    binary's sign-in and refreshed by every run. It is never the user's
+    own directory.
+  - **Stories,** for each provider:
+    - a run refreshes its grant at the issuer;
+    - a chat ends with a commit in place;
+    - a second run resumes it;
+    - with a remote named, the push lands, and the test removes the
+      branch afterwards.
+  - **Outcomes, not words.** An LLM's words vary, so a story asks for a
+    precise outcome, such as a file with given content, and the referee
+    checks that outcome.
+  - **What they show:** each provider's wire as it is today, refresh and
+    rotation at the issuer, and a push to a real forge. A failure is
+    captured as a recorded exchange for skein's fakes, and rerun lower
+    down.
 
 ## 3. Neighbours and their faces
 
@@ -226,7 +239,8 @@ Every component's files and processes go through it:
   It never reads a service's state, the simulator's or the fake
   machine's.
 - **One referee per scenario, every tier:** the local host's simulated
-  world and the real loop share theirs. A domain world's referee is its
+  world and the real loop share theirs. End to end, the referee checks
+  the same outcomes from outside (2.3). A domain world's referee is its
   own, as its scenarios stay in its tier.
 
 ## 6. What the worlds check
@@ -264,14 +278,14 @@ Every world checks what the strategy lists (testing-strategy.md, section
 
 The strategy's two suites (testing-strategy.md, section 8) make the gate,
 run by the commands in `docs/development/workflow.md`:
-- **focused tests:** the step tests, and each world's scenarios, referee
-  tests, replay, facts changing nothing, memory at the worst case, and
-  the real loop;
+- **focused tests:** the step tests; each world's scenarios, referee
+  tests, replay, facts changing nothing and memory at the worst case; the
+  real loop; and the end-to-end tests against fakes;
 - **fuzzy tests:** each world's `tests/fuzzy_*.rs`, sweeps over seeds
   under faults.
 
-The live tests are a third suite, outside the gate: the real loop's
-`tests/live.rs`, under the `live` profile only (2.3).
+The live tests are a third suite, outside the gate, under the `live`
+profile only (2.3).
 
 ## 7. Layout
 
@@ -290,10 +304,10 @@ tests/machine                simulated world: the machine component
 tests/agent-process          simulated world: the agent service
 tests/hosts                  simulated world: a sample host and the agent it spawns
 tests/local-process          simulated world: the local host and its peers
-tests/real                   the real loop, and its live tests
+tests/real                   the real loop
 tests/*/tests/*.rs           a world's focused tests
 tests/*/tests/fuzzy_*.rs     its fuzzy tests
-crates/smith/tests           the binary's own tests, beside the tiers
+crates/smith/tests           end to end: against fakes, and live.rs
 ```
 
 A world's package is `smith-<name>-world`. The world harness, the
