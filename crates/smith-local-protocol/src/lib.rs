@@ -28,6 +28,9 @@ mod terminal;
 pub use credential::{Begin, Credential, CredentialEvent, CredentialLimits, CredentialRequest, credential_worst_case};
 pub use delivery_store::{decode_delivery, save_delivery};
 pub use git::{Git, GitAction, GitCompletion, GitLimits, git_worst_case};
-pub use host_bridge::{BridgeError, PreparedStart, delivery_to_host, name_to_host, prepare_start, saved_reply_to_host};
+pub use host_bridge::{
+    BridgeError, PreparedStart, decode_change, decode_declared, delivery_to_host, name_to_host, prepare_start,
+    saved_reply_to_host,
+};
 pub use store::{File, StoreError, decode_state, decode_turns, save_state, save_turn, turn_name};
 pub use terminal::{Event, Limits, Terminal, max_out, worst_case};

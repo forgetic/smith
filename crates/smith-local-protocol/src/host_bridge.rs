@@ -4,7 +4,7 @@
 //! saved call name and answer into the host domain's parallel sealed types.
 
 use alloc::boxed::Box;
-use skein_lib::List;
+use skein_lib::{List, Reader};
 use smith_domain::{Answered, run};
 use smith_host_domain::{self as host, channel};
 use smith_local_domain::ExternalStart;
@@ -21,6 +21,74 @@ pub enum BridgeError {
     Transcript,
     /// Workspace paths or grant values do not correspond to their domain names.
     Values,
+    /// The result body is malformed or does not have the expected form.
+    Result,
+}
+
+/// Decode the accepted outcome body after the host channel has bounded it.
+pub fn decode_declared(bytes: &[u8]) -> Result<run::outcome::Declared, BridgeError> {
+    let Ok(record) = smith_charter::RunResult::decode(&smith_charter::CEILINGS, &mut Reader::new(bytes)) else {
+        return Err(BridgeError::Result);
+    };
+    let fields = decode_fields(record.fields())?;
+    let declared = match record.form() {
+        smith_charter::Form::Change => {
+            if record.label().is_some() || !record.text().is_empty() || !record.items().is_empty() {
+                return Err(BridgeError::Result);
+            }
+            run::outcome::Declared::Change(run::outcome::Change { fields })
+        }
+        smith_charter::Form::Report => {
+            if record.label().is_some() || !record.items().is_empty() {
+                return Err(BridgeError::Result);
+            }
+            run::outcome::Declared::Report(run::outcome::Report { text: Box::from(record.text()), fields })
+        }
+        smith_charter::Form::Failure => {
+            if record.label().is_some() || !record.items().is_empty() {
+                return Err(BridgeError::Result);
+            }
+            run::outcome::Declared::Failure(run::outcome::DeclaredFailure { reason: Box::from(record.text()), fields })
+        }
+        smith_charter::Form::Verdict => {
+            let Some(label) = record.label() else { return Err(BridgeError::Result) };
+            let mut items = List::with_capacity(record.items().len());
+            for item in record.items() {
+                let value = run::outcome::Item { kind: Box::from(item.kind()), fields: decode_fields(item.fields())? };
+                if items.push(value).is_err() {
+                    return Err(BridgeError::Result);
+                }
+            }
+            run::outcome::Declared::Verdict(run::outcome::Verdict {
+                name: label.clone(),
+                text: Box::from(record.text()),
+                fields,
+                items: items.into_boxed(),
+            })
+        }
+    };
+    Ok(declared)
+}
+
+/// A Deliver ask carries the same result body but must be a Change.
+pub fn decode_change(bytes: &[u8]) -> Result<run::outcome::Change, BridgeError> {
+    match decode_declared(bytes)? {
+        run::outcome::Declared::Change(change) => Ok(change),
+        run::outcome::Declared::Verdict(_) | run::outcome::Declared::Report(_) | run::outcome::Declared::Failure(_) => {
+            Err(BridgeError::Result)
+        }
+    }
+}
+
+fn decode_fields(source: &List<smith_charter::Field>) -> Result<Box<[run::outcome::Field]>, BridgeError> {
+    let mut fields = List::with_capacity(source.len());
+    for field in source {
+        let item = run::outcome::Field { name: Box::from(field.name()), value: Box::from(field.text()) };
+        if fields.push(item).is_err() {
+            return Err(BridgeError::Result);
+        }
+    }
+    Ok(fields.into_boxed())
 }
 
 /// Host start and its parallel paths and credential envelopes, in domain order.
@@ -212,7 +280,36 @@ mod tests {
     use smith_domain::run;
     use smith_host_domain as host;
 
-    use super::{delivery_to_host, name_to_host, prepare_start, saved_reply_to_host};
+    use super::{decode_change, decode_declared, delivery_to_host, name_to_host, prepare_start, saved_reply_to_host};
+
+    #[test]
+    fn a_change_and_report_decode_from_the_agent_result_body() {
+        let change = run::outcome::Declared::Change(run::outcome::Change {
+            fields: Box::from([run::outcome::Field {
+                name: Box::from(&b"title"[..]),
+                value: Box::from(&b"Commit"[..]),
+            }]),
+        });
+        let bytes = smith_protocol_channel::encode_result(&change, &smith_charter::CEILINGS).expect("change bytes");
+        assert_eq!(decode_declared(&bytes), Ok(change));
+        assert_eq!(
+            decode_change(&bytes),
+            Ok(run::outcome::Change {
+                fields: Box::from([run::outcome::Field {
+                    name: Box::from(&b"title"[..]),
+                    value: Box::from(&b"Commit"[..])
+                }]),
+            })
+        );
+
+        let report = run::outcome::Declared::Report(run::outcome::Report {
+            text: Box::from(&b"finished"[..]),
+            fields: Box::new([]),
+        });
+        let bytes = smith_protocol_channel::encode_result(&report, &smith_charter::CEILINGS).expect("report bytes");
+        assert_eq!(decode_declared(&bytes), Ok(report));
+        assert_eq!(decode_change(&bytes), Err(super::BridgeError::Result));
+    }
 
     #[test]
     fn a_local_start_keeps_the_configured_wire_charter_and_run_identity() {
