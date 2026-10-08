@@ -49,6 +49,7 @@ smith-channel = { path = "crates/smith-channel" }
 smith-protocol-channel = { path = "crates/smith-protocol-channel" }
 smith-host-protocol = { path = "crates/smith-host-protocol" }
 smith-agent-service = { path = "crates/smith-agent-service" }
+smith-local-protocol = { path = "crates/smith-local-protocol" }
 smith-agent-process-world = { path = "tests/agent-process" }
 smith = { path = "crates/smith" }
 smith-run-world = { path = "tests/run" }
