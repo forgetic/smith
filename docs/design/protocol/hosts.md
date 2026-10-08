@@ -159,6 +159,21 @@ what its host's protocol layer would do:
 - **A plain directory's files** are kept as they are, and delivered says so.
 - **A repository whose head moved** since the run started is a stale
   delivery.
+- **Each commit names its delivery** in its message, by the call's name,
+  and the host keeps its intent to deliver until the answer is kept. A
+  delivery a crash interrupted is then found and answered when the host
+  starts again.
+- **An uncertain step is not a failure.** A git step whose effect is
+  unknown (its deadline passed, its output overflowed, or the head could
+  not be read after a commit) is settled as a crash would be: the host
+  looks for the delivery's commit in the repository before answering, and
+  never commits again on doubt.
+  - Found: the directory is delivered, with that commit.
+  - Absent, with the head unchanged: the step did nothing, and the
+    delivery goes on or fails as usual.
+  - Still unknown: the delivery fails with the reason *unknown*. The host
+    keeps its intent, and the next start settles it and tells the run what
+    landed (domain/run.md, section 6).
 
 ### 5.6 The agent
 
