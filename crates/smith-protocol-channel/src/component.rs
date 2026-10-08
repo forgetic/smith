@@ -653,7 +653,9 @@ impl Component {
                         Err(_) => self.refuse_rules(below),
                     }
                 }
-                Some(Event::Body { kind: 0x0103, body }) if self.phase == Phase::Admitted => {
+                Some(Event::Body { kind: 0x0103, body })
+                    if self.phase == Phase::Admitted || self.phase == Phase::Answered =>
+                {
                     match smith_channel::Acknowledge::decode(&self.bodies, &mut Reader::new(&body)) {
                         Ok(acknowledge) => {
                             if acknowledge.number() > self.last_sent_turn || acknowledge.number() == 0 {

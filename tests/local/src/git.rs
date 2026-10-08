@@ -16,14 +16,15 @@ struct Commit {
 
 /// A small graph with one initial branch and monotonically named objects.
 #[derive(Debug)]
-pub(crate) struct History {
+pub struct History {
     commits: BTreeMap<u64, Commit>,
     branch: u64,
     next: u64,
 }
 
 impl History {
-    pub(crate) fn new(tree: Tree) -> Self {
+    #[must_use]
+    pub fn new(tree: Tree) -> Self {
         Self {
             commits: BTreeMap::from([(1, Commit { parent: None, merging: None, tree, message: Vec::new() })]),
             branch: 1,
@@ -31,15 +32,17 @@ impl History {
         }
     }
 
-    pub(crate) fn commit_message(&self, commit: u64) -> &[u8] {
+    #[must_use]
+    pub fn commit_message(&self, commit: u64) -> &[u8] {
         &self.commits.get(&commit).expect("local commit exists").message
     }
 
-    pub(crate) fn remote_head(&self) -> u64 {
+    #[must_use]
+    pub fn remote_head(&self) -> u64 {
         self.branch
     }
 
-    pub(crate) fn move_remote(&mut self) {
+    pub fn move_remote(&mut self) {
         let mut tree = self.tree(self.branch);
         tree.insert(b"remote.txt".to_vec(), b"another change".to_vec());
         let previous = self.branch;

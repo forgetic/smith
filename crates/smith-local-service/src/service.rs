@@ -1,5 +1,7 @@
 //! Bounded local-to-host domain routing. Local policy owns durability and
-//! delivery; the host kit owns child lifecycle and channel rights.
+//! delivery; the host kit owns child lifecycle and channel rights. The saved
+//! conversation position continues across activation-local channel turn numbers
+//! (protocol/channel.md, section 5.1; protocol/hosts.md, section 5.3).
 
 use alloc::boxed::Box;
 use core::mem::size_of;
@@ -118,6 +120,7 @@ pub struct Service {
     charter: Box<[u8]>,
     endpoints: channel::Endpoints,
     host_agent: Option<Token>,
+    sequence: u32,
     failed: bool,
 }
 
@@ -229,6 +232,7 @@ impl Service {
             charter: config.charter,
             endpoints: config.endpoints,
             host_agent: None,
+            sequence: 0,
             failed: false,
         })
     }
@@ -522,6 +526,13 @@ impl Service {
     fn route_external(&mut self, now: Time, request: local::ExternalRequest) {
         match request {
             local::ExternalRequest::Start(start) => {
+                self.sequence = match &start.transcript {
+                    Some(transcript) => match transcript.turns.last() {
+                        Some(turn) => turn.sequence,
+                        None => 0,
+                    },
+                    None => 0,
+                };
                 let mut directories = List::with_capacity(64);
                 if let Some(workspace) = &start.workspace {
                     for (position, directory) in workspace.directories.iter().enumerate() {
@@ -641,13 +652,22 @@ impl Service {
                 self.local_events.push(local::Event::External(local::ExternalEvent::Admitted { run }));
             }
             host::Request::Turn { turn, .. } => {
-                match channel::decode_turn(&turn.body, turn.number, &smith_transcript::CEILINGS, &self.endpoints) {
-                    Ok(decoded) => self.local_events.push(local::Event::External(local::ExternalEvent::Turn {
-                        number: turn.number,
-                        read: turn.read,
-                        turn: decoded,
-                    })),
-                    Err(_) => {
+                let decoded = match self.sequence.checked_add(1) {
+                    Some(sequence) => {
+                        channel::decode_turn(&turn.body, sequence, &smith_transcript::CEILINGS, &self.endpoints).ok()
+                    }
+                    None => None,
+                };
+                match decoded {
+                    Some(decoded) => {
+                        self.sequence = decoded.sequence;
+                        self.local_events.push(local::Event::External(local::ExternalEvent::Turn {
+                            number: turn.number,
+                            read: turn.read,
+                            turn: decoded,
+                        }));
+                    }
+                    None => {
                         self.failed = true;
                         self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
                     }
@@ -704,7 +724,15 @@ impl Service {
                 })),
                 Err(_) => {
                     self.failed = true;
-                    self.host_events.push(host::Event::Answer { agent, call, reply: host::Reply::Unavailable });
+                    self.host_events.push(host::Event::Answer {
+                        agent,
+                        call,
+                        reply: host::Reply::Delivery(host::Delivery::Failed(host::DeliveryFailure {
+                            directory: 0,
+                            reason: host::DeliveryReason::Broken,
+                            diagnostic: host::Diagnostic::empty(),
+                        })),
+                    });
                 }
             },
             host::Ask::Host { .. } => {

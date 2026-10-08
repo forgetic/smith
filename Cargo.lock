@@ -707,12 +707,33 @@ dependencies = [
 name = "smith-local-process-world"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
+ "skein-fake-checkout",
+ "skein-fake-llm-domain",
+ "skein-fake-llm-protocol",
+ "skein-fake-machine",
  "skein-fake-oauth",
  "skein-io",
  "skein-lib",
+ "skein-llm",
+ "skein-llm-world",
  "skein-oauth",
+ "skein-sim",
+ "skein-tls",
  "skein-tls-world",
  "skein-world",
+ "smith",
+ "smith-agent-process-world",
+ "smith-agent-service",
+ "smith-domain",
+ "smith-host-domain",
+ "smith-host-protocol",
+ "smith-host-world",
+ "smith-local-domain",
+ "smith-local-service",
+ "smith-local-world",
+ "smith-protocol-channel",
+ "smith-transcript",
 ]
 
 [[package]]
@@ -723,6 +744,7 @@ dependencies = [
  "skein-io",
  "skein-lib",
  "skein-oauth",
+ "smith-channel",
  "smith-charter",
  "smith-domain",
  "smith-host-domain",

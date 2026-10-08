@@ -1840,7 +1840,12 @@ pub fn work_pending(service: &Service, now: Time) -> bool {
         || !service.io_requests.is_empty()
         || !service.io_submissions.is_empty()
         || !service.file_submissions.is_empty()
-        || (service.channel_ended && !service.roots.is_empty())
+        || (service.channel_ended
+            && !service.roots.is_empty()
+            && service.owners.is_empty()
+            && service.pipe_routes.is_empty()
+            && service.files.takes()
+            && !service.root_close_pending)
 }
 
 /// The channel has ended, every lower child has settled, and the final

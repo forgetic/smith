@@ -88,14 +88,22 @@ pub fn decode_declared(bytes: &[u8]) -> Result<run::outcome::Declared, BridgeErr
     Ok(declared)
 }
 
-/// A Deliver ask carries the same result body but must be a Change.
+/// Decode the channel's field-only Deliver ask (protocol/channel.md, section 5).
 pub fn decode_change(bytes: &[u8]) -> Result<run::outcome::Change, BridgeError> {
-    match decode_declared(bytes)? {
-        run::outcome::Declared::Change(change) => Ok(change),
-        run::outcome::Declared::Verdict(_) | run::outcome::Declared::Report(_) | run::outcome::Declared::Failure(_) => {
-            Err(BridgeError::Result)
+    let mut reader = Reader::new(bytes);
+    let Ok(record) = smith_channel::DeliverAsk::decode(&smith_channel::CEILINGS, &mut reader) else {
+        return Err(BridgeError::Result);
+    };
+    if reader.remaining() != 0 {
+        return Err(BridgeError::Result);
+    }
+    let mut fields = List::with_capacity(record.fields().len());
+    for field in record.fields() {
+        if fields.push(run::outcome::Field { name: Box::from(field.name()), value: Box::from(field.text()) }).is_err() {
+            return Err(BridgeError::Result);
         }
     }
+    Ok(run::outcome::Change { fields: fields.into_boxed() })
 }
 
 fn decode_fields(source: &List<smith_charter::Field>) -> Result<Box<[run::outcome::Field]>, BridgeError> {
@@ -327,6 +335,21 @@ mod tests {
         });
         let bytes = smith_protocol_channel::encode_result(&change, &smith_charter::CEILINGS).expect("change bytes");
         assert_eq!(decode_declared(&bytes), Ok(change));
+        let limits = &smith_channel::CEILINGS;
+        let mut fields = skein_lib::List::with_capacity(1);
+        fields
+            .push(
+                smith_channel::Field::new(
+                    limits,
+                    smith_channel::FieldParts { name: Box::from(&b"title"[..]), text: Box::from(&b"Commit"[..]) },
+                )
+                .expect("field"),
+            )
+            .expect("one field");
+        let ask = smith_channel::DeliverAsk::new(limits, smith_channel::DeliverAskParts { fields }).expect("ask");
+        let mut writer = skein_lib::Writer::new(usize::try_from(ask.measure()).expect("ask measure"));
+        ask.encode(&mut writer).expect("ask encode");
+        let bytes = writer.finish();
         assert_eq!(
             decode_change(&bytes),
             Ok(run::outcome::Change {

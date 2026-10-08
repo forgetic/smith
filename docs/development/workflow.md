@@ -334,3 +334,19 @@ are found by their delivery trailer. An unreadable inspection keeps the
 intent across later turns and a restart; an absent trailer with an unchanged
 head proves no effect. The world's one-second focused and five-second fuzzy
 shares, and the workspace budgets, remain unchanged.
+
+07 LOCAL PROCESS was measured serially on 2026-10-08 from `c89db88` plus
+this increment. The new world calls the binary's shared shell, with the agent
+spawned or colocated. Its ten focused tests passed in 0.833 seconds (0.833
+seconds summed rounded PASS durations), and its fuzzy test passed in 2.723
+seconds (2.722 seconds PASS duration). The 16-seed sweep runs both placements
+and replays each report, cancellation or change with short IO, delayed
+completions and cancellation races. Seed 115 is retained as the late final
+acknowledgement regression. The referee sees terminal bytes, decoded peer
+requests, service facts and a narrow head/message/files checkout interface.
+The memory test reuses Skein's allocator and separately prices the finite
+world's trace and fixture. TLS signing is intentionally nondeterministic;
+replay compares application observations through Skein's trace kit.
+The final-tip parallel gate passed 1,409 focused tests in 4.221 seconds and
+18 fuzzy tests in 6.132 seconds, with no skips; formatting and workspace
+all-target Clippy passed. Existing workspace budgets are unchanged.

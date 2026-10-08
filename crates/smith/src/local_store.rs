@@ -116,7 +116,7 @@ impl Store {
         read: Option<Token>,
         turn: smith_domain::Turn,
     ) -> Result<local::Event, local::StoreFailure> {
-        let file = protocol::save_turn(number, read, &turn, &smith_transcript::CEILINGS, &self.endpoints)
+        let file = protocol::save_turn(turn.sequence, read, &turn, &smith_transcript::CEILINGS, &self.endpoints)
             .map_err(|_| local::StoreFailure::Write)?;
         self.replace(file).map_err(|_| local::StoreFailure::Write)?;
         Ok(local::Event::TurnSaved { number })
