@@ -483,3 +483,61 @@ credentials and durable test-only token directory are supplied by the caller.
 ```sh
 cargo nextest run --workspace --profile live
 ```
+
+
+### Live environment and one-time sign-in
+
+Set `SMITH_TEST_LIVE_TOKEN_DIR` to an **absolute, private directory reserved
+for this suite**, and `SMITH_TEST_LIVE_PROVIDERS` to `codex`, `anthropic`, or
+`codex,anthropic`. Each provider keeps its account-zero record in its own
+subdirectory. The suite requires its bootstrap marker and an existing signed-in
+record. It never defaults to the user's token directory. Never copy a refresh
+token from the user's tool login: issuers rotate refresh tokens, and doing so
+can log those tools out. Dedicated test records are kept durably after each
+refresh.
+
+For each selected provider, `SMITH_TEST_LIVE_CODEX_ACCOUNT_FILE` or
+`SMITH_TEST_LIVE_ANTHROPIC_ACCOUNT_FILE` names a JSON file containing only public
+registration data: `account_id` and `oauth` in the shape described in
+[local-host settings](local-host.md#accounts-and-sign-in). Use the account and
+issuer's registered public client, authorization/token URLs, callback, scope,
+address, TLS server name and form/JSON choice. Do not put tokens or client
+secrets in this file. Unknown fields are refused. Machine trust roots verify
+both the provider and issuer; no fixture certificates are used. Provider
+identity headers come from Skein; Anthropic opts into its Claude Code profile
+and only the basic OAuth betas used by Skein's live reference.
+
+`SMITH_TEST_LIVE_CODEX_MODEL` defaults to `gpt-5.5` and
+`SMITH_TEST_LIVE_ANTHROPIC_MODEL` to `claude-haiku-4-5`, matching Skein's live
+reference. `SMITH_TEST_LIVE_GIT_REMOTE` is optional. It authorizes the configured
+push story to that caller-selected test remote, including removal of the run's
+branch. Use a disposable test repository with already configured authentication;
+no remote is invented by the suite. Model prices are zero in this outcome-only
+test fixture; token and turn ceilings still bound each invocation.
+
+For example, bootstrap Codex once (replace the public registration path):
+
+```sh
+export SMITH_TEST_LIVE_TOKEN_DIR="$HOME/.local/state/smith-live-tokens"
+export SMITH_TEST_LIVE_PROVIDERS=codex
+export SMITH_TEST_LIVE_CODEX_ACCOUNT_FILE="$HOME/smith-live-codex-account.json"
+export SMITH_TEST_LIVE_BOOTSTRAP_DIR="$HOME/.local/state/smith-live-bootstrap"
+cargo nextest run -p smith --test live --profile live -E 'test(=bootstrap_settings)'
+cargo run -p smith -- local "$SMITH_TEST_LIVE_BOOTSTRAP_DIR/codex/settings.json" "$SMITH_TEST_LIVE_BOOTSTRAP_DIR/codex"
+```
+
+Type a short message at the terminal, open the displayed sign-in URL by hand,
+and complete the browser redirect. After the response, close input with Ctrl-D.
+For Anthropic, export its account-file variable, select `anthropic`, regenerate
+bootstrap settings, and use the `anthropic/settings.json` and `anthropic` state
+paths. This sign-in creates the suite's private saved-token record without
+reading or writing another tool's login. Remove the bootstrap selector before
+running the stories:
+
+```sh
+unset SMITH_TEST_LIVE_BOOTSTRAP_DIR
+cargo nextest run --workspace --profile live
+```
+
+Missing required variables or signed-in records fail with a named prerequisite;
+no story silently substitutes a fake or falls back to an ordinary token store.
