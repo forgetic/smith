@@ -20,10 +20,12 @@ extern crate alloc;
 
 mod credential;
 mod delivery_store;
+mod git;
 mod store;
 mod terminal;
 
 pub use credential::{Begin, Credential, CredentialEvent, CredentialLimits, CredentialRequest, credential_worst_case};
 pub use delivery_store::{decode_delivery, save_delivery};
+pub use git::{Git, GitAction, GitCompletion, GitLimits, git_worst_case};
 pub use store::{File, StoreError, decode_state, decode_turns, save_state, save_turn, turn_name};
 pub use terminal::{Event, Limits, Terminal, max_out, worst_case};
