@@ -5,7 +5,7 @@ Provisional, 2026-10-08. How smith is tested. The strategy is skein's
 shares, what every world checks, scenarios and the referee, the two
 suites, and where a failure is fixed. This document keeps what is
 smith's:
-- its tiers (section 2);
+- its tiers, and its live tests (section 2);
 - its neighbours and their faces (section 3);
 - its fakes (section 4);
 - its scenarios and referee (section 5);
@@ -36,6 +36,9 @@ document's "The world" section.
 - **Plaintext below the real loop.** The replaying tiers connect to their
   fakes in plaintext on loopback, so they replay. TLS runs in the real
   loop.
+- **Live tests run the real loop against real backends:** the
+  providers, their issuers and a git remote. They are opt-in, and never
+  part of the gate.
 - **One scenario, every tier its fakes reach.** The local host's
   simulated world and the real loop run the same processes, scenarios
   and referee. Only the loop beneath them changes.
@@ -108,14 +111,45 @@ Domain worlds use domains and fakes only, never protocol crates.
 - It runs in the focused suite, and fails, saying why, where `io_uring`,
   git, rg or sh is missing.
 
-### 2.3 Beside the tiers
+### 2.3 Live tests
 
-- **The binary's own tests** run `smith` as a process: its startup
-  refusals, and, under a pseudo-terminal, a person's interrupt reaching
-  the host alone, not the agent it spawned (skein's `io.md`, section 6).
-- **Live checks** call real providers with real credentials, by hand,
-  outside both suites: TLS to them and the machine's roots. What they
-  capture becomes skein's recorded exchanges.
+- **The real loop against real backends.** The world is 2.2's, with each
+  fake replaced:
+  - the providers' endpoints, over TLS with the machine's roots and each
+    provider's identity profile;
+  - the providers' OAuth issuers, for refresh;
+  - a git remote, for a configured push, when one is named.
+- **Opt-in.** They form a suite of their own, `live`, chosen by its
+  profile: one at a time, without retries, with a generous timeout.
+  Neither the focused nor the fuzzy suite runs them, so the gate never
+  does.
+- **Credentials come from the caller,** named by environment variables. A
+  test that lacks one fails, saying which.
+- **A token directory of their own.** Refresh tokens rotate, so the live
+  tests keep a durable token directory, signed in once by hand with the
+  binary's own sign-in, and refreshed by every run. It is never the
+  user's own directory.
+- **Stories,** for each provider:
+  - a run refreshes its grant against the issuer;
+  - a chat ends with a commit in place;
+  - a second run resumes the chat from its files;
+  - with a remote named, the push lands, and the test removes the branch
+    afterwards.
+- **Outcomes, not words.** An LLM's words vary, so a story asks for a
+  precise outcome, such as a file with given content, and the referee
+  checks that outcome.
+- **What they show:** each provider's wire as it is today (its dialect,
+  identity headers, TLS and roots), refresh and rotation at the issuer,
+  and a push to a real forge. A failure is captured as a recorded
+  exchange for skein's fakes, and rerun lower down
+  (testing-strategy.md, section 9).
+
+### 2.4 Beside the tiers
+
+The binary's own tests run `smith` as a process:
+- its startup refusals;
+- under a pseudo-terminal, a person's interrupt reaching the host alone,
+  not the agent it spawned (skein's `io.md`, section 6).
 
 ## 3. Neighbours and their faces
 
@@ -226,15 +260,18 @@ Every world checks what the strategy lists (testing-strategy.md, section
   These need cgroup v2 delegated to the user and unprivileged user
   namespaces. A test fails, saying so, where they are missing.
 
-### 6.1 Focused tests and fuzzy tests
+### 6.1 The suites
 
-The two suites are the strategy's (testing-strategy.md, section 8), run
-by the commands in `docs/development/workflow.md`:
+The strategy's two suites (testing-strategy.md, section 8) make the gate,
+run by the commands in `docs/development/workflow.md`:
 - **focused tests:** the step tests, and each world's scenarios, referee
   tests, replay, facts changing nothing, memory at the worst case, and
   the real loop;
 - **fuzzy tests:** each world's `tests/fuzzy_*.rs`, sweeps over seeds
   under faults.
+
+The live tests are a third suite, outside the gate: the real loop's
+`tests/live.rs`, under the `live` profile only (2.3).
 
 ## 7. Layout
 
@@ -253,7 +290,7 @@ tests/machine                simulated world: the machine component
 tests/agent-process          simulated world: the agent service
 tests/hosts                  simulated world: a sample host and the agent it spawns
 tests/local-process          simulated world: the local host and its peers
-tests/real                   the real loop
+tests/real                   the real loop, and its live tests
 tests/*/tests/*.rs           a world's focused tests
 tests/*/tests/fuzzy_*.rs     its fuzzy tests
 crates/smith/tests           the binary's own tests, beside the tiers
@@ -271,4 +308,5 @@ smith keeps only its worlds, its scripted neighbours and its scenarios.
   CI's containers.
 - **The sample host in the real loop:** whether a second host earns a
   real loop of its own, beside the local host's.
-- **Live checks' home:** where they live, and who runs them when.
+- **Live tests on a schedule:** credentials kept as CI secrets, and how
+  often to spend a subscription's usage on them.
