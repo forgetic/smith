@@ -113,6 +113,36 @@ fn change_scripts() -> Box<[api::Script]> {
     }])
 }
 
+// Shared scenario data: any tier can select these same provider turns.
+fn tool_scripts() -> Box<[api::Script]> {
+    let turns = [
+        ("wait", "{}"),
+        ("read", r#"{"path":"original.txt"}"#),
+        ("search", r#"{"pattern":"original","path":"original.txt"}"#),
+        ("edit", r#"{"path":"original.txt","old":"original","new":"edited"}"#),
+        ("write", r#"{"path":"result.txt","content":"new\n"}"#),
+        ("shell", r#"{"command":"printf 'ran\n' > command.txt"}"#),
+        (
+            "finish",
+            r#"{"form":"change","text":"","fields":{"title":"Updated result","body":"Created the result file"}}"#,
+        ),
+    ];
+    Box::new([api::Script {
+        cue: b"@local-shell".as_slice().into(),
+        turns: turns
+            .into_iter()
+            .map(|(name, arguments)| api::Turn {
+                lines: Box::new([api::Line::Call {
+                    name: name.as_bytes().into(),
+                    arguments: arguments.as_bytes().into(),
+                }]),
+                finish: api::Finish::ToolCalls,
+                tokens: 1,
+            })
+            .collect(),
+    }])
+}
+
 /// Checkout observations shared only by the machine and outside referee.
 #[derive(Clone)]
 pub struct CheckoutView(Rc<RefCell<Option<(Checkout, History, u64)>>>);
@@ -378,6 +408,7 @@ impl World {
                     tls: false,
                     trust_der: None,
                     change,
+                    tools: false,
                     in_process: placement == Placement::InProcess,
                     keep_facts,
                     authenticated: false,
@@ -635,7 +666,13 @@ impl Scenario {
     #[must_use]
     pub fn provider(&self) -> crate::llm::Peer {
         smith_agent_process_world::fake::configured_transport(
-            if self.launch.change { change_scripts() } else { scripts() },
+            if self.launch.tools {
+                tool_scripts()
+            } else if self.launch.change {
+                change_scripts()
+            } else {
+                scripts()
+            },
             skein_llm::Credential {
                 access_token: if self.launch.authenticated {
                     b"access-new".as_slice().into()

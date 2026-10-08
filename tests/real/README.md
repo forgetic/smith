@@ -12,9 +12,14 @@ test trust and git repository with an executable check script. Git implements
 the referee's narrow head/message/files face through outside observations.
 The ordinary test observer reaps each observation command before returning.
 
-The current Skein pin is `6e36bce926aa468b9afed755f29ad696cb215802`, which
-includes skein 04 and the later required hosted-root and peer-batching fixes.
+The current Skein pin is `e8bc0183785de5d56c263db40efb76cbaa58267e`, which
+includes all five Skein sessions, required hosted-root and peer-batching fixes
+and shared checked real-loop accounting.
 Moving back to the original skein 04 tip would remove those prerequisites.
 
-Per-process real-loop metering awaits Skein's shared real harness support;
-smith owns no generic allocator spans, host schedule or descriptor ledger.
+The four named stories cover sign-in/token persistence, all tool families
+followed by mandatory checks and a local commit, durable history across
+invocations, and equivalent hosted/colocated reports. The original adapter
+controls are covered by these stories. Checked per-process accounting is
+consumed in testing pass 03.3; smith owns no generic allocator spans, host
+schedule or descriptor ledger.

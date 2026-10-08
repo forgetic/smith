@@ -86,6 +86,9 @@ impl Scratch {
             br#"#!/bin/sh
 set -eu
 test "$(cat result.txt)" = new
+test "$(cat original.txt)" = edited
+test "$(cat command.txt)" = ran
+printf 'checked\n' > checks-ran.txt
 "#,
         )
         .expect("check script");
@@ -136,6 +139,7 @@ impl World {
     pub fn changed(seed: u64, scratch: &Scratch, placement: Placement) -> Self {
         let mut scenario = Simulated::changed(seed, &scratch.files, placement).scenario;
         let checkout = Checkout { path: Some(scratch.path().join("repo")) };
+        scenario.launch.tools = true;
         scenario.ending = Ending::Change { before: checkout.head().expect("initial head") };
         Self::configured(scenario, scratch)
     }
@@ -210,6 +214,21 @@ impl World {
     #[must_use]
     pub fn checkout(&self) -> &Checkout {
         &self.checkout
+    }
+
+    /// Actual durable transcript loaded through the same outside store face.
+    #[must_use]
+    pub fn turns(&self) -> usize {
+        let store = smith::local_store::Store::new(
+            self.scenario.launch.state_directory.clone(),
+            process::lower_configuration().channel_endpoints,
+            1 << 20,
+        )
+        .expect("outside durable store");
+        match store.load().expect("durable history") {
+            smith_local_domain::Event::Loaded { transcript, .. } => transcript.map_or(0, |history| history.turns.len()),
+            _ => unreachable!("store load has its declared terminal"),
+        }
     }
 
     #[must_use]

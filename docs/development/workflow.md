@@ -421,3 +421,15 @@ nextest serializes these stories. The shared invocation deadline starts at
 the first supplied clock value, and fixture connection reuse expires after
 50 ms. Per-process real-loop metering still needs Skein's shared harness
 support before testing pass 03.3 can finish. Budgets remain unchanged.
+
+Testing pass 03.2 repins Skein to e8bc018 and adds the four named real-loop
+stories. Idle serial `measure -j 1` on 2026-10-08 measured four real stories /
+0.607 seconds summed PASS durations: checked local commit 0.329, first sign-in
+0.080, durable second invocation 0.104 and equivalent colocated report 0.094.
+They subsume the two original adapter controls. Shared tool-domain and
+machine-adapter ceilings now agree; a lower-tier admission regression checks
+read/search/shell/check requests at their configured bounds. Fixture reuse
+expires after 5 ms. The affected local-process world's sixteen focused tests
+measured 0.873 seconds and its fuzzy replay sweep 2.700 seconds. The real
+commit contains the edited file, command result and actual check marker, and
+its message follows the result fields. All existing budgets remain unchanged.

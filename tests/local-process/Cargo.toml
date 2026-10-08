@@ -14,6 +14,7 @@ skein-fake-llm-domain.workspace = true
 skein-llm.workspace = true
 skein-llm-connection.workspace = true
 smith-protocol-llm.workspace = true
+smith-protocol-machine.workspace = true
 skein-llm-world.workspace = true
 skein-io.workspace = true
 skein-lib.workspace = true

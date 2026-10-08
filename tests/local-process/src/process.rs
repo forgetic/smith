@@ -26,6 +26,9 @@ pub struct Launch {
     pub tls: bool,
     pub trust_der: Option<PathBuf>,
     pub change: bool,
+    /// Include the real-loop tool and mandatory-check story.
+    #[serde(default)]
+    pub tools: bool,
     pub in_process: bool,
     pub keep_facts: bool,
     pub authenticated: bool,
@@ -50,9 +53,22 @@ pub fn lower_configuration() -> agent::Config {
     let mut lower = smith_agent_process_world::configuration();
     lower.limits.llm.head = Some(Duration::from_secs(10));
     lower.limits.io.close_timeout = Duration::from_millis(50);
-    lower.limits.llm.connection.idle_keep = Duration::from_millis(50);
+    lower.limits.llm.connection.idle_keep = Duration::from_millis(5);
     lower.limits.llm.connection.io.close_timeout = Duration::from_millis(50);
-    lower.limits.machine.file_bytes = 4096;
+    lower.limits.domain.session.tools.file_bytes = 4096;
+    lower.limits.domain.session.tools.list_entries = 32;
+    lower.limits.domain.session.tools.list_bytes = 512;
+    lower.limits.machine.file_bytes = lower.limits.domain.session.tools.file_bytes;
+    lower.limits.machine.path_bytes = lower.limits.domain.session.tools.path_bytes;
+    lower.limits.machine.search_hits = lower.limits.domain.session.tools.search_hits;
+    lower.limits.machine.search_bytes = lower.limits.domain.session.tools.search_bytes;
+    lower.limits.machine.output_bytes = lower
+        .limits
+        .domain
+        .run
+        .check_tail
+        .max(lower.limits.domain.session.tools.shell_head)
+        .max(lower.limits.domain.session.tools.shell_tail);
     lower.limits.machine.entries = 32;
     lower.limits.file_bytes = 8192;
     lower.limits.file_entries = 32;
@@ -68,6 +84,17 @@ pub fn configuration(root: kernel::Fd, change: bool) -> (service::Config, agent:
 /// Same bounded local policy with transport selected by immutable scenario settings.
 #[must_use]
 pub fn configuration_with(root: kernel::Fd, change: bool, tls: bool) -> (service::Config, agent::Config) {
+    configuration_with_tools(root, change, tls, false)
+}
+
+/// The shared policy optionally requires the extended tool story's real checks.
+#[must_use]
+pub fn configuration_with_tools(
+    root: kernel::Fd,
+    change: bool,
+    tls: bool,
+    tools: bool,
+) -> (service::Config, agent::Config) {
     let lower = lower_configuration_with(tls);
     let mut source = serde_json::json!({
         "agent": {}, "chat": "main", "instructions": "@local-shell Assist",
@@ -78,7 +105,11 @@ pub fn configuration_with(root: kernel::Fd, change: bool, tls: bool) -> (service
     });
     if change {
         source["directories"] = serde_json::json!([{ "name": "repo", "path": "repo", "writable": true, "git": true }]);
-        source["contract"] = serde_json::json!({ "form": "change", "checks_must_pass": false, "fields": [{"name": "title", "max": 256}, {"name": "body", "max": 1024}] });
+        source["contract"] = serde_json::json!({ "form": "change", "checks_must_pass": tools, "fields": [{"name": "title", "max": 256}, {"name": "body", "max": 1024}] });
+    }
+    if tools {
+        assert!(change, "tool story has a writable repository");
+        source["conventions"] = serde_json::json!({"guide": ".smith-test/guide", "checks": ".smith-test/check"});
     }
     let settings: local_settings::Settings = serde_json::from_value(source).expect("host settings");
     let endpoints = lower.channel_endpoints.clone();
@@ -589,7 +620,8 @@ pub fn local_roots(spawn: &kernel::Spawn) -> Vec<StartupRoot> {
 #[must_use]
 pub fn make_local(spawn: &kernel::Spawn, inherited: &Inherited) -> Proc {
     let launch = Launch::read(spawn);
-    let (mut config, lower) = configuration_with(root(inherited, b"launch"), launch.change, launch.tls);
+    let (mut config, lower) =
+        configuration_with_tools(root(inherited, b"launch"), launch.change, launch.tls, launch.tools);
     config.launch.arguments = launch.arguments();
     let local = Local::new(
         config,
