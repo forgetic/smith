@@ -1,3 +1,8 @@
+use skein_world::domain::heap::Counting;
+
+#[global_allocator]
+static HEAP: Counting = Counting;
+
 use skein_io::kernel;
 use smith_local_process_world::{
     Placement,

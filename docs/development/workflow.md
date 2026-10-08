@@ -433,3 +433,13 @@ expires after 5 ms. The affected local-process world's sixteen focused tests
 measured 0.873 seconds and its fuzzy replay sweep 2.700 seconds. The real
 commit contains the edited file, command result and actual check marker, and
 its message follows the result fields. All existing budgets remain unchanged.
+
+Testing pass 03.3 measured the real world serially on the idle machine on
+2026-10-08, consuming Skein's checked accounting at `e8bc018`. Its four
+focused stories passed in 0.723 seconds (sum of individual reports 0.722):
+commit/tool/check story 0.392, sign-in 0.094, durable second invocation 0.122,
+and equivalent hosted/colocated invocation 0.114 seconds. These include
+per-process construction/iteration/drop checks, complete expected scratch
+changes and outside child-reaping observations. This world has no fuzzy
+suite: kernel schedules are not seeded replay. Existing suite budgets and
+serial measurement policy remain unchanged.

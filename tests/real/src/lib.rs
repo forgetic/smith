@@ -3,10 +3,12 @@
 //! here; service state is never inspected. `World::settle` registers the same
 //! local and agent factories over one ring, with TLS peers on loopback.
 
+mod settled;
+
 use skein_fake_checkout::git::Tree;
 use skein_lib::Duration;
 use skein_shell::Clock;
-use skein_world::{HostedProgram, real};
+use skein_world::{Host, HostedProgram, real};
 use smith_local_process_world::{
     Files, Placement, World as Simulated,
     process::{self, Proc},
@@ -118,7 +120,7 @@ impl Default for Scratch {
 pub struct World {
     pub scenario: Scenario,
     checkout: Checkout,
-    outcome: Option<real::Outcome<Proc>>,
+    outcome: Option<real::CheckedOutcome<Proc>>,
 }
 
 impl World {
@@ -161,6 +163,8 @@ impl World {
     }
 
     pub fn settle(&mut self) {
+        settled::assert_no_children();
+        let before = settled::Before::new(&self.scenario.launch.root_path);
         let launch = &self.scenario.launch;
         let referee = Run::new(
             launch.seed,
@@ -170,7 +174,7 @@ impl World {
             self.scenario.interrupt_on_query,
             launch.keep_facts,
         );
-        let mut world = real::World::new(referee);
+        let mut world = real::World::new_checked(referee);
         world.host_roots(
             HostedProgram {
                 program: b"smith-local".as_slice().into(),
@@ -200,6 +204,16 @@ impl World {
             world.spawn(|| Proc::Browser(Box::default()));
         }
         self.outcome = Some(world.run(&Clock::new(), Duration::from_secs(5)));
+        let outcome = self.outcome.as_ref().expect("settled checked world");
+        assert!(outcome.procs.iter().all(Host::is_empty), "all real processes have settled");
+        assert!(outcome.killed.is_empty(), "normal stories kill no hosted child");
+        settled::assert_no_children();
+        before.assert_expected(&self.scenario, &self.seen());
+        let heaps = outcome.heap.as_ref().expect("per-process checked heap ledger");
+        assert_eq!(heaps.len(), outcome.procs.len());
+        for (peak, bound) in heaps {
+            assert!(*peak > 0 && peak <= bound, "each constructed and iterated process stays within its bound");
+        }
     }
 
     #[must_use]
