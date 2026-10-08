@@ -279,6 +279,15 @@ version = "0.0.0"
 source = "git+https://git.ekanayaka.io/ai/skein.git#b1c9e90adee6bde6c0fb688dc651bdcdbd03df63"
 
 [[package]]
+name = "skein-fake-channel"
+version = "0.0.0"
+source = "git+https://git.ekanayaka.io/ai/skein.git#45a9d655bbc5df04c5f00d44da4ca9580a1f8b26"
+dependencies = [
+ "skein-channel",
+ "skein-lib",
+]
+
+[[package]]
 name = "skein-fake-checkout"
 version = "0.0.0"
 source = "git+https://git.ekanayaka.io/ai/skein.git#b1c9e90adee6bde6c0fb688dc651bdcdbd03df63"
@@ -450,6 +459,31 @@ dependencies = [
  "skein-shell",
  "skein-tls",
  "smith-agent-service",
+ "smith-channel",
+ "smith-charter",
+ "smith-domain",
+ "smith-protocol-channel",
+ "smith-protocol-llm",
+ "smith-protocol-machine",
+ "smith-transcript",
+]
+
+[[package]]
+name = "smith-agent-process-world"
+version = "0.0.0"
+dependencies = [
+ "skein-channel",
+ "skein-fake-channel",
+ "skein-fake-machine",
+ "skein-io",
+ "skein-lib",
+ "skein-llm-connection",
+ "skein-llm-world",
+ "skein-sim",
+ "skein-tls",
+ "skein-world",
+ "smith-agent-service",
+ "smith-agent-world",
  "smith-channel",
  "smith-charter",
  "smith-domain",
