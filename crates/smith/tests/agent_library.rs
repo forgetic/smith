@@ -125,13 +125,13 @@ fn the_shared_agent_pass_answers_the_host_and_writes_its_trace() {
     .expect("shared agent startup");
     let mut host = fixture::host();
     host.play(fixture::start(&fixture::charter()));
-    let mut peer = fixture::peer::Peer::new();
+    let mut peer = fixture::fake::peer();
     let mut machine = skein_fake_machine::Machine::new();
     let mut pending = None;
     let mut closed = false;
     for _ in 0..10_000 {
         sim.reap(peer_pid, peer.completions());
-        peer.step(sim.now(), sim.wall());
+        peer.iterate(sim.now(), sim.wall());
         sim.submit(peer_pid, peer.submissions());
         sim.reap(pid, agent.completions());
         agent.iterate(sim.now(), sim.wall());
@@ -155,7 +155,7 @@ fn the_shared_agent_pass_answers_the_host_and_writes_its_trace() {
             break;
         }
         if !agent.work_pending(sim.now())
-            && !peer.work_pending()
+            && !peer.work_pending(sim.now())
             && sim.ready(pid) == 0
             && sim.ready(peer_pid) == 0
             && let Some(at) = [sim.next_due(), agent.next_deadline(), peer.next_deadline()].into_iter().flatten().min()
@@ -164,7 +164,7 @@ fn the_shared_agent_pass_answers_the_host_and_writes_its_trace() {
         }
     }
     assert_eq!(agent.result(), Some(Ok(())));
-    assert!(peer.replied());
+    assert!(fixture::fake::replied(&peer));
     assert!(agent.is_empty());
     sim.assert_quiescent(pid);
     sim.assert_no_open_fds(pid);

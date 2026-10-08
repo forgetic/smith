@@ -296,20 +296,18 @@ impl World {
             Action::Eof,
         ];
         let mut world = Self::configured(seed, files, placement, commands, false, true, false);
-        let certificate = files.path.join("root.der");
-        std::fs::write(&certificate, skein_tls_world::pki::ROOT).expect("fixture certificate");
         world.accounts = Box::new([local_settings::Account {
             number: 0,
             account_id: "acc".into(),
             oauth: Some(local_settings::OAuth {
-                authorization_url: "https://skein.test/authorize".into(),
-                token_endpoint: "https://skein.test/token".into(),
+                authorization_url: "http://127.0.0.1:444/authorize".into(),
+                token_endpoint: "http://127.0.0.1:444/token".into(),
                 client_id: "client".into(),
                 redirect_uri: "http://127.0.0.1:2345/callback".into(),
                 scope: "read".into(),
                 address: "127.0.0.1:444".into(),
-                server_name: "skein.test".into(),
-                trust_der: Some(certificate.to_str().expect("fixture path").into()),
+                server_name: String::new(),
+                trust_der: None,
                 json: false,
             }),
         }]);
@@ -321,16 +319,27 @@ impl World {
             rotations: 4,
             plans: 4,
         };
-        let mut issuer = fake_oauth::Issuer::new(
+        let mut issuer = Issuer::new(
+            (std::net::Ipv4Addr::LOCALHOST, 444).into(),
+            skein_fake_peers::Transport::Plaintext,
+            smith_agent_process_world::fake::limits(),
             fake_oauth::Config {
-                authorization_url: b"https://skein.test/authorize".as_slice().into(),
-                token_endpoint: b"https://skein.test/token".as_slice().into(),
+                authorization_url: b"http://127.0.0.1:444/authorize".as_slice().into(),
+                token_endpoint: b"http://127.0.0.1:444/token".as_slice().into(),
                 client_id: b"client".as_slice().into(),
                 client_secret: None,
                 redirect_uri: b"http://127.0.0.1:2345/callback".as_slice().into(),
                 refresh_token: b"refresh-old".as_slice().into(),
             },
             limits,
+            skein_http::server::Limits {
+                head: 8192,
+                headers: 32,
+                body: 16_384,
+                read: 1024,
+                response: 49_152,
+                send: 1024,
+            },
         )
         .expect("issuer fixture");
         issuer
@@ -373,7 +382,7 @@ impl World {
                 .save(0, &skein_oauth::encode_record(&prior, &token_limits()).expect("expired token encoding"))
                 .expect("expired token fixture");
         }
-        world.peer = Peer::new(
+        world.peer = crate::llm::peer(
             scripts(),
             skein_llm::Credential {
                 access_token: b"access-new".as_slice().into(),
@@ -382,15 +391,7 @@ impl World {
             if mode == Authentication::Proactive { Duration::from_secs(2) } else { Duration::ZERO },
         );
         let pid = world.sim.spawn_process();
-        world.issuer = Some((
-            pid,
-            Issuer::new(
-                issuer,
-                &limits,
-                kernel::Addr::from((std::net::Ipv4Addr::LOCALHOST, 444)),
-                b"https://skein.test/token".as_slice().into(),
-            ),
-        ));
+        world.issuer = Some((pid, issuer));
         world
     }
 
@@ -457,7 +458,7 @@ impl World {
         }
         let credential =
             skein_llm::Credential { access_token: b"token".as_slice().into(), account_id: b"acc".as_slice().into() };
-        let peer = Peer::new(
+        let peer = crate::llm::peer(
             if change { change_scripts() } else { scripts() },
             credential,
             if interrupt_on_query { Duration::from_secs(3600) } else { Duration::ZERO },
@@ -570,7 +571,7 @@ impl World {
         if let Some((pid, issuer)) = &mut self.issuer {
             self.sim.reap(*pid, issuer.completions());
             issuer.iterate(self.sim.now(), self.sim.wall());
-            if issuer.posts() > 0 && self.first_post.is_none() {
+            if crate::oauth::posts(issuer) > 0 && self.first_post.is_none() {
                 self.first_post = Some(self.sim.wall());
             }
             self.sim.submit(*pid, issuer.submissions());
@@ -583,7 +584,7 @@ impl World {
         self.sim.reap(self.peer_pid, self.peer.completions());
         self.peer.iterate(self.sim.now(), self.sim.wall());
         self.sim.submit(self.peer_pid, self.peer.submissions());
-        if self.issuer.is_some() && !self.peer.queries().is_empty() && !self.saved_before_query {
+        if self.issuer.is_some() && crate::llm::queries(&self.peer).next().is_some() && !self.saved_before_query {
             let tokens = local_tokens::Tokens::new(&self.token_directory, token_limits()).expect("private token store");
             assert_eq!(
                 tokens
@@ -596,7 +597,7 @@ impl World {
             );
             self.saved_before_query = true;
         }
-        if self.interrupt_on_query && !self.interrupted && !self.peer.queries().is_empty() {
+        if self.interrupt_on_query && !self.interrupted && crate::llm::queries(&self.peer).next().is_some() {
             self.terminal.interrupt();
             self.interrupted = true;
         }
@@ -668,9 +669,9 @@ impl World {
                 assert!(result.is_ok(), "shared shell IO error: {result:?}");
                 let success = matches!(result, Ok(local::ExitStatus::Success));
                 self.sim.finish_service(*pid, kernel::Exit::Code(u8::from(!success)));
-                self.peer.stop();
+                self.peer.shutdown();
                 if let Some((_, issuer)) = &mut self.issuer {
-                    issuer.stop();
+                    issuer.shutdown();
                 }
             }
             for (parent, pidfd) in git_spawned {
@@ -690,17 +691,14 @@ impl World {
         }
         self.terminal.iterate(self.sim.now(), self.sim.wall());
         self.sim.submit(self.terminal_pid, self.terminal.submissions());
-        if self.browser.is_none()
-            && let Some((_, issuer)) = &mut self.issuer
-        {
+        if self.browser.is_none() && self.issuer.is_some() {
             let shown = self.terminal.shown();
             if let Some(at) = shown.windows(9).position(|part| part == b"Sign in: ") {
                 let url = &shown[at + 9..];
                 // Visit only after the whole final URL parameter has reached
                 // the terminal. A writer may hand it out across many packets.
                 if let Some(end) = url.iter().position(|byte| *byte == b'\n') {
-                    let redirect = issuer.authorize(url[..end].into(), self.sim.now());
-                    self.browser = Some((self.sim.spawn_process(), Browser::new(redirect)));
+                    self.browser = Some((self.sim.spawn_process(), Browser::new(&url[..end])));
                     self.pages += 1;
                 }
             }
@@ -931,7 +929,7 @@ impl World {
             self.steps,
             self.terminal.exit(),
             String::from_utf8_lossy(self.terminal.shown()),
-            self.peer.queries().len(),
+            crate::llm::queries(&self.peer).count(),
             self.facts
         );
     }
@@ -943,7 +941,7 @@ impl World {
 
     #[must_use]
     pub fn oauth_posts(&self) -> u64 {
-        self.issuer.as_ref().map_or(0, |(_, issuer)| issuer.posts())
+        self.issuer.as_ref().map_or(0, |(_, issuer)| crate::oauth::posts(issuer))
     }
     #[must_use]
     pub fn page_visits(&self) -> u32 {
@@ -964,11 +962,11 @@ impl World {
             facts: self.facts.clone(),
             shown: self.terminal.shown().to_vec(),
             errors: self.terminal.errors().to_vec(),
-            queries: self.peer.queries().to_vec(),
+            queries: crate::llm::queries(&self.peer).cloned().collect(),
             exit: self.terminal.exit(),
             pushed: self.git_commands.iter().any(|args| args[0].as_ref() == b"push"),
             oauth: self.issuer.as_ref().map(|(_, issuer)| crate::referee::OAuthSeen {
-                posts: issuer.posts(),
+                posts: crate::oauth::posts(issuer),
                 pages: self.pages,
                 browser_replied: self.browser_replied(),
                 saved_before_query: self.saved_before_query,
@@ -976,19 +974,10 @@ impl World {
         }
     }
 
-    /// Replay application observations; rustls deliberately draws signing
-    /// randomness from the kernel, so TLS record lengths are not a seed trace.
+    /// Replay the complete seeded kernel trace, including every plaintext peer operation.
     #[must_use]
     pub fn trace(&self) -> Vec<String> {
-        let mut trace = skein_world::domain::Trace::default();
-        for fact in &self.facts {
-            trace.log(skein_lib::Time::ZERO, format!("fact {fact:?}"));
-        }
-        for query in self.peer.queries() {
-            trace.log(skein_lib::Time::ZERO, format!("query {query:?}"));
-        }
-        trace.log(skein_lib::Time::ZERO, format!("terminal {:?} {:?}", self.terminal.shown(), self.terminal.exit()));
-        trace.lines().to_vec()
+        self.sim.render_trace().lines().map(str::to_owned).collect()
     }
 
     /// Host bounds plus the finite world's trace, fixture and observation cells.
@@ -1020,8 +1009,8 @@ impl World {
         self.terminal.shown()
     }
     #[must_use]
-    pub fn queries(&self) -> &[api::Query] {
-        self.peer.queries()
+    pub fn queries(&self) -> Vec<api::Query> {
+        crate::llm::queries(&self.peer).cloned().collect::<Vec<_>>()
     }
     #[must_use]
     pub fn facts(&self) -> &[local::Fact] {

@@ -19,6 +19,8 @@ smith-protocol-channel.workspace = true
 smith-transcript.workspace = true
 
 [dev-dependencies]
+skein-fake-peers.workspace = true
+skein-world.workspace = true
 skein-tls-world.workspace = true
 skein-sim.workspace = true
 skein-fake-machine.workspace = true

@@ -30,6 +30,7 @@ struct World {
     saved: Option<oauth::SavedToken>,
     terminal: Option<Result<smith_domain::Grant, local::CredentialFailure>>,
     root: PathBuf,
+    lose: bool,
 }
 
 fn issuer_limits() -> fake::Limits {
@@ -47,33 +48,42 @@ impl World {
     fn new(name: &str, seed: u64, prior: Option<&[u8]>) -> Self {
         let root = std::env::temp_dir().join(format!("smith-auth-{}-{name}", std::process::id()));
         std::fs::create_dir_all(&root).expect("test directory");
-        let certificate = root.join("root.der");
-        std::fs::write(&certificate, skein_tls_world::pki::ROOT).expect("fixture trust certificate");
         let account = Account {
             number: 7,
             account_id: "acc".into(),
             oauth: Some(OAuth {
-                authorization_url: "https://skein.test/authorize".into(),
-                token_endpoint: "https://skein.test/token".into(),
+                authorization_url: "http://127.0.0.1:443/authorize".into(),
+                token_endpoint: "http://127.0.0.1:443/token".into(),
                 client_id: "client".into(),
                 redirect_uri: "http://127.0.0.1:2345/callback".into(),
                 scope: "read".into(),
                 address: "127.0.0.1:443".into(),
-                server_name: "skein.test".into(),
-                trust_der: Some(certificate.to_str().expect("fixture path").into()),
+                server_name: String::new(),
+                trust_der: None,
                 json: false,
             }),
         };
-        let mut issuer = fake::Issuer::new(
+        let mut issuer = Peer::new(
+            (std::net::Ipv4Addr::LOCALHOST, 443).into(),
+            skein_fake_peers::Transport::Plaintext,
+            smith_agent_process_world::fake::limits(),
             fake::Config {
-                authorization_url: b"https://skein.test/authorize".as_slice().into(),
-                token_endpoint: b"https://skein.test/token".as_slice().into(),
+                authorization_url: b"http://127.0.0.1:443/authorize".as_slice().into(),
+                token_endpoint: b"http://127.0.0.1:443/token".as_slice().into(),
                 client_id: b"client".as_slice().into(),
                 client_secret: None,
                 redirect_uri: b"http://127.0.0.1:2345/callback".as_slice().into(),
                 refresh_token: b"refresh-old".as_slice().into(),
             },
             issuer_limits(),
+            skein_http::server::Limits {
+                head: 8192,
+                headers: 32,
+                body: 16_384,
+                read: 1024,
+                response: 49_152,
+                send: 1024,
+            },
         )
         .expect("fake issuer");
         issuer
@@ -84,7 +94,7 @@ impl World {
                     refresh_token: Some(b"refresh-new".as_slice().into()),
                     expires_in: 7200,
                 }),
-                delay: Duration::ZERO,
+                delay: Duration::from_millis(10),
                 retry_after: Duration::ZERO,
             })
             .expect("one token plan");
@@ -117,21 +127,21 @@ impl World {
             events: Queue::with_capacity(256),
             requests: Queue::with_capacity(256),
             auth,
-            peer: Peer::new(
-                issuer,
-                &issuer_limits(),
-                kernel::Addr::from((std::net::Ipv4Addr::LOCALHOST, 443)),
-                b"https://skein.test/token".as_slice().into(),
-            ),
+            peer: issuer,
             saved: None,
             terminal: None,
             root,
+            lose: false,
         }
     }
 
     fn step(&mut self) {
         self.sim.reap(self.peer_pid, self.peer.completions());
         self.peer.iterate(self.sim.now(), self.sim.wall());
+        if self.lose && smith_local_process_world::oauth::posts(&self.peer) > 0 {
+            self.lose = false;
+            self.peer.shutdown();
+        }
         self.sim.submit(self.peer_pid, self.peer.submissions());
         if let Some((pid, browser)) = &mut self.browser {
             self.sim.reap(*pid, browser.completions());
@@ -160,8 +170,7 @@ impl World {
         }
         self.auth.tick(self.env.now, self.env.wall, &mut self.requests);
         if let Some(url) = self.auth.shown_url() {
-            let redirect = self.peer.authorize(url, self.env.now);
-            self.browser = Some((self.sim.spawn_process(), Browser::new(redirect)));
+            self.browser = Some((self.sim.spawn_process(), Browser::new(&url)));
         }
         while let Some(request) = self.auth.take() {
             match request {
@@ -216,7 +225,7 @@ impl World {
             self.step();
             if self.terminal.is_some() {
                 self.auth.close(self.env.now, self.env.wall, &mut self.requests);
-                self.peer.stop();
+                self.peer.shutdown();
                 for _ in 0..4000 {
                     self.step();
                     if self.io.is_empty()
@@ -247,26 +256,26 @@ impl Drop for World {
 }
 
 #[test]
-fn sign_in_returns_through_the_loopback_listener_and_tls_token_endpoint() {
+fn sign_in_returns_through_the_loopback_listener_and_plaintext_token_endpoint() {
     let mut world = World::new("sign-in", 1, None);
     world.settle();
     let Some(Ok(grant)) = world.terminal else {
-        panic!("sign-in grant {:?}, posts {}", world.terminal, world.peer.posts())
+        panic!("sign-in grant {:?}, posts {}", world.terminal, smith_local_process_world::oauth::posts(&world.peer))
     };
     assert_eq!(grant.name.generation, 1);
-    assert_eq!(world.peer.posts(), 1);
+    assert_eq!(smith_local_process_world::oauth::posts(&world.peer), 1);
     assert!(world.saved.is_some(), "candidate is saved before lending");
 }
 
 #[test]
-fn a_refresh_uses_the_tls_endpoint_and_rotates_the_saved_record() {
+fn a_refresh_uses_the_plaintext_endpoint_and_rotates_the_saved_record() {
     let mut world = World::new("refresh", 2, Some(b"refresh-old"));
     world.settle();
     let Some(Ok(grant)) = world.terminal else {
-        panic!("refresh grant {:?}, posts {}", world.terminal, world.peer.posts())
+        panic!("refresh grant {:?}, posts {}", world.terminal, smith_local_process_world::oauth::posts(&world.peer))
     };
     assert_eq!(grant.name.generation, 2);
-    assert_eq!(world.peer.posts(), 1);
+    assert_eq!(smith_local_process_world::oauth::posts(&world.peer), 1);
     assert_eq!(world.saved.as_ref().expect("candidate").refresh_token.as_ref(), b"refresh-new");
 }
 
@@ -275,17 +284,17 @@ fn a_refused_refresh_returns_no_credential() {
     let mut world = World::new("refused", 3, Some(b"wrong-refresh"));
     world.settle();
     assert_eq!(world.terminal, Some(Err(local::CredentialFailure::Refresh)));
-    assert_eq!(world.peer.posts(), 1);
+    assert_eq!(smith_local_process_world::oauth::posts(&world.peer), 1);
     assert!(world.saved.is_none());
 }
 
 #[test]
 fn a_lost_refresh_response_is_uncertain_and_is_never_repeated() {
     let mut world = World::new("lost", 4, Some(b"refresh-old"));
-    world.peer.lose_response();
+    world.lose = true;
     world.settle();
     assert_eq!(world.terminal, Some(Err(local::CredentialFailure::Refresh)));
-    assert_eq!(world.peer.posts(), 1);
+    assert_eq!(smith_local_process_world::oauth::posts(&world.peer), 1);
     assert!(world.saved.is_none());
 }
 

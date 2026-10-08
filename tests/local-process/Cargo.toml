@@ -7,9 +7,10 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+skein-http.workspace = true
+skein-fake-peers.workspace = true
 skein-fake-oauth.workspace = true
 skein-fake-llm-domain.workspace = true
-skein-fake-llm-protocol.workspace = true
 skein-llm.workspace = true
 skein-llm-world.workspace = true
 skein-io.workspace = true
@@ -20,7 +21,6 @@ skein-world.workspace = true
 skein-sim.workspace = true
 skein-fake-machine.workspace = true
 skein-fake-checkout.workspace = true
-skein-tls.workspace = true
 smith.workspace = true
 smith-agent-service.workspace = true
 smith-agent-process-world.workspace = true

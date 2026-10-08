@@ -7,6 +7,9 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+skein-fake-llm-domain.workspace = true
+skein-fake-llm-protocol.workspace = true
+skein-fake-peers.workspace = true
 skein-channel.workspace = true
 skein-fake-channel.workspace = true
 skein-fake-machine.workspace = true

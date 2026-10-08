@@ -2,6 +2,7 @@
 
 use alloc::boxed::Box;
 use skein_lib::{Duration, List, Time, Wall};
+use skein_world::Host;
 use smith_domain::run::{self, charter::Endpoint, outcome};
 use smith_local_domain as local;
 
@@ -241,7 +242,7 @@ fn plain_status_uses_the_runs_snapshot_and_refreshes_it_before_the_next_run() {
 
 #[test]
 #[expect(clippy::wildcard_enum_match_arm, reason = "the story names unexpected shell requests")]
-fn a_colocated_chat_routes_a_turn_through_the_shared_tls_effects_without_spawning() {
+fn a_colocated_chat_routes_a_turn_through_the_shared_plaintext_effects_without_spawning() {
     use skein_lib::Queue;
     let (config, lower) = colocated_config();
     let mut sim_config = skein_sim::Config::calm();
@@ -249,7 +250,7 @@ fn a_colocated_chat_routes_a_turn_through_the_shared_tls_effects_without_spawnin
     let mut sim = skein_sim::Sim::new(8, sim_config);
     let pid = sim.spawn_process();
     let peer_pid = sim.spawn_process();
-    let mut peer = smith_agent_process_world::peer::Peer::new();
+    let mut peer = smith_agent_process_world::fake::peer();
     let mut service = Service::new_in_process(config, lower, Box::new([]), 8).expect("colocated service");
     let mut machine = skein_fake_machine::Machine::new();
     let mut saved_turn = false;
@@ -257,7 +258,7 @@ fn a_colocated_chat_routes_a_turn_through_the_shared_tls_effects_without_spawnin
     let mut sent = false;
     for _ in 0_u32..2000 {
         sim.reap(peer_pid, peer.completions());
-        peer.step(sim.now(), sim.wall());
+        peer.iterate(sim.now(), sim.wall());
         sim.submit(peer_pid, peer.submissions());
         sim.reap(pid, service.completions());
         iterate(&mut service, sim.now(), sim.wall());
@@ -311,7 +312,7 @@ fn a_colocated_chat_routes_a_turn_through_the_shared_tls_effects_without_spawnin
             && !sim.deferred(pid)
             && !sim.deferred(peer_pid)
             && !service.work_pending(sim.now())
-            && !peer.work_pending()
+            && !peer.work_pending(sim.now())
             && let Some(at) =
                 [sim.next_due(), service.next_deadline(), peer.next_deadline()].into_iter().flatten().min()
         {
@@ -319,7 +320,7 @@ fn a_colocated_chat_routes_a_turn_through_the_shared_tls_effects_without_spawnin
         }
     }
     assert!(saved_turn, "local policy acknowledged the shared effect's turn");
-    assert!(peer.replied(), "the fake TLS LLM received the completion");
+    assert!(smith_agent_process_world::fake::replied(&peer), "the fake plaintext LLM received the completion");
     assert!(shown, "the terminal observed the run");
     settle_colocated_exit(&mut service, &mut sim, pid, &mut peer, peer_pid);
 }
@@ -329,14 +330,14 @@ fn settle_colocated_exit(
     service: &mut Service,
     sim: &mut skein_sim::Sim,
     pid: skein_sim::Pid,
-    peer: &mut smith_agent_process_world::peer::Peer,
+    peer: &mut skein_fake_peers::llm::Peer,
     peer_pid: skein_sim::Pid,
 ) {
     service.closed();
     let mut exited = false;
     for _ in 0_u32..1000 {
         sim.reap(peer_pid, peer.completions());
-        peer.step(sim.now(), sim.wall());
+        peer.iterate(sim.now(), sim.wall());
         sim.submit(peer_pid, peer.submissions());
         sim.reap(pid, service.completions());
         iterate(service, sim.now(), sim.wall());
@@ -355,7 +356,7 @@ fn settle_colocated_exit(
             && !sim.deferred(pid)
             && !sim.deferred(peer_pid)
             && !service.work_pending(sim.now())
-            && !peer.work_pending()
+            && !peer.work_pending(sim.now())
             && let Some(at) =
                 [sim.next_due(), service.next_deadline(), peer.next_deadline()].into_iter().flatten().min()
         {

@@ -12,7 +12,8 @@ use smith_protocol_channel as channel;
 use smith_protocol_llm as llm;
 use smith_protocol_machine as machine;
 
-pub mod peer;
+use skein_world::Host;
+pub mod fake;
 
 /// Bounded agent-process settings shared by its direct and hosted worlds.
 #[must_use]
@@ -128,10 +129,7 @@ pub fn configuration() -> agent::Config {
             name: smith_domain::llm::Endpoint(0),
             destination: skein_llm_connection::Endpoint {
                 address: kernel::Addr::from((std::net::Ipv4Addr::LOCALHOST, 443)),
-                transport: skein_llm_connection::Transport::Tls {
-                    server_name: skein_tls::Name::new("skein.test").expect("server name"),
-                    trust: skein_tls_world::pki::client(&[]),
-                },
+                transport: skein_llm_connection::Transport::Plaintext,
                 llm: skein_llm_world::call(7).endpoint,
             },
             account: 0,
@@ -264,7 +262,7 @@ pub struct World {
     signals: kernel::Fd,
     pending: Option<(Box<[u8]>, usize)>,
     input_closed: bool,
-    peer: peer::Peer,
+    peer: skein_fake_peers::llm::Peer,
     peer_pid: Pid,
     machine: skein_fake_machine::Machine,
 }
@@ -294,7 +292,7 @@ impl World {
             signals,
             pending: None,
             input_closed: false,
-            peer: peer::Peer::new(),
+            peer: fake::peer(),
             peer_pid,
             machine: skein_fake_machine::Machine::new(),
         }
@@ -306,7 +304,7 @@ impl World {
 
     pub fn step(&mut self) {
         self.sim.reap(self.peer_pid, self.peer.completions());
-        self.peer.step(self.sim.now(), self.sim.wall());
+        self.peer.iterate(self.sim.now(), self.sim.wall());
         self.sim.submit(self.peer_pid, self.peer.submissions());
         self.sim.reap(self.pid, self.service.completions());
         agent::iterate(&mut self.service, self.sim.now(), self.sim.wall());
@@ -329,7 +327,7 @@ impl World {
             self.input_closed = true;
         }
         if !agent::work_pending(&self.service, self.sim.now())
-            && !self.peer.work_pending()
+            && !self.peer.work_pending(self.sim.now())
             && self.sim.ready(self.pid) == 0
             && self.sim.ready(self.peer_pid) == 0
         {
@@ -372,13 +370,18 @@ impl World {
     }
 
     #[must_use]
-    pub fn peer_replied(&self) -> bool {
-        self.peer.replied()
+    pub fn peer_observations(&self) -> &[skein_fake_peers::llm::Observation] {
+        self.peer.observations()
     }
 
     #[must_use]
-    pub fn peer_request(&self) -> &[u8] {
-        self.peer.received()
+    pub fn peer_replied(&self) -> bool {
+        fake::replied(&self.peer)
+    }
+
+    #[must_use]
+    pub fn peer_queries(&self) -> Vec<&skein_fake_llm_domain::api::Query> {
+        fake::queries(&self.peer).collect()
     }
 
     #[must_use]

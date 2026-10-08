@@ -6,6 +6,7 @@
 use skein_io::{self as io, kernel};
 use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 use skein_sim::{Config as SimConfig, Pid, Sim};
+use skein_world::Host;
 use smith_agent_process_world as agent_fixture;
 use smith_agent_service as agent;
 use smith_host_domain as host;
@@ -457,13 +458,13 @@ impl HostService {
 }
 
 /// The simulated parent, agent child, fake LLM process, and machine.
-#[expect(missing_debug_implementations, reason = "the scripted TLS peer has no Debug implementation")]
+#[expect(missing_debug_implementations, reason = "the shared fake peer has no Debug implementation")]
 pub struct World {
     sim: Sim,
     parent: Pid,
     agent: Option<(Pid, agent::Service)>,
     peer_pid: Pid,
-    peer: agent_fixture::peer::Peer,
+    peer: skein_fake_peers::llm::Peer,
     host: HostService,
     machine: skein_fake_machine::Machine,
     program: Program,
@@ -487,7 +488,7 @@ impl World {
             parent,
             agent: None,
             peer_pid,
-            peer: agent_fixture::peer::Peer::new(),
+            peer: agent_fixture::fake::peer(),
             host,
             machine,
             program,
@@ -497,7 +498,7 @@ impl World {
 
     pub fn step(&mut self) {
         self.sim.reap(self.peer_pid, self.peer.completions());
-        self.peer.step(self.sim.now(), self.sim.wall());
+        self.peer.iterate(self.sim.now(), self.sim.wall());
         self.sim.submit(self.peer_pid, self.peer.submissions());
         if let Some((pid, service)) = &mut self.agent
             && self.sim.service_running(*pid)
@@ -551,7 +552,7 @@ impl World {
         if !self.host.work_pending(self.sim.now())
             && self.sim.ready(self.parent) == 0
             && self.sim.ready(self.peer_pid) == 0
-            && !self.peer.work_pending()
+            && !self.peer.work_pending(self.sim.now())
             && self.agent.as_ref().is_none_or(|(pid, service)| {
                 self.stopped_child
                     || !self.sim.service_running(*pid)
@@ -646,7 +647,7 @@ impl World {
 
     #[must_use]
     pub fn peer_replied(&self) -> bool {
-        self.peer.replied()
+        agent_fixture::fake::replied(&self.peer)
     }
 
     #[must_use]

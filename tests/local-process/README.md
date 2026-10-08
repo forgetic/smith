@@ -1,7 +1,7 @@
 # Local process world
 
-The scripted terminal, shared `smith::local_host::Local` shell, fake LLM
-HTTP/TLS peer, OAuth peer and browser implement `skein_world::Host`. Each
+The scripted terminal, shared `smith::local_host::Local` shell, Skein fake LLM
+HTTP peer, OAuth peer and browser implement `skein_world::Host`. Each
 holds only process state and kernel queues. The binary and this world pass
 file directories, input/output descriptors and the signal source into the
 same shell. Its actual Store and Tokens implementations perform their file
@@ -28,9 +28,9 @@ The required stories cover resume across invocations, a commit with the
 result fields as its message, interruption during a turn, and equivalent
 spawned/colocated operation. File write/sync crash cuts are in the shared
 Store's tests. The fuzzy world uses seeded kernel short IO, completion delays
-and cancellation races, and compares application observations with Skein's
-trace kit. Rustls uses kernel randomness for signing, so encrypted transport
-record lengths are deliberately outside the replay comparison.
+and cancellation races, and compares the full plaintext kernel trace with
+Skein's replay kit.
+The replaying tiers use shared `skein-fake-peers` over plaintext loopback.
 
 Authentication stories run through the shared token store in both placements:
 sign-in and loopback return, expired-token refresh, and refusal. A timed story

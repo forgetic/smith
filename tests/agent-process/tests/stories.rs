@@ -7,8 +7,8 @@ fn a_run_goes_from_start_to_answer_and_the_process_exits_with_success() {
     let mut world = World::new(7, &charter);
     assert!(world.settle(), "the admitted run answered");
     assert_eq!(world.observed().iter().filter(|frame| frame.kind == 0x0110).count(), 1);
-    assert!(world.peer_replied(), "the fake LLM served a TLS response");
-    assert!(world.peer_request().starts_with(b"POST "), "the agent sent an HTTP request");
+    assert!(world.peer_replied(), "the fake LLM served a plaintext response: {:?}", world.peer_observations());
+    assert_eq!(world.peer_queries().len(), 1, "the independent peer decoded one model request");
     let answer = world.answer().expect("host saw final answer");
     assert_eq!(answer.turns(), 1);
     assert!(matches!(answer.result(), RunResult::Failed(_)), "one-turn budget ended the run");

@@ -1,4 +1,4 @@
-//! The shared shell, actual turn store, TLS peers and finite fixture remain
+//! The shared shell, actual turn store, plaintext peers and finite fixture remain
 //! within their checked Host bounds and the separately priced world trace.
 use skein_world::domain::heap::{Counting, Meter};
 use smith_local_process_world::{Authentication, Files, Placement, World};

@@ -56,7 +56,7 @@ struct Invocation {
     machine: skein_fake_machine::Machine,
     pid: skein_sim::Pid,
     peer_pid: skein_sim::Pid,
-    peer: smith_agent_process_world::peer::Peer,
+    peer: skein_fake_peers::llm::Peer,
     local: Local,
     input: skein_io::kernel::Fd,
     output: skein_io::kernel::Fd,
@@ -119,7 +119,7 @@ impl Invocation {
             machine,
             pid,
             peer_pid,
-            peer: smith_agent_process_world::peer::Peer::new(),
+            peer: smith_agent_process_world::fake::peer(),
             local,
             input,
             output,
@@ -131,7 +131,7 @@ impl Invocation {
 
     fn step(&mut self) {
         self.sim.reap(self.peer_pid, self.peer.completions());
-        self.peer.step(self.sim.now(), self.sim.wall());
+        self.peer.iterate(self.sim.now(), self.sim.wall());
         self.sim.submit(self.peer_pid, self.peer.submissions());
         self.sim.reap(self.pid, self.local.completions());
         self.local.iterate(self.sim.now(), self.sim.wall());
@@ -139,7 +139,7 @@ impl Invocation {
         skein_fake_machine::serve(&mut self.machine, &mut self.sim);
         self.seen.extend(self.sim.peer_drain(self.pid, self.output, 4096));
         if !self.local.work_pending(self.sim.now())
-            && !self.peer.work_pending()
+            && !self.peer.work_pending(self.sim.now())
             && self.sim.ready(self.pid) == 0
             && self.sim.ready(self.peer_pid) == 0
             && !self.sim.deferred(self.pid)
@@ -175,7 +175,7 @@ impl Drop for Invocation {
 }
 
 #[test]
-fn the_shared_library_saves_a_tls_turn_and_flushes_terminal_output_before_exiting() {
+fn the_shared_library_saves_a_plaintext_turn_and_flushes_terminal_output_before_exiting() {
     let mut invocation = Invocation::new("turn", 17);
     assert_eq!(invocation.sim.peer_feed(invocation.pid, invocation.input, b"hello\n"), 6);
     for _ in 0..2000 {
@@ -184,7 +184,10 @@ fn the_shared_library_saves_a_tls_turn_and_flushes_terminal_output_before_exitin
             break;
         }
     }
-    assert!(invocation.peer.replied(), "the shared service reached the TLS peer");
+    assert!(
+        smith_agent_process_world::fake::replied(&invocation.peer),
+        "the shared service reached the plaintext peer"
+    );
     let local::Event::Loaded { transcript: Some(transcript), .. } =
         invocation.local.store().load().expect("saved chat")
     else {
