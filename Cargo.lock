@@ -481,6 +481,8 @@ dependencies = [
  "smith-channel",
  "smith-charter",
  "smith-domain",
+ "smith-local-domain",
+ "smith-local-protocol",
  "smith-protocol-channel",
  "smith-protocol-llm",
  "smith-protocol-machine",

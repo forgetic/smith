@@ -91,11 +91,17 @@ impl Store {
     fn replace(&mut self, replacement: protocol::File) -> io::Result<()> {
         let name = std::str::from_utf8(&replacement.name)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "record filename is not UTF-8"))?;
-        self.serial = self.serial.checked_add(1).ok_or_else(|| io::Error::other("store serial exhausted"))?;
-        let temp = self.directory.join(format!(".{name}.{}.tmp", self.serial));
+        let (temp, mut file) = loop {
+            self.serial = self.serial.checked_add(1).ok_or_else(|| io::Error::other("store serial exhausted"))?;
+            let candidate = self.directory.join(format!(".{name}.{}.tmp", self.serial));
+            match OpenOptions::new().write(true).create_new(true).open(&candidate) {
+                Ok(file) => break (candidate, file),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        };
         let target = self.directory.join(name);
         let result = (|| {
-            let mut file = OpenOptions::new().write(true).create_new(true).open(&temp)?;
             file.write_all(&replacement.bytes)?;
             file.sync_all()?;
             fs::rename(&temp, &target)?;
@@ -215,6 +221,19 @@ mod tests {
             panic!("temporary replacement is invisible");
         };
         assert!(deliveries.is_empty());
+        fs::remove_dir_all(path).expect("remove test store");
+    }
+
+    #[test]
+    fn a_crashed_temporary_file_does_not_block_the_next_durable_save() {
+        let path = directory();
+        let mut store = Store::new(path.clone(), endpoints(), 4096).expect("store opens");
+        fs::write(path.join(".state.1.tmp"), b"partial").expect("crash cut file");
+        store
+            .save_state(local::ChatState { activation: 1, next_message: 1, read: None }, false)
+            .expect("new save uses a fresh temporary file");
+        assert!(path.join(".state.1.tmp").exists());
+        assert!(matches!(store.load(), Ok(local::Event::Loaded { state: Some(_), .. })));
         fs::remove_dir_all(path).expect("remove test store");
     }
 }
