@@ -350,3 +350,18 @@ replay compares application observations through Skein's trace kit.
 The final-tip parallel gate passed 1,409 focused tests in 4.221 seconds and
 18 fuzzy tests in 6.132 seconds, with no skips; formatting and workspace
 all-target Clippy passed. Existing workspace budgets are unchanged.
+
+07 LOCAL PROCESS AUTHENTICATION extends that world with sign-in, refresh,
+refused refresh and a timed refresh before a lent grant expires. Both modes
+use the actual private token store, fake issuer and browser Hosts. The referee
+includes their observations and uses opaque head bytes for its repository
+interface, so real git object names require no referee rewrite. Its final
+serial measurements are recorded below. The same 16-seed, two-placement,
+twice-replayed sweep now includes all four authentication states as well as
+reports, changes and cancellation. The memory story exercises sign-in in the
+spawned placement and a change in the colocated placement.
+On the final source, fourteen focused tests passed serially in 0.911 seconds
+and one fuzzy test in 2.715 seconds (2.714 seconds PASS duration). The final-tip
+parallel gate passed 1,414 focused / 4.396 seconds and 18 fuzzy / 6.249
+seconds, with no skips; formatting and workspace all-target Clippy passed
+(17.04 seconds). Budgets remain unchanged.

@@ -11,9 +11,9 @@ use smith_local_domain::Fact;
 
 /// Repository observations implemented by a fake checkout or a future real one.
 pub trait CheckoutRead {
-    fn head(&self) -> Option<u64>;
-    fn message(&self, commit: u64) -> Vec<u8>;
-    fn files(&self, commit: u64) -> Tree;
+    fn head(&self) -> Option<Vec<u8>>;
+    fn message(&self, commit: &[u8]) -> Vec<u8>;
+    fn files(&self, commit: &[u8]) -> Tree;
 }
 
 /// Concrete observations collected independently of process state.
@@ -25,6 +25,16 @@ pub struct Seen {
     pub queries: Vec<Query>,
     pub exit: Option<kernel::Exit>,
     pub pushed: bool,
+    pub oauth: Option<OAuthSeen>,
+}
+
+/// Facts observed by the fake issuer, browser and first provider request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OAuthSeen {
+    pub posts: u64,
+    pub pages: u32,
+    pub browser_replied: bool,
+    pub saved_before_query: bool,
 }
 
 /// One expected story ending supplied by its author.
@@ -32,15 +42,17 @@ pub struct Seen {
 pub enum Ending {
     Report(Vec<u8>),
     Cancelled,
-    Change,
+    Change { before: Vec<u8> },
+    Unavailable,
 }
 
 /// Evidence handed to the shared judgment kit, never internal process cells.
 #[derive(Clone, Debug)]
 pub enum Observation {
     Fact(Fact),
+    Peer { queries: Vec<Query>, oauth: Option<OAuthSeen> },
     Terminal { shown: Vec<u8>, errors: Vec<u8>, exit: Option<kernel::Exit>, queries: usize },
-    Commit { head: Option<u64>, message: Vec<u8>, files: Tree, pushed: bool },
+    Commit { head: Option<Vec<u8>>, message: Vec<u8>, files: Tree, pushed: bool },
 }
 
 /// Obligations and ordering from one invocation's visible facts.
@@ -95,23 +107,57 @@ impl Expectations for Meeting {
                 let expected = match &self.ending {
                     Ending::Report(text) => text.as_slice(),
                     Ending::Cancelled => b"Run cancelled",
-                    Ending::Change => b"Change delivered",
+                    Ending::Change { .. } => b"Change delivered",
+                    Ending::Unavailable => b"account is unavailable",
                 };
-                judge.check(self.shown && self.answered, "the invocation actually answered and showed it");
+                if matches!(self.ending, Ending::Unavailable) {
+                    judge.check(
+                        self.activation.is_none() && !self.answered && !self.shown,
+                        "a refused account starts no run",
+                    );
+                } else {
+                    judge.check(self.shown && self.answered, "the invocation actually answered and showed it");
+                }
                 judge.check(exit == Some(kernel::Exit::Code(0)), "successful shell exit");
-                judge.check(queries > 0, "the fake provider saw an actual request");
+                judge.check(
+                    if matches!(self.ending, Ending::Unavailable) { queries == 0 } else { queries > 0 },
+                    "provider work matches account availability",
+                );
                 judge.check(errors.is_empty(), "no startup error output");
                 judge.check(shown.windows(expected.len()).any(|part| part == expected), "expected terminal text");
                 judge.check(
                     !shown.windows(7).any(|part| part == b"refresh") && !shown.windows(5).any(|part| part == b"token"),
                     "terminal never reveals credentials",
                 );
-                let met = judge.meet(&"terminal");
-                judge.check(met, "terminal settles the activation");
+                if !matches!(self.ending, Ending::Unavailable) {
+                    let met = judge.meet(&"terminal");
+                    judge.check(met, "terminal settles the activation");
+                }
+            }
+            Observation::Peer { queries, oauth } => {
+                judge.check(queries.len() <= 64, "bounded observed provider requests");
+                for query in &queries {
+                    judge.check(
+                        query.model.as_ref() == b"fake" && query.max_tokens > 0,
+                        "configured model reaches the provider and its declared ceiling is positive",
+                    );
+                    judge.check(
+                        query.system.windows(12).any(|part| part == b"@local-shell"),
+                        "configured instructions reach the provider",
+                    );
+                }
+                if let Some(oauth) = oauth {
+                    judge.check(oauth.posts == 1 && oauth.pages <= 1, "one token exchange and at most one page visit");
+                    judge.check(oauth.pages == 0 || oauth.browser_replied, "the browser heard the loopback reply");
+                    judge.check(
+                        queries.is_empty() || oauth.saved_before_query,
+                        "token saved before the peer saw grant use",
+                    );
+                }
             }
             Observation::Commit { head, message, files, pushed } => {
-                if matches!(self.ending, Ending::Change) {
-                    judge.check(head.is_some_and(|head| head > 1), "a new local commit exists");
+                if let Ending::Change { before } = &self.ending {
+                    judge.check(head.as_ref().is_some_and(|head| head != before), "a new local commit exists");
                     judge.check(
                         message.starts_with(b"Updated result\n\nCreated the result file"),
                         "result fields form the message",
@@ -151,13 +197,18 @@ pub fn review(seen: &Seen, checkout: &impl CheckoutRead, ending: Ending) -> Refe
         },
         &mut stimuli,
     );
+    referee.observe(
+        Time::ZERO,
+        Observation::Peer { queries: seen.queries.clone(), oauth: seen.oauth.clone() },
+        &mut stimuli,
+    );
     let head = checkout.head();
     referee.observe(
         Time::ZERO,
         Observation::Commit {
+            message: head.as_ref().map_or_else(Vec::new, |head| checkout.message(head)),
+            files: head.as_ref().map_or_else(Tree::new, |head| checkout.files(head)),
             head,
-            message: head.map_or_else(Vec::new, |head| checkout.message(head)),
-            files: head.map_or_else(Tree::new, |head| checkout.files(head)),
             pushed: seen.pushed,
         },
         &mut stimuli,

@@ -13,4 +13,4 @@ pub mod git;
 pub mod referee;
 
 pub mod world;
-pub use world::{Files, Placement, World};
+pub use world::{Authentication, Files, Placement, World};

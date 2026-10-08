@@ -32,7 +32,7 @@ impl Tokens {
 
     pub fn load(&self, account: u32) -> Result<Option<oauth::SavedToken>, String> {
         let path = self.root.join(format!("{account}.json"));
-        let file = match OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(&path) {
+        let file = match OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(format!("token record open: {error}")),
@@ -146,5 +146,19 @@ mod tests {
         symlink(root.join("7.json"), root.join("8.json")).expect("symlink");
         assert!(store.load(8).is_err());
         fs::remove_dir_all(root).expect("cleanup");
+    }
+}
+
+#[cfg(test)]
+mod special_files {
+    #[test]
+    fn a_fifo_token_record_is_refused_without_waiting_for_a_writer() {
+        let root = std::env::temp_dir().join(format!("smith-fifo-token-{}", std::process::id()));
+        let store = super::Tokens::new(&root, crate::local_host::token_limits()).expect("private directory");
+        assert!(
+            std::process::Command::new("mkfifo").arg(root.join("0.json")).status().expect("fixture FIFO").success()
+        );
+        assert!(store.load(0).is_err());
+        std::fs::remove_dir_all(root).expect("cleanup");
     }
 }

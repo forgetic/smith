@@ -31,3 +31,17 @@ Store's tests. The fuzzy world uses seeded kernel short IO, completion delays
 and cancellation races, and compares application observations with Skein's
 trace kit. Rustls uses kernel randomness for signing, so encrypted transport
 record lengths are deliberately outside the replay comparison.
+
+Authentication stories run through the shared token store in both placements:
+sign-in and loopback return, expired-token refresh, and refusal. A timed story
+also refreshes a lent grant while a provider response is pending, before its
+original expiry. The first provider request verifies the record was already
+saved. Refusal shows account unavailability and starts no run; EOF exits
+cleanly, following the local domain's existing idle-state behavior. These
+states are also part of the replayed seed sweep. The referee's checkout heads
+are opaque bytes, compatible with future real git object names.
+
+For the Responses dialect, Skein's fake document decoder reports its own
+model token ceiling in Query; it does not attest an output-token field on the
+wire. The referee checks the model and a positive peer ceiling; the agent's
+budget and receiving limits retain their independent tests.

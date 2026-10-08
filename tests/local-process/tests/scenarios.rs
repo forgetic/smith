@@ -1,5 +1,8 @@
 use skein_io::kernel;
-use smith_local_process_world::{Files, Placement, World};
+use smith_local_process_world::{
+    Files, Placement, World,
+    referee::{CheckoutRead, Ending, review},
+};
 
 #[test]
 fn a_chat_resumes_from_its_files_across_runs_of_the_binary() {
@@ -55,7 +58,9 @@ fn a_change_is_committed_in_place_with_its_fields_as_the_message() {
     for placement in [Placement::Spawned, Placement::InProcess] {
         let files = Files::new();
         let mut world = World::changed(5, &files, placement);
+        let before = world.head().expect("initial head");
         world.settle();
+        review(&world.seen(), &world, Ending::Change { before }).assert_passed(5);
         assert_eq!(world.exit(), Some(kernel::Exit::Code(0)));
         let message = std::str::from_utf8(world.commit_message()).expect("commit UTF-8");
         assert!(message.starts_with("Updated result\n\nCreated the result file"), "{message}");

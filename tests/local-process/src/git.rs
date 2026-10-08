@@ -93,9 +93,12 @@ impl Host for Child {
         self.output.is_none() && self.error.is_none() && !self.pending
     }
     fn operations(&self) -> u32 {
-        u32::from(self.pending)
+        1
     }
     fn worst_case(&self) -> u64 {
         65_536
+            + Queue::<kernel::Complete>::worst_case(32).expect("git completions")
+            + Queue::<kernel::Submit>::worst_case(32).expect("git submissions")
+            + std::mem::size_of::<Self>() as u64
     }
 }

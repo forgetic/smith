@@ -21,9 +21,11 @@ use smith_local_service as service;
 
 use crate::git::Child;
 use crate::llm::Peer;
+use crate::oauth::{Browser, Peer as Issuer};
 use crate::terminal::{Action, Terminal};
 use skein_fake_checkout::git::{Remote, Tree};
 use skein_fake_checkout::{Checkout, git};
+use skein_fake_oauth as fake_oauth;
 use smith_local_world::git::History;
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
@@ -33,6 +35,15 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 pub enum Placement {
     Spawned,
     InProcess,
+}
+
+/// Credential state at the next shell startup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Authentication {
+    SignIn,
+    Refresh,
+    Refused,
+    Proactive,
 }
 
 /// Files surviving separate invocations of the actual shared shell.
@@ -66,6 +77,7 @@ impl Drop for Files {
 
 fn lower_configuration() -> agent::Config {
     let mut lower = smith_agent_process_world::configuration();
+    lower.limits.llm.head = Some(Duration::from_secs(10));
     lower.limits.machine.file_bytes = 4096;
     lower.limits.machine.entries = 32;
     lower.limits.file_bytes = 8192;
@@ -158,6 +170,12 @@ pub struct World {
     git_children: Vec<(Pid, Child)>,
     git_commands: Vec<Box<[Box<[u8]>]>>,
     git_replies: std::collections::VecDeque<(Box<[u8]>, u8)>,
+    accounts: Box<[local_settings::Account]>,
+    issuer: Option<(Pid, Issuer)>,
+    browser: Option<(Pid, Browser)>,
+    pages: u32,
+    saved_before_query: bool,
+    first_post: Option<Wall>,
 }
 
 fn scripts() -> Box<[api::Script]> {
@@ -265,6 +283,117 @@ impl World {
         )
     }
 
+    /// Attach a fake issuer and browser to the actual shared token store.
+    #[must_use]
+    pub fn authenticated(seed: u64, files: &Files, placement: Placement, mode: Authentication) -> Self {
+        let commands = vec![
+            Action::Send(b"hello\n".as_slice().into()),
+            Action::Wait(if mode == Authentication::Refused {
+                b"account is unavailable".as_slice().into()
+            } else {
+                b"First answer".as_slice().into()
+            }),
+            Action::Eof,
+        ];
+        let mut world = Self::configured(seed, files, placement, commands, false, true, false);
+        let certificate = files.path.join("root.der");
+        std::fs::write(&certificate, skein_tls_world::pki::ROOT).expect("fixture certificate");
+        world.accounts = Box::new([local_settings::Account {
+            number: 0,
+            account_id: "acc".into(),
+            oauth: Some(local_settings::OAuth {
+                authorization_url: "https://skein.test/authorize".into(),
+                token_endpoint: "https://skein.test/token".into(),
+                client_id: "client".into(),
+                redirect_uri: "http://127.0.0.1:2345/callback".into(),
+                scope: "read".into(),
+                address: "127.0.0.1:444".into(),
+                server_name: "skein.test".into(),
+                trust_der: Some(certificate.to_str().expect("fixture path").into()),
+                json: false,
+            }),
+        }]);
+        let limits = fake_oauth::Limits {
+            document: token_limits(),
+            uri_bytes: 8192,
+            request_bytes: 16_384,
+            codes: 4,
+            rotations: 4,
+            plans: 4,
+        };
+        let mut issuer = fake_oauth::Issuer::new(
+            fake_oauth::Config {
+                authorization_url: b"https://skein.test/authorize".as_slice().into(),
+                token_endpoint: b"https://skein.test/token".as_slice().into(),
+                client_id: b"client".as_slice().into(),
+                client_secret: None,
+                redirect_uri: b"http://127.0.0.1:2345/callback".as_slice().into(),
+                refresh_token: b"refresh-old".as_slice().into(),
+            },
+            limits,
+        )
+        .expect("issuer fixture");
+        issuer
+            .queue(fake_oauth::Plan {
+                status: 200,
+                body: fake_oauth::Body::Token(skein_oauth::TokenResponse {
+                    access_token: b"access-new".as_slice().into(),
+                    refresh_token: Some(b"refresh-new".as_slice().into()),
+                    expires_in: 7200,
+                }),
+                delay: Duration::ZERO,
+                retry_after: Duration::ZERO,
+            })
+            .expect("token plan");
+        let tokens = local_tokens::Tokens::new(&world.token_directory, token_limits()).expect("private token store");
+        if mode == Authentication::SignIn {
+            std::fs::remove_file(world.token_directory.join("0.json")).expect("no saved token");
+        } else {
+            let prior = skein_oauth::SavedToken {
+                key: 0,
+                generation: 1,
+                access_token: if mode == Authentication::Proactive {
+                    b"access-new".as_slice().into()
+                } else {
+                    b"old".as_slice().into()
+                },
+                refresh_token: if mode == Authentication::Refused {
+                    b"wrong".as_slice().into()
+                } else {
+                    b"refresh-old".as_slice().into()
+                },
+                metadata: None,
+                expires_at: if mode == Authentication::Proactive {
+                    Wall::from_nanos(world.sim.wall().as_nanos() + Duration::from_secs(61).as_nanos())
+                } else {
+                    world.sim.wall()
+                },
+            };
+            tokens
+                .save(0, &skein_oauth::encode_record(&prior, &token_limits()).expect("expired token encoding"))
+                .expect("expired token fixture");
+        }
+        world.peer = Peer::new(
+            scripts(),
+            skein_llm::Credential {
+                access_token: b"access-new".as_slice().into(),
+                account_id: b"acc".as_slice().into(),
+            },
+            if mode == Authentication::Proactive { Duration::from_secs(2) } else { Duration::ZERO },
+        );
+        let pid = world.sim.spawn_process();
+        world.issuer = Some((
+            pid,
+            Issuer::new(
+                issuer,
+                &limits,
+                kernel::Addr::from((std::net::Ipv4Addr::LOCALHOST, 444)),
+                b"https://skein.test/token".as_slice().into(),
+            ),
+        ));
+        world
+    }
+
     fn configured(
         seed: u64,
         files: &Files,
@@ -356,6 +485,12 @@ impl World {
             git_children: Vec::new(),
             git_commands: Vec::new(),
             git_replies: std::collections::VecDeque::new(),
+            accounts: Box::new([local_settings::Account { number: 0, account_id: "acc".into(), oauth: None }]),
+            issuer: None,
+            browser: None,
+            pages: 0,
+            saved_before_query: false,
+            first_post: None,
         }
     }
 
@@ -394,7 +529,7 @@ impl World {
                 delivery_roots,
                 effect_roots,
                 delivery_environment: Box::new([]),
-                accounts: Box::new([local_settings::Account { number: 0, account_id: "acc".into(), oauth: None }]),
+                accounts: self.accounts.clone(),
                 seed: self.seed,
                 oauth_entropy: [31; 32],
             },
@@ -432,9 +567,35 @@ impl World {
         self.steps = self.steps.checked_add(1).expect("bounded schedule");
         assert!(self.steps <= 20_000 && self.sim.trace().len() <= 100_000, "finite world schedule");
         assert!(self.agents.len() <= 8 && self.git_children.len() <= 128, "finite world process cells");
+        if let Some((pid, issuer)) = &mut self.issuer {
+            self.sim.reap(*pid, issuer.completions());
+            issuer.iterate(self.sim.now(), self.sim.wall());
+            if issuer.posts() > 0 && self.first_post.is_none() {
+                self.first_post = Some(self.sim.wall());
+            }
+            self.sim.submit(*pid, issuer.submissions());
+        }
+        if let Some((pid, browser)) = &mut self.browser {
+            self.sim.reap(*pid, browser.completions());
+            browser.iterate(self.sim.now(), self.sim.wall());
+            self.sim.submit(*pid, browser.submissions());
+        }
         self.sim.reap(self.peer_pid, self.peer.completions());
         self.peer.iterate(self.sim.now(), self.sim.wall());
         self.sim.submit(self.peer_pid, self.peer.submissions());
+        if self.issuer.is_some() && !self.peer.queries().is_empty() && !self.saved_before_query {
+            let tokens = local_tokens::Tokens::new(&self.token_directory, token_limits()).expect("private token store");
+            assert_eq!(
+                tokens
+                    .load(0)
+                    .expect("token record")
+                    .expect("token already saved before grant use")
+                    .access_token
+                    .as_ref(),
+                b"access-new"
+            );
+            self.saved_before_query = true;
+        }
         if self.interrupt_on_query && !self.interrupted && !self.peer.queries().is_empty() {
             self.terminal.interrupt();
             self.interrupted = true;
@@ -508,6 +669,9 @@ impl World {
                 let success = matches!(result, Ok(local::ExitStatus::Success));
                 self.sim.finish_service(*pid, kernel::Exit::Code(u8::from(!success)));
                 self.peer.stop();
+                if let Some((_, issuer)) = &mut self.issuer {
+                    issuer.stop();
+                }
             }
             for (parent, pidfd) in git_spawned {
                 self.bind_git(parent, pidfd);
@@ -526,12 +690,29 @@ impl World {
         }
         self.terminal.iterate(self.sim.now(), self.sim.wall());
         self.sim.submit(self.terminal_pid, self.terminal.submissions());
+        if self.browser.is_none()
+            && let Some((_, issuer)) = &mut self.issuer
+        {
+            let shown = self.terminal.shown();
+            if let Some(at) = shown.windows(9).position(|part| part == b"Sign in: ") {
+                let url = &shown[at + 9..];
+                // Visit only after the whole final URL parameter has reached
+                // the terminal. A writer may hand it out across many packets.
+                if let Some(end) = url.iter().position(|byte| *byte == b'\n') {
+                    let redirect = issuer.authorize(url[..end].into(), self.sim.now());
+                    self.browser = Some((self.sim.spawn_process(), Browser::new(redirect)));
+                    self.pages += 1;
+                }
+            }
+        }
         self.serve_machine();
         if self.idle()
             && let Some(at) = [
                 self.sim.next_due(),
                 self.terminal.next_deadline(),
                 self.peer.next_deadline(),
+                self.issuer.as_ref().and_then(|(_, issuer)| issuer.next_deadline()),
+                self.browser.as_ref().and_then(|(_, browser)| browser.next_deadline()),
                 self.local
                     .as_ref()
                     .filter(|(pid, _)| self.sim.service_running(*pid))
@@ -557,6 +738,12 @@ impl World {
             && self.sim.ready(self.peer_pid) == 0
             && !self.sim.deferred(self.terminal_pid)
             && !self.sim.deferred(self.peer_pid)
+            && self.issuer.as_ref().is_none_or(|(pid, issuer)| {
+                !issuer.work_pending(self.sim.now()) && self.sim.ready(*pid) == 0 && !self.sim.deferred(*pid)
+            })
+            && self.browser.as_ref().is_none_or(|(pid, browser)| {
+                !browser.work_pending(self.sim.now()) && self.sim.ready(*pid) == 0 && !self.sim.deferred(*pid)
+            })
             && self.local.as_ref().is_none_or(|(pid, local)| {
                 !self.sim.service_running(*pid)
                     || (!local.work_pending(self.sim.now()) && self.sim.ready(*pid) == 0 && !self.sim.deferred(*pid))
@@ -706,7 +893,11 @@ impl World {
     pub fn settle(&mut self) {
         for _ in 0..20_000 {
             self.step();
-            if self.terminal.is_empty() && self.peer.is_empty() {
+            if self.terminal.is_empty()
+                && self.peer.is_empty()
+                && self.issuer.as_ref().is_none_or(|(_, issuer)| issuer.is_empty())
+                && self.browser.as_ref().is_none_or(|(_, browser)| browser.is_empty())
+            {
                 assert!(self.local.as_ref().is_some_and(|(_, local)| local.is_empty()));
                 self.sim.assert_quiescent(self.terminal_pid);
                 self.sim.assert_no_open_fds(self.terminal_pid);
@@ -721,6 +912,14 @@ impl World {
                     self.sim.assert_no_open_fds(*pid);
                 }
                 assert!(self.git_replies.is_empty());
+                if let Some((pid, _)) = &self.issuer {
+                    self.sim.assert_quiescent(*pid);
+                    self.sim.assert_no_open_fds(*pid);
+                }
+                if let Some((pid, _)) = &self.browser {
+                    self.sim.assert_quiescent(*pid);
+                    self.sim.assert_no_open_fds(*pid);
+                }
                 let pid = self.local.as_ref().expect("local child").0;
                 self.sim.assert_quiescent(pid);
                 self.sim.assert_no_open_fds(pid);
@@ -738,6 +937,28 @@ impl World {
     }
 
     #[must_use]
+    pub fn first_token_post(&self) -> Option<Wall> {
+        self.first_post
+    }
+
+    #[must_use]
+    pub fn oauth_posts(&self) -> u64 {
+        self.issuer.as_ref().map_or(0, |(_, issuer)| issuer.posts())
+    }
+    #[must_use]
+    pub fn page_visits(&self) -> u32 {
+        self.pages
+    }
+    #[must_use]
+    pub fn browser_replied(&self) -> bool {
+        self.browser.as_ref().is_some_and(|(_, browser)| browser.saw_reply())
+    }
+    #[must_use]
+    pub fn saved_before_query(&self) -> bool {
+        self.saved_before_query
+    }
+
+    #[must_use]
     pub fn seen(&self) -> crate::referee::Seen {
         crate::referee::Seen {
             facts: self.facts.clone(),
@@ -746,6 +967,12 @@ impl World {
             queries: self.peer.queries().to_vec(),
             exit: self.terminal.exit(),
             pushed: self.git_commands.iter().any(|args| args[0].as_ref() == b"push"),
+            oauth: self.issuer.as_ref().map(|(_, issuer)| crate::referee::OAuthSeen {
+                posts: issuer.posts(),
+                pages: self.pages,
+                browser_replied: self.browser_replied(),
+                saved_before_query: self.saved_before_query,
+            }),
         }
     }
 
@@ -767,7 +994,9 @@ impl World {
     /// Host bounds plus the finite world's trace, fixture and observation cells.
     #[must_use]
     pub fn worst_case(&self) -> u64 {
-        let hosts = self.terminal.worst_case()
+        let hosts = self.issuer.as_ref().map_or(0, |(_, issuer)| issuer.worst_case())
+            + self.browser.as_ref().map_or(0, |(_, browser)| browser.worst_case())
+            + self.terminal.worst_case()
             + self.peer.worst_case()
             + self.local.as_ref().map_or(0, |(_, local)| local.worst_case())
             + self
@@ -818,13 +1047,17 @@ impl World {
 }
 
 impl crate::referee::CheckoutRead for World {
-    fn head(&self) -> Option<u64> {
-        self.checkout.as_ref().map(|(_, _, head)| *head)
+    fn head(&self) -> Option<Vec<u8>> {
+        self.checkout.as_ref().map(|(_, _, head)| format!("{head:040x}").into_bytes())
     }
-    fn message(&self, commit: u64) -> Vec<u8> {
+    fn message(&self, commit: &[u8]) -> Vec<u8> {
+        let commit =
+            u64::from_str_radix(std::str::from_utf8(commit).expect("fixture head"), 16).expect("fixture object");
         self.checkout.as_ref().expect("checkout").1.commit_message(commit).to_vec()
     }
-    fn files(&self, commit: u64) -> Tree {
+    fn files(&self, commit: &[u8]) -> Tree {
+        let commit =
+            u64::from_str_radix(std::str::from_utf8(commit).expect("fixture head"), 16).expect("fixture object");
         self.checkout.as_ref().expect("checkout").1.tree(commit)
     }
 }

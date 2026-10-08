@@ -1,7 +1,7 @@
 //! Bounded local-to-host domain routing. Local policy owns durability and
 //! delivery; the host kit owns child lifecycle and channel rights. The saved
 //! conversation position continues across activation-local channel turn numbers
-//! (protocol/channel.md, section 5.1; protocol/hosts.md, section 5.3).
+//! (protocol/channel.md, section 5; protocol/hosts.md, section 5.3).
 
 use alloc::boxed::Box;
 use core::mem::size_of;

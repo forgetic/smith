@@ -2,7 +2,7 @@ use skein_world::domain::Verdict;
 use smith_local_domain::Fact;
 use smith_local_process_world::{
     Files, Placement, World,
-    referee::{Ending, review},
+    referee::{CheckoutRead, Ending, review},
 };
 
 #[test]
@@ -28,27 +28,53 @@ fn observations_pass_and_duplicate_or_early_answers_fail() {
 
 #[test]
 fn commit_fields_and_files_are_checked_through_the_checkout_interface() {
-    let files = Files::new();
-    let mut world = World::changed(8, &files, Placement::InProcess);
-    world.settle();
-    let seen = world.seen();
-    review(&seen, &world, Ending::Change).assert_passed(8);
-    struct Wrong;
-    impl smith_local_process_world::referee::CheckoutRead for Wrong {
-        fn head(&self) -> Option<u64> {
-            Some(2)
+    use skein_fake_llm_domain::api::Query;
+    use skein_io::kernel;
+    use smith_local_process_world::referee::Seen;
+    struct Repository {
+        correct: bool,
+    }
+    impl CheckoutRead for Repository {
+        fn head(&self) -> Option<Vec<u8>> {
+            Some(b"new-head".to_vec())
         }
-        fn message(&self, _: u64) -> Vec<u8> {
-            b"wrong fields".to_vec()
+        fn message(&self, _: &[u8]) -> Vec<u8> {
+            if self.correct {
+                b"Updated result\n\nCreated the result file\n\nSmith-Delivery: 1/3/0".to_vec()
+            } else {
+                b"wrong fields".to_vec()
+            }
         }
-        fn files(&self, _: u64) -> skein_fake_checkout::git::Tree {
-            Default::default()
+        fn files(&self, _: &[u8]) -> skein_fake_checkout::git::Tree {
+            if self.correct { [(b"result.txt".to_vec(), b"new\n".to_vec())].into() } else { Default::default() }
         }
     }
-    assert!(matches!(review(&seen, &Wrong, Ending::Change).verdict(), Verdict::Failed(_)));
+    let seen = Seen {
+        facts: vec![
+            Fact::Started { activation: 1 },
+            Fact::Turn { number: 1 },
+            Fact::Answered { activation: 1 },
+            Fact::Shown { activation: 1 },
+        ],
+        shown: b"Change delivered".to_vec(),
+        errors: vec![],
+        queries: vec![Query {
+            model: b"fake".as_slice().into(),
+            system: b"@local-shell".as_slice().into(),
+            tools: Box::new([]),
+            messages: Box::new([]),
+            max_tokens: 1,
+        }],
+        exit: Some(kernel::Exit::Code(0)),
+        pushed: false,
+        oauth: None,
+    };
+    let ending = Ending::Change { before: b"initial-head".to_vec() };
+    review(&seen, &Repository { correct: true }, ending.clone()).assert_passed(8);
+    assert!(matches!(review(&seen, &Repository { correct: false }, ending.clone()).verdict(), Verdict::Failed(_)));
     let mut pushed = seen;
     pushed.pushed = true;
-    assert!(matches!(review(&pushed, &world, Ending::Change).verdict(), Verdict::Failed(_)));
+    assert!(matches!(review(&pushed, &Repository { correct: true }, ending).verdict(), Verdict::Failed(_)));
 }
 
 #[test]

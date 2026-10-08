@@ -4,7 +4,9 @@
 //! Contract: protocol/agent.md, sections 4 and 6.
 
 use std::fs;
+use std::io::Read;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 use serde::Deserialize;
@@ -263,10 +265,17 @@ pub(crate) fn trust(der: Option<&str>) -> Result<tls::Config, String> {
     let mut roots = tls::RootCertStore::empty();
     match der {
         Some(path) => {
-            if fs::metadata(path).map_err(|error| format!("trust certificate metadata: {error}"))?.len() > 65_536 {
-                return Err("trust certificate exceeds 65536 bytes".into());
+            let file = fs::OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(path)
+                .map_err(|error| format!("trust certificate {path:?}: {error}"))?;
+            let metadata = file.metadata().map_err(|error| format!("trust certificate metadata: {error}"))?;
+            if !metadata.is_file() || metadata.len() > 65_536 {
+                return Err("trust certificate must be a regular file of at most 65536 bytes".into());
             }
-            let bytes = fs::read(path).map_err(|error| format!("trust certificate {path:?}: {error}"))?;
+            let mut bytes = Vec::new();
+            file.take(65_537).read_to_end(&mut bytes).map_err(|error| format!("trust certificate read: {error}"))?;
             if bytes.len() > 65_536 {
                 return Err("trust certificate exceeds 65536 bytes".into());
             }
