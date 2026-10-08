@@ -704,6 +704,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-local-service"
+version = "0.0.0"
+dependencies = [
+ "skein-lib",
+ "smith-agent-world",
+ "smith-domain",
+ "smith-host-domain",
+ "smith-host-protocol",
+ "smith-host-world",
+ "smith-local-domain",
+ "smith-local-protocol",
+ "smith-protocol-channel",
+ "smith-transcript",
+]
+
+[[package]]
 name = "smith-local-world"
 version = "0.0.0"
 dependencies = [
