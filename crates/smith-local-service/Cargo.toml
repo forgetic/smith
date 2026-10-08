@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 skein-lib.workspace = true
+skein-io.workspace = true
 smith-domain.workspace = true
 smith-local-domain.workspace = true
 smith-local-protocol.workspace = true
@@ -18,6 +19,7 @@ smith-transcript.workspace = true
 
 [dev-dependencies]
 smith-agent-world.workspace = true
+smith-agent-process-world.workspace = true
 smith-host-world.workspace = true
 
 [lints]

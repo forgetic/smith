@@ -5,7 +5,7 @@ use skein_lib::{Duration, List, Time, Wall};
 use smith_domain::run::{self, charter::Endpoint, outcome};
 use smith_local_domain as local;
 
-use crate::{Config, Limits, Service, iterate};
+use crate::{Config, Launch, Limits, ProcessLimits, Service, iterate};
 
 fn config() -> Config {
     let local_limits = local::Limits {
@@ -24,6 +24,28 @@ fn config() -> Config {
     host_limits.agents = 1;
     host_limits.accounts = 1;
     let queue = local::max_out(&local_limits).max(smith_host_domain::max_out(&host_limits));
+    let agent_limits = smith_agent_process_world::limits();
+    let process = ProcessLimits {
+        io: skein_io::Limits {
+            sockets: 8,
+            refusals: 1,
+            intake: 4096,
+            receive: 4096,
+            output: 1_000_000,
+            sends: 8,
+            accepts: 1,
+            backlog: 2,
+            close_timeout: Duration::from_secs(1),
+            retry: Duration::from_millis(1),
+        },
+        channel: smith_host_protocol::Limits {
+            bodies: agent_limits.channel.bodies,
+            channel: agent_limits.channel.channel,
+            calls: host_limits.calls,
+        },
+        detail_bytes: host_limits.detail_bytes,
+        queue,
+    };
     Config {
         local: local::Config {
             chat: Box::from(&b"main"[..]),
@@ -48,10 +70,17 @@ fn config() -> Config {
             workspace: None,
             push: None,
         },
-        limits: Limits { local: local_limits, host: host_limits, queue },
+        limits: Limits { local: local_limits, host: host_limits, process, queue },
         charter: Box::new([]),
         endpoints: smith_protocol_channel::Endpoints::new(List::with_capacity(0)),
         paths: Box::new([]),
+        launch: Launch {
+            program: Box::from(&b"smith"[..]),
+            arguments: Box::from([Box::from(&b"agent"[..]), Box::from(&b"agent.json"[..])]),
+            environment: Box::new([]),
+            root: skein_io::kernel::Fd::new(0),
+            directory: Box::from(&b"."[..]),
+        },
     }
 }
 

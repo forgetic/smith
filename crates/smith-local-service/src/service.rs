@@ -3,6 +3,7 @@
 
 use alloc::boxed::Box;
 use core::mem::size_of;
+use skein_io::kernel;
 use skein_lib::{Env, Map, Queue, Time, Token, Wall};
 use smith_domain as agent;
 use smith_host_domain as host;
@@ -10,11 +11,14 @@ use smith_local_domain as local;
 use smith_local_protocol as protocol;
 use smith_protocol_channel as channel;
 
+use crate::process::{Launch, ProcessAdapter, ProcessLimits};
+
 /// Immutable bounds for one local chat and its host process slot.
 #[derive(Clone, Debug)]
 pub struct Limits {
     pub local: local::Limits,
     pub host: host::Limits,
+    pub process: ProcessLimits,
     pub queue: u32,
 }
 
@@ -26,6 +30,7 @@ pub struct Config {
     pub charter: Box<[u8]>,
     pub endpoints: channel::Endpoints,
     pub paths: Box<[Box<[u8]>]>,
+    pub launch: Launch,
 }
 
 /// Startup cannot allocate or represent the requested local composition.
@@ -34,6 +39,7 @@ pub enum Error {
     Local(local::Invalid),
     Queue,
     Memory,
+    Process,
 }
 
 /// Checked memory bound for both domains and their routing queues.
@@ -41,6 +47,7 @@ pub enum Error {
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     local::worst_case(&limits.local)?
         .checked_add(host::worst_case(&limits.host)?)?
+        .checked_add(ProcessAdapter::worst_case(&limits.process)?)?
         .checked_add(Queue::<local::Event>::worst_case(limits.queue)?)?
         .checked_add(Queue::<local::Request>::worst_case(limits.queue)?.checked_mul(2)?)?
         .checked_add(Queue::<host::Event>::worst_case(limits.queue)?)?
@@ -56,6 +63,7 @@ pub struct Service {
     limits: Limits,
     local: local::Domain,
     host: host::Domain,
+    process: ProcessAdapter,
     local_events: Queue<local::Event>,
     local_requests: Queue<local::Request>,
     host_events: Queue<host::Event>,
@@ -93,12 +101,14 @@ impl Service {
             Err(error) => return Err(Error::Local(error)),
         };
         let host = host::Domain::new(&config.limits.host);
+        let process = ProcessAdapter::new(config.limits.process, config.launch).ok_or(Error::Process)?;
         let queue = config.limits.queue;
         let accounts = config.limits.local.agent.accounts;
         Ok(Self {
             limits: config.limits,
             local,
             host,
+            process,
             local_events: Queue::with_capacity(queue),
             local_requests: Queue::with_capacity(queue),
             host_events: Queue::with_capacity(queue),
@@ -148,12 +158,16 @@ impl Service {
 
     #[must_use]
     pub fn next_deadline(&self) -> Option<Time> {
-        match (self.local.next_deadline(), self.host.next_deadline()) {
-            (Some(local), Some(host)) => Some(local.min(host)),
-            (Some(local), None) => Some(local),
-            (None, Some(host)) => Some(host),
-            (None, None) => None,
+        let mut next: Option<Time> = None;
+        for deadline in
+            [self.local.next_deadline(), self.host.next_deadline(), self.process.next_deadline()].into_iter().flatten()
+        {
+            next = Some(match next {
+                Some(current) => current.min(deadline),
+                None => deadline,
+            });
         }
+        next
     }
 
     #[must_use]
@@ -165,11 +179,22 @@ impl Service {
             || !self.local_requests.is_empty()
             || !self.host_events.is_empty()
             || !self.host_requests.is_empty()
+            || self.process.work_pending(now)
     }
 
     #[must_use]
-    pub const fn failed(&self) -> bool {
-        self.failed
+    pub fn failed(&self) -> bool {
+        self.failed || self.process.failed()
+    }
+
+    /// Kernel completions for the child process and its three pipes.
+    pub fn completions(&mut self) -> &mut Queue<kernel::Complete> {
+        self.process.completions()
+    }
+
+    /// Kernel work submitted by the supervised child process.
+    pub fn submissions(&mut self) -> &mut Queue<kernel::Submit> {
+        self.process.submissions()
     }
 
     fn route_local(&mut self, request: local::Request) {
@@ -343,6 +368,7 @@ impl Service {
 
 /// One bounded up pass followed by one bounded down pass.
 pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
+    service.process.up(now, wall, &mut service.host_events);
     let local_env = Env { now, wall, limits: service.limits.local.clone() };
     let host_env = Env { now, wall, limits: service.limits.host };
     for _ in 0..service.local_events.capacity() {
@@ -370,6 +396,14 @@ pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
         let Some(request) = service.host_requests.pop() else { break };
         service.route_host(request);
     }
+    service.process.down(
+        now,
+        wall,
+        &mut service.lower,
+        &mut service.start_values,
+        &service.values,
+        &mut service.host_events,
+    );
     service.local.reclaim();
     service.host.reclaim();
 }

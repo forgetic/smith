@@ -11,9 +11,11 @@
 
 extern crate alloc;
 
+mod process;
 mod service;
 
 #[cfg(test)]
 mod tests;
 
+pub use process::{Launch, ProcessLimits};
 pub use service::{Config, Error, Limits, Service, StartValues, iterate, worst_case};
