@@ -695,6 +695,7 @@ dependencies = [
  "skein-fake-oauth",
  "skein-lib",
  "skein-oauth",
+ "smith-charter",
  "smith-domain",
  "smith-host-domain",
  "smith-local-domain",
