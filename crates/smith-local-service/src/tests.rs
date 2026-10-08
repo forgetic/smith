@@ -238,3 +238,147 @@ fn plain_status_uses_the_runs_snapshot_and_refreshes_it_before_the_next_run() {
     let Some(local::Event::PlainStatus { changed: false, .. }) = events.pop() else { panic!("fresh run baseline") };
     assert!(events.is_empty());
 }
+
+#[test]
+#[expect(clippy::wildcard_enum_match_arm, reason = "the story names unexpected shell requests")]
+fn a_colocated_chat_routes_a_turn_through_the_shared_tls_effects_without_spawning() {
+    use skein_lib::Queue;
+    let (config, lower) = colocated_config();
+    let mut sim_config = skein_sim::Config::calm();
+    sim_config.wall = skein_tls_world::pki::VALID;
+    let mut sim = skein_sim::Sim::new(8, sim_config);
+    let pid = sim.spawn_process();
+    let peer_pid = sim.spawn_process();
+    let mut peer = smith_agent_process_world::peer::Peer::new();
+    let mut service = Service::new_in_process(config, lower, Box::new([]), 8).expect("colocated service");
+    let mut machine = skein_fake_machine::Machine::new();
+    let mut saved_turn = false;
+    let mut shown = false;
+    let mut sent = false;
+    for _ in 0_u32..2000 {
+        sim.reap(peer_pid, peer.completions());
+        peer.step(sim.now(), sim.wall());
+        sim.submit(peer_pid, peer.submissions());
+        sim.reap(pid, service.completions());
+        iterate(&mut service, sim.now(), sim.wall());
+        while let Some(request) = service.shell_requests().pop() {
+            match request {
+                local::Request::Load => {
+                    service.local_event(local::Event::Loaded {
+                        state: None,
+                        transcript: None,
+                        deliveries: Box::new([]),
+                    });
+                    if !sent {
+                        for byte in b"hello\n" {
+                            service.feed(*byte);
+                        }
+                        sent = true;
+                    }
+                }
+                local::Request::Credential { account: 0 } => service.credential(
+                    smith_domain::Grant {
+                        name: smith_domain::GrantName { account: 0, generation: 1 },
+                        valid: Duration::from_secs(7200),
+                    },
+                    Box::from(b"\0\x03acctoken".as_slice()),
+                ),
+                local::Request::SaveState { .. } => service.local_event(local::Event::StateSaved),
+                local::Request::SaveTurn { number, .. } => {
+                    saved_turn = true;
+                    service.local_event(local::Event::TurnSaved { number });
+                }
+                other => panic!("unexpected shell request {other:?}"),
+            }
+        }
+        while let Some(text) = service.output().pop() {
+            shown |= !text.is_empty();
+        }
+        assert!(service.lower_requests().is_empty(), "colocated mode never spawns an agent");
+        sim.submit(pid, service.submissions());
+        let mut calls = Queue::with_capacity(256);
+        let mut answers = Queue::with_capacity(256);
+        sim.calls(&mut calls);
+        while let Some(call) = calls.pop() {
+            skein_fake_machine::step(&mut machine, call, &mut answers);
+        }
+        sim.answer(&mut answers);
+        if saved_turn && !service.work_pending(sim.now()) && sim.ready(pid) == 0 && !sim.deferred(pid) {
+            break;
+        }
+        if sim.ready(pid) == 0
+            && sim.ready(peer_pid) == 0
+            && !sim.deferred(pid)
+            && !sim.deferred(peer_pid)
+            && !service.work_pending(sim.now())
+            && !peer.work_pending()
+            && let Some(at) =
+                [sim.next_due(), service.next_deadline(), peer.next_deadline()].into_iter().flatten().min()
+        {
+            sim.advance_to(at);
+        }
+    }
+    assert!(saved_turn, "local policy acknowledged the shared effect's turn");
+    assert!(peer.replied(), "the fake TLS LLM received the completion");
+    assert!(shown, "the terminal observed the run");
+    settle_colocated_exit(&mut service, &mut sim, pid, &mut peer, peer_pid);
+}
+
+#[expect(clippy::wildcard_enum_match_arm, reason = "the story names unexpected ending requests")]
+fn settle_colocated_exit(
+    service: &mut Service,
+    sim: &mut skein_sim::Sim,
+    pid: skein_sim::Pid,
+    peer: &mut smith_agent_process_world::peer::Peer,
+    peer_pid: skein_sim::Pid,
+) {
+    service.closed();
+    let mut exited = false;
+    for _ in 0_u32..1000 {
+        sim.reap(peer_pid, peer.completions());
+        peer.step(sim.now(), sim.wall());
+        sim.submit(peer_pid, peer.submissions());
+        sim.reap(pid, service.completions());
+        iterate(service, sim.now(), sim.wall());
+        while let Some(request) = service.shell_requests().pop() {
+            match request {
+                local::Request::Exit { .. } => exited = true,
+                other => panic!("unexpected ending {other:?}"),
+            }
+        }
+        sim.submit(pid, service.submissions());
+        if exited {
+            break;
+        }
+        if sim.ready(pid) == 0
+            && sim.ready(peer_pid) == 0
+            && !sim.deferred(pid)
+            && !sim.deferred(peer_pid)
+            && !service.work_pending(sim.now())
+            && !peer.work_pending()
+            && let Some(at) =
+                [sim.next_due(), service.next_deadline(), peer.next_deadline()].into_iter().flatten().min()
+        {
+            sim.advance_to(at);
+        }
+    }
+    assert!(exited, "local exit waits for lower cleanup");
+    sim.assert_quiescent(pid);
+    sim.assert_no_open_fds(pid);
+    assert!(!service.work_pending(sim.now()));
+}
+
+fn colocated_config() -> (Config, smith_agent_service::Config) {
+    let lower = smith_agent_process_world::configuration();
+    let mut config = config();
+    config.limits.local.agent = lower.limits.domain;
+    config.limits.local.endpoints = lower.domain.endpoints.clone();
+    config.local.accounts = Box::new([0]);
+    config.local.models[0].account = 0;
+    config.local.models[0].endpoint = Endpoint(0);
+    config.local.models[0].prices = run::Prices { input: 0, cached: 0, output: 0, unit: 1 };
+    config.local.models[0].max_tokens = 1024;
+    config.local.budget.turns = 1;
+    config.local.models[0].model = Box::from(b"fake".as_slice());
+    (config, lower)
+}

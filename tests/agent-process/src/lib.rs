@@ -113,6 +113,12 @@ pub fn limits() -> agent::Limits {
 /// Build the same agent service for a direct or spawned process world.
 #[must_use]
 pub fn service(seed: u64) -> agent::Service {
+    agent::Service::new(configuration(), seed).expect("bounded agent")
+}
+
+/// The shared lower configuration for direct, spawned and colocated process worlds.
+#[must_use]
+pub fn configuration() -> agent::Config {
     let mut endpoints = List::with_capacity(1);
     endpoints
         .push(channel::Endpoint { name: Box::default(), number: 0, dialect: 0, account: 0 })
@@ -135,19 +141,15 @@ pub fn service(seed: u64) -> agent::Service {
         1,
     )
     .expect("one LLM endpoint");
-    agent::Service::new(
-        agent::Config {
-            limits: limits(),
-            domain: smith_domain::Config { endpoints: Box::new([smith_domain::run::charter::Endpoint(0)]) },
-            channel_endpoints: channel::Endpoints::new(endpoints),
-            llm_endpoints,
-            environment: Box::new([]),
-            stream_mode: StreamMode::Two,
-            capture_prompts: false,
-        },
-        seed,
-    )
-    .expect("bounded agent")
+    agent::Config {
+        limits: limits(),
+        domain: smith_domain::Config { endpoints: Box::new([smith_domain::run::charter::Endpoint(0)]) },
+        channel_endpoints: channel::Endpoints::new(endpoints),
+        llm_endpoints,
+        environment: Box::new([]),
+        stream_mode: StreamMode::Two,
+        capture_prompts: false,
+    }
 }
 
 fn host() -> ScriptedPeer {

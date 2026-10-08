@@ -5,6 +5,7 @@ use alloc::boxed::Box;
 use core::mem::size_of;
 use skein_io::kernel;
 use skein_lib::{Env, List, Map, Queue, Time, Token, Wall};
+use smith_agent_service as agent_service;
 use smith_domain as agent;
 use smith_host_domain as host;
 use smith_local_domain as local;
@@ -36,9 +37,13 @@ pub struct Config {
 /// Startup cannot allocate or represent the requested local composition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
+    /// Local policy refused the operator's configuration.
     Local(local::Invalid),
+    /// The caller's queues cannot reserve a complete transition.
     Queue,
+    /// The requested retained bound or directory table cannot be represented.
     Memory,
+    /// The lower agent or process configuration cannot be composed.
     Process,
 }
 
@@ -63,7 +68,23 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(
             u64::from(limits.local.agent.run.directories).checked_mul(u64::try_from(size_of::<kernel::Fd>()).ok()?)?,
         )?
+        .checked_add(Queue::<kernel::Complete>::worst_case(limits.queue)?)?
+        .checked_add(Queue::<kernel::Submit>::worst_case(limits.queue)?)?
+        .checked_add(List::<u32>::worst_case(64)?)?
         .checked_add(u64::try_from(size_of::<Service>()).ok()?)
+}
+
+/// Bound for local policy, its terminal/delivery IO and the colocated agent effects.
+#[must_use]
+pub fn in_process_worst_case(limits: &Limits, effects: &agent_service::Limits) -> Option<u64> {
+    worst_case(limits)?.checked_add(agent_service::effects_worst_case(effects)?)
+}
+
+#[derive(Debug)]
+enum SnapshotState {
+    Idle,
+    Capturing { saved: bool },
+    Failed,
 }
 
 /// One local chat, its host kit and bounded requests to process and shell.
@@ -71,7 +92,15 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
 pub struct Service {
     limits: Limits,
     local: local::Domain,
-    host: host::Domain,
+    host: Option<host::Domain>,
+    effects: Option<agent_service::Effects>,
+    completions: Queue<kernel::Complete>,
+    submissions: Queue<kernel::Submit>,
+    now: Time,
+    plain_directories: List<u32>,
+    capture_activation: Option<u64>,
+    snapshot_state: SnapshotState,
+    pending_exit: Option<local::ExitStatus>,
     process: ProcessAdapter,
     terminal: protocol::Terminal,
     terminal_events: Queue<protocol::TerminalEvent>,
@@ -102,6 +131,34 @@ pub struct StartValues {
 impl Service {
     /// Construct one spawned-agent local chat without touching files or processes.
     pub fn new(config: Config, seed: u64) -> Result<Self, Error> {
+        Self::with_effects(config, seed, None)
+    }
+
+    /// Build a local chat whose agent contract crosses as typed entities in this process.
+    pub fn new_in_process(
+        mut config: Config,
+        lower: agent_service::Config,
+        roots: Box<[kernel::Fd]>,
+        seed: u64,
+    ) -> Result<Self, Error> {
+        if lower.limits.domain != config.limits.local.agent || lower.domain.endpoints != config.limits.local.endpoints {
+            return Err(Error::Process);
+        }
+        in_process_worst_case(&config.limits, &lower.limits).ok_or(Error::Memory)?;
+        let Ok(mut effects) = agent_service::Effects::new(lower, seed) else { return Err(Error::Process) };
+        effects.contract(local::charter(&config.local).outcome);
+        config.local.workspace = match config.local.workspace.take() {
+            Some(workspace) => match effects.workspace(workspace, roots) {
+                Ok(workspace) => Some(workspace),
+                Err(_) => return Err(Error::Process),
+            },
+            None if roots.is_empty() => None,
+            None => return Err(Error::Memory),
+        };
+        Self::with_effects(config, seed, Some(effects))
+    }
+
+    fn with_effects(config: Config, seed: u64, effects: Option<agent_service::Effects>) -> Result<Self, Error> {
         let required = local::max_out(&config.limits.local).max(host::max_out(&config.limits.host)).max(64);
         if config.limits.queue < required {
             return Err(Error::Queue);
@@ -109,11 +166,27 @@ impl Service {
         if worst_case(&config.limits).is_none() {
             return Err(Error::Memory);
         }
-        let local = match local::Domain::new_external(config.local, &config.limits.local, seed) {
+        let mut plain_directories = List::with_capacity(64);
+        if let Some(workspace) = &config.local.workspace {
+            for (position, directory) in workspace.directories.iter().enumerate() {
+                if directory.writable
+                    && !directory.git
+                    && plain_directories.push(u32::try_from(position).expect("admitted directory")).is_err()
+                {
+                    return Err(Error::Memory);
+                }
+            }
+        }
+        let local_result = if effects.is_some() {
+            local::Domain::new(config.local, &config.limits.local, seed)
+        } else {
+            local::Domain::new_external(config.local, &config.limits.local, seed)
+        };
+        let local = match local_result {
             Ok(local) => local,
             Err(error) => return Err(Error::Local(error)),
         };
-        let host = host::Domain::new(&config.limits.host);
+        let host = if effects.is_some() { None } else { Some(host::Domain::new(&config.limits.host)) };
         let process = ProcessAdapter::new(config.limits.process, config.launch).ok_or(Error::Process)?;
         let terminal = protocol::Terminal::new(protocol::TerminalLimits {
             line_bytes: config.limits.local.line_bytes,
@@ -126,6 +199,14 @@ impl Service {
             limits: config.limits,
             local,
             host,
+            effects,
+            completions: Queue::with_capacity(queue),
+            submissions: Queue::with_capacity(queue),
+            now: Time::ZERO,
+            plain_directories,
+            capture_activation: None,
+            snapshot_state: SnapshotState::Idle,
+            pending_exit: None,
             process,
             terminal,
             terminal_events: Queue::with_capacity(queue),
@@ -174,6 +255,15 @@ impl Service {
 
     /// Lend a credential value only beside the domain's grant name.
     pub fn credential(&mut self, grant: agent::Grant, envelope: Box<[u8]>) {
+        if let Some(effects) = &mut self.effects
+            && effects.grant(grant, &envelope, self.now).is_err()
+        {
+            self.local_events.push(local::Event::NoCredential {
+                account: grant.name.account,
+                reason: local::CredentialFailure::Missing,
+            });
+            return;
+        }
         self.values.insert(grant.name.account, envelope).expect("configured account capacity");
         self.local_events.push(local::Event::Credential { grant });
     }
@@ -201,8 +291,20 @@ impl Service {
     #[must_use]
     pub fn next_deadline(&self) -> Option<Time> {
         let mut next: Option<Time> = None;
-        for deadline in
-            [self.local.next_deadline(), self.host.next_deadline(), self.process.next_deadline()].into_iter().flatten()
+        for deadline in [
+            self.local.next_deadline(),
+            match &self.host {
+                Some(host) => host.next_deadline(),
+                None => None,
+            },
+            self.process.next_deadline(),
+            match &self.effects {
+                Some(effects) => effects.next_deadline(),
+                None => None,
+            },
+        ]
+        .into_iter()
+        .flatten()
         {
             next = Some(match next {
                 Some(current) => current.min(deadline),
@@ -214,9 +316,18 @@ impl Service {
 
     #[must_use]
     pub fn work_pending(&self, now: Time) -> bool {
-        self.local.is_ready()
+        !self.completions.is_empty()
+            || !self.submissions.is_empty()
+            || self.local.is_ready()
             || self.local.is_due(now)
-            || self.host.is_due(now)
+            || match &self.host {
+                Some(host) => host.is_due(now),
+                None => false,
+            }
+            || match &self.effects {
+                Some(effects) => effects.work_pending(now),
+                None => false,
+            }
             || !self.local_events.is_empty()
             || !self.local_requests.is_empty()
             || !self.host_events.is_empty()
@@ -232,7 +343,7 @@ impl Service {
 
     /// Kernel completions for the child process and its three pipes.
     pub fn completions(&mut self) -> &mut Queue<kernel::Complete> {
-        self.process.completions()
+        &mut self.completions
     }
 
     /// Adopt terminal input and blocked termination signals into the IO pass.
@@ -240,7 +351,8 @@ impl Service {
         self.process.adopt_terminal(input, signals)
     }
 
-    /// Adopt workspace roots for git children launched by the host, with its explicit environment.
+    /// Adopt separate workspace descriptors for delivery IO and its explicit child environment.
+    /// Colocated effects own their roots independently; these descriptors must not alias them.
     pub fn adopt_delivery_roots(
         &mut self,
         roots: Box<[kernel::Fd]>,
@@ -265,7 +377,73 @@ impl Service {
 
     /// Kernel work submitted by the supervised child process.
     pub fn submissions(&mut self) -> &mut Queue<kernel::Submit> {
-        self.process.submissions()
+        &mut self.submissions
+    }
+
+    /// Content-free local observations for the shell or an independent referee.
+    pub fn pop_fact(&mut self) -> Option<local::Fact> {
+        self.local.pop_fact()
+    }
+
+    fn route_completions(&mut self) {
+        for _ in 0..self.completions.capacity() {
+            let Some(complete) = self.completions.pop() else { break };
+            if complete.op.raw() & EFFECT_OPERATION_BIT == 0 {
+                self.process.completions().push(complete);
+            } else {
+                self.effects.as_mut().expect("effect namespace belongs to colocated mode").completions().push(
+                    kernel::Complete {
+                        op: Token::new(complete.op.raw() & !EFFECT_OPERATION_BIT),
+                        kind: complete.kind,
+                        result: complete.result,
+                    },
+                );
+            }
+        }
+    }
+
+    fn flush_submissions(&mut self) {
+        for _ in 0..self.limits.queue {
+            if self.submissions.room() == 0 {
+                break;
+            }
+            let Some(submit) = self.process.submissions().pop() else { break };
+            self.submissions.push(namespace_submit(submit, false));
+        }
+        if let Some(effects) = &mut self.effects {
+            for _ in 0..self.limits.queue {
+                if self.submissions.room() == 0 {
+                    break;
+                }
+                let Some(submit) = effects.submissions().pop() else { break };
+                self.submissions.push(namespace_submit(submit, true));
+            }
+        }
+    }
+
+    fn state_saved(&mut self) -> bool {
+        match &mut self.snapshot_state {
+            SnapshotState::Capturing { saved } => {
+                *saved = true;
+                false
+            }
+            SnapshotState::Idle => true,
+            SnapshotState::Failed => false,
+        }
+    }
+
+    fn finish_exit(&mut self) {
+        let lower_closed = match &self.effects {
+            Some(effects) => effects.closed(),
+            None => true,
+        };
+        if self.shell.room() > 0
+            && self.process.closed()
+            && lower_closed
+            && let Some(status) = self.pending_exit.take()
+        {
+            self.shell.push(local::Request::Exit { status });
+        }
     }
 
     fn route_local(&mut self, now: Time, request: local::Request) {
@@ -283,7 +461,9 @@ impl Service {
                     self.process.start_git(owner, directory, op, deadline, &mut self.local_events);
                 }
             },
-            local::Request::Agent(_) => unreachable!("spawned local service has no in-process agent IO"),
+            local::Request::Agent(request) => {
+                self.effects.as_mut().expect("typed IO belongs to colocated mode").request(request);
+            }
             local::Request::Show { text } => self.terminal.show(text, &mut self.terminal_events),
             local::Request::Load => {
                 self.terminal.answer_finished();
@@ -292,11 +472,25 @@ impl Service {
             local::Request::PlainStatus { owner, directory, deadline } => {
                 self.process.plain_status(owner, directory, deadline, &mut self.local_events);
             }
-            other @ (local::Request::SaveState { .. }
-            | local::Request::SaveTurn { .. }
+            local::Request::SaveState { state, fresh } => {
+                if self.effects.is_some() && self.capture_activation != Some(state.activation) {
+                    self.capture_activation = Some(state.activation);
+                    self.snapshot_state = SnapshotState::Capturing { saved: false };
+                    self.process
+                        .capture_plain(self.plain_directories.clone(), now.saturating_add(self.limits.host.wall_time));
+                }
+                self.shell.push(local::Request::SaveState { state, fresh });
+            }
+            local::Request::Exit { status } => {
+                self.pending_exit = Some(status);
+                self.process.close();
+                if let Some(effects) = &mut self.effects {
+                    effects.close();
+                }
+            }
+            other @ (local::Request::SaveTurn { .. }
             | local::Request::SaveDelivery { .. }
-            | local::Request::Credential { .. }
-            | local::Request::Exit { .. }) => self.shell.push(other),
+            | local::Request::Credential { .. }) => self.shell.push(other),
         }
     }
 
@@ -308,7 +502,13 @@ impl Service {
             let Some(event) = self.terminal_events.pop() else { break };
             match event {
                 protocol::TerminalEvent::Domain(event) => self.local_events.push(event),
-                protocol::TerminalEvent::StopProcess => self.process.force_stop(),
+                protocol::TerminalEvent::StopProcess => {
+                    if self.effects.is_some() {
+                        self.local_events.push(local::Event::Interrupt);
+                    } else {
+                        self.process.force_stop();
+                    }
+                }
                 protocol::TerminalEvent::Write(text) => self.output.push(text),
             }
         }
@@ -376,6 +576,17 @@ impl Service {
     fn start_captured(&mut self) {
         match self.process.take_capture_done() {
             Some(true) => {
+                if self.effects.is_some() {
+                    let state = core::mem::replace(&mut self.snapshot_state, SnapshotState::Idle);
+                    match state {
+                        SnapshotState::Capturing { saved: true } => self.local_events.push(local::Event::StateSaved),
+                        SnapshotState::Capturing { saved: false } => {}
+                        SnapshotState::Idle | SnapshotState::Failed => {
+                            unreachable!("capture belongs to activation save")
+                        }
+                    }
+                    return;
+                }
                 let start = self.pending_start.take().expect("capture belongs to pending start");
                 let mut credentials = List::with_capacity(u32::try_from(start.grants.len()).expect("bounded grants"));
                 for grant in &start.grants {
@@ -403,6 +614,11 @@ impl Service {
                 }
             }
             Some(false) => {
+                if self.effects.is_some() {
+                    self.snapshot_state = SnapshotState::Failed;
+                    self.local_events.push(local::Event::StoreFailed { reason: local::StoreFailure::Read });
+                    return;
+                }
                 self.pending_start = None;
                 self.failed = true;
                 self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
@@ -495,6 +711,18 @@ impl Service {
 
 /// One bounded up pass followed by one bounded down pass.
 pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
+    service.now = now;
+    service.route_completions();
+    if let Some(effects) = &mut service.effects {
+        effects.up(now, wall);
+        for _ in 0..service.limits.queue {
+            if service.local_events.room() == 0 {
+                break;
+            }
+            let Some(event) = effects.event() else { break };
+            service.local_events.push(local::Event::Agent(to_agent_io(event)));
+        }
+    }
     service.process.up(
         now,
         wall,
@@ -505,14 +733,60 @@ pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
     );
     service.drain_terminal();
     service.start_captured();
+    local_pass(service, now, wall);
+    host_pass(service, now, wall);
+    service.process.down(
+        now,
+        wall,
+        &mut service.lower,
+        &mut service.start_values,
+        &service.values,
+        &mut service.host_events,
+    );
+    if let Some(effects) = &mut service.effects {
+        effects.down();
+    }
+    service.flush_submissions();
+    service.finish_exit();
+    service.local.reclaim();
+    if let Some(host) = &mut service.host {
+        host.reclaim();
+    }
+}
+
+const EFFECT_OPERATION_BIT: u64 = 1 << 63;
+
+fn local_pass(service: &mut Service, now: Time, wall: Wall) {
     let local_env = Env { now, wall, limits: service.limits.local.clone() };
-    let host_env = Env { now, wall, limits: service.limits.host };
     for _ in 0..service.local_events.capacity() {
         if service.local_requests.room() < local::max_out(&service.limits.local) {
             break;
         }
         let Some(event) = service.local_events.pop() else { break };
-        local::step(&mut service.local, &local_env, event, &mut service.local_requests);
+        match event {
+            local::Event::StateSaved => {
+                if !service.state_saved() {
+                    continue;
+                }
+            }
+            other @ (local::Event::Line { .. }
+            | local::Event::Interrupt
+            | local::Event::Closed
+            | local::Event::Loaded { .. }
+            | local::Event::TurnSaved { .. }
+            | local::Event::DeliverySaved { .. }
+            | local::Event::Git { .. }
+            | local::Event::PlainStatus { .. }
+            | local::Event::StoreFailed { .. }
+            | local::Event::Credential { .. }
+            | local::Event::NoCredential { .. }
+            | local::Event::Agent(_)
+            | local::Event::External(_)) => {
+                local::step(&mut service.local, &local_env, other, &mut service.local_requests);
+                continue;
+            }
+        }
+        local::step(&mut service.local, &local_env, local::Event::StateSaved, &mut service.local_requests);
     }
     if service.local.is_due(now) && service.local_requests.room() >= local::max_out(&service.limits.local) {
         local::fire(&mut service.local, &local_env, &mut service.local_requests);
@@ -526,6 +800,10 @@ pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
             || service.local_events.room() == 0
             || service.terminal_events.room() < protocol::terminal_max_out()
             || !service.process.output_room()
+            || match &service.effects {
+                Some(effects) => effects.request_room() == 0,
+                None => false,
+            }
         {
             break;
         }
@@ -534,15 +812,28 @@ pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
     }
     service.drain_terminal();
     service.start_captured();
+}
+
+fn host_pass(service: &mut Service, now: Time, wall: Wall) {
+    let host_env = Env { now, wall, limits: service.limits.host };
     for _ in 0..service.host_events.capacity() {
         if service.host_requests.room() < host::max_out(&service.limits.host) {
             break;
         }
         let Some(event) = service.host_events.pop() else { break };
-        host::step(&mut service.host, &host_env, event, &mut service.host_requests);
+        host::step(
+            service.host.as_mut().expect("spawned events own a host domain"),
+            &host_env,
+            event,
+            &mut service.host_requests,
+        );
     }
-    if service.host.is_due(now) && service.host_requests.room() >= host::max_out(&service.limits.host) {
-        host::fire(&mut service.host, &host_env, &mut service.host_requests);
+    if match &service.host {
+        Some(host) => host.is_due(now),
+        None => false,
+    } && service.host_requests.room() >= host::max_out(&service.limits.host)
+    {
+        host::fire(service.host.as_mut().expect("spawned mode owns watchdog"), &host_env, &mut service.host_requests);
     }
     for _ in 0..service.host_requests.capacity() {
         if service.local_events.room() == 0 || service.lower.room() == 0 || service.host_events.room() == 0 {
@@ -551,14 +842,43 @@ pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
         let Some(request) = service.host_requests.pop() else { break };
         service.route_host(request);
     }
-    service.process.down(
-        now,
-        wall,
-        &mut service.lower,
-        &mut service.start_values,
-        &service.values,
-        &mut service.host_events,
-    );
-    service.local.reclaim();
-    service.host.reclaim();
+}
+
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "kernel operations are external; only Cancel names another operation"
+)]
+fn namespace_submit(submit: kernel::Submit, effects: bool) -> kernel::Submit {
+    assert!(submit.op.raw() & EFFECT_OPERATION_BIT == 0, "operation namespace never exhausts its half");
+    let bit = if effects { EFFECT_OPERATION_BIT } else { 0 };
+    let kind = match submit.kind {
+        kernel::Op::Cancel { target } if target.raw() != u64::MAX => {
+            assert!(target.raw() & EFFECT_OPERATION_BIT == 0, "lower cancel uses its own namespace");
+            kernel::Op::Cancel { target: Token::new(target.raw() | bit) }
+        }
+        other => other,
+    };
+    kernel::Submit { op: Token::new(submit.op.raw() | bit), kind }
+}
+
+fn to_agent_io(event: agent::Event) -> local::AgentIo {
+    match event {
+        agent::Event::Completed { owner, completion } => local::AgentIo::Completed { owner, completion },
+        agent::Event::Failed { owner, failure, evidence, detail } => {
+            local::AgentIo::Failed { owner, failure, evidence, detail }
+        }
+        agent::Event::Cancelled { owner } => local::AgentIo::Cancelled { owner },
+        agent::Event::Done { owner, done } => local::AgentIo::Done { owner, done },
+        agent::Event::Read { owner, read } => local::AgentIo::Read { owner, read },
+        agent::Event::Probed { owner, executable } => local::AgentIo::Probed { owner, executable },
+        agent::Event::Checked { owner, ran } => local::AgentIo::Checked { owner, ran },
+        agent::Event::Aborted { owner } => local::AgentIo::Aborted { owner },
+        agent::Event::Start { .. }
+        | agent::Event::Message { .. }
+        | agent::Event::Cancel { .. }
+        | agent::Event::Acknowledge { .. }
+        | agent::Event::Grant { .. }
+        | agent::Event::HostReturned { .. }
+        | agent::Event::Delivered { .. } => unreachable!("effects emit only typed IO terminals"),
+    }
 }

@@ -262,11 +262,22 @@ impl Effects {
 
     /// Advance the same lower stages used by a framed agent at injected clocks.
     pub fn iterate(&mut self, now: Time, wall: Wall) {
+        self.up(now, wall);
+        self.down();
+    }
+
+    /// Reap IO and translate its settled terminals before the host's domain pass.
+    pub fn up(&mut self, now: Time, wall: Wall) {
         let service = &mut self.service;
         clocks(service, now, wall);
         io_up(service);
         lower_events(service);
         component_up(service);
+    }
+
+    /// Submit domain effects and reclaim lower entities after the host's down pass.
+    pub fn down(&mut self) {
+        let service = &mut self.service;
         domain_down(service);
         component_down(service);
         cleanup(service);

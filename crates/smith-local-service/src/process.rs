@@ -101,6 +101,8 @@ pub(crate) struct ProcessAdapter {
     force_pending: bool,
     terminal_input: Option<Token>,
     signals: Option<Token>,
+    closing: Option<u32>,
+    close_root_pending: bool,
 }
 
 impl ProcessAdapter {
@@ -141,6 +143,8 @@ impl ProcessAdapter {
             force_pending: false,
             terminal_input: None,
             signals: None,
+            closing: None,
+            close_root_pending: false,
         })
     }
 
@@ -191,6 +195,35 @@ impl ProcessAdapter {
         self.file_roots = file_roots.into_boxed();
         self.delivery_roots = roots;
         self.git_environment = environment;
+    }
+
+    pub(crate) fn close(&mut self) {
+        if self.closing.is_some() {
+            return;
+        }
+        self.closing = Some(u32::try_from(self.file_roots.len()).expect("admitted root count"));
+        if let Some(entity) = self.terminal_input {
+            self.io_requests.push(io::Request::Close { entity });
+        }
+        if let Some(entity) = self.signals {
+            self.io_requests.push(io::Request::Close { entity });
+        }
+    }
+
+    pub(crate) fn closed(&self) -> bool {
+        self.closing.is_some()
+            && self.io.is_empty()
+            && self.files.takes()
+            && self.files.open_files() == 0
+            && self.operations.is_empty()
+            && self.file_requests.is_empty()
+            && self.file_events.is_empty()
+            && self.io_requests.is_empty()
+            && self.io_events.is_empty()
+            && self.io_submissions.is_empty()
+            && self.file_submissions.is_empty()
+            && self.submissions.is_empty()
+            && self.completions.is_empty()
     }
 
     pub(crate) fn capture_plain(&mut self, directories: List<u32>, deadline: Time) {
@@ -401,6 +434,7 @@ impl ProcessAdapter {
             || !self.io_submissions.is_empty()
             || !self.file_submissions.is_empty()
             || self.files.is_due(now)
+            || (self.closing.unwrap_or(0) > 0 && self.files.takes() && !self.close_root_pending)
     }
 
     pub(crate) const fn failed(&self) -> bool {
@@ -467,6 +501,10 @@ impl ProcessAdapter {
                 break;
             }
             let Some(event) = self.file_events.pop() else { break };
+            if self.close_root_pending && event.owner() == Token::new(u64::MAX) {
+                self.close_root_pending = false;
+                continue;
+            }
             match &mut self.plain {
                 Some(active) => {
                     let action = active.scan.from_file(event);
@@ -535,10 +573,12 @@ impl ProcessAdapter {
                         for byte in bytes {
                             terminal.feed(byte, terminal_events);
                         }
-                        self.io_requests.push(io::Request::Stream {
-                            stream: owner,
-                            down: stream::Down::Demand { read: stream::Read::Fill(1), room: 0 },
-                        });
+                        if self.closing.is_none() {
+                            self.io_requests.push(io::Request::Stream {
+                                stream: owner,
+                                down: stream::Down::Demand { read: stream::Read::Fill(1), room: 0 },
+                            });
+                        }
                     }
                     stream::Up::End | stream::Up::Failed(_) => terminal.closed(terminal_events),
                     stream::Up::Room => unreachable!("read-only terminal asks for no output room"),
@@ -630,6 +670,25 @@ impl ProcessAdapter {
                 &mut self.files,
                 deadline,
                 request,
+                &mut self.file_events,
+                &mut self.file_submissions,
+            );
+        }
+        if self.closing.unwrap_or(0) > 0
+            && !self.close_root_pending
+            && self.files.takes()
+            && self.file_submissions.room() >= 2
+            && self.file_events.room() > 0
+        {
+            let position = self.closing.expect("closing roots").checked_sub(1).expect("positive roots to close");
+            self.closing = Some(position);
+            let root =
+                *self.file_roots.get(usize::try_from(position).expect("root position fits")).expect("adopted root");
+            self.close_root_pending = true;
+            file_layer::down(
+                &mut self.files,
+                now,
+                file::Request::Close { owner: Token::new(u64::MAX), file: root },
                 &mut self.file_events,
                 &mut self.file_submissions,
             );
