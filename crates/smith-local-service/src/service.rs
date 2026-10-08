@@ -141,8 +141,13 @@ impl Service {
         roots: Box<[kernel::Fd]>,
         seed: u64,
     ) -> Result<Self, Error> {
-        if lower.limits.domain != config.limits.local.agent || lower.domain.endpoints != config.limits.local.endpoints {
+        if lower.limits.domain != config.limits.local.agent {
             return Err(Error::Process);
+        }
+        for endpoint in &config.limits.local.endpoints {
+            if !lower.domain.endpoints.contains(endpoint) {
+                return Err(Error::Process);
+            }
         }
         in_process_worst_case(&config.limits, &lower.limits).ok_or(Error::Memory)?;
         let Ok(mut effects) = agent_service::Effects::new(lower, seed) else { return Err(Error::Process) };

@@ -104,6 +104,30 @@ pub struct Settings {
     pub title_field: String,
     #[serde(default)]
     pub delivery_environment: Vec<String>,
+    #[serde(default)]
+    pub in_process: bool,
+    #[serde(default)]
+    pub token_directory: Option<String>,
+    #[serde(default)]
+    pub accounts: Vec<Account>,
+    #[serde(default)]
+    pub push: Option<Vec<Option<Push>>>,
+}
+
+/// A configured OAuth account's opaque identifier for the agent envelope.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Account {
+    pub number: u32,
+    pub account_id: String,
+}
+
+/// One explicitly configured push destination for local git deliveries.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Push {
+    pub remote: String,
+    pub branch: String,
 }
 
 /// Build bounded local policy and parallel workspace paths from settings.
@@ -199,7 +223,17 @@ pub fn policy(
         resume: true,
         accounts: accounts.into(),
         workspace,
-        push: None,
+        push: settings.push.as_ref().map(|targets| {
+            targets
+                .iter()
+                .map(|target| {
+                    target.as_ref().map(|target| local::PushTarget {
+                        remote: target.remote.as_bytes().into(),
+                        branch: target.branch.as_bytes().into(),
+                    })
+                })
+                .collect()
+        }),
     };
     let mut configured_endpoints = Vec::with_capacity(settings.models.len());
     for model in &settings.models {
@@ -502,6 +536,10 @@ mod tests {
             deliver: None,
             title_field: "title".into(),
             delivery_environment: vec![],
+            in_process: false,
+            token_directory: None,
+            accounts: vec![],
+            push: None,
         };
         let prepared = policy(&settings, &endpoints, crate::limits::LIMITS).expect("bounded policy");
         assert!(prepared.paths.is_empty());

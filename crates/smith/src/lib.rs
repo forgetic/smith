@@ -1,0 +1,14 @@
+//! Smith's shell library (protocol/agent.md, section 6; protocol/hosts.md,
+//! section 5). Configuration, durable chat and token files, and terminal
+//! output are shared by the binary and hosted process worlds. Kernel,
+//! simulator, neighbour and fault state belong to the caller.
+
+mod limits;
+
+pub mod config;
+pub mod local_host;
+pub mod local_settings;
+pub mod local_shell;
+pub mod local_store;
+pub mod local_tokens;
+pub mod trace;

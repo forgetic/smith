@@ -8,15 +8,20 @@ use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use skein_io::{self as io, kernel::Fd};
+use skein_io::kernel::Fd;
 use skein_lib::Duration;
 use skein_shell::{Clock, Config as KernelConfig, Kernel, Now, Wait};
+use skein_world::Host;
 use smith_host_domain as host;
 use smith_host_protocol as protocol;
 use smith_local_domain as local;
 use smith_local_service as service;
 
-use crate::{config, local_settings, local_store};
+use crate::{
+    config,
+    local_host::{Local, Resources},
+    local_settings,
+};
 
 pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&Path>) -> Result<(), String> {
     let settings = local_settings::read(settings_path, workspace_settings)?;
@@ -43,8 +48,18 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
     let agent_path = state_root.join("agent.json");
     save_agent_config(&agent_path, &agent_bytes)?;
     let chat_path = state_root.join(&settings.chat);
-    let mut store = local_store::Store::new(chat_path, endpoints.clone(), 1 << 20)
-        .map_err(|error| format!("chat store: {error}"))?;
+    let token_path = token_directory(settings.token_directory.as_deref())?;
+    let parent = token_path.parent().ok_or("token directory has no parent")?;
+    fs::create_dir_all(parent).map_err(|error| format!("token directory parent: {error}"))?;
+    let mut effect_roots = Vec::new();
+    if settings.in_process {
+        for directory in &settings.directories {
+            effect_roots.push(
+                skein_shell::open_root(Path::new(&directory.path))
+                    .map_err(|error| format!("agent root {}: {error}", directory.path))?,
+            );
+        }
+    }
     let launch_root = skein_shell::open_root(Path::new(".")).map_err(|error| format!("launch root: {error}"))?;
     let executable = std::env::current_exe().map_err(|error| format!("agent program path: {error}"))?;
     let host_limits = host_limits();
@@ -60,48 +75,51 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
         queue,
     };
     let limits = service::Limits { local: prepared.limits, host: host_limits, process: process_limits, queue };
-    let worst = service::worst_case(&limits).ok_or("local memory calculation overflowed")?;
     let seed = skein_shell::seed().map_err(|error| format!("local seed failed (errno {error})"))?;
-    let mut local_service = service::Service::new(
-        service::Config {
-            local: prepared.config,
-            limits,
-            charter,
-            endpoints,
-            paths: prepared.paths,
-            launch: service::Launch {
-                program: executable.as_os_str().as_bytes().into(),
-                arguments: Box::new([Box::from(&b"agent"[..]), agent_path.as_os_str().as_bytes().into()]),
-                environment: Box::new([]),
-                root: launch_root,
-                directory: Box::from(&b"."[..]),
-            },
+    let local_config = service::Config {
+        local: prepared.config,
+        limits,
+        charter,
+        endpoints,
+        paths: prepared.paths,
+        launch: service::Launch {
+            program: executable.as_os_str().as_bytes().into(),
+            arguments: Box::new([Box::from(&b"agent"[..]), agent_path.as_os_str().as_bytes().into()]),
+            environment: Box::new([]),
+            root: launch_root,
+            directory: Box::from(&b"."[..]),
         },
-        seed,
-    )
-    .map_err(|error| format!("local service: {error:?}"))?;
-    local_service
-        .adopt_delivery_roots(
-            delivery_roots.into(),
-            settings.delivery_environment.iter().map(|entry| entry.as_bytes().into()).collect(),
-        )
-        .map_err(|error| format!("delivery directories: {error:?}"))?;
+    };
     let signals =
         skein_shell::open_termination_signals().map_err(|error| format!("local signals failed (errno {error})"))?;
-    local_service
-        .adopt_terminal(Fd::new(0), signals)
-        .map_err(|fd| format!("local terminal {} cannot be adopted", fd.raw()))?;
-    let operations = io::operations(&process_limits.io)
-        .and_then(|count| count.checked_add(64))
-        .ok_or("local IO operation count overflowed")?;
+    let lower = settings.in_process.then_some(agent_config.service);
+    let mut local_service = Local::new(
+        local_config,
+        lower,
+        Resources {
+            state_directory: chat_path,
+            token_directory: token_path,
+            input: Fd::new(0),
+            output: Fd::new(1),
+            signals,
+            delivery_roots: delivery_roots.into(),
+            effect_roots: effect_roots.into(),
+            delivery_environment: settings.delivery_environment.iter().map(|entry| entry.as_bytes().into()).collect(),
+            accounts: settings.accounts.into(),
+            seed,
+        },
+    )?;
+    let worst = local_service.worst_case();
+    let operations = local_service.operations();
     let mut kernel = Kernel::open(KernelConfig { operations }).map_err(|error| format!("local kernel: {error}"))?;
     let clock = Clock::new();
     eprintln!("smith: local host started; worst case {worst} bytes");
     loop {
         kernel.reap(local_service.completions());
         let Now { now, wall } = clock.now();
-        service::iterate(&mut local_service, now, wall);
-        if let Some(exit) = settle_shell(&mut local_service, &mut store)? {
+        local_service.iterate(now, wall);
+        if let Some(exit) = local_service.result() {
+            let exit = exit.map_err(str::to_owned)?;
             return match exit {
                 local::ExitStatus::Success => Ok(()),
                 local::ExitStatus::Failed => Err("local chat ended with a failure".into()),
@@ -136,54 +154,16 @@ fn save_agent_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
         .map_err(|error| format!("agent configuration directory sync: {error}"))
 }
 
-fn settle_shell(
-    local_service: &mut service::Service,
-    store: &mut local_store::Store,
-) -> Result<Option<local::ExitStatus>, String> {
-    let mut stdout = std::io::stdout().lock();
-    for _ in 0..local_service.output().capacity() {
-        let Some(text) = local_service.output().pop() else { break };
-        stdout.write_all(&text).map_err(|error| format!("terminal write: {error}"))?;
+fn token_directory(configured: Option<&str>) -> Result<std::path::PathBuf, String> {
+    if let Some(configured) = configured {
+        return Ok(configured.into());
     }
-    stdout.flush().map_err(|error| format!("terminal flush: {error}"))?;
-    for _ in 0..local_service.shell_requests().capacity() {
-        let Some(request) = local_service.shell_requests().pop() else { break };
-        match request {
-            local::Request::Load => match store.load() {
-                Ok(event) => local_service.local_event(event),
-                Err(reason) => local_service.local_event(local::Event::StoreFailed { reason }),
-            },
-            local::Request::SaveState { state, fresh } => match store.save_state(state, fresh) {
-                Ok(event) => local_service.local_event(event),
-                Err(reason) => local_service.local_event(local::Event::StoreFailed { reason }),
-            },
-            local::Request::SaveTurn { number, read, turn } => match store.save_turn(number, read, turn) {
-                Ok(event) => local_service.local_event(event),
-                Err(reason) => local_service.local_event(local::Event::StoreFailed { reason }),
-            },
-            local::Request::SaveDelivery { record } => match store.save_delivery(&record) {
-                Ok(event) => local_service.local_event(event),
-                Err(reason) => local_service.local_event(local::Event::StoreFailed { reason }),
-            },
-            local::Request::Credential { account } => local_service
-                .local_event(local::Event::NoCredential { account, reason: local::CredentialFailure::Missing }),
-            local::Request::Git { owner, .. } => local_service.local_event(local::Event::Git {
-                owner,
-                result: local::GitResult::Failed {
-                    reason: smith_domain::run::DeliveryReason::Broken,
-                    diagnostic: Box::new(smith_domain::run::Diagnostic::empty()),
-                },
-            }),
-            local::Request::PlainStatus { .. } => {
-                local_service.local_event(local::Event::StoreFailed { reason: local::StoreFailure::Read })
-            }
-            local::Request::Exit { status } => return Ok(Some(status)),
-            local::Request::Show { .. } | local::Request::Agent(_) | local::Request::External(_) => {
-                unreachable!("service translates these before shell routing")
-            }
-        }
-    }
-    Ok(None)
+    let base = match std::env::var_os("XDG_CONFIG_HOME") {
+        Some(base) => std::path::PathBuf::from(base),
+        None => std::path::PathBuf::from(std::env::var_os("HOME").ok_or("HOME is absent; configure token_directory")?)
+            .join(".config"),
+    };
+    Ok(base.join("smith/tokens"))
 }
 
 fn host_limits() -> host::Limits {
