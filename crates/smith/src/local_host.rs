@@ -124,7 +124,8 @@ impl Local {
         let output = writer.adopt_write_pipe(resources.output).map_err(|_| "terminal output cannot be adopted")?;
         let requests = Queue::with_capacity(queue);
         worst = worst
-            .checked_add(io::worst_case(&io_limits).ok_or("terminal memory overflowed")?)
+            .checked_add(Store::worst_case().ok_or("chat store memory overflowed")?)
+            .and_then(|count| count.checked_add(io::worst_case(&io_limits)?))
             .and_then(|count| count.checked_add(u64::from(queue).checked_mul(u64::from(show_bytes.max(8192)))?))
             .and_then(|count| count.checked_add(Queue::<kernel::Complete>::worst_case(queue)?.checked_mul(3)?))
             .and_then(|count| count.checked_add(Queue::<kernel::Submit>::worst_case(queue)?.checked_mul(3)?))
