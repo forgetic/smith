@@ -134,3 +134,16 @@ fn transcript_refuses_a_gap_and_a_different_dialect() {
         Err(record::Refusal::Dialect)
     );
 }
+
+#[test]
+fn a_live_turn_decodes_at_its_number_without_the_saved_prefix() {
+    use smith_domain_session::record;
+    let mut configured = skein_lib::List::with_capacity(1);
+    configured.push(crate::Endpoint { name: Box::default(), number: 3, dialect: 0, account: 5 }).expect("endpoint");
+    let endpoints = crate::Endpoints::new(configured);
+    let bytes = saved_turn(4, b"00000000");
+    let turn = crate::decode_turn(&bytes, 4, &smith_transcript::CEILINGS, &endpoints).expect("live turn");
+    assert_eq!(turn.sequence, 4);
+    assert_eq!(turn.spent, 7);
+    assert_eq!(crate::decode_turn(&bytes, 3, &smith_transcript::CEILINGS, &endpoints), Err(record::Refusal::Malformed));
+}

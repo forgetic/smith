@@ -33,28 +33,18 @@ pub fn decode_transcript(
         if body.get(..2) != Some(&[0, 2][..]) {
             return Err(record::Refusal::Version);
         }
-        let Ok(source) = wire::Turn::decode(limits, &mut Reader::new(body)) else {
-            return Err(record::Refusal::Malformed);
-        };
-        let endpoint = endpoints.resolve(source.endpoint()).ok_or(record::Refusal::Endpoint)?;
-        if source.dialect() != dialect_name(endpoint.dialect).as_ref() {
-            return Err(record::Refusal::Dialect);
-        }
+        let place = turns.len().checked_add(1).ok_or(record::Refusal::TooLarge)?;
+        let turn = decode_turn(body, place, limits, endpoints)?;
         match first_endpoint {
-            Some(first) if first != llm::Endpoint(endpoint.number) => return Err(record::Refusal::Endpoint),
+            Some(first) if first != turn.endpoint => return Err(record::Refusal::Endpoint),
             Some(_) => {}
-            None => first_endpoint = Some(llm::Endpoint(endpoint.number)),
+            None => first_endpoint = Some(turn.endpoint),
         }
         match first_dialect {
-            Some(first) if first != endpoint.dialect => return Err(record::Refusal::Dialect),
+            Some(first) if first != turn.dialect => return Err(record::Refusal::Dialect),
             Some(_) => {}
-            None => first_dialect = Some(endpoint.dialect),
+            None => first_dialect = Some(turn.dialect),
         }
-        let place = turns.len().checked_add(1).ok_or(record::Refusal::TooLarge)?;
-        if source.place() != place {
-            return Err(record::Refusal::Malformed);
-        }
-        let turn = decode_turn(source, endpoint.number, endpoint.dialect)?;
         if turns.push(turn).is_err() {
             return Err(record::Refusal::TooLarge);
         }
@@ -67,7 +57,30 @@ pub fn decode_transcript(
     }))
 }
 
-fn decode_turn(source: wire::Turn, endpoint: u32, dialect: u32) -> Result<record::Turn, record::Refusal> {
+/// Decode one live numbered turn without requiring its earlier saved prefix.
+pub fn decode_turn(
+    bytes: &[u8],
+    number: u32,
+    limits: &wire::v2::Limits,
+    endpoints: &Endpoints,
+) -> Result<record::Turn, record::Refusal> {
+    if bytes.get(..2) != Some(&[0, 2][..]) {
+        return Err(record::Refusal::Version);
+    }
+    let Ok(source) = wire::Turn::decode(limits, &mut Reader::new(bytes)) else {
+        return Err(record::Refusal::Malformed);
+    };
+    if number == 0 || source.place() != number {
+        return Err(record::Refusal::Malformed);
+    }
+    let endpoint = endpoints.resolve(source.endpoint()).ok_or(record::Refusal::Endpoint)?;
+    if source.dialect() != dialect_name(endpoint.dialect).as_ref() {
+        return Err(record::Refusal::Dialect);
+    }
+    translate_turn(source, endpoint.number, endpoint.dialect)
+}
+
+fn translate_turn(source: wire::Turn, endpoint: u32, dialect: u32) -> Result<record::Turn, record::Refusal> {
     let mut messages = List::with_capacity(source.messages().len());
     for message in source.messages() {
         let role = match message.role() {
