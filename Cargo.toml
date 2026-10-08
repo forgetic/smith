@@ -32,6 +32,8 @@ skein-tls-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-fake-llm-domain = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-fake-llm-protocol = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-llm-world = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-oauth = { git = "https://git.ekanayaka.io/ai/skein.git" }
+skein-fake-oauth = { git = "https://git.ekanayaka.io/ai/skein.git" }
 smith-host-domain = { path = "crates/smith-host-domain" }
 smith-local-domain = { path = "crates/smith-local-domain" }
 smith-host-world = { path = "tests/host" }

@@ -12,6 +12,10 @@ smith-local-domain.workspace = true
 smith-domain.workspace = true
 smith-protocol-channel.workspace = true
 smith-transcript.workspace = true
+skein-oauth.workspace = true
+
+[dev-dependencies]
+skein-fake-oauth.workspace = true
 
 [lints]
 workspace = true

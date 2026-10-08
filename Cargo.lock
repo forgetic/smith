@@ -323,6 +323,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "skein-fake-oauth"
+version = "0.0.0"
+source = "git+https://git.ekanayaka.io/ai/skein.git#9840f49590fdd627e169a7f6c56c6c90977a9eeb"
+dependencies = [
+ "skein-json",
+ "skein-lib",
+ "skein-oauth",
+]
+
+[[package]]
 name = "skein-heap"
 version = "0.0.0"
 source = "git+https://git.ekanayaka.io/ai/skein.git#9840f49590fdd627e169a7f6c56c6c90977a9eeb"
@@ -388,6 +398,15 @@ dependencies = [
  "skein-json",
  "skein-lib",
  "skein-llm",
+]
+
+[[package]]
+name = "skein-oauth"
+version = "0.0.0"
+source = "git+https://git.ekanayaka.io/ai/skein.git#9840f49590fdd627e169a7f6c56c6c90977a9eeb"
+dependencies = [
+ "skein-json",
+ "skein-lib",
 ]
 
 [[package]]
@@ -673,7 +692,9 @@ dependencies = [
 name = "smith-local-protocol"
 version = "0.0.0"
 dependencies = [
+ "skein-fake-oauth",
  "skein-lib",
+ "skein-oauth",
  "smith-domain",
  "smith-local-domain",
  "smith-protocol-channel",
