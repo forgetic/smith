@@ -367,3 +367,12 @@ and one fuzzy test in 2.715 seconds (2.714 seconds PASS duration). The final-tip
 parallel gate passed 1,414 focused / 4.396 seconds and 18 fuzzy / 6.249
 seconds, with no skips; formatting and workspace all-target Clippy passed
 (17.04 seconds). Budgets remain unchanged.
+
+The shared agent shell's entry-point stories were measured serially on
+2026-10-08 with `cargo nextest run -p smith --profile measure -j 1` on an
+idle machine. The three startup, terminal-diagnostic and successful
+hosted-trace stories contributed 0.024 seconds of reported test durations;
+the whole shell package passed 36 focused tests in 0.214 seconds. The
+stories use the binary's `agent_shell::Agent` startup and `Host` pass with
+caller-supplied descriptors and deterministic seeds. Existing focused,
+fuzzy and per-world budgets remain unchanged.

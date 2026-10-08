@@ -154,13 +154,17 @@ pub fn configuration() -> agent::Config {
     }
 }
 
-fn host() -> ScriptedPeer {
+/// The scripted channel initiator used by agent startup stories.
+#[must_use]
+pub fn host() -> ScriptedPeer {
     let limits = limits().channel;
     let schema = smith_channel::schema(&limits.bodies).expect("schema");
     ScriptedPeer::new(schema, Role::Initiator, limits.channel, 1, Box::new([])).expect("scripted host")
 }
 
-fn start(charter: &[u8]) -> skein_channel::Frame {
+/// One activation Start sent by the scripted host, ending with an Answer.
+#[must_use]
+pub fn start(charter: &[u8]) -> skein_channel::Frame {
     let limits = smith_channel::CEILINGS;
     let window = smith_channel::Window::new(&limits, smith_channel::WindowParts { turns: 8, bytes: 1_000_000_000 })
         .expect("window");

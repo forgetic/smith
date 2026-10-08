@@ -7,6 +7,7 @@ mod limits;
 mod local_auth;
 mod local_auth_http;
 
+pub mod agent_shell;
 pub mod config;
 pub mod local_host;
 pub mod local_settings;

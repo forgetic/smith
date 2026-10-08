@@ -471,6 +471,7 @@ dependencies = [
  "serde",
  "serde_json",
  "skein-channel",
+ "skein-fake-channel",
  "skein-fake-machine",
  "skein-fake-oauth",
  "skein-http",

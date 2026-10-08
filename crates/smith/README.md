@@ -61,3 +61,17 @@ Run an interactive host with
 `smith local SETTINGS.json STATE_DIR [WORKSPACE_SETTINGS.json]`.
 Its [settings and file layout](../../docs/development/local-host.md) describe
 workspace overrides, both agent placements, OAuth sign-in and local deliveries.
+
+The shared agent shell is `smith::agent_shell::Agent`. `Agent::read` reads this
+configuration; `Agent::new` takes an already parsed `config::Configuration`.
+Both take `Resources` (channel input/output, signal descriptor and injected
+seed) and an error writer. The writer receives startup and final diagnostics
+once. `Resources::roots` supplies inherited mount descriptors in Start order
+for hosted worlds; omitted roots are opened on the machine, as in the binary.
+The caller owns any provided roots that the Start does not consume.
+`Agent` implements Skein's `Host`: the caller reaps into `completions`, calls
+`iterate(now, wall)`, and submits `submissions`. That pass drains the same
+trace and opens/adopts the same roots as the binary. `result` is available
+only after the channel and every lower child have settled.
+`agent_shell::run` is the binary's kernel-and-clock driver; its failures are
+already written to the supplied error output.
