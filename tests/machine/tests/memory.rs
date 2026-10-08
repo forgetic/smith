@@ -99,3 +99,41 @@ fn saturated_searches_and_pipe_routes_stay_within_the_machine_bound() {
     meter.check(meter.end(), bound, &"bounded JSON line parse");
     assert!(meter.held() > 0, "the component retains bounded state");
 }
+
+#[test]
+fn shared_harness_meters_file_child_and_flood_runs_through_drop() {
+    let mut world = smith_machine_world::World::new(8, &[skein_fake_machine::Item::file(b"file", b"old")]);
+    world.check_memory();
+    let root = world.root();
+    let loaded = world.request(FromDomain::Op {
+        owner: Token::new(20),
+        op: tools::Op::Load { at: tools::Place { root, path: b"file".as_slice().into() }, max: 128 },
+        deadline: Time::from_nanos(100_000_000),
+    });
+    let ToDomain::Done { done: tools::Done::Loaded { version, .. }, .. } = loaded else {
+        panic!("the memory fixture loaded its file");
+    };
+    let stored = world.request(FromDomain::Op {
+        owner: Token::new(21),
+        op: tools::Op::Store {
+            at: tools::Place { root, path: b"file".as_slice().into() },
+            content: Box::new([b'x'; 128]),
+            expect: tools::Expect::Is { version },
+        },
+        deadline: Time::from_nanos(100_000_000),
+    });
+    assert!(matches!(stored, ToDomain::Done { done: tools::Done::Stored { .. }, .. }));
+    let checked = world.request(FromDomain::Check {
+        owner: Token::new(22),
+        program: run::Place { root, path: b"check-hang".as_slice().into() },
+        deadline: Time::from_nanos(10_000_000),
+        tail: 32,
+    });
+    assert!(matches!(checked, ToDomain::Checked { ran: run::Ran { exit: run::Exit::TimedOut, .. }, .. }));
+    let flooded = world.flood(Token::new(23), &[b'x'; 4096], 16, 16);
+    assert!(matches!(flooded, ToDomain::Done { done: tools::Done::Exited { dropped: 4064, .. }, .. }));
+    world.settle();
+    assert_eq!(world.heap().len(), 4, "every independent run was metered");
+    assert!(world.heap().iter().all(|(peak, bound)| *peak > 0 && peak <= bound));
+    assert!(!world.trace().is_empty(), "actual kernel operations ran");
+}

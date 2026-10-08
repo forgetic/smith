@@ -26,7 +26,7 @@ fn load(world: &mut World, owner: Token) -> tools::Version {
     }
 }
 
-fn run(seed: u64) -> (usize, ToDomain) {
+fn run(seed: u64) -> (usize, ToDomain, Vec<String>) {
     let mut rng = Rng::new(seed);
     let mode = usize::try_from(rng.below(7)).expect("mode fits");
     let mut world = if mode == 6 {
@@ -113,7 +113,7 @@ fn run(seed: u64) -> (usize, ToDomain) {
         7.. => unreachable!("seven modes"),
     };
     world.settle();
-    (mode, terminal)
+    (mode, terminal, world.trace().to_vec())
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn seeded_file_changes_child_failures_and_deadlines_replay_and_settle() {
     for seed in 100_u64..228 {
         let first = run(seed);
         let second = run(seed);
-        assert_eq!(first, second, "seed {seed} replays its terminal");
+        assert_eq!(first, second, "seed {seed} replays its terminal and complete kernel trace");
         let slot = covered.get_mut(first.0).expect("one of seven modes");
         *slot = slot.checked_add(1).expect("seed count fits");
     }

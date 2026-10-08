@@ -198,3 +198,42 @@ fn referee_writes_only_within_a_writable_root_and_answers_each_call_once() {
     assert_eq!(writable.content(b"kept"), b"new");
     writable.settle();
 }
+
+#[test]
+fn full_kernel_trace_and_file_terminal_replay_through_the_shared_kit() {
+    let trace = skein_world::domain::assert_replays(40, 41, |seed| {
+        let bytes = vec![b'x'; usize::try_from(seed % 16 + 1).expect("bounded seeded file")];
+        let mut world = World::new(seed, &[Item::file(b"file", &bytes)]);
+        let terminal = world.request(FromDomain::Op {
+            owner: Token::new(40),
+            op: tools::Op::Load { at: place(world.root(), b"file"), max: 16 },
+            deadline: far(),
+        });
+        world.settle();
+        (world.trace().to_vec(), terminal)
+    });
+    assert!(!trace.is_empty(), "the complete file IO trace was retained");
+}
+
+#[test]
+fn successive_harness_runs_preserve_the_absolute_deadline_clock() {
+    let mut world = World::new(42, &[]);
+    let first = world.request(FromDomain::Check {
+        owner: Token::new(50),
+        program: run::Place { root: world.root(), path: b"check-hang".as_slice().into() },
+        deadline: Time::from_nanos(10_000_000),
+        tail: 8,
+    });
+    assert!(matches!(first, ToDomain::Checked { ran: run::Ran { exit: run::Exit::TimedOut, .. }, .. }));
+    let before = world.now();
+    assert!(before >= Time::from_nanos(10_000_000), "the first deadline elapsed");
+    let second = world.request(FromDomain::Check {
+        owner: Token::new(51),
+        program: run::Place { root: world.root(), path: b"check-hang".as_slice().into() },
+        deadline: Time::from_nanos(1_000_000),
+        tail: 8,
+    });
+    assert!(matches!(second, ToDomain::Checked { ran: run::Ran { exit: run::Exit::TimedOut, .. }, .. }));
+    assert_eq!(world.now(), before, "an expired absolute deadline does not restart its duration");
+    world.settle();
+}

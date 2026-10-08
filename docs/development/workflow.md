@@ -400,3 +400,14 @@ uses the same process enum and referee, with transport configuration only;
 all seeded worlds remain plaintext. The default fifteen-second, fuzzy
 sixty-second and per-world budgets are unchanged. Unoptimized builds retain
 debug assertions with debug information disabled as in 02.3.
+
+Testing pass 02.5 moves the machine component world onto Skein's harness.
+Idle `measure -j 1` runs on 2026-10-08 measured ten focused tests / 0.045
+seconds summed rounded PASS durations (0.047 seconds suite elapsed), and
+one 128-seed fuzzy replay sweep / 0.061 seconds. Every request closes its
+independently owned root and settles the full IO stack; the fake checkout
+and absolute scenario clock persist between runs. Shared replay and checked
+construction, iteration and drop controls supplement the retained saturated
+component memory test. The bounded flood remains explicitly a component-seam
+fixture. Workspace and per-world budgets remain unchanged; unoptimized
+builds retain debug assertions with debug information disabled as in 02.3.
