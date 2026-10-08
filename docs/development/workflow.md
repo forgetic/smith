@@ -443,3 +443,32 @@ per-process construction/iteration/drop checks, complete expected scratch
 changes and outside child-reaping observations. This world has no fuzzy
 suite: kernel schedules are not seeded replay. Existing suite budgets and
 serial measurement policy remain unchanged.
+
+Testing pass 04 runs the shipped local binary and the agent it launches against
+shared TLS peers, with the shared scripted person on a controlling terminal.
+Idle `measure -j 1` on 2026-10-08 measured four end-to-end tests / 0.322 seconds:
+first sign-in plus a real tool/check/git commit, a second binary invocation
+resuming durable history, a basic terminal report, and startup refusals of both
+commands. The cases formerly in `crates/smith/tests/startup.rs` are now in
+`end_to_end.rs`. The same scratch setup, narrow checkout observations and
+outside scenario policy are used as in the real-loop tier. Every invocation
+checks its expected durable outputs, a fresh agent trace, successful process
+settlement and reaping. Refusal controls instead require failure and no channel
+or chat. Missing io_uring, git, rg or sh fails with a prerequisite diagnostic.
+
+The affected shared local-process tier measured sixteen focused tests / 0.943
+seconds and one fuzzy sweep / 3.505 seconds; the real tier measured four tests /
+0.727 seconds. The final merge gate passed 1436 focused tests / 7.439 seconds
+and seventeen fuzzy tests / 11.001 seconds, with formatting and workspace
+all-target Clippy passing. Existing suite and per-world budgets are unchanged.
+Run the binary tier alone with:
+
+```sh
+cargo nextest run -p smith --test end_to_end --profile measure -j 1
+```
+
+After a machine freeze, these gates used one build job, a shared repository
+`target`, debug information disabled without disabling assertions, and two
+nextest workers. Heavy commands ran sequentially in a user systemd scope with
+`MemoryHigh=6G`, `MemoryMax=8G` and `MemorySwapMax=0`, after checking at least
+6 GiB available RAM. No memory-pressure or scope-limit failure occurred.
