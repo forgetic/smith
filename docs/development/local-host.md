@@ -64,6 +64,7 @@ while inheriting the global agent, model, budget and account settings:
 | `chat` | Required nonempty directory name beneath `STATE_DIR`; no slash, backslash, NUL, `.` or `..`. |
 | `instructions` | Required instruction text for each activation. |
 | `models` | Required nonempty array of priced models, described below. |
+| `sub_agents` | Whether to offer the native `sub_agent` tool; default `false`. Children share the workspace and run budget. |
 | `budget` | Required `{ "turns", "spend", "seconds" }`; turns and seconds are positive. Spend is an integer in the pricing currency's chosen unit. |
 | `waiting_seconds` | Required positive waiting interval, in seconds. |
 | `brief` | Ordered `{ "title", "text" }` context sections; default `[]`. |
@@ -103,6 +104,12 @@ model name. The three prices are integer currency units per `price_unit`
 tokens, which must be positive. These example names and prices are placeholders
 for the operator's model registration and prices. The settings do not discover
 models or prices from the provider.
+
+With `sub_agents` enabled, an unnamed child uses the main model, endpoint and
+reasoning effort. Models after the first are the choices a child may name
+explicitly; repeat the main model there to allow selecting it by name. Child
+tools stay within the requested workspace families, and children cannot spawn
+more sub-agents.
 
 The agent configuration's `environment` is an array of `{ "name", "value" }`
 for agent commands. It is separate from the host's `delivery_environment`.

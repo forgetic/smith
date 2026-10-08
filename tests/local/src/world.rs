@@ -587,6 +587,7 @@ impl World {
                 model: b"scripted".as_slice().into(),
                 max_tokens: 256,
             }]),
+            sub_agents: false,
             budget: agent_world::BUDGET,
             conventions: None,
             contract,

@@ -60,6 +60,7 @@ fn config() -> Config {
                 model: Box::from(&b"small"[..]),
                 max_tokens: 128,
             }]),
+            sub_agents: false,
             budget: run::Budget { turns: 8, spend: 1, time: Duration::from_secs(60) },
             conventions: None,
             contract: local::Contract::Report(outcome::TextSpec { max: 256, fields: Box::new([]) }),

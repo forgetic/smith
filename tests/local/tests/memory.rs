@@ -34,6 +34,7 @@ fn a_local_domain_with_every_line_slot_full_stays_within_its_worst_case() {
             model: b"scripted".as_slice().into(),
             max_tokens: 256,
         }]),
+        sub_agents: false,
         budget: smith_agent_world::BUDGET,
         conventions: None,
         contract: Contract::Report(outcome::TextSpec { max: 2048, fields: Box::new([]) }),

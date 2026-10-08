@@ -191,7 +191,9 @@ the agent it is the `smith` binary:
   still drains lines already received.
 - **Charters from configuration:** instructions, models, prices, a
   budget, conventions, and a result contract (a report, by default, or a
-  change).
+  change). Sub-agent authority is an explicit local choice, disabled by
+  default; an enabled child uses the run's shared workspace and budget
+  under run.md, section 5.3.
 - **Transcripts in files,** under the workspace's state directory, so a
   chat resumes across invocations.
 - **Delivery in place:** a commit in each writable repository, with the

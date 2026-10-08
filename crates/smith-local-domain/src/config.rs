@@ -38,6 +38,7 @@ pub struct Config {
     pub brief: charter::Brief,
     /// Main model first, followed by models available to sub-agents.
     pub models: Box<[charter::Llm]>,
+    pub sub_agents: bool,
     /// Activation budget in the host's unit.
     pub budget: run::Budget,
     /// Optional guide and check paths.
@@ -233,7 +234,7 @@ pub fn charter(config: &Config) -> charter::Charter {
             wait: true,
             deliver: config.deliver.clone(),
             tools: charter::Tools { inspect: workspace.is_some(), modify: writable, shell: workspace.is_some() },
-            agents: false,
+            agents: config.sub_agents,
             host_tools: Box::new([]),
         },
         outcome: outcome::OutcomeSpec { change, verdicts: Box::new([]), report, failure: None },

@@ -88,6 +88,8 @@ pub struct Settings {
     pub chat: String,
     pub instructions: String,
     pub models: Vec<Model>,
+    #[serde(default)]
+    pub sub_agents: bool,
     pub budget: Budget,
     pub waiting_seconds: u64,
     #[serde(default)]
@@ -228,6 +230,7 @@ pub fn policy(
         instructions: settings.instructions.as_bytes().into(),
         brief: run::charter::Brief { sections: brief.into() },
         models: models.into(),
+        sub_agents: settings.sub_agents,
         budget: run::Budget {
             turns: settings.budget.turns,
             spend: settings.budget.spend,
@@ -510,11 +513,15 @@ mod tests {
             "budget":{"turns":8,"spend":100,"seconds":60}, "waiting_seconds":30
         });
         merge(&mut document, serde_json::json!({"instructions":"workspace", "agent":{"memory_bytes":99}}));
-        let settings: Settings = serde_json::from_value(document).expect("merged settings");
+        let settings: Settings = serde_json::from_value(document.clone()).expect("merged settings");
+        assert!(!settings.sub_agents, "sub-agents are not granted by omitted settings");
         assert_eq!(settings.instructions, "workspace");
         assert_eq!(settings.agent["profile"], "standard");
         assert_eq!(settings.agent["memory_bytes"], 99);
         assert_eq!(settings.models[0].name, "small");
+        merge(&mut document, serde_json::json!({"sub_agents":true}));
+        let enabled: Settings = serde_json::from_value(document).expect("enabled sub-agent setting");
+        assert!(enabled.sub_agents);
     }
 
     #[test]
@@ -535,7 +542,7 @@ mod tests {
             .push(channel::Endpoint { name: Box::from(&b"main"[..]), number: 7, dialect: 1, account: 0 })
             .expect("one endpoint");
         let endpoints = channel::Endpoints::new(entries);
-        let settings = Settings {
+        let mut settings = Settings {
             agent: serde_json::json!({}),
             chat: "one".into(),
             instructions: "Assist".into(),
@@ -548,6 +555,7 @@ mod tests {
                 output_price: 1,
                 price_unit: 1,
             }],
+            sub_agents: false,
             budget: Budget { turns: 8, spend: 1, seconds: 60 },
             waiting_seconds: 30,
             brief: vec![],
@@ -567,5 +575,14 @@ mod tests {
         assert_eq!(prepared.limits.endpoints.as_ref(), &[run::charter::Endpoint(7)]);
         let encoded = charter(&prepared.config, &endpoints).expect("matching charter");
         assert!(!encoded.is_empty());
+        assert!(!local::charter(&prepared.config).grants.agents);
+
+        settings.sub_agents = true;
+        let enabled = policy(&settings, &endpoints, crate::limits::LIMITS).expect("enabled sub-agent policy");
+        let enabled_charter = local::charter(&enabled.config);
+        assert!(enabled_charter.grants.agents);
+        assert_eq!(enabled_charter.llm, local::charter(&prepared.config).llm);
+        assert!(enabled_charter.models.is_empty(), "an unnamed child uses the main model");
+        charter(&enabled.config, &endpoints).expect("sub-agent grant survives wire decoding");
     }
 }
