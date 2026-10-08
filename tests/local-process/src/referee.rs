@@ -183,14 +183,23 @@ impl Expectations for Meeting {
 /// Judge only supplied observations and the checkout's narrow read interface.
 #[must_use]
 pub fn review(seen: &Seen, checkout: &impl CheckoutRead, ending: Ending) -> Referee<Meeting> {
-    let mut referee = Referee::new(Meeting {
-        ending,
-        require_facts: true,
-        activation: None,
-        next_turn: 1,
-        answered: false,
-        shown: false,
-    });
+    review_with_facts(seen, checkout, ending, true)
+}
+
+/// Judge binary observations without requiring in-process service facts.
+#[must_use]
+pub fn review_binary(seen: &Seen, checkout: &impl CheckoutRead, ending: Ending) -> Referee<Meeting> {
+    review_with_facts(seen, checkout, ending, false)
+}
+
+fn review_with_facts(
+    seen: &Seen,
+    checkout: &impl CheckoutRead,
+    ending: Ending,
+    require_facts: bool,
+) -> Referee<Meeting> {
+    let mut referee =
+        Referee::new(Meeting { ending, require_facts, activation: None, next_turn: 1, answered: false, shown: false });
     let mut stimuli = Vec::new();
     for fact in &seen.facts {
         referee.observe(Time::ZERO, Observation::Fact(*fact), &mut stimuli);

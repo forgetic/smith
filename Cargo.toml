@@ -55,6 +55,7 @@ smith-agent-service = { path = "crates/smith-agent-service" }
 smith-local-protocol = { path = "crates/smith-local-protocol" }
 smith-local-service = { path = "crates/smith-local-service" }
 smith-agent-process-world = { path = "tests/agent-process" }
+smith-real-world = { path = "tests/real" }
 smith-local-process-world = { path = "tests/local-process" }
 smith = { path = "crates/smith" }
 smith-run-world = { path = "tests/run" }

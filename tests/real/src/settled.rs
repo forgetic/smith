@@ -18,7 +18,7 @@ struct Entry {
     bytes: Option<Vec<u8>>,
 }
 
-pub(crate) struct Before {
+pub struct Before {
     entries: BTreeMap<PathBuf, Entry>,
     head: Vec<u8>,
 }
@@ -40,23 +40,36 @@ fn entries(root: &Path, directory: &Path, out: &mut BTreeMap<PathBuf, Entry>) {
 }
 
 impl Before {
-    pub(crate) fn new(root: &Path) -> Self {
+    pub fn new(root: &Path) -> Self {
         let mut snapshot = BTreeMap::new();
         entries(root, root, &mut snapshot);
         Self { entries: snapshot, head: git(&root.join("repo"), &["rev-parse", "HEAD"]) }
     }
 
     pub(crate) fn assert_expected(&self, scenario: &Scenario, seen: &Seen) {
+        self.assert_outputs(scenario, seen, false);
+    }
+
+    /// A binary adds its generated configuration and configured trace to the shared scratch contract.
+    pub fn assert_binary_expected(&self, scenario: &Scenario, seen: &Seen) {
+        self.assert_outputs(scenario, seen, true);
+    }
+
+    fn assert_outputs(&self, scenario: &Scenario, seen: &Seen, binary: bool) {
         let root = &scenario.launch.root_path;
         let mut after = BTreeMap::new();
         entries(root, root, &mut after);
         let mut expected = BTreeSet::from([PathBuf::from("chat/state")]);
-        let store = smith::local_store::Store::new(
-            scenario.launch.state_directory.clone(),
-            smith_local_process_world::process::lower_configuration().channel_endpoints,
-            1 << 20,
-        )
-        .expect("outside durable store");
+        if binary {
+            expected.extend([PathBuf::from("agent.json"), PathBuf::from("agent-trace.jsonl")]);
+        }
+        let endpoints = if binary {
+            smith::config::read(&root.join("agent.json")).expect("actual child config").service.channel_endpoints
+        } else {
+            smith_local_process_world::process::lower_configuration().channel_endpoints
+        };
+        let store = smith::local_store::Store::new(scenario.launch.state_directory.clone(), endpoints, 1 << 20)
+            .expect("outside durable store");
         let Event::Loaded { state, transcript, deliveries } = store.load().expect("settled durable history") else {
             unreachable!("store load terminal")
         };
@@ -72,7 +85,12 @@ impl Before {
             .count();
         assert_eq!(
             transcript.turns.len(),
-            old_turns + seen.facts.iter().filter(|fact| matches!(fact, Fact::Turn { .. })).count(),
+            old_turns
+                + if binary {
+                    seen.queries.len()
+                } else {
+                    seen.facts.iter().filter(|fact| matches!(fact, Fact::Turn { .. })).count()
+                },
             "only this invocation's observed turns were appended"
         );
         let mut returned = BTreeSet::new();
@@ -99,7 +117,15 @@ impl Before {
                 expected.insert(path);
             }
         }
-        assert_eq!(new_deliveries, returned, "only observed delivery terminals were persisted");
+        if binary {
+            assert_eq!(
+                new_deliveries.len(),
+                usize::from(scenario.launch.change),
+                "only the expected final delivery is persisted"
+            );
+        } else {
+            assert_eq!(new_deliveries, returned, "only observed delivery terminals were persisted");
+        }
         if scenario.launch.authenticated {
             expected.insert(PathBuf::from("tokens/0.json"));
         }
@@ -157,7 +183,7 @@ impl Before {
 /// Outside observation after the loop drained: no actual git, rg, sh or check
 /// child remains, including a zombie awaiting wait. Hosted agents use the
 /// shared world's own process/descriptor ledger and exit assertions.
-pub(crate) fn assert_no_children() {
+pub fn assert_no_children() {
     for task in std::fs::read_dir("/proc/self/task").expect("Linux task observations") {
         let path = task.expect("task entry").path().join("children");
         match std::fs::read_to_string(path) {

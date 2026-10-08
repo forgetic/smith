@@ -489,6 +489,7 @@ dependencies = [
  "serde_json",
  "skein-channel",
  "skein-fake-channel",
+ "skein-fake-llm-domain",
  "skein-fake-machine",
  "skein-fake-oauth",
  "skein-fake-peers",
@@ -518,6 +519,7 @@ dependencies = [
  "smith-protocol-channel",
  "smith-protocol-llm",
  "smith-protocol-machine",
+ "smith-real-world",
  "smith-transcript",
 ]
 

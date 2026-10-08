@@ -3,7 +3,7 @@
 //! here; service state is never inspected. `World::settle` registers the same
 //! local and agent factories over one ring, with TLS peers on loopback.
 
-mod settled;
+pub mod settled;
 
 use skein_fake_checkout::git::Tree;
 use skein_lib::Duration;
@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Git's actual committed observations, read by the independent referee.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Checkout {
     path: Option<PathBuf>,
 }
@@ -102,6 +102,12 @@ printf 'checked\n' > checks-ran.txt
         git(&repo, &["add", "."]);
         git(&repo, &["commit", "-q", "-m", "Initial checkout"]);
         Self { files }
+    }
+
+    /// The repository face observed independently by higher tiers.
+    #[must_use]
+    pub fn checkout(&self) -> Checkout {
+        Checkout { path: Some(self.path().join("repo")) }
     }
 
     #[must_use]

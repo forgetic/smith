@@ -27,6 +27,11 @@ pub enum Action {
 
 /// Simulator-free terminal process implementing the shared Host boundary.
 pub struct Terminal {
+    terminal: Option<kernel::Fd>,
+    terminal_reading: bool,
+    terminal_writing: bool,
+    terminal_ended: bool,
+    terminal_closing: bool,
     io: io::Io,
     env: Env<io::Limits>,
     root: Option<kernel::Fd>,
@@ -97,6 +102,11 @@ impl Terminal {
             },
         });
         Self {
+            terminal: None,
+            terminal_reading: false,
+            terminal_writing: false,
+            terminal_ended: false,
+            terminal_closing: false,
             io: io::Io::new(&limits),
             env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits },
             root: Some(root),
@@ -116,6 +126,103 @@ impl Terminal {
             submissions: Queue::with_capacity(128),
             events: Queue::with_capacity(128),
             requests,
+        }
+    }
+
+    /// The same person's script on the controlling terminal of a shipped binary.
+    #[must_use]
+    pub fn attached(stream: kernel::Fd, commands: Vec<Action>) -> Self {
+        let mut person = Self::new(stream, commands);
+        while person.requests.pop().is_some() {}
+        person.root = None;
+        person.root_closed = true;
+        person.terminal = Some(stream);
+        person
+    }
+
+    /// The binary observer supplies only the child's externally observed exit.
+    pub fn finished(&mut self, exit: kernel::Exit) {
+        self.exit = Some(exit);
+        self.commands.clear();
+    }
+
+    fn terminal_iterate(&mut self) {
+        while let Some(complete) = self.completions.pop() {
+            match complete.kind {
+                kernel::Op::PipeRead { buf, .. } => {
+                    self.terminal_reading = false;
+                    match complete.result {
+                        Ok(kernel::Done::Count(0)) | Err(kernel::Error::Other(5)) => self.terminal_ended = true,
+                        Ok(kernel::Done::Count(count)) => {
+                            let count = usize::try_from(count).expect("terminal read size");
+                            assert!(self.shown.len() + count <= 65_536, "bounded terminal observations");
+                            self.shown.extend_from_slice(&buf[..count]);
+                        }
+                        result => panic!("terminal read: {result:?}"),
+                    }
+                }
+                kernel::Op::PipeWrite { bytes: buf, .. } => {
+                    self.terminal_writing = false;
+                    let Ok(kernel::Done::Count(count)) = complete.result else { panic!("terminal write failed") };
+                    let count = usize::try_from(count).expect("terminal write size");
+                    assert!(count > 0 && count <= buf.len());
+                    if count < buf.len() {
+                        self.sending = Some(buf[count..].into());
+                    }
+                }
+                kernel::Op::Close { .. } => {
+                    assert!(complete.result.is_ok());
+                    self.terminal = None;
+                    self.terminal_closing = false;
+                }
+                _ => unreachable!("person submits terminal read, write and close only"),
+            }
+        }
+        let Some(stream) = self.terminal else { return };
+        if self.terminal_ended {
+            if self.exit.is_some() && !self.terminal_writing && !self.terminal_closing {
+                self.terminal_closing = true;
+                self.submissions.push(kernel::Submit { op: Token::new(3), kind: kernel::Op::Close { fd: stream } });
+            }
+            return;
+        }
+        if !self.terminal_reading {
+            self.terminal_reading = true;
+            self.submissions.push(kernel::Submit {
+                op: Token::new(1),
+                kind: kernel::Op::PipeRead { fd: stream, buf: vec![0; 4096].into() },
+            });
+        }
+        if !self.terminal_writing && self.exit.is_none() {
+            if self.sending.is_none() {
+                for _ in 0..16 {
+                    let Some(action) = self.commands.front() else { break };
+                    if let Action::Wait(needle) = action
+                        && !self.shown.windows(needle.len()).any(|part| part == needle.as_ref())
+                    {
+                        break;
+                    }
+                    match self.commands.pop_front().expect("script action") {
+                        Action::Send(bytes) => {
+                            self.sending = Some(bytes);
+                            break;
+                        }
+                        Action::Wait(_) => {}
+                        Action::Eof => {
+                            self.sending = Some(Box::new([4]));
+                            break;
+                        }
+                        Action::Interrupt => panic!("terminal interrupts are outside this pass"),
+                    }
+                }
+            }
+            if let Some(bytes) = self.sending.take() {
+                self.terminal_writing = true;
+                self.submissions.push(kernel::Submit {
+                    op: Token::new(2),
+                    kind: kernel::Op::PipeWrite { fd: stream, bytes, from: 0 },
+                });
+            }
         }
     }
 
@@ -232,6 +339,10 @@ impl Terminal {
 
 impl Host for Terminal {
     fn iterate(&mut self, now: Time, wall: Wall) {
+        if self.terminal.is_some() || self.terminal_ended {
+            self.terminal_iterate();
+            return;
+        }
         self.env.now = now;
         self.env.wall = wall;
         while self.io.is_ready() {
@@ -281,6 +392,10 @@ impl Host for Terminal {
         &mut self.submissions
     }
     fn work_pending(&self, now: Time) -> bool {
+        if self.terminal.is_some() || self.terminal_ended {
+            return !self.completions.is_empty()
+                || (self.terminal_ended && self.exit.is_some() && self.terminal.is_some() && !self.terminal_closing);
+        }
         self.io.is_ready()
             || self.io.is_due(now)
             || !self.completions.is_empty()
@@ -292,6 +407,12 @@ impl Host for Terminal {
         self.io.next_deadline()
     }
     fn is_empty(&self) -> bool {
+        if self.terminal.is_some() || self.terminal_ended {
+            return self.terminal.is_none()
+                && self.exit.is_some()
+                && self.submissions.is_empty()
+                && self.completions.is_empty();
+        }
         self.exit.is_some()
             && self.root_closed
             && self.io.is_empty()
