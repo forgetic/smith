@@ -26,3 +26,11 @@ slow-timeout = { period = "20s" }
 [profile.measure]
 global-timeout = "1h"
 slow-timeout = { period = "60s" }
+
+# TLS fixtures share the same loopback addresses across real stories.
+[test-groups.real-local]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = "package(smith-real-world)"
+test-group = "real-local"

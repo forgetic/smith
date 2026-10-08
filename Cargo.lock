@@ -896,6 +896,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "smith-real-world"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "skein-fake-checkout",
+ "skein-fake-llm-domain",
+ "skein-fake-peers",
+ "skein-io",
+ "skein-lib",
+ "skein-shell",
+ "skein-tls-world",
+ "skein-world",
+ "smith",
+ "smith-local-process-world",
+]
+
+[[package]]
 name = "smith-run-world"
 version = "0.0.0"
 dependencies = [

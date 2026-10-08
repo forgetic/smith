@@ -267,7 +267,7 @@ pub struct Run {
     reviewed: bool,
     next_act: Option<Time>,
     shutdown: bool,
-    end: Time,
+    end: Option<Time>,
 }
 impl Run {
     /// Prepare the scenario's policy, repository face and observed-token check.
@@ -299,13 +299,14 @@ impl Run {
             reviewed: false,
             next_act: None,
             shutdown: false,
-            end: Time::from_nanos(Duration::from_secs(120).as_nanos()),
+            end: None,
         }
     }
 }
 impl skein_world::Referee<crate::process::Proc> for Run {
-    fn act(&mut self, _now: Time, procs: &mut [crate::process::Proc]) {
+    fn act(&mut self, now: Time, procs: &mut [crate::process::Proc]) {
         use crate::process::Proc;
+        self.end.get_or_insert_with(|| now.saturating_add(Duration::from_secs(120)));
         self.next_act = None;
         let query = procs.iter().any(|p| matches!(p, Proc::Peer(peer) if crate::llm::queries(peer).next().is_some()));
         let exited = procs.iter().any(|p| matches!(p, Proc::Terminal(t) if t.exit().is_some()));
@@ -439,10 +440,11 @@ impl skein_world::Referee<crate::process::Proc> for Run {
         }
     }
     fn next_deadline(&self) -> Option<Time> {
-        [self.next_act, self.meeting.next_deadline(), (!self.reviewed).then_some(self.end)].into_iter().flatten().min()
+        [self.next_act, self.meeting.next_deadline(), self.end.filter(|_| !self.reviewed)].into_iter().flatten().min()
     }
     fn overdue(&self, now: Time) -> Option<String> {
-        (now >= self.end && !self.reviewed).then(|| "local invocation did not settle its observed terminal".into())
+        (self.end.is_some_and(|end| now >= end) && !self.reviewed)
+            .then(|| "local invocation did not settle its observed terminal".into())
     }
     fn passed(&self) -> bool {
         self.reviewed && matches!(self.meeting.verdict(), skein_world::domain::Verdict::Passed)

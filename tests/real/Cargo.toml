@@ -1,0 +1,25 @@
+[package]
+name = "smith-real-world"
+description = "The local host and its agent on one real kernel loop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+skein-lib.workspace = true
+skein-io.workspace = true
+skein-shell.workspace = true
+skein-world.workspace = true
+skein-fake-peers.workspace = true
+skein-fake-checkout.workspace = true
+skein-fake-llm-domain.workspace = true
+skein-tls-world.workspace = true
+smith.workspace = true
+smith-local-process-world.workspace = true
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+elided_lifetimes_in_paths = "deny"
+unused_must_use = "deny"

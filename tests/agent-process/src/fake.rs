@@ -10,7 +10,13 @@ use skein_lib::Duration;
 #[must_use]
 pub fn limits() -> Limits {
     Limits {
-        io: skein_io::Limits { sockets: 8, intake: 32_768, output: 65_536, ..super::limits().io },
+        io: skein_io::Limits {
+            sockets: 8,
+            intake: 32_768,
+            output: 65_536,
+            close_timeout: Duration::from_millis(50),
+            ..super::limits().io
+        },
         connections: 4,
         queue: 256,
         plaintext: 32_768,
@@ -61,7 +67,7 @@ pub fn configured_transport(
     protocol.documents.openai.tokens = 4096;
     protocol.documents.openai.parts = 256;
     llm::Peer::new(
-        (std::net::Ipv4Addr::LOCALHOST, 443).into(),
+        (std::net::Ipv4Addr::LOCALHOST, if transport == Transport::Tls { 34_443 } else { 443 }).into(),
         transport,
         limits(),
         provider::Config {

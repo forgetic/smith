@@ -49,6 +49,9 @@ impl Launch {
 pub fn lower_configuration() -> agent::Config {
     let mut lower = smith_agent_process_world::configuration();
     lower.limits.llm.head = Some(Duration::from_secs(10));
+    lower.limits.io.close_timeout = Duration::from_millis(50);
+    lower.limits.llm.connection.idle_keep = Duration::from_millis(50);
+    lower.limits.llm.connection.io.close_timeout = Duration::from_millis(50);
     lower.limits.machine.file_bytes = 4096;
     lower.limits.machine.entries = 32;
     lower.limits.file_bytes = 8192;
@@ -133,7 +136,7 @@ pub fn lower_configuration_with(tls: bool) -> agent::Config {
             Box::new([smith_protocol_llm::ConfiguredEndpoint {
                 name: smith_domain::llm::Endpoint(0),
                 destination: skein_llm_connection::Endpoint {
-                    address: kernel::Addr::from((std::net::Ipv4Addr::LOCALHOST, 443)),
+                    address: kernel::Addr::from((std::net::Ipv4Addr::LOCALHOST, 34_443)),
                     transport: skein_llm_connection::Transport::Tls {
                         server_name: skein_tls_world::pki::name(),
                         trust: skein_tls_world::pki::client(&[]),
@@ -184,8 +187,9 @@ pub fn accounts_with(
         }]);
         if tls {
             let oauth = accounts[0].oauth.as_mut().expect("OAuth account");
-            oauth.authorization_url = "https://127.0.0.1:444/authorize".into();
-            oauth.token_endpoint = "https://127.0.0.1:444/token".into();
+            oauth.authorization_url = "https://127.0.0.1:34444/authorize".into();
+            oauth.token_endpoint = "https://127.0.0.1:34444/token".into();
+            oauth.address = "127.0.0.1:34444".into();
             oauth.server_name = "skein.test".into();
             oauth.trust_der = Some(trust_der.expect("test trust file").to_str().expect("UTF-8 trust path").into());
         }
@@ -205,6 +209,7 @@ pub fn issuer() -> Issuer {
 #[must_use]
 pub fn issuer_with(transport: skein_fake_peers::Transport) -> Issuer {
     let scheme = if transport == skein_fake_peers::Transport::Tls { "https" } else { "http" };
+    let port = if transport == skein_fake_peers::Transport::Tls { 34_444 } else { 444 };
     let limits = fake_oauth::Limits {
         document: token_limits(),
         uri_bytes: 8192,
@@ -214,12 +219,12 @@ pub fn issuer_with(transport: skein_fake_peers::Transport) -> Issuer {
         plans: 4,
     };
     let mut issuer = Issuer::new(
-        (std::net::Ipv4Addr::LOCALHOST, 444).into(),
+        (std::net::Ipv4Addr::LOCALHOST, port).into(),
         transport,
         smith_agent_process_world::fake::limits(),
         fake_oauth::Config {
-            authorization_url: format!("{scheme}://127.0.0.1:444/authorize").into_bytes().into(),
-            token_endpoint: format!("{scheme}://127.0.0.1:444/token").into_bytes().into(),
+            authorization_url: format!("{scheme}://127.0.0.1:{port}/authorize").into_bytes().into(),
+            token_endpoint: format!("{scheme}://127.0.0.1:{port}/token").into_bytes().into(),
             client_id: b"client".as_slice().into(),
             client_secret: None,
             redirect_uri: b"http://127.0.0.1:2345/callback".as_slice().into(),

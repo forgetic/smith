@@ -411,3 +411,13 @@ construction, iteration and drop controls supplement the retained saturated
 component memory test. The bounded flood remains explicitly a component-seam
 fixture. Workspace and per-world budgets remain unchanged; unoptimized
 builds retain debug assertions with debug information disabled as in 02.3.
+
+Testing pass 03.1 adds the real local-host adapter over Skein's shared ring.
+Idle serial `measure -j 1` on 2026-10-08 measured the spawned and in-process
+TLS report paths together / 0.219 seconds, and the TLS issuer/browser sign-in
+control / 0.173 seconds (0.392 seconds suite elapsed). Both reuse the shared
+local-process enum and referee. TLS peers use unprivileged loopback ports;
+nextest serializes these stories. The shared invocation deadline starts at
+the first supplied clock value, and fixture connection reuse expires after
+50 ms. Per-process real-loop metering still needs Skein's shared harness
+support before testing pass 03.3 can finish. Budgets remain unchanged.
