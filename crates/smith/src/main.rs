@@ -6,6 +6,7 @@
 
 mod config;
 mod limits;
+pub mod local_store;
 mod trace;
 
 use std::env;

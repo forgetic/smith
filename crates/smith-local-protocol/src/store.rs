@@ -6,13 +6,14 @@
 //! conversation.
 
 use alloc::boxed::Box;
-use skein_lib::{Reader, Token, Writer};
+use skein_lib::{List, Reader, Token, Writer};
 use smith_domain::Transcript;
 use smith_local_domain::ChatState;
 use smith_protocol_channel::{self as channel, Endpoints};
 use smith_transcript as transcript;
 
 const STATE_BYTES: usize = 4 + 8 + 8 + 1 + 8;
+const TURN_HEADER: usize = 4 + 1 + 8;
 
 /// One file replacement; the service acknowledges it only after a durable store terminal.
 #[derive(Debug, PartialEq, Eq)]
@@ -98,6 +99,7 @@ pub fn turn_name(place: u32) -> Box<[u8]> {
 /// Encode one concrete turn for a durable numbered file.
 pub fn save_turn(
     place: u32,
+    read: Option<Token>,
     turn: &smith_domain::Turn,
     limits: &transcript::v2::Limits,
     endpoints: &Endpoints,
@@ -106,7 +108,20 @@ pub fn save_turn(
         return Err(StoreError::Malformed);
     }
     let Ok(bytes) = channel::encode_turn(turn, limits, endpoints) else { return Err(StoreError::Turn) };
-    Ok(File { name: turn_name(place), bytes })
+    let mut writer = Writer::new(TURN_HEADER.checked_add(bytes.len()).ok_or(StoreError::TooLarge)?);
+    writer.put(b"SMLT").expect("bounded turn header");
+    match read {
+        Some(read) => {
+            writer.put(&[1]).expect("bounded turn flag");
+            writer.put(&read.raw().to_be_bytes()).expect("bounded read token");
+        }
+        None => {
+            writer.put(&[0]).expect("bounded turn flag");
+            writer.put(&0_u64.to_be_bytes()).expect("bounded read token");
+        }
+    }
+    writer.put(&bytes).expect("bounded turn body");
+    Ok(File { name: turn_name(place), bytes: writer.finish() })
 }
 
 /// Decode ordered numbered files as one concrete history before returning Loaded.
@@ -114,9 +129,28 @@ pub fn decode_turns(
     files: &[Box<[u8]>],
     limits: &transcript::v2::Limits,
     endpoints: &Endpoints,
-) -> Result<Option<Transcript>, StoreError> {
-    match channel::decode_transcript(files, limits, endpoints) {
-        Ok(transcript) => Ok(transcript),
+) -> Result<(Option<Transcript>, Option<Token>), StoreError> {
+    let Ok(count) = u32::try_from(files.len()) else { return Err(StoreError::TooLarge) };
+    let mut bodies = List::with_capacity(count);
+    let mut last_read = None;
+    for file in files {
+        let mut reader = Reader::new(file);
+        if reader.bytes(4) != Some(&b"SMLT"[..]) {
+            return Err(StoreError::Malformed);
+        }
+        let flag = reader.u8().ok_or(StoreError::Malformed)?;
+        let raw = reader.u64().ok_or(StoreError::Malformed)?;
+        last_read = match flag {
+            0 if raw == 0 => None,
+            1 => Some(Token::new(raw)),
+            0 | 2..=u8::MAX => return Err(StoreError::Malformed),
+        };
+        bodies
+            .push(Box::from(reader.bytes(reader.remaining()).ok_or(StoreError::Malformed)?))
+            .expect("bounded turn count");
+    }
+    match channel::decode_transcript(bodies.as_slice(), limits, endpoints) {
+        Ok(transcript) => Ok((transcript, last_read)),
         Err(_) => Err(StoreError::Malformed),
     }
 }
@@ -144,7 +178,7 @@ mod tests {
 
     #[test]
     fn one_saved_turn_reloads_as_concrete_history() {
-        let mut entries = skein_lib::List::with_capacity(1);
+        let mut entries = List::with_capacity(1);
         entries
             .push(channel::Endpoint { name: Box::from(&b"main"[..]), number: 2, dialect: 1, account: 0 })
             .expect("one endpoint");
@@ -158,11 +192,12 @@ mod tests {
             spent: 0,
             messages: Box::new([]),
         };
-        let file = save_turn(1, &turn, &transcript::CEILINGS, &endpoints).expect("bounded saved turn");
+        let file =
+            save_turn(1, Some(Token::new(9)), &turn, &transcript::CEILINGS, &endpoints).expect("bounded saved turn");
         assert_eq!(file.name.as_ref(), b"0000000001.turn");
-        let loaded = decode_turns(&[file.bytes], &transcript::CEILINGS, &endpoints)
-            .expect("valid transcript")
-            .expect("one turn");
+        let (loaded, read) = decode_turns(&[file.bytes], &transcript::CEILINGS, &endpoints).expect("valid transcript");
+        let loaded = loaded.expect("one turn");
+        assert_eq!(read, Some(Token::new(9)));
         assert_eq!(loaded.turns.as_ref(), &[turn]);
     }
 }
