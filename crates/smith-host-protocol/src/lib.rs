@@ -22,6 +22,7 @@ extern crate alloc;
 mod answer;
 mod component;
 mod limits;
+mod process;
 mod translate;
 
 #[cfg(test)]
@@ -29,4 +30,5 @@ mod tests;
 
 pub use component::{Component, OpenEvent};
 pub use limits::{Error, Limits, MaxOut, max_out, worst_case};
+pub use process::{Launch, Process, ProcessEvent, process_worst_case};
 pub use translate::{Values, encode_start};
