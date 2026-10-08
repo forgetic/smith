@@ -14,5 +14,6 @@ extern crate alloc;
 mod service;
 
 pub use service::{
-    Config, ConfigError, Failure, Limits, Service, done, failure, iterate, next_deadline, work_pending, worst_case,
+    Config, ConfigError, Effects, Failure, Limits, Service, done, effects_worst_case, failure, iterate, next_deadline,
+    work_pending, worst_case,
 };

@@ -103,8 +103,8 @@ enum Operation {
 #[expect(clippy::struct_excessive_bools, reason = "answer, channel, cleanup and root-close progress are independent")]
 pub struct Service {
     limits: Limits,
-    domain: domain::Domain,
-    channel: channel::Component,
+    domain: Option<domain::Domain>,
+    channel: Option<channel::Component>,
     llm: llm::Component,
     machine: machine::Component,
     io: io::Io,
@@ -157,6 +157,166 @@ pub struct Service {
     root_close_next: u32,
     root_close_pending: bool,
     cleanup_started: bool,
+}
+
+/// Agent LLM and machine effects owned by a host that keeps the domain itself.
+/// Typed requests have typed terminals, with no channel, frames or agent process
+/// (domain/host.md, section 9; protocol/hosts.md, section 5.6).
+#[derive(Debug)]
+pub struct Effects {
+    service: Service,
+    installed: Map<u32, domain::GrantName>,
+}
+
+impl Effects {
+    /// Build the shared lower stages, retaining neither a root domain nor a channel.
+    pub fn new(config: Config, seed: u64) -> Result<Self, ConfigError> {
+        let accounts = config.limits.llm.accounts;
+        if effects_worst_case(&config.limits).ok_or(ConfigError::Memory)? > config.limits.memory {
+            return Err(ConfigError::MemoryCeiling);
+        }
+        let mut service = Service::new(config, seed)?;
+        service.domain = None;
+        service.channel = None;
+        service.capture_prompts = false;
+        Ok(Self { service, installed: Map::with_capacity(accounts) })
+    }
+
+    /// Configure the result shapes used by completion tool schemas.
+    pub fn contract(&mut self, outcome: run::outcome::OutcomeSpec) {
+        self.service.delivery.clone_from(&outcome.change);
+        self.service.outcome = Some(outcome);
+    }
+
+    /// Adopt opened workspace roots and replace the host's opaque names with file tokens.
+    pub fn workspace(
+        &mut self,
+        mut workspace: run::Workspace,
+        roots: Box<[kernel::Fd]>,
+    ) -> Result<run::Workspace, ConfigError> {
+        if workspace.directories.len() != roots.len()
+            || roots.len() > usize::try_from(self.service.limits.machine.roots).expect("root bound fits")
+        {
+            return Err(ConfigError::Io);
+        }
+        for (directory, fd) in workspace.directories.iter_mut().zip(&roots) {
+            let root = self.service.files.adopt_root(*fd).ok_or(ConfigError::Io)?;
+            self.service.roots.push(root).expect("admitted root count");
+            directory.root = root;
+        }
+        self.service.root_close_next = self.service.roots.len();
+        self.service.machine.workspace(&workspace);
+        Ok(workspace)
+    }
+
+    /// Install a grant's bounded secret envelope before supplying the grant to the domain.
+    pub fn grant(&mut self, grant: domain::Grant, value: &[u8], now: Time) -> Result<(), Failure> {
+        if self.installed.get(&grant.name.account) == Some(&grant.name) {
+            return Ok(());
+        }
+        let credential = credential(value).ok_or(Failure::Credential)?;
+        match self.service.llm.grant(grant.name, credential, now.saturating_add(grant.valid)) {
+            Ok(()) => {
+                self.installed.insert(grant.name.account, grant.name).expect("admitted account count");
+                Ok(())
+            }
+            Err(_) => Err(Failure::Credential),
+        }
+    }
+
+    /// Remaining cells for typed IO requests; the owner reserves them before draining.
+    #[must_use]
+    pub fn request_room(&self) -> u32 {
+        self.service.domain_requests.room()
+    }
+
+    /// Queue one effect emitted by the host's in-process agent domain.
+    pub fn request(&mut self, request: domain::Request) {
+        match request {
+            request @ (domain::Request::Complete { .. }
+            | domain::Request::Cancel { .. }
+            | domain::Request::Io { .. }
+            | domain::Request::CancelIo { .. }
+            | domain::Request::Read { .. }
+            | domain::Request::Probe { .. }
+            | domain::Request::Check { .. }
+            | domain::Request::Abort { .. }) => self.service.domain_requests.push(request),
+            domain::Request::Waiting { .. }
+            | domain::Request::Turn { .. }
+            | domain::Request::HostCall { .. }
+            | domain::Request::WithdrawHost { .. }
+            | domain::Request::Admitted { .. }
+            | domain::Request::Answer { .. }
+            | domain::Request::Checking { .. }
+            | domain::Request::ChecksEnded { .. }
+            | domain::Request::Deliver { .. }
+            | domain::Request::Rejected { .. }
+            | domain::Request::Exhausted { .. } => unreachable!("local domain owns host requests"),
+        }
+    }
+
+    /// Take one typed LLM or machine terminal for the host's domain.
+    pub fn event(&mut self) -> Option<domain::Event> {
+        self.service.domain_events.pop()
+    }
+
+    /// Advance the same lower stages used by a framed agent at injected clocks.
+    pub fn iterate(&mut self, now: Time, wall: Wall) {
+        let service = &mut self.service;
+        clocks(service, now, wall);
+        io_up(service);
+        lower_events(service);
+        component_up(service);
+        domain_down(service);
+        component_down(service);
+        cleanup(service);
+        io_down(service);
+        service.io.reclaim();
+        service.llm.reclaim();
+        service.owners.reclaim();
+    }
+
+    /// Completions supplied by the shell's kernel or a world's simulator.
+    pub fn completions(&mut self) -> &mut Queue<kernel::Complete> {
+        self.service.completions()
+    }
+
+    /// Kernel work issued by the shared lower stages.
+    pub fn submissions(&mut self) -> &mut Queue<kernel::Submit> {
+        self.service.submissions()
+    }
+
+    /// The next deadline belonging to an LLM, machine or IO entity.
+    #[must_use]
+    pub fn next_deadline(&self) -> Option<Time> {
+        next_deadline(&self.service)
+    }
+
+    /// Whether another lower pass can progress without waiting.
+    #[must_use]
+    pub fn work_pending(&self, now: Time) -> bool {
+        work_pending(&self.service, now)
+    }
+
+    /// Close reusable lower entities after the local domain has ended its run.
+    pub fn close(&mut self) {
+        self.service.channel_ended = true;
+        self.service.answer_sent = true;
+    }
+
+    /// Every lower child and adopted root has completed its close.
+    #[must_use]
+    pub fn closed(&self) -> bool {
+        done(&self.service).is_some()
+    }
+}
+
+/// Construction peak and retained bound for the host-owned effects adapter.
+#[must_use]
+pub fn effects_worst_case(limits: &Limits) -> Option<u64> {
+    worst_case(limits)?
+        .checked_add(Map::<u32, domain::GrantName>::worst_case(limits.llm.accounts)?)?
+        .checked_add(u64::try_from(size_of::<Effects>()).ok()?)
 }
 
 /// Checked maximum of every owned layer and inter-layer queue. The file
@@ -239,8 +399,8 @@ impl Service {
         let wall = Wall::EPOCH;
         Ok(Service {
             limits,
-            domain: domain::Domain::new(&limits.domain, config.domain, seed),
-            channel,
+            domain: Some(domain::Domain::new(&limits.domain, config.domain, seed)),
+            channel: Some(channel),
             llm,
             machine,
             io: io::Io::new(&limits.io),
@@ -319,7 +479,7 @@ impl Service {
 
     /// One owned content observation for local capture, never sent to the host.
     pub fn pop_trace_content(&mut self) -> Option<domain::Content> {
-        self.domain.pop_content()
+        self.domain.as_mut().expect("framed agent owns its domain").pop_content()
     }
 
     /// One bounded typed prompt, captured before its ownership passes to LLM.
@@ -342,7 +502,7 @@ impl Service {
     /// Number of projected host facts dropped at the channel's output reserve.
     #[must_use]
     pub fn lost_channel_facts(&self) -> u64 {
-        self.channel.lost_facts()
+        self.channel.as_ref().expect("framed agent owns its channel").lost_facts()
     }
 
     /// Give Skein IO the inherited channel and termination descriptors. The
@@ -423,7 +583,13 @@ impl Service {
         self.pending_start = None;
         let token = self.next_send();
         let answer = run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Workspace));
-        if self.channel.send_answer(answer, token, &mut self.channel_events, &mut self.channel_below).is_err() {
+        if self
+            .channel
+            .as_mut()
+            .expect("framed agent owns its channel")
+            .send_answer(answer, token, &mut self.channel_events, &mut self.channel_below)
+            .is_err()
+        {
             self.mark_failed(Failure::Send);
         } else {
             self.answer_sent = true;
@@ -446,7 +612,7 @@ impl Service {
         self.delivery.clone_from(&start.charter.outcome.change);
         let mut grants = List::with_capacity(u32::try_from(start.grants.len()).expect("bounded grant count"));
         for grant in &start.grants {
-            let value = match self.channel.grant_value(grant.name) {
+            let value = match self.channel.as_ref().expect("framed agent owns its channel").grant_value(grant.name) {
                 Some(value) => value,
                 None => {
                     self.refuse_start();
@@ -588,14 +754,7 @@ fn append(bytes: &mut List<u8>, part: &[u8]) -> bool {
 
 /// Advance io, the components, and the domain once at injected clocks.
 pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
-    service.domain_env.now = now;
-    service.domain_env.wall = wall;
-    service.llm_env.now = now;
-    service.llm_env.wall = wall;
-    service.machine_env.now = now;
-    service.machine_env.wall = wall;
-    service.io_env.now = now;
-    service.io_env.wall = wall;
+    clocks(service, now, wall);
     io_up(service);
     lower_events(service);
     component_up(service);
@@ -606,8 +765,19 @@ pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
     io_down(service);
     service.io.reclaim();
     service.llm.reclaim();
-    service.domain.reclaim();
+    service.domain.as_mut().expect("framed agent owns its domain").reclaim();
     service.owners.reclaim();
+}
+
+fn clocks(service: &mut Service, now: Time, wall: Wall) {
+    service.domain_env.now = now;
+    service.domain_env.wall = wall;
+    service.llm_env.now = now;
+    service.llm_env.wall = wall;
+    service.machine_env.now = now;
+    service.machine_env.wall = wall;
+    service.io_env.now = now;
+    service.io_env.wall = wall;
 }
 
 fn io_up(service: &mut Service) {
@@ -742,21 +912,21 @@ fn route_io_event(service: &mut Service, event: io::Event) {
             }
         }
         io::Event::Stream { owner, up } if Some(owner) == service.input => {
-            service.channel.from_below(
+            service.channel.as_mut().expect("framed agent owns its channel").from_below(
                 ChannelLowerEvent::Read(up),
                 &mut service.channel_events,
                 &mut service.channel_below,
             );
         }
         io::Event::Output { owner, up } if Some(owner) == service.output => {
-            service.channel.from_below(
+            service.channel.as_mut().expect("framed agent owns its channel").from_below(
                 ChannelLowerEvent::Write(up),
                 &mut service.channel_events,
                 &mut service.channel_below,
             );
         }
         io::Event::Stream { owner, up } if Some(owner) == service.output => match up {
-            stream::Up::Failed(fault) => service.channel.from_below(
+            stream::Up::Failed(fault) => service.channel.as_mut().expect("framed agent owns its channel").from_below(
                 ChannelLowerEvent::WriteFailed(fault),
                 &mut service.channel_events,
                 &mut service.channel_below,
@@ -764,7 +934,7 @@ fn route_io_event(service: &mut Service, event: io::Event) {
             stream::Up::Bytes(_) | stream::Up::Room | stream::Up::End => {}
         },
         io::Event::Closed { owner } if Some(owner) == service.input => {
-            service.channel.from_below(
+            service.channel.as_mut().expect("framed agent owns its channel").from_below(
                 ChannelLowerEvent::Read(stream::Up::End),
                 &mut service.channel_events,
                 &mut service.channel_below,
@@ -890,8 +1060,11 @@ fn remap_io_owner(event: io::Event, owner: Token) -> io::Event {
 
 fn component_up(service: &mut Service) {
     let channel_max = channel::max_out(&service.limits.channel);
-    if service.channel_events.room() >= channel_max.to_domain && service.channel_below.room() >= channel_max.below {
-        service.channel.fire(&mut service.channel_events, &mut service.channel_below);
+    if service.channel_events.room() >= channel_max.to_domain
+        && service.channel_below.room() >= channel_max.below
+        && let Some(channel) = &mut service.channel
+    {
+        channel.fire(&mut service.channel_events, &mut service.channel_below);
     }
     let llm_due = match service.llm.next_deadline() {
         Some(at) => at <= service.llm_env.now,
@@ -944,9 +1117,14 @@ fn component_up(service: &mut Service) {
             }
             llm::ToDomain::Cancelled { owner } => service.domain_events.push(domain::Event::Cancelled { owner }),
             llm::ToDomain::Text { owner: _, bytes } => {
+                if service.channel.is_none() {
+                    continue;
+                }
                 let token = service.next_send();
                 if service
                     .channel
+                    .as_mut()
+                    .expect("framed agent owns its channel")
                     .send_text_arrived(
                         service.domain_env.now.saturating_since(Time::ZERO),
                         u64::from(bytes),
@@ -1025,20 +1203,22 @@ fn channel_event(service: &mut Service, event: channel::OpenEvent) {
                 service.domain_events.push(domain::Event::Acknowledge { run, turn });
             }
         }
-        channel::OpenEvent::Grant { grant } => match service.channel.grant_value(grant.name) {
-            Some(value) => match credential(value) {
-                Some(value) => {
-                    let lapses = service.domain_env.now.saturating_add(grant.valid);
-                    if service.llm.grant(grant.name, value, lapses).is_ok() {
-                        service.domain_events.push(domain::Event::Grant { grant });
-                    } else {
-                        service.mark_failed(Failure::Credential);
+        channel::OpenEvent::Grant { grant } => {
+            match service.channel.as_ref().expect("framed agent owns its channel").grant_value(grant.name) {
+                Some(value) => match credential(value) {
+                    Some(value) => {
+                        let lapses = service.domain_env.now.saturating_add(grant.valid);
+                        if service.llm.grant(grant.name, value, lapses).is_ok() {
+                            service.domain_events.push(domain::Event::Grant { grant });
+                        } else {
+                            service.mark_failed(Failure::Credential);
+                        }
                     }
-                }
+                    None => service.mark_failed(Failure::Credential),
+                },
                 None => service.mark_failed(Failure::Credential),
-            },
-            None => service.mark_failed(Failure::Credential),
-        },
+            }
+        }
         channel::OpenEvent::Cancel => {
             if let Some(run) = service.admitted {
                 service.domain_events.push(domain::Event::Cancel { run });
@@ -1062,10 +1242,16 @@ fn channel_event(service: &mut Service, event: channel::OpenEvent) {
 fn domain_up(service: &mut Service) {
     let maximum = domain::max_out(&service.limits.domain);
     for _ in 0..service.limits.domain.run.conversations {
-        if !service.domain.is_ready() || service.domain_requests.room() < maximum {
+        if !service.domain.as_ref().expect("framed agent owns its domain").is_ready()
+            || service.domain_requests.room() < maximum
+        {
             break;
         }
-        domain::resume(&mut service.domain, &service.domain_env, &mut service.domain_requests);
+        domain::resume(
+            service.domain.as_mut().expect("framed agent owns its domain"),
+            &service.domain_env,
+            &mut service.domain_requests,
+        );
     }
     for _ in 0..service.domain_events.capacity() {
         if service.domain_requests.room() < maximum {
@@ -1075,10 +1261,21 @@ fn domain_up(service: &mut Service) {
             Some(event) => event,
             None => break,
         };
-        domain::step(&mut service.domain, &service.domain_env, event, &mut service.domain_requests);
+        domain::step(
+            service.domain.as_mut().expect("framed agent owns its domain"),
+            &service.domain_env,
+            event,
+            &mut service.domain_requests,
+        );
     }
-    if service.domain.is_due(service.domain_env.now) && service.domain_requests.room() >= maximum {
-        domain::fire(&mut service.domain, &service.domain_env, &mut service.domain_requests);
+    if service.domain.as_ref().expect("framed agent owns its domain").is_due(service.domain_env.now)
+        && service.domain_requests.room() >= maximum
+    {
+        domain::fire(
+            service.domain.as_mut().expect("framed agent owns its domain"),
+            &service.domain_env,
+            &mut service.domain_requests,
+        );
     }
 }
 
@@ -1126,7 +1323,7 @@ fn domain_down(service: &mut Service) {
             {
                 break;
             }
-            let fact = match service.domain.pop_fact() {
+            let fact = match service.domain.as_mut().expect("framed agent owns its domain").pop_fact() {
                 Some(fact) => fact,
                 None => break,
             };
@@ -1138,6 +1335,8 @@ fn domain_down(service: &mut Service) {
             let token = service.next_send();
             if service
                 .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
                 .send_fact(
                     fact,
                     service.domain_env.now.saturating_since(Time::ZERO),
@@ -1160,6 +1359,8 @@ fn domain_request(service: &mut Service, request: domain::Request) {
             let token = service.next_send();
             if service
                 .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
                 .send_waiting(read, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
@@ -1170,6 +1371,8 @@ fn domain_request(service: &mut Service, request: domain::Request) {
             let token = service.next_send();
             if service
                 .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
                 .send_turn(number, read, spent, &turn, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
@@ -1180,6 +1383,8 @@ fn domain_request(service: &mut Service, request: domain::Request) {
             let token = service.next_send();
             if service
                 .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
                 .send_host_call(
                     service.domain_env.now,
                     name,
@@ -1201,6 +1406,8 @@ fn domain_request(service: &mut Service, request: domain::Request) {
             let token = service.next_send();
             if service
                 .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
                 .send_withdraw(relay, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
@@ -1210,7 +1417,13 @@ fn domain_request(service: &mut Service, request: domain::Request) {
         domain::Request::Admitted { host_run: _, run } => {
             service.admitted = Some(run);
             let token = service.next_send();
-            if service.channel.send_admitted(token, &mut service.channel_events, &mut service.channel_below).is_err() {
+            if service
+                .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
+                .send_admitted(token, &mut service.channel_events, &mut service.channel_below)
+                .is_err()
+            {
                 service.mark_failed(Failure::Send);
             }
         }
@@ -1219,6 +1432,8 @@ fn domain_request(service: &mut Service, request: domain::Request) {
             let token = service.next_send();
             if service
                 .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
                 .send_answer(answer, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
@@ -1230,14 +1445,25 @@ fn domain_request(service: &mut Service, request: domain::Request) {
         domain::Request::Checking { host_run: _, deadline } => {
             let token = service.next_send();
             let span = deadline.saturating_since(service.domain_env.now);
-            if service.channel.send_long(span, token, &mut service.channel_events, &mut service.channel_below).is_err()
+            if service
+                .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
+                .send_long(span, token, &mut service.channel_events, &mut service.channel_below)
+                .is_err()
             {
                 service.mark_failed(Failure::Send);
             }
         }
         domain::Request::ChecksEnded { host_run: _ } => {
             let token = service.next_send();
-            if service.channel.send_long_done(token, &mut service.channel_events, &mut service.channel_below).is_err() {
+            if service
+                .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
+                .send_long_done(token, &mut service.channel_events, &mut service.channel_below)
+                .is_err()
+            {
                 service.mark_failed(Failure::Send);
             }
         }
@@ -1245,6 +1471,8 @@ fn domain_request(service: &mut Service, request: domain::Request) {
             let token = service.next_send();
             if service
                 .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
                 .send_delivery(
                     service.domain_env.now,
                     name,
@@ -1304,6 +1532,8 @@ fn domain_request(service: &mut Service, request: domain::Request) {
             let token = service.next_send();
             if service
                 .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
                 .send_rejected(grant, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
@@ -1314,6 +1544,8 @@ fn domain_request(service: &mut Service, request: domain::Request) {
             let token = service.next_send();
             if service
                 .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
                 .send_exhausted(account, retry_after, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
@@ -1548,7 +1780,10 @@ fn route_submission(service: &mut Service, submit: kernel::Submit, file: bool) {
 /// Earliest active deadline over all child machines.
 #[must_use]
 pub fn next_deadline(service: &Service) -> Option<Time> {
-    let mut earliest = service.domain.next_deadline();
+    let mut earliest = match &service.domain {
+        Some(domain) => domain.next_deadline(),
+        None => None,
+    };
     for deadline in [
         service.llm.next_deadline(),
         service.machine.next_deadline(),
@@ -1575,7 +1810,10 @@ pub fn work_pending(service: &Service, now: Time) -> bool {
     };
     due || service.io.is_ready()
         || service.llm.has_work()
-        || service.domain.is_ready()
+        || match &service.domain {
+            Some(domain) => domain.is_ready(),
+            None => false,
+        }
         || !service.completions.is_empty()
         || !service.io_events.is_empty()
         || !service.file_events.is_empty()
@@ -1737,23 +1975,50 @@ mod tests {
         }
     }
 
-    fn service() -> Service {
+    fn configuration() -> Config {
         let limits = limits();
         let channel_endpoints = channel::Endpoints::new(List::with_capacity(1));
         let llm_endpoints = llm::Endpoints::new(Box::new([]), 1, 1).expect("empty endpoint table");
-        Service::new(
-            Config {
-                limits,
-                domain: domain::Config { endpoints: Box::new([]) },
-                channel_endpoints,
-                llm_endpoints,
-                environment: Box::new([]),
-                stream_mode: StreamMode::Two,
-                capture_prompts: false,
-            },
-            1,
-        )
-        .expect("bounded service")
+        Config {
+            limits,
+            domain: domain::Config { endpoints: Box::new([]) },
+            channel_endpoints,
+            llm_endpoints,
+            environment: Box::new([]),
+            stream_mode: StreamMode::Two,
+            capture_prompts: false,
+        }
+    }
+
+    fn service() -> Service {
+        Service::new(configuration(), 1).expect("bounded service")
+    }
+
+    #[test]
+    fn a_colocated_host_gets_typed_machine_terminals_without_an_agent_channel() {
+        let mut effects = Effects::new(configuration(), 1).expect("bounded effects");
+        effects.request(domain::Request::Probe {
+            owner: Token::new(17),
+            at: run::Place { root: Token::new(19), path: Box::from(b"checks".as_slice()) },
+            deadline: Time::from_nanos(50),
+        });
+        effects.iterate(Time::ZERO, Wall::EPOCH);
+        effects.iterate(Time::ZERO, Wall::EPOCH);
+        let Some(domain::Event::Probed { owner, executable: false }) = effects.event() else {
+            panic!("typed machine terminal")
+        };
+        assert_eq!(owner, Token::new(17));
+        assert!(effects.event().is_none());
+        assert!(effects.submissions().is_empty());
+        let grant =
+            domain::Grant { name: domain::GrantName { account: 0, generation: 1 }, valid: Duration::from_secs(60) };
+        effects.grant(grant, b"\0\x03acctoken", Time::ZERO).expect("first grant");
+        effects
+            .grant(grant, b"\0\x03acctoken", Time::from_nanos(1))
+            .expect("same saved generation on another activation");
+        effects.close();
+        effects.iterate(Time::ZERO, Wall::EPOCH);
+        assert!(effects.closed());
     }
 
     #[test]
