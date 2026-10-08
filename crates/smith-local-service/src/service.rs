@@ -4,7 +4,7 @@
 use alloc::boxed::Box;
 use core::mem::size_of;
 use skein_io::kernel;
-use skein_lib::{Env, Map, Queue, Time, Token, Wall};
+use skein_lib::{Env, List, Map, Queue, Time, Token, Wall};
 use smith_domain as agent;
 use smith_host_domain as host;
 use smith_local_domain as local;
@@ -85,6 +85,7 @@ pub struct Service {
     values: Map<u32, Box<[u8]>>,
     paths: Box<[Box<[u8]>]>,
     start_values: Option<StartValues>,
+    pending_start: Option<local::ExternalStart>,
     charter: Box<[u8]>,
     endpoints: channel::Endpoints,
     host_agent: Option<Token>,
@@ -138,6 +139,7 @@ impl Service {
             values: Map::with_capacity(accounts),
             paths: config.paths,
             start_values: None,
+            pending_start: None,
             charter: config.charter,
             endpoints: config.endpoints,
             host_agent: None,
@@ -244,7 +246,8 @@ impl Service {
         roots: Box<[kernel::Fd]>,
         environment: Box<[Box<[u8]>]>,
     ) -> Result<(), Error> {
-        if roots.len() > usize::try_from(self.limits.local.agent.run.directories).expect("directory bound fits")
+        if roots.len() > 64
+            || roots.len() > usize::try_from(self.limits.local.agent.run.directories).expect("directory bound fits")
             || environment.len() > 64
         {
             return Err(Error::Memory);
@@ -265,9 +268,9 @@ impl Service {
         self.process.submissions()
     }
 
-    fn route_local(&mut self, request: local::Request) {
+    fn route_local(&mut self, now: Time, request: local::Request) {
         match request {
-            local::Request::External(external) => self.route_external(*external),
+            local::Request::External(external) => self.route_external(now, *external),
             local::Request::Git { owner, directory, op, deadline } => match op {
                 local::GitOp::Markers { paths } => {
                     self.process.start_markers(owner, directory, paths, deadline, &mut self.local_events);
@@ -286,10 +289,12 @@ impl Service {
                 self.terminal.answer_finished();
                 self.shell.push(local::Request::Load);
             }
+            local::Request::PlainStatus { owner, directory, deadline } => {
+                self.process.plain_status(owner, directory, deadline, &mut self.local_events);
+            }
             other @ (local::Request::SaveState { .. }
             | local::Request::SaveTurn { .. }
             | local::Request::SaveDelivery { .. }
-            | local::Request::PlainStatus { .. }
             | local::Request::Credential { .. }
             | local::Request::Exit { .. }) => self.shell.push(other),
         }
@@ -309,34 +314,21 @@ impl Service {
         }
     }
 
-    fn route_external(&mut self, request: local::ExternalRequest) {
+    fn route_external(&mut self, now: Time, request: local::ExternalRequest) {
         match request {
             local::ExternalRequest::Start(start) => {
-                let mut credentials =
-                    skein_lib::List::with_capacity(u32::try_from(start.grants.len()).expect("bounded grants"));
-                for grant in &start.grants {
-                    let value = self.values.get(&grant.name.account).expect("grant value supplied before Start");
-                    credentials.push(value.clone()).expect("bounded grant count");
-                }
-                let prepared = protocol::prepare_start(
-                    start,
-                    self.charter.clone(),
-                    &self.endpoints,
-                    self.paths.clone(),
-                    credentials.into_boxed(),
-                );
-                match prepared {
-                    Ok(prepared) => {
-                        self.start_values =
-                            Some(StartValues { paths: prepared.paths, credentials: prepared.credentials });
-                        self.host_events.push(host::Event::Spawn { client: Token::new(1), start: prepared.start });
-                    }
-                    Err(_) => {
-                        self.failed = true;
-                        self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
-                        self.local_events.push(local::Event::External(local::ExternalEvent::Gone));
+                let mut directories = List::with_capacity(64);
+                if let Some(workspace) = &start.workspace {
+                    for (position, directory) in workspace.directories.iter().enumerate() {
+                        if directory.writable && !directory.git {
+                            directories
+                                .push(u32::try_from(position).expect("admitted directory"))
+                                .expect("bounded plain directories");
+                        }
                     }
                 }
+                self.process.capture_plain(directories, now.saturating_add(start.charter.budget.time));
+                self.pending_start = Some(start);
             }
             local::ExternalRequest::Message { run, name, text } => {
                 self.host_events.push(host::Event::Message {
@@ -378,6 +370,45 @@ impl Service {
                 }
             }
             local::ExternalRequest::Cancel { run } => self.host_events.push(host::Event::Stop { agent: run }),
+        }
+    }
+
+    fn start_captured(&mut self) {
+        match self.process.take_capture_done() {
+            Some(true) => {
+                let start = self.pending_start.take().expect("capture belongs to pending start");
+                let mut credentials = List::with_capacity(u32::try_from(start.grants.len()).expect("bounded grants"));
+                for grant in &start.grants {
+                    let value = self.values.get(&grant.name.account).expect("grant value supplied before Start");
+                    credentials.push(value.clone()).expect("bounded grant count");
+                }
+                let prepared = protocol::prepare_start(
+                    start,
+                    self.charter.clone(),
+                    &self.endpoints,
+                    self.paths.clone(),
+                    credentials.into_boxed(),
+                );
+                match prepared {
+                    Ok(prepared) => {
+                        self.start_values =
+                            Some(StartValues { paths: prepared.paths, credentials: prepared.credentials });
+                        self.host_events.push(host::Event::Spawn { client: Token::new(1), start: prepared.start });
+                    }
+                    Err(_) => {
+                        self.failed = true;
+                        self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
+                        self.local_events.push(local::Event::External(local::ExternalEvent::Gone));
+                    }
+                }
+            }
+            Some(false) => {
+                self.pending_start = None;
+                self.failed = true;
+                self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
+                self.local_events.push(local::Event::External(local::ExternalEvent::Gone));
+            }
+            None => {}
         }
     }
 
@@ -473,6 +504,7 @@ pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
         &mut service.local_events,
     );
     service.drain_terminal();
+    service.start_captured();
     let local_env = Env { now, wall, limits: service.limits.local.clone() };
     let host_env = Env { now, wall, limits: service.limits.host };
     for _ in 0..service.local_events.capacity() {
@@ -498,9 +530,10 @@ pub fn iterate(service: &mut Service, now: Time, wall: Wall) {
             break;
         }
         let Some(request) = service.local_requests.pop() else { break };
-        service.route_local(request);
+        service.route_local(now, request);
     }
     service.drain_terminal();
+    service.start_captured();
     for _ in 0..service.host_events.capacity() {
         if service.host_requests.room() < host::max_out(&service.limits.host) {
             break;

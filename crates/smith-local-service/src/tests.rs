@@ -159,3 +159,82 @@ fn original_conflict_files_are_read_through_the_services_kernel_routes() {
     assert!(local_events.is_empty());
     assert!(!process.work_pending(sim.now()));
 }
+
+fn settle_file_io(
+    process: &mut crate::process::ProcessAdapter,
+    sim: &mut skein_sim::Sim,
+    machine: &mut skein_fake_machine::Machine,
+    pid: skein_sim::Pid,
+    local_events: &mut skein_lib::Queue<local::Event>,
+) {
+    let mut host_events = skein_lib::Queue::with_capacity(256);
+    let mut host_requests = skein_lib::Queue::with_capacity(256);
+    let mut terminal_events = skein_lib::Queue::with_capacity(256);
+    let mut terminal =
+        smith_local_protocol::Terminal::new(smith_local_protocol::TerminalLimits { line_bytes: 256, show_bytes: 1024 })
+            .unwrap();
+    for _ in 0_u32..400 {
+        sim.reap(pid, process.completions());
+        process.up(sim.now(), sim.wall(), &mut host_events, &mut terminal, &mut terminal_events, local_events);
+        process.down(
+            sim.now(),
+            sim.wall(),
+            &mut host_requests,
+            &mut None,
+            &skein_lib::Map::with_capacity(1),
+            &mut host_events,
+        );
+        sim.submit(pid, process.submissions());
+        let mut calls = skein_lib::Queue::with_capacity(256);
+        let mut answers = skein_lib::Queue::with_capacity(256);
+        sim.calls(&mut calls);
+        while let Some(call) = calls.pop() {
+            skein_fake_machine::step(machine, call, &mut answers);
+        }
+        sim.answer(&mut answers);
+        if !process.work_pending(sim.now()) && sim.ready(pid) == 0 && !sim.deferred(pid) {
+            match sim.next_due() {
+                Some(at) => sim.advance_to(at),
+                None => return,
+            }
+        }
+    }
+    panic!("file IO settles within bounded iterations")
+}
+
+#[test]
+fn plain_status_uses_the_runs_snapshot_and_refreshes_it_before_the_next_run() {
+    use skein_lib::{Queue, Token};
+    let mut machine = skein_fake_machine::Machine::new();
+    let handle = machine
+        .lay(&[skein_fake_machine::Item::directory(b"src"), skein_fake_machine::Item::file(b"src/file", b"before")]);
+    let mut sim = skein_sim::Sim::new(8, skein_sim::Config::calm());
+    let pid = sim.spawn_process();
+    let root = sim.root(pid, skein_sim::Handle::new(handle.raw()));
+    let config = config();
+    let mut process = crate::process::ProcessAdapter::new(config.limits.process, config.launch).unwrap();
+    process.adopt_delivery_roots(Box::new([root]), Box::new([]));
+    let mut events = Queue::with_capacity(256);
+    let mut directories = List::with_capacity(1);
+    directories.push(0).unwrap();
+    process.capture_plain(directories.clone(), Time::from_nanos(10_000_000_000));
+    settle_file_io(&mut process, &mut sim, &mut machine, pid, &mut events);
+    assert_eq!(process.take_capture_done(), Some(true));
+    process.plain_status(Token::new(7), 0, Time::from_nanos(10_000_000_000), &mut events);
+    settle_file_io(&mut process, &mut sim, &mut machine, pid, &mut events);
+    let Some(local::Event::PlainStatus { changed: false, .. }) = events.pop() else { panic!("unchanged snapshot") };
+    let file = machine.open(handle, b"src/file", skein_fake_machine::How::Read).unwrap();
+    machine.write(file, 0, b"edited").unwrap();
+    machine.close(file);
+    process.plain_status(Token::new(8), 0, Time::from_nanos(10_000_000_000), &mut events);
+    settle_file_io(&mut process, &mut sim, &mut machine, pid, &mut events);
+    let Some(local::Event::PlainStatus { owner, changed: true }) = events.pop() else { panic!("content changed") };
+    assert_eq!(owner, Token::new(8));
+    process.capture_plain(directories, Time::from_nanos(10_000_000_000));
+    settle_file_io(&mut process, &mut sim, &mut machine, pid, &mut events);
+    assert_eq!(process.take_capture_done(), Some(true));
+    process.plain_status(Token::new(9), 0, Time::from_nanos(10_000_000_000), &mut events);
+    settle_file_io(&mut process, &mut sim, &mut machine, pid, &mut events);
+    let Some(local::Event::PlainStatus { changed: false, .. }) = events.pop() else { panic!("fresh run baseline") };
+    assert!(events.is_empty());
+}

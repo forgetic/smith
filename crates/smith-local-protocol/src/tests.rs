@@ -137,3 +137,118 @@ fn a_marker_read_over_its_bound_is_failed_instead_of_declared_clean() {
         panic!("oversized file is not clean")
     };
 }
+
+fn plain_snapshot(files: &[(&[u8], &[u8])]) -> crate::Snapshot {
+    let owner = skein_lib::Token::new(17);
+    let mut scan = crate::Plain::new(
+        owner,
+        skein_lib::Token::new(19),
+        crate::PlainLimits { entries: 8, path_bytes: 64, file_bytes: 128 },
+        skein_lib::Time::from_nanos(50),
+    )
+    .unwrap();
+    let crate::PlainAction::File { request: skein_io::file::Request::Scan { no_follow: true, .. }, .. } = scan.start()
+    else {
+        panic!("root scan")
+    };
+    let mut entries = skein_lib::List::with_capacity(u32::try_from(files.len()).unwrap());
+    for (name, _) in files {
+        entries.push(skein_io::file::Entry { name: Box::from(*name), kind: skein_io::kernel::Kind::File }).unwrap();
+    }
+    let mut action = scan.from_file(skein_io::file::Event::Scanned { owner, entries: entries.into_boxed(), more: 0 });
+    for (name, bytes) in files {
+        let crate::PlainAction::File { request: skein_io::file::Request::Load { path, no_follow: true, .. }, .. } =
+            action
+        else {
+            panic!("one whole file load")
+        };
+        assert_eq!(path.as_ref(), *name);
+        action = scan.from_file(skein_io::file::Event::Loaded { owner, bytes: Box::from(*bytes) });
+    }
+    let crate::PlainAction::Done = action else { panic!("complete snapshot") };
+    scan.finish()
+}
+
+#[test]
+fn plain_snapshots_compare_contents_additions_and_deletions() {
+    let original = plain_snapshot(&[(b"a", b"old"), (b"b", b"same")]);
+    assert_eq!(original, plain_snapshot(&[(b"a", b"old"), (b"b", b"same")]));
+    assert_ne!(original, plain_snapshot(&[(b"a", b"new"), (b"b", b"same")]));
+    assert_ne!(original, plain_snapshot(&[(b"a", b"old")]));
+    assert_ne!(original, plain_snapshot(&[(b"a", b"old"), (b"b", b"same"), (b"c", b"new")]));
+}
+
+#[test]
+fn plain_snapshots_walk_nested_directories() {
+    let owner = skein_lib::Token::new(17);
+    let mut scan = crate::Plain::new(
+        owner,
+        skein_lib::Token::new(19),
+        crate::PlainLimits { entries: 8, path_bytes: 64, file_bytes: 128 },
+        skein_lib::Time::from_nanos(50),
+    )
+    .unwrap();
+    drop(scan.start());
+    let action = scan.from_file(skein_io::file::Event::Scanned {
+        owner,
+        entries: Box::new([skein_io::file::Entry {
+            name: b"src".as_slice().into(),
+            kind: skein_io::kernel::Kind::Directory,
+        }]),
+        more: 0,
+    });
+    let crate::PlainAction::File { request: skein_io::file::Request::Scan { path, .. }, .. } = action else {
+        panic!("nested scan")
+    };
+    assert_eq!(path.as_ref(), b"src");
+    let action = scan.from_file(skein_io::file::Event::Scanned {
+        owner,
+        entries: Box::new([skein_io::file::Entry {
+            name: b"lib.rs".as_slice().into(),
+            kind: skein_io::kernel::Kind::File,
+        }]),
+        more: 0,
+    });
+    let crate::PlainAction::File { request: skein_io::file::Request::Load { path, .. }, .. } = action else {
+        panic!("nested load")
+    };
+    assert_eq!(path.as_ref(), b"src/lib.rs");
+    let crate::PlainAction::Done = scan.from_file(skein_io::file::Event::Loaded { owner, bytes: Box::new([]) }) else {
+        panic!("complete snapshot")
+    };
+}
+
+#[test]
+fn an_incomplete_or_unsupported_plain_tree_is_never_declared_unchanged() {
+    let owner = skein_lib::Token::new(17);
+    let empty: Box<[skein_io::file::Entry]> = Box::new([]);
+    for (entries, more) in [
+        (empty, 1_u64),
+        (
+            Box::new([skein_io::file::Entry {
+                name: b"link".as_slice().into(),
+                kind: skein_io::kernel::Kind::Symlink,
+            }]),
+            0,
+        ),
+        (
+            Box::new([skein_io::file::Entry {
+                name: b"../escape".as_slice().into(),
+                kind: skein_io::kernel::Kind::File,
+            }]),
+            0,
+        ),
+    ] {
+        let mut scan = crate::Plain::new(
+            owner,
+            skein_lib::Token::new(19),
+            crate::PlainLimits { entries: 2, path_bytes: 64, file_bytes: 128 },
+            skein_lib::Time::from_nanos(50),
+        )
+        .unwrap();
+        drop(scan.start());
+        let crate::PlainAction::Failed = scan.from_file(skein_io::file::Event::Scanned { owner, entries, more }) else {
+            panic!("partial snapshot refused")
+        };
+    }
+}

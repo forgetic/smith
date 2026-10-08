@@ -1,6 +1,8 @@
 //! One spawned agent's IO, pipe channel and host-domain terminals
 //! (protocol/hosts.md, sections 3 and 5.6). The adapter keeps IO tokens,
-//! process resources and channel buffers. It never knows local delivery
+//! process resources, channel buffers, and bounded plain-tree snapshots.
+//! File demands settle serially before markers or a snapshot become a terminal.
+//! It never knows local delivery
 //! policy, a credential's meaning, or the agent's private domain state.
 //! `up` converts kernel completions to host observations; `down` translates
 //! host effects and submits IO. Gone remains the host domain's decision after
@@ -8,7 +10,7 @@
 
 use alloc::boxed::Box;
 use skein_io::{self as io, file, file_layer, kernel};
-use skein_lib::{Env, Map, Queue, Time, Token, Wall, stream};
+use skein_lib::{Env, List, Map, Queue, Time, Token, Wall, stream};
 use smith_host_domain as host;
 use smith_host_protocol as protocol;
 use smith_local_domain as local;
@@ -54,6 +56,18 @@ enum Operation {
 }
 
 #[derive(Debug)]
+enum PlainPurpose {
+    Capture { directory: u32 },
+    Compare { owner: Token, directory: u32 },
+}
+
+#[derive(Debug)]
+struct PlainScan {
+    purpose: PlainPurpose,
+    scan: local_protocol::Plain,
+}
+
+#[derive(Debug)]
 pub(crate) struct ProcessAdapter {
     limits: ProcessLimits,
     launch: Launch,
@@ -61,6 +75,12 @@ pub(crate) struct ProcessAdapter {
     process: Option<protocol::Process>,
     git: Option<local_protocol::GitChild>,
     markers: Option<(Token, local_protocol::Markers)>,
+    plain: Option<PlainScan>,
+    snapshots: Map<u32, local_protocol::Snapshot>,
+    capture_directories: List<u32>,
+    capture_next: u32,
+    capture_deadline: Time,
+    capture_done: Option<bool>,
     files: file_layer::FileIo,
     file_roots: Box<[Token]>,
     file_requests: Queue<(file::Request, Time)>,
@@ -95,7 +115,13 @@ impl ProcessAdapter {
             process: None,
             git: None,
             markers: None,
-            files: file_layer::FileIo::with_whole_limit(65, 4096, 64, 65_536, skein_lib::Duration::from_secs(30)),
+            plain: None,
+            snapshots: Map::with_capacity(64),
+            capture_directories: List::with_capacity(64),
+            capture_next: 0,
+            capture_deadline: Time::ZERO,
+            capture_done: None,
+            files: file_layer::FileIo::with_whole_limit(65, 4096, 256, 65_536, skein_lib::Duration::from_secs(30)),
             file_roots: Box::new([]),
             file_requests: Queue::with_capacity(limits.queue),
             file_events: Queue::with_capacity(limits.queue),
@@ -120,7 +146,10 @@ impl ProcessAdapter {
 
     pub(crate) fn worst_case(limits: &ProcessLimits) -> Option<u64> {
         io::worst_case(&limits.io)?
-            .checked_add(file_layer::FileIo::worst_case(65, 4096, 64, 65_536)?)?
+            .checked_add(file_layer::FileIo::worst_case(65, 4096, 256, 65_536)?)?
+            .checked_add(local_protocol::plain_worst_case(&plain_limits())?.checked_mul(65)?)?
+            .checked_add(Map::<u32, local_protocol::Snapshot>::worst_case(64)?)?
+            .checked_add(List::<u32>::worst_case(64)?)?
             .checked_add(local_protocol::markers_worst_case(&git_limits(limits))?)?
             .checked_add(Queue::<(file::Request, Time)>::worst_case(limits.queue)?)?
             .checked_add(Queue::<file::Event>::worst_case(limits.queue)?)?
@@ -129,7 +158,7 @@ impl ProcessAdapter {
             .checked_add(64_u64.checked_mul(u64::try_from(size_of::<Token>()).ok()?)?)?
             .checked_add(local_protocol::git_child_worst_case(&git_limits(limits))?)?
             .checked_add(4096)?
-            .checked_add(skein_lib::List::<Box<[u8]>>::worst_case(64)?)?
+            .checked_add(List::<Box<[u8]>>::worst_case(64)?)?
             .checked_add(protocol::process_worst_case(&limits.channel, limits.detail_bytes)?)?
             .checked_add(Queue::<io::Event>::worst_case(limits.queue)?)?
             .checked_add(Queue::<io::Request>::worst_case(limits.queue)?)?
@@ -153,7 +182,7 @@ impl ProcessAdapter {
     }
 
     pub(crate) fn adopt_delivery_roots(&mut self, roots: Box<[kernel::Fd]>, environment: Box<[Box<[u8]>]>) {
-        let mut file_roots = skein_lib::List::with_capacity(u32::try_from(roots.len()).expect("admitted root count"));
+        let mut file_roots = List::with_capacity(u32::try_from(roots.len()).expect("admitted root count"));
         for root in &roots {
             file_roots
                 .push(self.files.adopt_root(*root).expect("bounded workspace roots"))
@@ -164,6 +193,99 @@ impl ProcessAdapter {
         self.git_environment = environment;
     }
 
+    pub(crate) fn capture_plain(&mut self, directories: List<u32>, deadline: Time) {
+        assert!(self.plain.is_none() && self.markers.is_none(), "file inspection is serial");
+        self.snapshots = Map::with_capacity(64);
+        self.capture_directories = directories;
+        self.capture_next = 0;
+        self.capture_deadline = deadline;
+        self.capture_done = None;
+        self.next_capture();
+    }
+
+    pub(crate) fn take_capture_done(&mut self) -> Option<bool> {
+        self.capture_done.take()
+    }
+
+    fn next_capture(&mut self) {
+        match self.capture_directories.get(self.capture_next) {
+            Some(directory) => {
+                let directory = *directory;
+                let root = match self.file_roots.get(usize::try_from(directory).expect("bounded directory")) {
+                    Some(root) => *root,
+                    None => {
+                        self.capture_done = Some(false);
+                        return;
+                    }
+                };
+                let scan = local_protocol::Plain::new(Token::new(0), root, plain_limits(), self.capture_deadline)
+                    .expect("checked plain limits");
+                let action = scan.start();
+                self.plain = Some(PlainScan { purpose: PlainPurpose::Capture { directory }, scan });
+                match action {
+                    local_protocol::PlainAction::File { request, deadline } => {
+                        self.file_requests.push((request, deadline));
+                    }
+                    local_protocol::PlainAction::Done | local_protocol::PlainAction::Failed => {
+                        unreachable!("root is first scan")
+                    }
+                }
+            }
+            None => self.capture_done = Some(true),
+        }
+    }
+
+    pub(crate) fn plain_status(
+        &mut self,
+        owner: Token,
+        directory: u32,
+        deadline: Time,
+        events: &mut Queue<local::Event>,
+    ) {
+        assert!(self.plain.is_none() && self.markers.is_none(), "file inspection is serial");
+        let root = match self.file_roots.get(usize::try_from(directory).expect("bounded directory")) {
+            Some(root) if self.snapshots.get(&directory).is_some() => *root,
+            Some(_) | None => {
+                events.push(local::Event::StoreFailed { reason: local::StoreFailure::Read });
+                return;
+            }
+        };
+        let scan = local_protocol::Plain::new(owner, root, plain_limits(), deadline).expect("checked plain limits");
+        let action = scan.start();
+        self.plain = Some(PlainScan { purpose: PlainPurpose::Compare { owner, directory }, scan });
+        self.plain_action(action, events);
+    }
+
+    fn plain_action(&mut self, action: local_protocol::PlainAction, events: &mut Queue<local::Event>) {
+        match action {
+            local_protocol::PlainAction::File { request, deadline } => self.file_requests.push((request, deadline)),
+            local_protocol::PlainAction::Done => {
+                let active = self.plain.take().expect("active plain scan");
+                let snapshot = active.scan.finish();
+                match active.purpose {
+                    PlainPurpose::Capture { directory } => {
+                        self.snapshots.insert(directory, snapshot).expect("bounded snapshots");
+                        self.capture_next = self.capture_next.checked_add(1).expect("bounded directory position");
+                        self.next_capture();
+                    }
+                    PlainPurpose::Compare { owner, directory } => {
+                        let before = self.snapshots.get(&directory).expect("capture precedes compare");
+                        events.push(local::Event::PlainStatus { owner, changed: *before != snapshot });
+                    }
+                }
+            }
+            local_protocol::PlainAction::Failed => {
+                let active = self.plain.take().expect("active plain scan");
+                match active.purpose {
+                    PlainPurpose::Capture { .. } => self.capture_done = Some(false),
+                    PlainPurpose::Compare { .. } => {
+                        events.push(local::Event::StoreFailed { reason: local::StoreFailure::Read });
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn start_markers(
         &mut self,
         owner: Token,
@@ -172,7 +294,7 @@ impl ProcessAdapter {
         deadline: Time,
         events: &mut Queue<local::Event>,
     ) {
-        assert!(self.markers.is_none(), "one local file inspection at a time");
+        assert!(self.markers.is_none() && self.plain.is_none(), "one local file inspection at a time");
         let root = self.file_roots.get(usize::try_from(directory).expect("admitted directory"));
         let markers = match root {
             Some(root) => local_protocol::Markers::new(owner, *root, paths, deadline, git_limits(&self.limits)),
@@ -345,10 +467,18 @@ impl ProcessAdapter {
                 break;
             }
             let Some(event) = self.file_events.pop() else { break };
-            let (owner, markers) = self.markers.as_mut().expect("file terminal belongs to marker inspection");
-            let owner = *owner;
-            let action = markers.from_file(event);
-            self.marker_action(owner, action, local_events);
+            match &mut self.plain {
+                Some(active) => {
+                    let action = active.scan.from_file(event);
+                    self.plain_action(action, local_events);
+                }
+                None => {
+                    let (owner, markers) = self.markers.as_mut().expect("file terminal belongs to marker inspection");
+                    let owner = *owner;
+                    let action = markers.from_file(event);
+                    self.marker_action(owner, action, local_events);
+                }
+            }
         }
     }
 
@@ -708,4 +838,8 @@ fn io_owner(event: &io::Event) -> Option<Token> {
         | io::Event::Closed { owner } => Some(*owner),
         io::Event::Shutdown { .. } => None,
     }
+}
+
+fn plain_limits() -> local_protocol::PlainLimits {
+    local_protocol::PlainLimits { entries: 256, path_bytes: 4096, file_bytes: 65_536 }
 }
