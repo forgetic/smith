@@ -18,6 +18,8 @@ smith-protocol-channel.workspace = true
 smith-transcript.workspace = true
 
 [dev-dependencies]
+skein-sim.workspace = true
+skein-fake-machine.workspace = true
 smith-agent-world.workspace = true
 smith-agent-process-world.workspace = true
 smith-host-world.workspace = true

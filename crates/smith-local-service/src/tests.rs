@@ -102,3 +102,60 @@ fn the_local_service_loads_then_routes_durable_start_requests_to_the_shell() {
     };
     assert_eq!(state.activation, 1);
 }
+
+#[test]
+fn original_conflict_files_are_read_through_the_services_kernel_routes() {
+    use skein_lib::{Map, Queue, Token};
+    let mut machine = skein_fake_machine::Machine::new();
+    let handle = machine.lay(&[
+        skein_fake_machine::Item::file(b"resolved.rs", b"clean\n"),
+        skein_fake_machine::Item::file(b"conflict.rs", b"<<<<<<< ours\n"),
+    ]);
+    let mut sim = skein_sim::Sim::new(8, skein_sim::Config::calm());
+    let pid = sim.spawn_process();
+    let root = sim.root(pid, skein_sim::Handle::new(handle.raw()));
+    let config = config();
+    let mut process = crate::process::ProcessAdapter::new(config.limits.process, config.launch).unwrap();
+    process.adopt_delivery_roots(Box::new([root]), Box::new([]));
+    let mut local_events = Queue::with_capacity(256);
+    let mut host_events = Queue::with_capacity(256);
+    let mut host_requests = Queue::with_capacity(256);
+    let mut terminal_events = Queue::with_capacity(256);
+    let mut terminal =
+        smith_local_protocol::Terminal::new(smith_local_protocol::TerminalLimits { line_bytes: 256, show_bytes: 1024 })
+            .unwrap();
+    process.start_markers(
+        Token::new(7),
+        0,
+        Box::new([Box::from(b"resolved.rs".as_slice()), Box::from(b"conflict.rs".as_slice())]),
+        Time::from_nanos(1_000_000_000),
+        &mut local_events,
+    );
+    for _ in 0_u32..100 {
+        sim.reap(pid, process.completions());
+        process.up(sim.now(), sim.wall(), &mut host_events, &mut terminal, &mut terminal_events, &mut local_events);
+        process.down(sim.now(), sim.wall(), &mut host_requests, &mut None, &Map::with_capacity(1), &mut host_events);
+        sim.submit(pid, process.submissions());
+        let mut calls = Queue::with_capacity(256);
+        let mut answers = Queue::with_capacity(256);
+        sim.calls(&mut calls);
+        while let Some(call) = calls.pop() {
+            skein_fake_machine::step(&mut machine, call, &mut answers);
+        }
+        sim.answer(&mut answers);
+        if !local_events.is_empty() {
+            break;
+        }
+        if let Some(at) = sim.next_due() {
+            sim.advance_to(at);
+        }
+    }
+    let Some(local::Event::Git { owner, result: local::GitResult::Markers { first: Some(path) } }) = local_events.pop()
+    else {
+        panic!("marker terminal after file settlement")
+    };
+    assert_eq!(owner, Token::new(7));
+    assert_eq!(path.as_ref(), b"conflict.rs");
+    assert!(local_events.is_empty());
+    assert!(!process.work_pending(sim.now()));
+}

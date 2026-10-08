@@ -7,10 +7,11 @@
 //! the process adapter has reported child exit, pipe EOF and reap.
 
 use alloc::boxed::Box;
-use skein_io::{self as io, kernel};
+use skein_io::{self as io, file, file_layer, kernel};
 use skein_lib::{Env, Map, Queue, Time, Token, Wall, stream};
 use smith_host_domain as host;
 use smith_host_protocol as protocol;
+use smith_local_domain as local;
 use smith_local_protocol as local_protocol;
 
 use crate::StartValues;
@@ -46,6 +47,12 @@ pub struct ProcessLimits {
     pub queue: u32,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum Operation {
+    Io(Token),
+    File(Token),
+}
+
 #[derive(Debug)]
 pub(crate) struct ProcessAdapter {
     limits: ProcessLimits,
@@ -53,6 +60,15 @@ pub(crate) struct ProcessAdapter {
     io: io::Io,
     process: Option<protocol::Process>,
     git: Option<local_protocol::GitChild>,
+    markers: Option<(Token, local_protocol::Markers)>,
+    files: file_layer::FileIo,
+    file_roots: Box<[Token]>,
+    file_requests: Queue<(file::Request, Time)>,
+    file_events: Queue<file::Event>,
+    io_submissions: Queue<kernel::Submit>,
+    file_submissions: Queue<kernel::Submit>,
+    operations: Map<Token, Operation>,
+    next_operation: u64,
     delivery_roots: Box<[kernel::Fd]>,
     git_environment: Box<[Box<[u8]>]>,
     io_events: Queue<io::Event>,
@@ -78,6 +94,15 @@ impl ProcessAdapter {
             launch,
             process: None,
             git: None,
+            markers: None,
+            files: file_layer::FileIo::with_whole_limit(65, 4096, 64, 65_536, skein_lib::Duration::from_secs(30)),
+            file_roots: Box::new([]),
+            file_requests: Queue::with_capacity(limits.queue),
+            file_events: Queue::with_capacity(limits.queue),
+            io_submissions: Queue::with_capacity(limits.queue),
+            file_submissions: Queue::with_capacity(limits.queue),
+            operations: Map::with_capacity(limits.queue),
+            next_operation: 1,
             delivery_roots: Box::new([]),
             git_environment: Box::new([]),
             io_events: Queue::with_capacity(limits.queue),
@@ -95,6 +120,13 @@ impl ProcessAdapter {
 
     pub(crate) fn worst_case(limits: &ProcessLimits) -> Option<u64> {
         io::worst_case(&limits.io)?
+            .checked_add(file_layer::FileIo::worst_case(65, 4096, 64, 65_536)?)?
+            .checked_add(local_protocol::markers_worst_case(&git_limits(limits))?)?
+            .checked_add(Queue::<(file::Request, Time)>::worst_case(limits.queue)?)?
+            .checked_add(Queue::<file::Event>::worst_case(limits.queue)?)?
+            .checked_add(Queue::<kernel::Submit>::worst_case(limits.queue)?.checked_mul(2)?)?
+            .checked_add(Map::<Token, Operation>::worst_case(limits.queue)?)?
+            .checked_add(64_u64.checked_mul(u64::try_from(size_of::<Token>()).ok()?)?)?
             .checked_add(local_protocol::git_child_worst_case(&git_limits(limits))?)?
             .checked_add(4096)?
             .checked_add(skein_lib::List::<Box<[u8]>>::worst_case(64)?)?
@@ -121,8 +153,55 @@ impl ProcessAdapter {
     }
 
     pub(crate) fn adopt_delivery_roots(&mut self, roots: Box<[kernel::Fd]>, environment: Box<[Box<[u8]>]>) {
+        let mut file_roots = skein_lib::List::with_capacity(u32::try_from(roots.len()).expect("admitted root count"));
+        for root in &roots {
+            file_roots
+                .push(self.files.adopt_root(*root).expect("bounded workspace roots"))
+                .expect("one token per root");
+        }
+        self.file_roots = file_roots.into_boxed();
         self.delivery_roots = roots;
         self.git_environment = environment;
+    }
+
+    pub(crate) fn start_markers(
+        &mut self,
+        owner: Token,
+        directory: u32,
+        paths: Box<[Box<[u8]>]>,
+        deadline: Time,
+        events: &mut Queue<local::Event>,
+    ) {
+        assert!(self.markers.is_none(), "one local file inspection at a time");
+        let root = self.file_roots.get(usize::try_from(directory).expect("admitted directory"));
+        let markers = match root {
+            Some(root) => local_protocol::Markers::new(owner, *root, paths, deadline, git_limits(&self.limits)),
+            None => None,
+        };
+        match markers {
+            Some(markers) => {
+                let action = markers.start();
+                self.markers = Some((owner, markers));
+                self.marker_action(owner, action, events);
+            }
+            None => events.push(local::Event::Git {
+                owner,
+                result: local::GitResult::Failed {
+                    reason: smith_domain::run::DeliveryReason::TooLarge,
+                    diagnostic: Box::new(smith_domain::run::Diagnostic::empty()),
+                },
+            }),
+        }
+    }
+
+    fn marker_action(&mut self, owner: Token, action: local_protocol::MarkerAction, events: &mut Queue<local::Event>) {
+        match action {
+            local_protocol::MarkerAction::File { request, deadline } => self.file_requests.push((request, deadline)),
+            local_protocol::MarkerAction::Done(result) => {
+                self.markers = None;
+                events.push(local::Event::Git { owner, result });
+            }
+        }
     }
 
     pub(crate) fn start_git(
@@ -176,7 +255,9 @@ impl ProcessAdapter {
             None => None,
         };
         let mut next: Option<Time> = None;
-        for deadline in [self.io.next_deadline(), process_deadline, git_deadline].into_iter().flatten() {
+        for deadline in
+            [self.io.next_deadline(), process_deadline, git_deadline, self.files.next_deadline()].into_iter().flatten()
+        {
             next = Some(match next {
                 Some(current) => current.min(deadline),
                 None => deadline,
@@ -193,6 +274,11 @@ impl ProcessAdapter {
             || !self.io_requests.is_empty()
             || !self.process_events.is_empty()
             || !self.completions.is_empty()
+            || !self.file_events.is_empty()
+            || !self.file_requests.is_empty()
+            || !self.io_submissions.is_empty()
+            || !self.file_submissions.is_empty()
+            || self.files.is_due(now)
     }
 
     pub(crate) const fn failed(&self) -> bool {
@@ -221,6 +307,51 @@ impl ProcessAdapter {
         }
     }
 
+    fn reap(&mut self, env: &Env<io::Limits>) {
+        for _ in 0..self.completions.capacity() {
+            if self.io_events.room() < io::MAX_OUT_UP.events
+                || self.io_submissions.room() < io::MAX_OUT_UP.submissions
+                || self.file_events.room() == 0
+                || self.file_submissions.room() < 2
+            {
+                break;
+            }
+            let Some(complete) = self.completions.pop() else { break };
+            let route = self.operations.remove(&complete.op).expect("one route per submitted kernel operation");
+            match route {
+                Operation::Io(op) => io::up(
+                    &mut self.io,
+                    env,
+                    kernel::Complete { op, kind: complete.kind, result: complete.result },
+                    &mut self.io_events,
+                    &mut self.io_submissions,
+                ),
+                Operation::File(op) => file_layer::up(
+                    &mut self.files,
+                    kernel::Complete { op, kind: complete.kind, result: complete.result },
+                    &mut self.file_events,
+                    &mut self.file_submissions,
+                ),
+            }
+        }
+    }
+
+    fn markers_up(&mut self, now: Time, local_events: &mut Queue<local::Event>) {
+        if self.files.is_due(now) && self.file_submissions.room() >= 2 {
+            file_layer::expire(&mut self.files, now, &mut self.file_submissions);
+        }
+        for _ in 0..self.file_events.capacity() {
+            if local_events.room() == 0 || self.file_requests.room() == 0 {
+                break;
+            }
+            let Some(event) = self.file_events.pop() else { break };
+            let (owner, markers) = self.markers.as_mut().expect("file terminal belongs to marker inspection");
+            let owner = *owner;
+            let action = markers.from_file(event);
+            self.marker_action(owner, action, local_events);
+        }
+    }
+
     pub(crate) fn up(
         &mut self,
         now: Time,
@@ -231,27 +362,23 @@ impl ProcessAdapter {
         local_events: &mut Queue<smith_local_domain::Event>,
     ) {
         let env = Env { now, wall, limits: self.limits.io };
-        for _ in 0..self.completions.capacity() {
-            if self.io_events.room() < io::MAX_OUT_UP.events || self.submissions.room() < io::MAX_OUT_UP.submissions {
-                break;
-            }
-            let Some(complete) = self.completions.pop() else { break };
-            io::up(&mut self.io, &env, complete, &mut self.io_events, &mut self.submissions);
-        }
+        self.reap(&env);
         for _ in 0..self.limits.io.sockets {
-            if self.io_events.room() < io::MAX_OUT_UP.events || self.submissions.room() < io::MAX_OUT_UP.submissions {
+            if self.io_events.room() < io::MAX_OUT_UP.events || self.io_submissions.room() < io::MAX_OUT_UP.submissions
+            {
                 break;
             }
             if self.io.is_ready() {
-                io::resume(&mut self.io, &env, &mut self.io_events, &mut self.submissions);
+                io::resume(&mut self.io, &env, &mut self.io_events, &mut self.io_submissions);
             }
             if self.io.is_due(now)
                 && self.io_events.room() >= io::MAX_OUT_UP.events
-                && self.submissions.room() >= io::MAX_OUT_UP.submissions
+                && self.io_submissions.room() >= io::MAX_OUT_UP.submissions
             {
-                io::fire(&mut self.io, &env, &mut self.io_events, &mut self.submissions);
+                io::fire(&mut self.io, &env, &mut self.io_events, &mut self.io_submissions);
             }
         }
+        self.markers_up(now, local_events);
         for _ in 0..self.io_events.capacity() {
             if !self.output_room()
                 || terminal_events.room() < local_protocol::terminal_max_out()
@@ -358,13 +485,70 @@ impl ProcessAdapter {
         }
         let env = Env { now, wall, limits: self.limits.io };
         for _ in 0..self.io_requests.capacity() {
-            if self.submissions.room() < io::MAX_OUT_DOWN.submissions || !self.io.takes() {
+            if self.io_submissions.room() < io::MAX_OUT_DOWN.submissions || !self.io.takes() {
                 break;
             }
             let Some(request) = self.io_requests.pop() else { break };
-            io::down(&mut self.io, &env, request, &mut self.submissions);
+            io::down(&mut self.io, &env, request, &mut self.io_submissions);
         }
+        if self.files.takes()
+            && self.file_submissions.room() >= 2
+            && self.file_events.room() > 0
+            && let Some((request, deadline)) = self.file_requests.pop()
+        {
+            file_layer::down_until(
+                &mut self.files,
+                deadline,
+                request,
+                &mut self.file_events,
+                &mut self.file_submissions,
+            );
+        }
+        self.flush_submissions();
         self.io.reclaim();
+    }
+
+    fn flush_submissions(&mut self) {
+        for _ in 0..self.io_submissions.capacity() {
+            if self.submissions.room() == 0 || self.operations.len() == self.operations.capacity() {
+                break;
+            }
+            let Some(submit) = self.io_submissions.pop() else { break };
+            self.route_submission(submit, false);
+        }
+        for _ in 0..self.file_submissions.capacity() {
+            if self.submissions.room() == 0 || self.operations.len() == self.operations.capacity() {
+                break;
+            }
+            let Some(submit) = self.file_submissions.pop() else { break };
+            self.route_submission(submit, true);
+        }
+    }
+
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "kernel operations are external; only Cancel references another operation"
+    )]
+    fn route_submission(&mut self, submit: kernel::Submit, file: bool) {
+        let global = Token::new(self.next_operation);
+        self.next_operation = self.next_operation.checked_add(1).expect("kernel operation tokens never wrap");
+        let kind = match submit.kind {
+            kernel::Op::Cancel { target } => {
+                let mut found = None;
+                for (global, route) in &self.operations {
+                    match route {
+                        Operation::File(original) if file && *original == target => found = Some(*global),
+                        Operation::Io(original) if !file && *original == target => found = Some(*global),
+                        Operation::File(_) | Operation::Io(_) => {}
+                    }
+                }
+                kernel::Op::Cancel { target: found.unwrap_or(Token::new(u64::MAX)) }
+            }
+            other => other,
+        };
+        let route = if file { Operation::File(submit.op) } else { Operation::Io(submit.op) };
+        self.operations.insert(global, route).expect("reserved kernel route");
+        self.submissions.push(kernel::Submit { op: global, kind });
     }
 
     fn request(

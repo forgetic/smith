@@ -715,8 +715,10 @@ dependencies = [
 name = "smith-local-service"
 version = "0.0.0"
 dependencies = [
+ "skein-fake-machine",
  "skein-io",
  "skein-lib",
+ "skein-sim",
  "smith-agent-process-world",
  "smith-agent-world",
  "smith-domain",

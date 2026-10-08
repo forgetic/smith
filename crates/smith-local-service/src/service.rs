@@ -269,12 +269,9 @@ impl Service {
         match request {
             local::Request::External(external) => self.route_external(*external),
             local::Request::Git { owner, directory, op, deadline } => match op {
-                local::GitOp::Markers { paths } => self.shell.push(local::Request::Git {
-                    owner,
-                    directory,
-                    op: local::GitOp::Markers { paths },
-                    deadline,
-                }),
+                local::GitOp::Markers { paths } => {
+                    self.process.start_markers(owner, directory, paths, deadline, &mut self.local_events);
+                }
                 op @ (local::GitOp::Head
                 | local::GitOp::Status
                 | local::GitOp::Inspect { .. }
