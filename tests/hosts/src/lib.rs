@@ -11,6 +11,8 @@ use smith_agent_service as agent;
 use smith_host_domain as host;
 use smith_host_protocol as protocol;
 
+pub mod referee;
+
 /// Which child program the scripted machine supplies for the host's spawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Program {
@@ -39,6 +41,27 @@ pub struct Seen {
     pub signals: Vec<host::Signal>,
 }
 
+/// Boundary observations for an independent host-process referee.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Observation {
+    /// The host domain accepted a run start.
+    Started,
+    /// The channel's last answer reached the parent.
+    Answered,
+    /// A named host call reached the parent.
+    Called(Token),
+    /// The parent supplied one terminal for a host call.
+    CallAnswered(Token),
+    /// The child process exited.
+    Exited,
+    /// The child and its pipes were reaped.
+    Reaped,
+    /// Spawn or opening failed and the process resources settled.
+    Unspawned,
+    /// The domain released the run slot.
+    Gone,
+}
+
 /// The copied host composition: domain, process adapter, io and their queues.
 #[expect(missing_debug_implementations, reason = "world service holds a non-Debug simulated kernel queue")]
 pub struct HostService {
@@ -58,6 +81,7 @@ pub struct HostService {
     submissions: Queue<kernel::Submit>,
     completions: Queue<kernel::Complete>,
     seen: Seen,
+    observations: Vec<Observation>,
 }
 
 fn host_limits() -> host::Limits {
@@ -133,6 +157,7 @@ impl HostService {
             submissions: Queue::with_capacity(256),
             completions: Queue::with_capacity(256),
             seen: Seen::default(),
+            observations: Vec::new(),
         };
         service.domain_events.push(host::Event::Spawn { client: Token::new(1), start: start() });
         service
@@ -205,13 +230,16 @@ impl HostService {
                 self.domain_events.push(host::Event::Spawned { owner: agent, process });
             }
             protocol::ProcessEvent::Unspawned { agent, detail } => {
+                self.observations.push(Observation::Unspawned);
                 self.domain_events.push(host::Event::Unspawned { owner: agent, detail });
             }
             protocol::ProcessEvent::Exited { agent } => {
+                self.observations.push(Observation::Exited);
                 self.seen.exits = self.seen.exits.checked_add(1).expect("bounded observed exits");
                 self.domain_events.push(host::Event::Exited { owner: agent });
             }
             protocol::ProcessEvent::Reaped { agent, detail } => {
+                self.observations.push(Observation::Reaped);
                 self.seen.reaps = self.seen.reaps.checked_add(1).expect("bounded observed reaps");
                 self.domain_events.push(host::Event::Reaped { owner: agent, detail });
             }
@@ -274,12 +302,19 @@ impl HostService {
                 );
                 self.process = Some(process);
             }
-            host::Request::Started { .. } => self.seen.started = true,
+            host::Request::Started { .. } => {
+                self.seen.started = true;
+                self.observations.push(Observation::Started);
+            }
             host::Request::Admitted { .. } => self.seen.admitted = true,
-            host::Request::Answered { answer, .. } => self.seen.answered = Some(answer),
+            host::Request::Answered { answer, .. } => {
+                self.seen.answered = Some(answer);
+                self.observations.push(Observation::Answered);
+            }
             host::Request::Gone { end, detail, .. } => {
                 self.seen.gone = Some(end);
                 self.seen.detail = Some(detail);
+                self.observations.push(Observation::Gone);
             }
             host::Request::Turn { turn, .. } => {
                 self.seen.turns = self.seen.turns.checked_add(1).expect("bounded observed turns");
@@ -287,6 +322,7 @@ impl HostService {
             }
             host::Request::Called { call, .. } => {
                 self.seen.calls = self.seen.calls.checked_add(1).expect("bounded observed calls");
+                self.observations.push(Observation::Called(call));
                 self.domain_events.push(host::Event::Answer {
                     agent: self.agent_owner(),
                     call,
@@ -319,6 +355,14 @@ impl HostService {
     fn send(&mut self, message: host::Down) {
         let process = self.process.as_mut().expect("spawned child");
         let token = Token::new(99);
+        let answering = match &message {
+            host::Down::Answer { call, .. } => Some(*call),
+            host::Down::Start { .. }
+            | host::Down::Message { .. }
+            | host::Down::Acknowledge { .. }
+            | host::Down::Grant { .. }
+            | host::Down::Cancel => None,
+        };
         let sent = match message {
             host::Down::Start { start, window } => process.send_start(
                 start,
@@ -348,6 +392,8 @@ impl HostService {
         };
         if sent.is_err() {
             self.domain_events.push(host::Event::Unsent { owner: self.agent_owner() });
+        } else if let Some(call) = answering {
+            self.observations.push(Observation::CallAnswered(call));
         }
     }
 
@@ -396,6 +442,12 @@ impl HostService {
     #[must_use]
     pub fn seen(&self) -> &Seen {
         &self.seen
+    }
+
+    /// Boundary events in their order at the host-process interface.
+    #[must_use]
+    pub fn observations(&self) -> &[Observation] {
+        &self.observations
     }
 
     #[must_use]
@@ -501,7 +553,9 @@ impl World {
             && self.sim.ready(self.peer_pid) == 0
             && !self.peer.work_pending()
             && self.agent.as_ref().is_none_or(|(pid, service)| {
-                self.stopped_child || (self.sim.ready(*pid) == 0 && !agent::work_pending(service, self.sim.now()))
+                self.stopped_child
+                    || !self.sim.service_running(*pid)
+                    || (self.sim.ready(*pid) == 0 && !agent::work_pending(service, self.sim.now()))
             })
         {
             let at = [
@@ -510,7 +564,7 @@ impl World {
                 self.peer.next_deadline(),
                 self.agent
                     .as_ref()
-                    .filter(|_| !self.stopped_child)
+                    .filter(|(pid, _)| !self.stopped_child && self.sim.service_running(*pid))
                     .and_then(|(_, service)| agent::next_deadline(service)),
             ]
             .into_iter()
@@ -527,6 +581,23 @@ impl World {
         assert!(self.host.seen().admitted, "the agent opened before becoming unresponsive");
         self.stopped_child = true;
         self.host.stop();
+    }
+
+    /// Crash the hosted child at this scheduling cut, if it is still live.
+    pub fn crash_agent(&mut self) -> bool {
+        match &self.agent {
+            Some((pid, _)) if self.sim.service_running(*pid) => {
+                self.sim.finish_service(*pid, kernel::Exit::Code(1));
+                true
+            }
+            Some(_) | None => false,
+        }
+    }
+
+    /// Whether the hosted child can still be cut by a simulated crash.
+    #[must_use]
+    pub fn child_running(&self) -> bool {
+        self.agent.as_ref().is_some_and(|(pid, _)| self.sim.service_running(*pid))
     }
 
     fn serve_machine(&mut self) {
@@ -565,6 +636,12 @@ impl World {
     #[must_use]
     pub fn seen(&self) -> &Seen {
         self.host.seen()
+    }
+
+    /// Ordered process and domain boundary events for a referee.
+    #[must_use]
+    pub fn observations(&self) -> &[Observation] {
+        self.host.observations()
     }
 
     #[must_use]

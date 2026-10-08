@@ -319,3 +319,9 @@ service answering through a fake LLM, refused spawn, an error tail, an opening
 deadline, and cancel followed by terminate and kill. Its fuzzy sweep and
 memory test arrive in the next increment. The one-second focused share and
 workspace budgets are unchanged.
+
+The completed host process world was measured serially on 2026-10-08 with
+`measure -j 1`: nine focused stories, referee controls and the process-memory
+test passed in 0.163 seconds. The seeded crash sweep, including every step of
+one complete hosted run, passed in 0.777 seconds. The world's one-second
+focused and five-second fuzzy shares, and the workspace budgets, are unchanged.
