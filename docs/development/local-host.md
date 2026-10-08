@@ -42,7 +42,7 @@ while inheriting the global agent, model, budget and account settings:
 ```json
 {
   "chat": "review",
-  "instructions": "Make the requested change and explain it.",
+  "instructions": "Begin each activation by calling wait and ending your turn to receive the queued user message. Make the requested change and explain it.",
   "directories": [
     { "name": "project", "path": ".", "writable": true, "git": true }
   ],
@@ -77,6 +77,11 @@ while inheriting the global agent, model, budget and account settings:
 | `token_directory` | Optional private OAuth record directory; default described below. |
 | `accounts` | Account descriptors, described below; default `[]`. |
 | `push` | Optional ordered array matching `directories`, each entry `null` or `{ "remote", "branch" }`. Omitted means no push. |
+
+The opening asks the model to begin its brief. Terminal messages are queued
+until the model ends a turn without tool calls. For an interactive chat, the
+instructions should first ask it to call `wait` and end its turn, as above,
+so it receives the first terminal message before doing the requested work.
 
 Each model has this shape:
 

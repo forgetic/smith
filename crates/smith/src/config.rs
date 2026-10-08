@@ -320,15 +320,15 @@ pub(crate) fn trust(der: Option<&str>) -> Result<tls::Config, String> {
 
 fn standard_limits(memory: u64) -> Result<service::Limits, String> {
     let client = shared::client::Limits {
-        http: http::client::Limits { request: 4096, head: 4096, headers: 32, read: 256, send: 31 },
-        sse: http::sse::Limits { line: 4096, event: 8192, field: 128, chunk: 128 },
+        http: http::client::Limits { request: 4096, head: 4096, headers: 64, read: 256, send: 31 },
+        sse: http::sse::Limits { line: 16_384, event: 32_768, field: 128, chunk: 128 },
         dialect: openai::Limits {
-            request_bytes: 8192,
-            document_bytes: 8192,
-            string_bytes: 4096,
+            request_bytes: 65_536,
+            document_bytes: 32_768,
+            string_bytes: 32_768,
             depth: 32,
             tokens: 1024,
-            parts: 16,
+            parts: 64,
             input_bytes: 2048,
             opaque_bytes: 2048,
             answer_bytes: 8192,
@@ -336,7 +336,7 @@ fn standard_limits(memory: u64) -> Result<service::Limits, String> {
         },
         error_bytes: 4096,
     };
-    let decoded_call_bytes = 4096;
+    let decoded_call_bytes = 16_384;
     let completion = llm::completion_worst_case(&client, decoded_call_bytes).ok_or("LLM receiving bound overflows")?;
     let bodies = smith_channel::CEILINGS;
     let schema = smith_channel::schema(&bodies).map_err(|error| format!("channel schema: {error:?}"))?;
@@ -359,7 +359,9 @@ fn standard_limits(memory: u64) -> Result<service::Limits, String> {
         retry: Duration::from_millis(10),
     };
     let mut domain = limits::LIMITS;
+    domain.decoded_call_bytes = decoded_call_bytes;
     domain.session.completion_bytes = completion;
+    domain.session.completion_blocks = client.dialect.parts;
     let queue = domain::max_out(&domain).max(256);
     let routes = io::operations(&io).and_then(|count| count.checked_add(64)).ok_or("IO route count overflows")?;
     Ok(service::Limits {
@@ -457,6 +459,142 @@ mod tests {
         assert!(bound > 0);
         let service = service::Service::new(configuration.service, 1).expect("service");
         assert!(service::done(&service).is_none());
+    }
+
+    #[test]
+    fn standard_profile_accepts_full_workspace_read_results() {
+        let limits = standard_limits(u64::MAX).expect("standard limits");
+        let read_bytes = limits.domain.session.tools.read_bytes;
+        let outcome = smith_domain::tools::Outcome::Read {
+            content: vec![0xff; usize::try_from(read_bytes).expect("read bytes fit usize")].into_boxed_slice(),
+            skipped: 0,
+            lines: 1,
+            total: 1,
+            cut: false,
+        };
+        let (rendered, error) = llm::render_outcome(&outcome, limits.llm.connection.llm.dialect.string_bytes)
+            .expect("full read fits after escaping and adding line metadata");
+        assert!(!error);
+        assert!(rendered.len() > 16_384, "escaped bytes and metadata exceed the old string bound");
+    }
+
+    #[test]
+    fn standard_profile_accepts_conversation_history_with_workspace_results() {
+        let limits = standard_limits(u64::MAX).expect("standard limits").llm.connection.llm.dialect;
+        let mut input = Vec::new();
+        for index in 0..12 {
+            let call_id = format!("read_{index}").into_bytes().into_boxed_slice();
+            input.push(openai::Input::FunctionCall {
+                call_id: call_id.clone(),
+                item_id: None,
+                name: b"read".as_slice().into(),
+                arguments: br#"{"path":"README.md"}"#.as_slice().into(),
+            });
+            input.push(openai::Input::FunctionOutput { call_id, output: vec![b'x'; 1024].into_boxed_slice() });
+        }
+        let request = openai::Request {
+            model: b"provider-model".as_slice().into(),
+            instructions: b"Read the workspace and report.".as_slice().into(),
+            tools: Box::new([]),
+            input: input.into_boxed_slice(),
+            effort: None,
+            prompt_cache_key: None,
+        };
+        let encoded = openai::encode_request(&request, &limits).expect("workspace results fit the request");
+        assert!(encoded.len() > 8192, "workspace history exceeds the old request bound");
+    }
+
+    #[test]
+    fn standard_profile_accepts_provider_heads_with_many_metadata_fields() {
+        use skein_lib::stream::{Down, Up};
+        use skein_lib::{Env, Queue, Time, Wall};
+
+        let limits = standard_limits(u64::MAX).expect("standard limits").llm.connection.llm.http;
+        let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+        let mut client = http::client::Client::new(&limits);
+        let mut above = Queue::with_capacity(4);
+        let mut below = Queue::with_capacity(4);
+        http::client::down(
+            &mut client,
+            &env,
+            http::client::Request::Call(http::client::Call {
+                method: http::Method::Get,
+                target: b"/".as_slice().into(),
+                headers: Box::new([Header {
+                    name: b"Host".as_slice().into(),
+                    value: b"provider.test".as_slice().into(),
+                }]),
+                body: http::client::Body::None,
+                close: false,
+            }),
+            &mut above,
+            &mut below,
+        );
+        assert!(matches!(below.pop(), Some(Down::Demand { .. })));
+        http::client::up(&mut client, &env, Up::Room, &mut above, &mut below);
+        assert!(matches!(below.pop(), Some(Down::Send(_))));
+
+        let mut lines = vec![b"HTTP/1.1 200 OK\r\n".to_vec()];
+        for index in 0..40 {
+            lines.push(format!("X-Provider-Metadata-{index}: value\r\n").into_bytes());
+        }
+        lines.push(b"Content-Type: text/event-stream\r\n".to_vec());
+        lines.push(b"Content-Length: 0\r\n".to_vec());
+        lines.push(b"\r\n".to_vec());
+        for line in lines {
+            assert!(matches!(below.pop(), Some(Down::Demand { .. })), "each head line answers a read demand");
+            http::client::up(&mut client, &env, Up::Bytes(line.into()), &mut above, &mut below);
+        }
+        let Some(http::client::Event::Response(response)) = above.pop() else {
+            panic!("the standard profile accepts the provider's response head");
+        };
+        assert_eq!(response.status, 200);
+        assert_eq!(response.headers.len(), 42);
+    }
+
+    #[test]
+    fn standard_profile_accepts_provider_events_that_echo_tool_schemas() {
+        use skein_lib::stream::{Down, Up};
+        use skein_lib::{Env, Queue, Time, Wall};
+
+        let limits = standard_limits(u64::MAX).expect("standard limits").llm.connection.llm;
+        let tools: Vec<_> = (0..32)
+            .map(|index| {
+                serde_json::json!({
+                    "type": "function",
+                    "name": format!("tool_{index}"),
+                    "description": "x".repeat(300),
+                    "parameters": { "type": "object", "properties": {} }
+                })
+            })
+            .collect();
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "type": "response.created",
+            "response": { "id": "response", "status": "in_progress", "tools": tools }
+        }))
+        .expect("provider event JSON");
+        assert!(payload.len() > 8192, "echoed schemas exceed the old event and document bounds");
+        let mut data = b"data: ".to_vec();
+        data.extend_from_slice(&payload);
+        data.push(b'\n');
+
+        let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits: limits.sse };
+        let mut reader = http::sse::Reader::new(&limits.sse);
+        let mut above = Queue::with_capacity(1);
+        let mut below = Queue::with_capacity(1);
+        http::sse::down(&mut reader, &env, http::sse::Request::Next, &mut above, &mut below);
+        for line in [b"event: response.created\n".as_slice(), data.as_slice(), b"\n"] {
+            for chunk in line.chunks(usize::try_from(limits.sse.chunk).expect("chunk fits usize")) {
+                assert!(matches!(below.pop(), Some(Down::Demand { .. })), "each chunk answers a read demand");
+                http::sse::up(&mut reader, &env, Up::Bytes(chunk.into()), &mut above, &mut below);
+            }
+        }
+        let Some(http::sse::Event::Message(message)) = above.pop() else {
+            panic!("the standard profile accepts the provider's echoed tool schemas");
+        };
+        assert_eq!(message.data.as_ref(), payload);
+        let json = openai::Json::from_bytes(&message.data, &limits.dialect).expect("provider event document");
+        assert_eq!(openai::decode_event(&json, &limits.dialect), Ok(openai::Event::Created { echo: None }));
     }
 
     #[test]

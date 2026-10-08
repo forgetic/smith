@@ -44,6 +44,10 @@ You can write and edit files in its writable repositories.\n\n\
 You can ask for a sub-agent: an LLM of its own, working on a brief you write, with tools no wider than \
 yours and a share of the budget. Its last message comes back to you as the result. It runs on the \
 run's main LLM unless you name one of these: `fake-2`.\n\n\
+## Waiting\n\n\
+Host messages arrive when you end a turn without tool calls. When you need the next message, call `wait`, \
+then end your turn without more tool calls. Its `waiting` result acknowledges the request; it is not a \
+new host message. The run then passes queued messages or waits for one.\n\n\
 ## Finishing\n\n\
 When the work is done, call `finish` with its result. A result outside the host's contract returns \
 typed feedback; fix it and call `finish` again. Stopping without `finish` does not finish the run.\n\n\

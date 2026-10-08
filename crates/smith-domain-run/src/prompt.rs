@@ -110,6 +110,12 @@ fn render_system(
         text.put(b"\n");
     }
     if main {
+        if charter.grants.wait {
+            text.put(b"## Waiting\n\nHost messages arrive when you end a turn without tool calls. ");
+            text.put(b"When you need the next message, call `wait`, then end your turn without more tool calls. ");
+            text.put(b"Its `waiting` result acknowledges the request; it is not a new host message. ");
+            text.put(b"The run then passes queued messages or waits for one.\n\n");
+        }
         render_finishing(text, &charter.outcome, !found.checks.is_empty());
         if let Some(spec) = &charter.grants.deliver {
             text.put(b"\n## Delivery\n\nYou may call `deliver` during the run, then continue. Its opaque fields are: ");
@@ -478,6 +484,8 @@ mod tests {
         let rendered = system(&charter, None, &Found::with_capacity(0));
         let rendered = text(&rendered);
         assert!(rendered.contains("There is no checkout."));
+        assert!(rendered.contains("call `wait`, then end your turn without more tool calls"));
+        assert!(rendered.contains("it is not a new host message"));
         assert!(rendered.contains("Report: text up to 16 bytes, with these host-required fields:\n(none)"));
         assert!(!rendered.contains("Change:") && !rendered.contains("Verdict:"));
     }

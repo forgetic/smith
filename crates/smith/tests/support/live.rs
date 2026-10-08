@@ -163,7 +163,7 @@ impl Backend {
             "agent":{"profile":"standard","memory_bytes":1099511627776_u64,"grace_ms":1000,
                 "endpoints":[{"name":self.name,"number":0,"dialect":0,"account":0,"provider":self.name,"address":format!("{host}:443"),"server_name":host,"transport":"tls","identity":identity,"headers":headers,"reasoning_effort":if self.name == "codex" { Some("low") } else { None }}],
                 "environment":[],"trace":{"path":directory.join("agent-trace.jsonl"),"capture":"calls"}},
-            "chat":"chat","instructions":"@local-shell Follow the user's requested outcome exactly. Use the tools and call finish when done.",
+            "chat":"chat","instructions":"@local-shell Begin each activation by calling wait and ending your turn to receive the queued user message. Follow the user's requested outcome exactly. Use the tools and call finish when done.",
             "models":[{"endpoint":self.name,"name":self.model,"max_tokens":4096,"input_price":0,"cached_price":0,"output_price":0,"price_unit":1}],
             "budget":{"turns":12,"spend":1,"seconds":120},"waiting_seconds":30,
             "contract":{"form":"report","max":4096},"token_directory":self.tokens,"accounts":[self.account]
