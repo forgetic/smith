@@ -8,17 +8,25 @@
 mod check;
 mod formats;
 mod models;
+mod result;
 mod suite;
 mod task;
+mod tokens;
 
 pub mod agent;
 
 pub use agent::{Agent, Configuration, PinnedConfiguration, Provider, read_configuration};
 pub use models::{ModelChoice, ModelTiers, read_model_tiers};
+pub use result::{
+    Artifact, AttemptResult, BudgetLimit, CheckVerdict, Classification, Counts, End, Exit, FailureReason, Forced,
+    Headroom, Health, Identity, Measure, ModelIdentity, Outcome, RESULT_VERSION, ResourceScope, Resources, SmithFace,
+    Spend, SpendBasis, Timing, classify_smith_exit, parse_result, read_result, render_result,
+};
 pub use suite::{
     Arm, CatalogueTask, Design, GuardSelection, Selection, Suite, SuiteAgent, catalogue, choose_guards, read_suite,
     validate_suite,
 };
+pub use tokens::{Convention, ScopeKind, TokenCounts, TokenLedger, TokenRecord, Usage};
 
 pub use check::{ManifestCounts, check_benchmark_tree, check_task, check_tree, seed_digest};
 pub use task::{

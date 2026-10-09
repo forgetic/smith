@@ -1,5 +1,13 @@
 # smith-bench
 
+Attempt results are version-one JSON documents (`src/result.rs`), with strict
+fields and explicit observed, lower-bound or unavailable measurements. The
+token ledger retains one record per conversation scope and convention,
+deduplicates response ids, and names missing scopes in partial totals. A
+missing root keeps the total unavailable. Completed answers remain completed
+when the harness forces their teardown, with a warning; budget and setup ends
+are reported beside the eligible rate counts.
+
 Real-provider benchmarks show whether a change has its intended effect.
 Offline checks run in the workspace's focused suite, without agents,
 network access or credentials. See `docs/design/benchmarks.md` for the

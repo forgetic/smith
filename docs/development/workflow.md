@@ -492,6 +492,13 @@ working-model choices are reported without guessed values. No fuzzy parser
 sweep exists yet, and the one-second focused share and suite budgets remain
 unchanged.
 
+Benchmark increment 00.3 adds version-one attempt results and scoped token
+accounting. Its idle serial `heavy` measurement on 2026-10-09 passed 39
+unit/offline tests in 0.429 seconds. Missing scopes and null usage retain
+their reasons; no agent or network runs in this tier. There is no fuzzy
+parser sweep yet. The one-second focused share and suite budgets remain
+unchanged; builds retain assertions with debug information disabled.
+
 ## 5. Opt-in live suite
 
 The `live` profile runs the shipped binary against real backends, serially,

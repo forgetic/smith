@@ -112,3 +112,15 @@ fn a_check_cannot_escape_the_workspace() {
 fn duplicate_variant_names_are_refused() {
     refuses("duplicate-variant", "variant[1].name", "unique");
 }
+
+#[test]
+fn a_recorded_attempt_round_trips_without_erasing_measurement_gaps() {
+    let file = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/recorded/results/attempt.json");
+    let result = smith_bench::read_result(&file).expect("recorded result");
+    let rendered = smith_bench::render_result(&result).expect("versioned JSON");
+    assert_eq!(smith_bench::parse_result(&file, &rendered).expect("round-trip"), result);
+    assert!(matches!(result.spend.usd, smith_bench::Measure::Unavailable { .. }));
+    assert!(matches!(result.resources.cpu_ms, smith_bench::Measure::LowerBound { .. }));
+    assert_eq!(result.outcome.end, smith_bench::End::Completed);
+    assert_eq!(result.outcome.forced, smith_bench::Forced::Killed);
+}

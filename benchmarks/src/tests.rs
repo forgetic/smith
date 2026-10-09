@@ -289,3 +289,259 @@ fn guards_are_cheapest_first_and_report_budget_and_unknown_costs() {
     assert!(chosen.omitted.contains(&("probes/overflow".into(), "cost overflow".into())));
     assert!(chosen.omitted.contains(&("probes/expensive".into(), "suite wall or token budget".into())));
 }
+
+fn codex_usage(input: u64) -> crate::Usage {
+    crate::Usage::Codex { input, cached_input: 20, output: 10 }
+}
+
+fn ledger() -> crate::TokenLedger {
+    let mut ledger = crate::TokenLedger::default();
+    ledger.declare("root", crate::ScopeKind::Root, crate::Convention::Codex, "root usage not observed").expect("root");
+    ledger
+}
+
+#[test]
+fn token_conventions_preserve_cache_and_reasoning_boundaries() {
+    use crate::{Measure, Usage};
+
+    let codex = codex_usage(100).normalise().expect("Codex mapping");
+    assert_eq!(codex.fresh, Measure::Observed { value: 80 });
+    assert_eq!(codex.cache_read, Measure::Observed { value: 20 });
+    assert_eq!(codex.output, Measure::Observed { value: 10 });
+    assert!(matches!(codex.cache_write, Measure::Unavailable { .. }));
+    assert!(matches!(codex.reasoning, Measure::Unavailable { .. }));
+    let claude =
+        Usage::ClaudeCode { input: 30, cache_read: 70, cache_write: 5, output: 9 }.normalise().expect("Claude mapping");
+    assert_eq!(claude.fresh, Measure::Observed { value: 35 });
+    assert_eq!(claude.cache_read, Measure::Observed { value: 70 });
+    assert_eq!(claude.cache_write, Measure::Observed { value: 5 });
+    assert!(matches!(claude.reasoning, Measure::Unavailable { .. }));
+    let smith = Usage::SmithEvents {
+        input: Some(30),
+        cache_read: Some(70),
+        cache_write: Some(5),
+        output: Some(9),
+        reasoning: Some(4),
+    }
+    .normalise()
+    .expect("events mapping");
+    assert_eq!(smith.fresh, Measure::Observed { value: 35 });
+    assert_eq!(smith.reasoning, Measure::Observed { value: 4 });
+    let partial =
+        Usage::SmithEvents { input: Some(30), cache_read: None, cache_write: None, output: None, reasoning: None }
+            .normalise()
+            .expect("nulls preserved");
+    assert!(matches!(partial.fresh, Measure::LowerBound { value: 30, .. }));
+    assert!(matches!(partial.output, Measure::Unavailable { .. }));
+}
+
+#[test]
+fn impossible_and_overflowing_token_records_are_errors() {
+    assert!(crate::Usage::Codex { input: 1, cached_input: 2, output: 0 }.normalise().is_err());
+    assert!(
+        crate::Usage::ClaudeCode { input: u64::MAX, cache_read: 0, cache_write: 1, output: 0 }.normalise().is_err()
+    );
+    let mut ledger = ledger();
+    ledger.record("root", "one", codex_usage(u64::MAX)).expect("first response");
+    ledger.record("root", "two", codex_usage(100)).expect("second response");
+    assert!(ledger.records().expect_err("sum must not wrap").contains("overflow"));
+}
+
+#[test]
+fn usage_counts_once_per_response_even_when_repeated_in_another_scope() {
+    let mut ledger = ledger();
+    ledger
+        .declare(
+            "child",
+            crate::ScopeKind::Child { parent: "root".into() },
+            crate::Convention::Codex,
+            "child has no own usage",
+        )
+        .expect("child");
+    assert!(ledger.record("root", "response-a", codex_usage(100)).expect("first response"));
+    assert!(!ledger.record("root", "response-a", codex_usage(100)).expect("repeat"));
+    assert!(!ledger.record("child", "response-a", codex_usage(100)).expect("inherited repeat"));
+    assert!(ledger.record("child", "response-b", codex_usage(50)).expect("own child response"));
+    assert!(
+        ledger
+            .record("root", "response-a", codex_usage(101))
+            .expect_err("conflicting duplicate")
+            .contains("conflicting")
+    );
+    let records = ledger.records().expect("scoped tokens");
+    assert_eq!(records.len(), 3);
+    assert_eq!(records.last().expect("total").usage.fresh, crate::Measure::Observed { value: 110 });
+    assert_eq!(records.last().expect("total").usage.output, crate::Measure::Observed { value: 20 });
+}
+
+#[test]
+fn token_totals_name_missing_children_and_never_substitute_for_a_missing_root() {
+    let mut ledger = ledger();
+    ledger
+        .declare(
+            "unlinked-child",
+            crate::ScopeKind::Child { parent: "root".into() },
+            crate::Convention::Codex,
+            "rollout does not link child usage",
+        )
+        .expect("missing child");
+    ledger.record("root", "root-response", codex_usage(100)).expect("root usage");
+    let records = ledger.records().expect("partial total");
+    match &records.last().expect("total").usage.fresh {
+        crate::Measure::LowerBound { value, missing } => {
+            assert_eq!(*value, 80);
+            assert!(missing.iter().any(|reason| reason.contains("unlinked-child")));
+        }
+        other @ (crate::Measure::Observed { .. } | crate::Measure::Unavailable { .. }) => {
+            panic!("missing child must remain a lower bound: {other:?}");
+        }
+    }
+    let mut missing_root = crate::TokenLedger::default();
+    missing_root
+        .declare("root", crate::ScopeKind::Root, crate::Convention::Codex, "root unavailable")
+        .expect("missing root");
+    missing_root
+        .declare("child", crate::ScopeKind::Child { parent: "root".into() }, crate::Convention::Codex, "not read")
+        .expect("child");
+    missing_root.record("child", "child-response", codex_usage(100)).expect("child usage");
+    assert!(
+        matches!(&missing_root.records().expect("total").last().expect("total").usage.fresh, crate::Measure::Unavailable { reason } if reason.contains("root"))
+    );
+}
+
+#[test]
+fn observed_totals_include_children_compactions_and_helpers_in_their_own_scopes() {
+    use crate::{Convention, Measure, ScopeKind, TokenLedger, Usage};
+
+    let mut ledger = TokenLedger::default();
+    let scopes = [
+        ("root", ScopeKind::Root),
+        ("child", ScopeKind::Child { parent: "root".into() }),
+        ("compact", ScopeKind::Compaction { parent: "root".into() }),
+        ("helper", ScopeKind::Helper { parent: "root".into(), model: "helper-model".into() }),
+    ];
+    for (id, role) in scopes {
+        ledger.declare(id, role, Convention::SmithEvents, "not observed").expect("scope");
+        ledger
+            .record(
+                id,
+                &format!("response-{id}"),
+                Usage::SmithEvents {
+                    input: Some(2),
+                    cache_read: Some(3),
+                    cache_write: Some(4),
+                    output: Some(5),
+                    reasoning: Some(0),
+                },
+            )
+            .expect("own response");
+    }
+    let records = ledger.records().expect("complete total");
+    assert_eq!(records.len(), 5);
+    let total = &records.last().expect("total").usage;
+    assert_eq!(total.fresh, Measure::Observed { value: 24 });
+    assert_eq!(total.cache_read, Measure::Observed { value: 12 });
+    assert_eq!(total.cache_write, Measure::Observed { value: 16 });
+    assert_eq!(total.output, Measure::Observed { value: 20 });
+    assert_eq!(total.reasoning, Measure::Observed { value: 0 });
+}
+
+#[test]
+fn a_null_usage_field_keeps_its_response_gap_when_later_responses_report_it() {
+    use crate::{Convention, Measure, ScopeKind, TokenLedger, Usage};
+
+    let mut ledger = TokenLedger::default();
+    ledger.declare("root", ScopeKind::Root, Convention::SmithEvents, "not observed").expect("root");
+    for (id, output) in [("missing-response", None), ("reported-response", Some(10))] {
+        ledger
+            .record(
+                "root",
+                id,
+                Usage::SmithEvents {
+                    input: Some(2),
+                    cache_read: Some(3),
+                    cache_write: Some(4),
+                    output,
+                    reasoning: None,
+                },
+            )
+            .expect("partial response");
+    }
+    let records = ledger.records().expect("partial total");
+    assert!(
+        matches!(&records.last().expect("total").usage.output, Measure::LowerBound { value: 10, missing } if missing.iter().any(|reason| reason.contains("missing-response")))
+    );
+}
+
+#[test]
+fn measurements_require_reasons_and_the_ledger_requires_a_root_and_one_convention() {
+    use crate::{Convention, Measure, ScopeKind, TokenLedger};
+
+    for text in [r#"{"state":"unavailable","reason":""}"#, r#"{"state":"lower-bound","value":1,"missing":[]}"#] {
+        assert!(serde_json::from_str::<Measure<u64>>(text).is_err());
+    }
+    assert!(TokenLedger::default().records().is_err());
+    let mut ledger = ledger();
+    assert!(ledger.declare("second-root", ScopeKind::Root, Convention::Codex, "not observed").is_err());
+    ledger
+        .declare("child", ScopeKind::Child { parent: "root".into() }, Convention::SmithEvents, "not observed")
+        .expect("scope");
+    assert!(ledger.records().expect_err("mixed conventions").contains("mix"));
+}
+
+#[test]
+fn result_readers_refuse_versions_unknown_shapes_and_trailing_documents() {
+    let file = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/recorded/results/attempt.json");
+    let text = std::fs::read_to_string(&file).expect("recorded result");
+    let mut document: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+    document["version"] = 2.into();
+    assert_eq!(crate::parse_result(&file, &document.to_string()).expect_err("another version").key, "version");
+    document["version"] = crate::RESULT_VERSION.into();
+    document["counts"]["extra"] = 1.into();
+    assert!(crate::parse_result(&file, &document.to_string()).is_err());
+    assert!(crate::parse_result(&file, &format!("{text}{{}}")).is_err());
+    let mut result = crate::read_result(&file).expect("recorded result");
+    result.spend.usd = crate::Measure::Observed { value: f64::INFINITY };
+    assert!(crate::render_result(&result).is_err());
+}
+
+#[test]
+fn smith_exit_codes_reconcile_answers_deadlines_and_own_budgets() {
+    use crate::{BudgetLimit, End, Exit, FailureReason, Forced, classify_smith_exit};
+
+    assert_eq!(classify_smith_exit(Exit::Code(0), true, Forced::No, None).end, End::Completed);
+    assert!(matches!(
+        classify_smith_exit(Exit::Code(1), false, Forced::No, None).end,
+        End::Failed { reason: FailureReason::Agent, .. }
+    ));
+    for code in [2, 3] {
+        let end = classify_smith_exit(Exit::Code(code), false, Forced::No, None).end;
+        assert!(matches!(end, End::Refused { .. }));
+        assert!(!end.counts_in_rate());
+    }
+    for which in [BudgetLimit::Turns, BudgetLimit::Time, BudgetLimit::Spend] {
+        let end = classify_smith_exit(Exit::Code(4), false, Forced::No, Some(which)).end;
+        assert_eq!(end, End::Budget { which });
+        assert!(!end.counts_in_rate());
+    }
+    assert!(matches!(
+        classify_smith_exit(Exit::Code(5), false, Forced::No, None).end,
+        End::Failed { reason: FailureReason::InputNeeded, .. }
+    ));
+    assert!(matches!(
+        classify_smith_exit(Exit::Code(130), false, Forced::No, None).end,
+        End::Failed { reason: FailureReason::Cancelled, .. }
+    ));
+    for exit in [Exit::Code(130), Exit::Signal(9)] {
+        assert_eq!(classify_smith_exit(exit, false, Forced::Killed, None).end, End::Timeout);
+        let accepted = classify_smith_exit(exit, true, Forced::Killed, None);
+        assert_eq!(accepted.end, End::Completed);
+        assert_eq!(accepted.warnings.len(), 1);
+    }
+    for (code, accepted) in [(4, false), (0, false), (77, false), (1, true)] {
+        assert!(matches!(
+            classify_smith_exit(Exit::Code(code), accepted, Forced::No, None).end,
+            End::HarnessError { .. }
+        ));
+    }
+}

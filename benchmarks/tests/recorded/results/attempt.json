@@ -1,0 +1,269 @@
+{
+  "version": 1,
+  "identity": {
+    "run": "recorded-run",
+    "attempt": "recorded-attempt",
+    "arm": "codex-standard",
+    "task": "probes/recorded",
+    "task_version": 1,
+    "seed_sha256": "452c822eb37147a50a5ddf1271245fad2f5884ded6513b8f813e81629627fb85",
+    "prompt_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "agent": "codex",
+    "agent_version": "0.160.0",
+    "binary_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "smith_face": null,
+    "configuration_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "user_configuration_sha256": {
+      "state": "unavailable",
+      "reason": "synthetic fixture has no user configuration"
+    },
+    "provider": "codex",
+    "model": {
+      "requested_model": "gpt-6-luna",
+      "requested_effort": "low",
+      "resolved_model": {
+        "state": "unavailable",
+        "reason": "not reported"
+      },
+      "resolved_effort": {
+        "state": "unavailable",
+        "reason": "not reported"
+      }
+    },
+    "harness_commit": "4444444444444444444444444444444444444444",
+    "host": "recorded-host",
+    "cpus": [
+      0
+    ],
+    "started_utc": "2026-10-09T00:00:00Z"
+  },
+  "timing": {
+    "process_wall_ms": {
+      "state": "observed",
+      "value": 40
+    },
+    "task_wall_ms": {
+      "state": "observed",
+      "value": 30
+    },
+    "teardown_ms": {
+      "state": "observed",
+      "value": 10
+    },
+    "grading_wall_ms": {
+      "state": "unavailable",
+      "reason": "no grader"
+    },
+    "first_byte_ms": {
+      "state": "unavailable",
+      "reason": "not reported"
+    },
+    "largest_gap_ms": {
+      "state": "unavailable",
+      "reason": "not reported"
+    },
+    "longest_completion_ms": {
+      "state": "unavailable",
+      "reason": "not reported"
+    },
+    "agent_t_ms": {
+      "state": "unavailable",
+      "reason": "not reported"
+    }
+  },
+  "tokens": [
+    {
+      "scope": "root",
+      "role": {
+        "kind": "root"
+      },
+      "convention": "codex",
+      "usage": {
+        "fresh": {
+          "state": "observed",
+          "value": 80
+        },
+        "cache_read": {
+          "state": "observed",
+          "value": 20
+        },
+        "cache_write": {
+          "state": "unavailable",
+          "reason": "not reported separately"
+        },
+        "output": {
+          "state": "observed",
+          "value": 10
+        },
+        "reasoning": {
+          "state": "unavailable",
+          "reason": "included in output"
+        }
+      }
+    },
+    {
+      "scope": "total",
+      "role": {
+        "kind": "total"
+      },
+      "convention": "codex",
+      "usage": {
+        "fresh": {
+          "state": "observed",
+          "value": 80
+        },
+        "cache_read": {
+          "state": "observed",
+          "value": 20
+        },
+        "cache_write": {
+          "state": "unavailable",
+          "reason": "not reported separately"
+        },
+        "output": {
+          "state": "observed",
+          "value": 10
+        },
+        "reasoning": {
+          "state": "unavailable",
+          "reason": "included in output"
+        }
+      }
+    }
+  ],
+  "counts": {
+    "responses": {
+      "state": "observed",
+      "value": 1
+    },
+    "provider_attempts": {
+      "state": "unavailable",
+      "reason": "not reported"
+    },
+    "retries": {
+      "state": "unavailable",
+      "reason": "not reported"
+    },
+    "completions": {
+      "state": "observed",
+      "value": 1
+    },
+    "tool_calls": {
+      "command_execution": {
+        "state": "observed",
+        "value": 1
+      }
+    },
+    "tool_failures": {},
+    "children": {
+      "state": "unavailable",
+      "reason": "rollouts not collected"
+    },
+    "conversations": {
+      "state": "unavailable",
+      "reason": "rollouts not collected"
+    },
+    "compactions": {
+      "state": "unavailable",
+      "reason": "not reported"
+    },
+    "message_terminals": {}
+  },
+  "resources": {
+    "cpu_scope": "pidfd-walk",
+    "cpu_ms": {
+      "state": "lower-bound",
+      "value": 5,
+      "missing": [
+        "unreaped process accounting"
+      ]
+    },
+    "peak_memory_scope": "pidfd-walk",
+    "peak_rss_bytes": {
+      "state": "observed",
+      "value": 4096
+    }
+  },
+  "spend": {
+    "basis": "reported",
+    "usd": {
+      "state": "unavailable",
+      "reason": "not reported"
+    }
+  },
+  "outcome": {
+    "end": {
+      "end": "completed"
+    },
+    "exit": {
+      "state": "observed",
+      "value": {
+        "kind": "signal",
+        "value": 9
+      }
+    },
+    "forced": "killed",
+    "warnings": [
+      "forced teardown after accepted answer"
+    ],
+    "checks": [
+      {
+        "check": "file-content",
+        "passed": {
+          "state": "observed",
+          "value": true
+        },
+        "evidence": [
+          "workspace/answer.txt"
+        ]
+      }
+    ],
+    "protected_files_changed": {
+      "state": "observed",
+      "value": []
+    },
+    "writes_outside_workspace": {
+      "state": "unavailable",
+      "reason": "calls not fully observed"
+    },
+    "grade": {
+      "state": "unavailable",
+      "reason": "probe has no grader"
+    }
+  },
+  "health": {
+    "loss_per_sink": {
+      "trace": {
+        "state": "unavailable",
+        "reason": "not available on this adapter"
+      }
+    },
+    "headroom": {
+      "memory": {
+        "fraction_used": {
+          "state": "observed",
+          "value": 0.25
+        },
+        "warning": false
+      }
+    },
+    "passive_checks": [
+      {
+        "check": "tree-ended",
+        "passed": {
+          "state": "observed",
+          "value": true
+        },
+        "evidence": [
+          "tree settlement"
+        ]
+      }
+    ]
+  },
+  "artifacts": [
+    {
+      "path": "output.jsonl",
+      "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+    }
+  ]
+}
