@@ -2,8 +2,9 @@
 //! exactly-once ledgers (testing-strategy.md, sections 3 and 6; domain/host.md, 10).
 use skein_lib::{Duration, Rng, Token};
 use smith_host_domain::{
-    Answer, Ask, CallName, Delivery, Effect, Event, Fault, ModelFault, Reply, RunFailure, RunResult, Up,
+    Answer, Ask, CallName, Delivery, Effect, Fault, Input, ModelFault, Reply, RunFailure, RunResult, Up,
 };
+use smith_host_domain::{parent, process};
 use smith_host_world::{World, limits, start};
 use std::collections::BTreeSet;
 
@@ -18,7 +19,7 @@ fn random_worlds_settle_and_reach_every_ending() {
         let mut world = World::new(seed, bounds);
         world.spawn(start());
         if fate == 0 {
-            world.event(Event::Unspawned { owner: world.owner(), detail: Box::new([]) });
+            world.event(Input::Process(process::Event::Unspawned { owner: world.owner(), detail: Box::new([]) }));
         } else {
             world.spawned();
             world.sent();
@@ -48,7 +49,7 @@ fn random_worlds_settle_and_reach_every_ending() {
                     2 => last(&mut world, RunResult::Accepted { outcome: Box::new([]) }, 2),
                     3 => last(&mut world, RunResult::Parked, 3),
                     4 => last(&mut world, RunResult::Failed { failure: RunFailure::Model(ModelFault::Provider) }, 4),
-                    5 => world.event(Event::Malformed { owner: world.owner() }),
+                    5 => world.event(Input::Process(process::Event::Malformed { owner: world.owner() })),
                     6 => {
                         world.at(5);
                         world.at(15);
@@ -62,13 +63,13 @@ fn random_worlds_settle_and_reach_every_ending() {
                         assert_eq!(world.seen.fault, Some(Fault::WallTime));
                     }
                     8 => {
-                        world.event(Event::Stop { agent: world.agent() });
+                        world.event(Input::Parent(parent::Event::Stop { agent: world.agent() }));
                         world.sent();
                         last(&mut world, RunResult::Failed { failure: RunFailure::Cancelled }, 8);
                     }
-                    9 => world.event(Event::Hangup { owner: world.owner() }),
+                    9 => world.event(Input::Process(process::Event::Hangup { owner: world.owner() })),
                     10 => {
-                        world.event(Event::Exited { owner: world.owner() });
+                        world.event(Input::Process(process::Event::Exited { owner: world.owner() }));
                         last(&mut world, RunResult::Parked, 10);
                     }
                     0 | 1 => unreachable!("handled pre-admission"),
@@ -124,5 +125,5 @@ fn settle_parent_call(world: &mut World, seed: u64, fate: u64) {
     } else {
         Reply::Unavailable
     };
-    world.event(Event::Answer { agent: world.agent(), call: Token::new(20), reply });
+    world.event(Input::Parent(parent::Event::Answer { agent: world.agent(), call: Token::new(20), reply }));
 }

@@ -76,8 +76,8 @@ pub struct HostService {
     domain_owner: Option<Token>,
     process_limits: protocol::Limits,
     root: kernel::Fd,
-    domain_events: Queue<host::Event>,
-    domain_requests: Queue<host::Request>,
+    domain_events: Queue<host::Input>,
+    domain_requests: Queue<host::Output>,
     process_events: Queue<protocol::ProcessEvent>,
     io_events: Queue<io::Event>,
     io_requests: Queue<io::Request>,
@@ -173,7 +173,9 @@ impl HostService {
             crash_requested: false,
             crashed: false,
         };
-        service.domain_events.push(host::Event::Spawn { client: Token::new(1), start: start() });
+        service
+            .domain_events
+            .push(host::Input::Parent(host::parent::Event::Spawn { client: Token::new(1), start: start() }));
         service
     }
 
@@ -260,21 +262,21 @@ impl HostService {
     fn route_process(&mut self, event: protocol::ProcessEvent) {
         match event {
             protocol::ProcessEvent::Spawned { agent, process } => {
-                self.domain_events.push(host::Event::Spawned { owner: agent, process });
+                self.domain_events.push(host::Input::Process(host::process::Event::Spawned { owner: agent, process }));
             }
             protocol::ProcessEvent::Unspawned { agent, detail } => {
                 self.observations.push(Observation::Unspawned);
-                self.domain_events.push(host::Event::Unspawned { owner: agent, detail });
+                self.domain_events.push(host::Input::Process(host::process::Event::Unspawned { owner: agent, detail }));
             }
             protocol::ProcessEvent::Exited { agent } => {
                 self.observations.push(Observation::Exited);
                 self.seen.exits = self.seen.exits.checked_add(1).expect("bounded observed exits");
-                self.domain_events.push(host::Event::Exited { owner: agent });
+                self.domain_events.push(host::Input::Process(host::process::Event::Exited { owner: agent }));
             }
             protocol::ProcessEvent::Reaped { agent, detail } => {
                 self.observations.push(Observation::Reaped);
                 self.seen.reaps = self.seen.reaps.checked_add(1).expect("bounded observed reaps");
-                self.domain_events.push(host::Event::Reaped { owner: agent, detail });
+                self.domain_events.push(host::Input::Process(host::process::Event::Reaped { owner: agent, detail }));
             }
             protocol::ProcessEvent::Channel { agent, event } => {
                 self.route_channel(agent, event);
@@ -285,43 +287,62 @@ impl HostService {
     fn route_channel(&mut self, agent: Token, event: protocol::OpenEvent) {
         use protocol::OpenEvent;
         let event = match event {
-            OpenEvent::MessageRefused { name, reason } => {
-                host::Event::Received { owner: agent, message: host::Up::MessageRefused { name, reason } }
-            }
+            OpenEvent::MessageRefused { name, reason } => host::Input::Process(host::process::Event::Received {
+                owner: agent,
+                message: host::Up::MessageRefused { name, reason },
+            }),
             // Opened is transport-only. A failed write already settles its
             // send via Unsent; the independent read still owns Hangup.
             OpenEvent::Opened { .. } | OpenEvent::WriteFailed => return,
-            OpenEvent::Hangup { .. } => host::Event::Hangup { owner: agent },
-            OpenEvent::Sent { .. } => host::Event::Sent { owner: agent },
-            OpenEvent::Unsent { .. } => host::Event::Unsent { owner: agent },
-            OpenEvent::Answer { answer, .. } => {
-                host::Event::Received { owner: agent, message: host::Up::Answer { answer } }
+            OpenEvent::Hangup { .. } => host::Input::Process(host::process::Event::Hangup { owner: agent }),
+            OpenEvent::Sent { .. } => host::Input::Process(host::process::Event::Sent { owner: agent }),
+            OpenEvent::Unsent { .. } => host::Input::Process(host::process::Event::Unsent { owner: agent }),
+            OpenEvent::Answer { answer, .. } => host::Input::Process(host::process::Event::Received {
+                owner: agent,
+                message: host::Up::Answer { answer },
+            }),
+            OpenEvent::Admitted => {
+                host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Admitted })
             }
-            OpenEvent::Admitted => host::Event::Received { owner: agent, message: host::Up::Admitted },
-            OpenEvent::Waiting { read } => host::Event::Received { owner: agent, message: host::Up::Waiting { read } },
-            OpenEvent::Long { span } => host::Event::Received { owner: agent, message: host::Up::Long { span } },
-            OpenEvent::LongDone => host::Event::Received { owner: agent, message: host::Up::LongDone },
-            OpenEvent::Turn { turn } => host::Event::Received { owner: agent, message: host::Up::Turn { turn } },
-            OpenEvent::Fact { body } => host::Event::Received { owner: agent, message: host::Up::Fact { body } },
-            OpenEvent::Rejected { account, generation } => {
-                host::Event::Received { owner: agent, message: host::Up::Rejected { account, generation } }
+            OpenEvent::Waiting { read } => host::Input::Process(host::process::Event::Received {
+                owner: agent,
+                message: host::Up::Waiting { read },
+            }),
+            OpenEvent::Long { span } => {
+                host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Long { span } })
             }
-            OpenEvent::Exhausted { account, retry_after } => {
-                host::Event::Received { owner: agent, message: host::Up::Exhausted { account, retry_after } }
+            OpenEvent::LongDone => {
+                host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::LongDone })
             }
-            OpenEvent::Call { call, name, deadline, ask } => {
-                host::Event::Received { owner: agent, message: host::Up::Call { call, name, deadline, ask } }
+            OpenEvent::Turn { turn } => {
+                host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Turn { turn } })
             }
-            OpenEvent::Withdraw { call } => {
-                host::Event::Received { owner: agent, message: host::Up::Withdraw { call } }
+            OpenEvent::Fact { body } => {
+                host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Fact { body } })
             }
+            OpenEvent::Rejected { account, generation } => host::Input::Process(host::process::Event::Received {
+                owner: agent,
+                message: host::Up::Rejected { account, generation },
+            }),
+            OpenEvent::Exhausted { account, retry_after } => host::Input::Process(host::process::Event::Received {
+                owner: agent,
+                message: host::Up::Exhausted { account, retry_after },
+            }),
+            OpenEvent::Call { call, name, deadline, ask } => host::Input::Process(host::process::Event::Received {
+                owner: agent,
+                message: host::Up::Call { call, name, deadline, ask },
+            }),
+            OpenEvent::Withdraw { call } => host::Input::Process(host::process::Event::Received {
+                owner: agent,
+                message: host::Up::Withdraw { call },
+            }),
         };
         self.domain_events.push(event);
     }
 
-    fn route_domain(&mut self, request: host::Request) {
+    fn route_domain(&mut self, request: host::Output) {
         match request {
-            host::Request::Spawn { owner, deadline, .. } => {
+            host::Output::Process(host::process::Request::Spawn { owner, deadline, .. }) => {
                 self.domain_owner = Some(owner);
                 let mut process =
                     protocol::Process::new(owner, &self.process_limits, self.domain_env.limits.detail_bytes)
@@ -339,53 +360,63 @@ impl HostService {
                 );
                 self.process = Some(process);
             }
-            host::Request::Started { .. } => {
+            host::Output::Parent(host::parent::Request::Started { .. }) => {
                 self.seen.started = true;
                 self.observations.push(Observation::Started);
             }
-            host::Request::Admitted { .. } => self.seen.admitted = true,
-            host::Request::Answered { answer, .. } => {
+            host::Output::Parent(host::parent::Request::Admitted { .. }) => self.seen.admitted = true,
+            host::Output::Parent(host::parent::Request::Answered { answer, .. }) => {
                 self.seen.answered = Some(answer);
                 self.observations.push(Observation::Answered);
             }
-            host::Request::Gone { end, detail, .. } => {
+            host::Output::Parent(host::parent::Request::Gone { end, detail, .. }) => {
                 self.seen.gone = Some(end);
                 self.seen.detail = Some(detail);
                 self.observations.push(Observation::Gone);
             }
-            host::Request::Turn { turn, .. } => {
+            host::Output::Parent(host::parent::Request::Turn { turn, .. }) => {
                 self.seen.turns = self.seen.turns.checked_add(1).expect("bounded observed turns");
-                self.domain_events.push(host::Event::Acknowledge { agent: self.agent_owner(), turn: turn.number });
+                self.domain_events.push(host::Input::Parent(host::parent::Event::Acknowledge {
+                    agent: self.agent_owner(),
+                    turn: turn.number,
+                }));
             }
-            host::Request::Called { call, .. } => {
+            host::Output::Parent(host::parent::Request::Called { call, .. }) => {
                 self.seen.calls = self.seen.calls.checked_add(1).expect("bounded observed calls");
                 self.observations.push(Observation::Called(call));
-                self.domain_events.push(host::Event::Answer {
+                self.domain_events.push(host::Input::Parent(host::parent::Event::Answer {
                     agent: self.agent_owner(),
                     call,
                     reply: host::Reply::Unavailable,
-                });
+                }));
             }
-            host::Request::Send { message, .. } => self.send(message),
-            host::Request::Signal { signal, .. } => {
+            host::Output::Process(host::process::Request::Send { message, .. }) => self.send(message),
+            host::Output::Process(host::process::Request::Signal { signal, .. }) => {
                 self.seen.signals.push(signal);
                 let signal_below = match signal {
                     host::Signal::Terminate => kernel::Signal::Terminate,
                     host::Signal::Kill => kernel::Signal::Kill,
                 };
                 self.process.as_ref().expect("spawned child").signal(signal_below, &mut self.io_requests);
-                self.domain_events.push(host::Event::Signalled { owner: self.agent_owner() });
+                self.domain_events
+                    .push(host::Input::Process(host::process::Event::Signalled { owner: self.agent_owner() }));
             }
-            host::Request::Read { .. }
-            | host::Request::Wait { .. }
-            | host::Request::Reap { .. }
-            | host::Request::Waiting { .. }
-            | host::Request::Withdrawn { .. }
-            | host::Request::Rejected { .. }
-            | host::Request::Exhausted { .. }
-            | host::Request::Told { .. }
-            | host::Request::Faulted { .. }
-            | host::Request::MessageRefused { .. } => {}
+            host::Output::Process(
+                host::process::Request::Read { .. }
+                | host::process::Request::Wait { .. }
+                | host::process::Request::Reap { .. },
+            )
+            | host::Output::Parent(
+                host::parent::Request::Waiting { .. }
+                | host::parent::Request::Long { .. }
+                | host::parent::Request::LongDone { .. }
+                | host::parent::Request::Withdrawn { .. }
+                | host::parent::Request::Rejected { .. }
+                | host::parent::Request::Exhausted { .. }
+                | host::parent::Request::Told { .. }
+                | host::parent::Request::Faulted { .. }
+                | host::parent::Request::MessageRefused { .. },
+            ) => {}
         }
     }
 
@@ -428,7 +459,7 @@ impl HostService {
             host::Down::Cancel => process.send_cancel(token, &mut self.process_events, &mut self.io_requests),
         };
         if sent.is_err() {
-            self.domain_events.push(host::Event::Unsent { owner: self.agent_owner() });
+            self.domain_events.push(host::Input::Process(host::process::Event::Unsent { owner: self.agent_owner() }));
         } else if let Some(call) = answering {
             self.observations.push(Observation::CallAnswered(call));
         }
@@ -469,7 +500,7 @@ impl HostService {
 
     /// The sample parent requests a run stop through the host domain.
     pub fn stop(&mut self) {
-        self.domain_events.push(host::Event::Stop { agent: self.agent_owner() });
+        self.domain_events.push(host::Input::Parent(host::parent::Event::Stop { agent: self.agent_owner() }));
     }
 
     pub fn submissions(&mut self) -> &mut Queue<kernel::Submit> {

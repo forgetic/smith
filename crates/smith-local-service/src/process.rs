@@ -524,7 +524,7 @@ impl ProcessAdapter {
         &mut self,
         now: Time,
         wall: Wall,
-        host_events: &mut Queue<host::Event>,
+        host_events: &mut Queue<host::Input>,
         terminal: &mut local_protocol::Terminal,
         terminal_events: &mut Queue<local_protocol::TerminalEvent>,
         local_events: &mut Queue<smith_local_domain::Event>,
@@ -632,10 +632,10 @@ impl ProcessAdapter {
         &mut self,
         now: Time,
         wall: Wall,
-        requests: &mut Queue<host::Request>,
+        requests: &mut Queue<host::process::Request>,
         start_values: &mut Option<StartValues>,
         grant_values: &Map<u32, Box<[u8]>>,
-        host_events: &mut Queue<host::Event>,
+        host_events: &mut Queue<host::Input>,
     ) {
         for _ in 0..requests.capacity() {
             if !self.output_room() || host_events.room() == 0 {
@@ -742,23 +742,26 @@ impl ProcessAdapter {
 
     fn request(
         &mut self,
-        request: host::Request,
+        request: host::process::Request,
         start_values: &mut Option<StartValues>,
         grant_values: &Map<u32, Box<[u8]>>,
-        host_events: &mut Queue<host::Event>,
+        host_events: &mut Queue<host::Input>,
     ) {
         match request {
-            host::Request::Spawn { owner, deadline, .. } => {
+            host::process::Request::Spawn { owner, deadline, .. } => {
                 let Ok(mut process) = protocol::Process::new(owner, &self.limits.channel, self.limits.detail_bytes)
                 else {
                     self.failed = true;
-                    host_events.push(host::Event::Unspawned { owner, detail: Box::from(&b"invalid channel"[..]) });
+                    host_events.push(host::Input::Process(host::process::Event::Unspawned {
+                        owner,
+                        detail: Box::from(&b"invalid channel"[..]),
+                    }));
                     return;
                 };
                 process.spawn(self.launch.for_spawn(), deadline, &mut self.io_requests);
                 self.process = Some(process);
             }
-            host::Request::Send { owner, message, .. } => {
+            host::process::Request::Send { owner, message, .. } => {
                 let send_token = Token::new(self.send);
                 self.send = self.send.checked_add(1).expect("bounded send tokens");
                 let process = self.process.as_mut().expect("Spawn precedes Send");
@@ -804,75 +807,88 @@ impl ProcessAdapter {
                 };
                 if sent.is_err() {
                     self.failed = true;
-                    host_events.push(host::Event::Unsent { owner });
+                    host_events.push(host::Input::Process(host::process::Event::Unsent { owner }));
                 }
             }
-            host::Request::Signal { owner, signal, .. } => {
+            host::process::Request::Signal { owner, signal, .. } => {
                 let signal = match signal {
                     host::Signal::Terminate => kernel::Signal::Terminate,
                     host::Signal::Kill => kernel::Signal::Kill,
                 };
                 self.process.as_ref().expect("spawned child").signal(signal, &mut self.io_requests);
-                host_events.push(host::Event::Signalled { owner });
+                host_events.push(host::Input::Process(host::process::Event::Signalled { owner }));
             }
-            host::Request::Read { .. } | host::Request::Wait { .. } | host::Request::Reap { .. } => {}
-            host::Request::Started { .. }
-            | host::Request::Admitted { .. }
-            | host::Request::Called { .. }
-            | host::Request::Withdrawn { .. }
-            | host::Request::Turn { .. }
-            | host::Request::Waiting { .. }
-            | host::Request::Rejected { .. }
-            | host::Request::Exhausted { .. }
-            | host::Request::Told { .. }
-            | host::Request::Answered { .. }
-            | host::Request::Faulted { .. }
-            | host::Request::MessageRefused { .. }
-            | host::Request::Gone { .. } => unreachable!("parent notice cannot reach lower process adapter"),
+            host::process::Request::Read { .. }
+            | host::process::Request::Wait { .. }
+            | host::process::Request::Reap { .. } => {}
         }
     }
 }
 
-fn to_host_event(event: protocol::ProcessEvent) -> host::Event {
+fn to_host_event(event: protocol::ProcessEvent) -> host::Input {
     match event {
-        protocol::ProcessEvent::Spawned { agent, process } => host::Event::Spawned { owner: agent, process },
-        protocol::ProcessEvent::Unspawned { agent, detail } => host::Event::Unspawned { owner: agent, detail },
-        protocol::ProcessEvent::Exited { agent } => host::Event::Exited { owner: agent },
-        protocol::ProcessEvent::Reaped { agent, detail } => host::Event::Reaped { owner: agent, detail },
+        protocol::ProcessEvent::Spawned { agent, process } => {
+            host::Input::Process(host::process::Event::Spawned { owner: agent, process })
+        }
+        protocol::ProcessEvent::Unspawned { agent, detail } => {
+            host::Input::Process(host::process::Event::Unspawned { owner: agent, detail })
+        }
+        protocol::ProcessEvent::Exited { agent } => host::Input::Process(host::process::Event::Exited { owner: agent }),
+        protocol::ProcessEvent::Reaped { agent, detail } => {
+            host::Input::Process(host::process::Event::Reaped { owner: agent, detail })
+        }
         protocol::ProcessEvent::Channel { agent, event } => channel_event(agent, event),
     }
 }
 
-fn channel_event(agent: Token, event: protocol::OpenEvent) -> host::Event {
+fn channel_event(agent: Token, event: protocol::OpenEvent) -> host::Input {
     use protocol::OpenEvent;
     match event {
         OpenEvent::Opened { .. } => unreachable!("opened is emitted as Spawned"),
-        OpenEvent::Hangup { .. } => host::Event::Hangup { owner: agent },
-        OpenEvent::Sent { .. } => host::Event::Sent { owner: agent },
-        OpenEvent::Unsent { .. } => host::Event::Unsent { owner: agent },
+        OpenEvent::Hangup { .. } => host::Input::Process(host::process::Event::Hangup { owner: agent }),
+        OpenEvent::Sent { .. } => host::Input::Process(host::process::Event::Sent { owner: agent }),
+        OpenEvent::Unsent { .. } => host::Input::Process(host::process::Event::Unsent { owner: agent }),
         OpenEvent::Answer { answer, .. } => {
-            host::Event::Received { owner: agent, message: host::Up::Answer { answer } }
+            host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Answer { answer } })
         }
-        OpenEvent::MessageRefused { name, reason } => {
-            host::Event::Received { owner: agent, message: host::Up::MessageRefused { name, reason } }
+        OpenEvent::MessageRefused { name, reason } => host::Input::Process(host::process::Event::Received {
+            owner: agent,
+            message: host::Up::MessageRefused { name, reason },
+        }),
+        OpenEvent::Admitted => {
+            host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Admitted })
         }
-        OpenEvent::Admitted => host::Event::Received { owner: agent, message: host::Up::Admitted },
-        OpenEvent::Waiting { read } => host::Event::Received { owner: agent, message: host::Up::Waiting { read } },
-        OpenEvent::Long { span } => host::Event::Received { owner: agent, message: host::Up::Long { span } },
-        OpenEvent::LongDone => host::Event::Received { owner: agent, message: host::Up::LongDone },
-        OpenEvent::Turn { turn } => host::Event::Received { owner: agent, message: host::Up::Turn { turn } },
-        OpenEvent::Fact { body } => host::Event::Received { owner: agent, message: host::Up::Fact { body } },
-        OpenEvent::Rejected { account, generation } => {
-            host::Event::Received { owner: agent, message: host::Up::Rejected { account, generation } }
+        OpenEvent::Waiting { read } => {
+            host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Waiting { read } })
         }
-        OpenEvent::Exhausted { account, retry_after } => {
-            host::Event::Received { owner: agent, message: host::Up::Exhausted { account, retry_after } }
+        OpenEvent::Long { span } => {
+            host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Long { span } })
         }
-        OpenEvent::WriteFailed => host::Event::Malformed { owner: agent },
-        OpenEvent::Call { call, name, deadline, ask } => {
-            host::Event::Received { owner: agent, message: host::Up::Call { call, name, deadline, ask } }
+        OpenEvent::LongDone => {
+            host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::LongDone })
         }
-        OpenEvent::Withdraw { call } => host::Event::Received { owner: agent, message: host::Up::Withdraw { call } },
+        OpenEvent::Turn { turn } => {
+            host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Turn { turn } })
+        }
+        OpenEvent::Fact { body } => {
+            host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Fact { body } })
+        }
+        OpenEvent::Rejected { account, generation } => host::Input::Process(host::process::Event::Received {
+            owner: agent,
+            message: host::Up::Rejected { account, generation },
+        }),
+        OpenEvent::Exhausted { account, retry_after } => host::Input::Process(host::process::Event::Received {
+            owner: agent,
+            message: host::Up::Exhausted { account, retry_after },
+        }),
+        OpenEvent::WriteFailed => host::Input::Process(host::process::Event::Malformed { owner: agent }),
+        OpenEvent::Call { call, name, deadline, ask } => host::Input::Process(host::process::Event::Received {
+            owner: agent,
+            message: host::Up::Call { call, name, deadline, ask },
+        }),
+        OpenEvent::Withdraw { call } => {
+            host::Input::Process(host::process::Event::Received { owner: agent, message: host::Up::Withdraw { call } })
+        }
     }
 }
 

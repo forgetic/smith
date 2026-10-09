@@ -167,7 +167,7 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
             }
         }
     }
-    host_world.event(host::Event::Stop { agent: host_world.agent() });
+    host_world.event(host::Input::Parent(host::parent::Event::Stop { agent: host_world.agent() }));
     let down = host_world.seen.down.pop().expect("host domain cancelled live run");
     assert_eq!(down, Down::Cancel);
     wire.host_cancels();

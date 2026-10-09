@@ -2,9 +2,10 @@
 //! observations (domain/host.md, section 10; testing-strategy.md, sections 2.2, 6).
 use skein_lib::{Duration, Time, Token};
 use smith_host_domain::{
-    Answer, Ask, CallName, Delivered, Delivery, Down, Effect, End, Event, Fault, Grant, Invalid, MessageRefusal,
+    Answer, Ask, CallName, Delivered, Delivery, Down, Effect, End, Fault, Grant, Input, Invalid, MessageRefusal,
     ModelFault, Receipt, Reply, RunFailure, RunResult, Signal, Turn, Up,
 };
+use smith_host_domain::{parent, process};
 use smith_host_world::{Lower, World, limits, start};
 
 fn call(world: &mut World, callback: u64, completion: u32, delivery: bool, deadline: u64) {
@@ -34,7 +35,11 @@ fn call_from_a_different_activation_is_a_channel_rule_fault() {
     faulted(&mut world, Fault::Rules);
 }
 fn reply(world: &mut World, callback: u64, response: Reply) {
-    world.event(Event::Answer { agent: world.agent(), call: Token::new(callback), reply: response });
+    world.event(Input::Parent(parent::Event::Answer {
+        agent: world.agent(),
+        call: Token::new(callback),
+        reply: response,
+    }));
 }
 fn last(world: &mut World, result: RunResult, turns: u32, spent: u64) {
     world.up(Up::Answer { answer: Answer { turns, spent, result } });
@@ -56,18 +61,18 @@ fn turn(world: &mut World, number: u32, spent: u64, read: Option<Token>, bytes: 
     world.up(Up::Turn { turn: Turn { number, spent, read, body: vec![b't'; bytes].into_boxed_slice() } });
 }
 fn message(world: &mut World, name: u64, bytes: usize) {
-    world.event(Event::Message {
+    world.event(Input::Parent(parent::Event::Message {
         agent: world.agent(),
         name: Token::new(name),
         label: Box::new([]),
         text: vec![b'm'; bytes].into_boxed_slice(),
-    });
+    }));
 }
 fn grant(world: &mut World, generation: u64) {
-    world.event(Event::Grant {
+    world.event(Input::Parent(parent::Event::Grant {
         agent: world.agent(),
         grant: Grant { account: 1, generation, valid: Duration::from_secs(60) },
-    });
+    }));
 }
 fn count_answers(world: &World, wanted: Token) -> usize {
     world
@@ -92,12 +97,12 @@ fn process_started_precedes_agent_admitted_and_start_is_first() {
     assert!(world.seen.agent.is_none());
     assert!(!world.seen.admitted);
     // A guessed lower token before Started is not a legitimate parent handle.
-    world.event(Event::Message {
+    world.event(Input::Parent(parent::Event::Message {
         agent: world.owner(),
         name: Token::new(2),
         label: Box::new([]),
         text: Box::from(&b"early"[..]),
-    });
+    }));
     assert_eq!(world.seen.bounces, [MessageRefusal::Ending]);
     world.spawned();
     assert!(!world.seen.admitted);
@@ -183,7 +188,10 @@ fn admission_refusals_preserve_separate_process_rights() {
     world.settled();
     let mut world = World::new(10, limits());
     world.spawn(start());
-    world.event(Event::Unspawned { owner: world.owner(), detail: (0..100u8).collect::<Vec<u8>>().into_boxed_slice() });
+    world.event(Input::Process(process::Event::Unspawned {
+        owner: world.owner(),
+        detail: (0..100u8).collect::<Vec<u8>>().into_boxed_slice(),
+    }));
     assert_eq!(world.seen.gone, Some(End::Unspawned));
     assert_eq!(world.seen.gone_detail.as_deref(), Some((68..100).collect::<Vec<u8>>().as_slice()));
     world.settled();
@@ -374,16 +382,16 @@ fn payloads_beyond_the_limits_break_the_rules() {
 fn malformed_hangup_and_unsent_have_lower_terminals() {
     let mut world = World::new(21, limits());
     world.live();
-    world.event(Event::Malformed { owner: world.owner() });
+    world.event(Input::Process(process::Event::Malformed { owner: world.owner() }));
     faulted(&mut world, Fault::Rules);
     let mut world = World::new(22, limits());
     world.live();
-    world.event(Event::Hangup { owner: world.owner() });
+    world.event(Input::Process(process::Event::Hangup { owner: world.owner() }));
     faulted(&mut world, Fault::Exited);
     let mut world = World::new(23, limits());
     world.live();
     message(&mut world, 30, 1);
-    world.event(Event::Unsent { owner: world.owner() });
+    world.event(Input::Process(process::Event::Unsent { owner: world.owner() }));
     assert_eq!(world.seen.fault, None);
     world.cleanup();
     world.settled();
@@ -423,24 +431,24 @@ fn inbound_messages_are_ordered_bounded_and_named_opaquely() {
 fn a_message_sends_its_label_and_text_to_the_agent_as_given() {
     let mut world = World::new(242, limits());
     world.live();
-    world.event(Event::Message {
+    world.event(Input::Parent(parent::Event::Message {
         agent: world.agent(),
         name: Token::new(34),
         label: b"reviewer".as_slice().into(),
         text: b"ready to proceed".as_slice().into(),
-    });
+    }));
     let Some(Down::Message { name, label, text }) = world.seen.down.last() else {
         panic!("the host sends the accepted message");
     };
     assert_eq!(*name, Token::new(34));
     assert_eq!(label.as_ref(), b"reviewer");
     assert_eq!(text.as_ref(), b"ready to proceed");
-    world.event(Event::Message {
+    world.event(Input::Parent(parent::Event::Message {
         agent: world.agent(),
         name: Token::new(35),
         label: b"x".as_slice().into(),
         text: vec![b'm'; 64].into_boxed_slice(),
-    });
+    }));
     assert_eq!(world.seen.bounces, [MessageRefusal::TooLarge], "label and text share the message byte cap");
     world.sent();
     finish(&mut world);
@@ -479,7 +487,7 @@ fn read_watermarks_cover_only_sent_names_and_release_exact_prefix() {
     assert_eq!(world.seen.bounces, [MessageRefusal::Full]);
     world.sent();
     world.sent();
-    world.event(Event::Acknowledge { agent: world.agent(), turn: 1 });
+    world.event(Input::Parent(parent::Event::Acknowledge { agent: world.agent(), turn: 1 }));
     world.sent();
     last(&mut world, RunResult::Parked, 1, 2);
     world.cleanup();
@@ -534,16 +542,16 @@ fn exact_ack_metadata_preserves_parent_payloads_and_shutdown_rights() {
     assert!(!world.lower.contains(Lower::Read));
     world.at(40);
     assert_eq!(world.seen.fault, None);
-    world.event(Event::Acknowledge { agent: world.agent(), turn: 2 });
+    world.event(Input::Parent(parent::Event::Acknowledge { agent: world.agent(), turn: 2 }));
     assert!(world.seen.turns.contains_key(&1));
     assert!(!world.lower.contains(Lower::Read), "ACK metadata still reserved during its Send");
     world.sent();
     assert!(world.lower.contains(Lower::Read));
-    world.event(Event::Acknowledge { agent: world.agent(), turn: 2 });
+    world.event(Input::Parent(parent::Event::Acknowledge { agent: world.agent(), turn: 2 }));
     last(&mut world, RunResult::Parked, 2, 2);
     world.cleanup();
     assert_eq!(world.seen.gone, None);
-    world.event(Event::Acknowledge { agent: world.agent(), turn: 1 });
+    world.event(Input::Parent(parent::Event::Acknowledge { agent: world.agent(), turn: 1 }));
     world.settled();
 }
 
@@ -561,7 +569,7 @@ fn turn_numbers_spend_and_answer_counts_are_fenced() {
             _ => unreachable!(),
         }
         assert_eq!(world.seen.fault, Some(Fault::Rules));
-        world.event(Event::Acknowledge { agent: world.agent(), turn: 1 });
+        world.event(Input::Parent(parent::Event::Acknowledge { agent: world.agent(), turn: 1 }));
         world.cleanup();
         world.settled();
     }
@@ -570,7 +578,7 @@ fn turn_numbers_spend_and_answer_counts_are_fenced() {
     turn(&mut world, 1, 10, None, 1);
     last(&mut world, RunResult::Parked, 1, 9);
     assert_eq!(world.seen.fault, Some(Fault::Rules));
-    world.event(Event::Acknowledge { agent: world.agent(), turn: 1 });
+    world.event(Input::Parent(parent::Event::Acknowledge { agent: world.agent(), turn: 1 }));
     world.cleanup();
     world.settled();
 }
@@ -710,10 +718,10 @@ fn wall_clock_never_pauses_and_cancelled_spend_is_preserved() {
 fn explicit_stop_cancels_once_and_does_not_restart_grace() {
     let mut world = World::new(42, limits());
     world.live();
-    world.event(Event::Stop { agent: world.agent() });
+    world.event(Input::Parent(parent::Event::Stop { agent: world.agent() }));
     world.sent();
     world.at(4);
-    world.event(Event::Stop { agent: world.agent() });
+    world.event(Input::Parent(parent::Event::Stop { agent: world.agent() }));
     world.at(5);
     assert_eq!(world.seen.signals, [Signal::Terminate]);
     world.at(7);
@@ -733,7 +741,7 @@ fn stop_and_answer_during_wall_or_draining_preserve_original_shutdown_deadline()
     world.up(Up::Waiting { read: None });
     world.at(20);
     world.sent();
-    world.event(Event::Stop { agent: world.agent() });
+    world.event(Input::Parent(parent::Event::Stop { agent: world.agent() }));
     world.at(24);
     last(&mut world, RunResult::Failed { failure: RunFailure::Cancelled }, 0, 0);
     world.at(25);
@@ -742,8 +750,8 @@ fn stop_and_answer_during_wall_or_draining_preserve_original_shutdown_deadline()
     world.settled();
     let mut world = World::new(44, limits());
     world.live();
-    world.event(Event::Exited { owner: world.owner() });
-    world.event(Event::Stop { agent: world.agent() });
+    world.event(Input::Process(process::Event::Exited { owner: world.owner() }));
+    world.event(Input::Parent(parent::Event::Stop { agent: world.agent() }));
     world.cleanup();
     world.settled();
     assert_eq!(world.seen.fault, None);
@@ -753,13 +761,13 @@ fn stop_and_answer_during_wall_or_draining_preserve_original_shutdown_deadline()
 fn buffered_answer_after_exit_is_heard_before_tree_empty_and_gone() {
     let mut world = World::new(45, limits());
     world.live();
-    world.event(Event::Exited { owner: world.owner() });
+    world.event(Input::Process(process::Event::Exited { owner: world.owner() }));
     turn(&mut world, 1, 5, None, 1);
     last(&mut world, RunResult::Parked, 1, 5);
-    world.event(Event::Reaped { owner: world.owner(), detail: Box::new([]) });
-    world.event(Event::Hangup { owner: world.owner() });
+    world.event(Input::Process(process::Event::Reaped { owner: world.owner(), detail: Box::new([]) }));
+    world.event(Input::Process(process::Event::Hangup { owner: world.owner() }));
     assert_eq!(world.seen.gone, None);
-    world.event(Event::Acknowledge { agent: world.agent(), turn: 1 });
+    world.event(Input::Parent(parent::Event::Acknowledge { agent: world.agent(), turn: 1 }));
     world.settled();
 }
 
@@ -769,7 +777,7 @@ fn delivery_right_outlives_process_tree_and_eof_without_abandonment() {
         let mut world = World::new(46, limits());
         world.live();
         call(&mut world, 20, 1, true, 100);
-        world.event(Event::Stop { agent: world.agent() });
+        world.event(Input::Parent(parent::Event::Stop { agent: world.agent() }));
         world.sent();
         world.cleanup();
         assert_eq!(world.seen.gone, None);
@@ -795,7 +803,7 @@ fn ordinary_earlier_landing_then_later_stop_remains_an_ordinary_answer() {
     call(&mut world, 20, 1, true, 100);
     reply(&mut world, 20, Reply::Delivery(Delivery::Delivered(receipts(b"ordinary"))));
     world.sent();
-    world.event(Event::Stop { agent: world.agent() });
+    world.event(Input::Parent(parent::Event::Stop { agent: world.agent() }));
     world.sent();
     last(&mut world, RunResult::Failed { failure: RunFailure::Cancelled }, 0, 9);
     world.cleanup();
@@ -915,14 +923,14 @@ fn an_agent_has_gone_only_after_every_io_right_even_after_answer() {
     let mut world = World::new(54, limits());
     world.live();
     last(&mut world, RunResult::Parked, 0, 0);
-    world.event(Event::Exited { owner: world.owner() });
-    world.event(Event::Reaped { owner: world.owner(), detail: Box::new([]) });
+    world.event(Input::Process(process::Event::Exited { owner: world.owner() }));
+    world.event(Input::Process(process::Event::Reaped { owner: world.owner(), detail: Box::new([]) }));
     assert_eq!(world.seen.gone, None);
     world.at(5);
     assert_eq!(world.seen.signals, [Signal::Terminate]);
-    world.event(Event::Hangup { owner: world.owner() });
+    world.event(Input::Process(process::Event::Hangup { owner: world.owner() }));
     assert_eq!(world.seen.gone, None);
-    world.event(Event::Signalled { owner: world.owner() });
+    world.event(Input::Process(process::Event::Signalled { owner: world.owner() }));
     world.settled();
 }
 
@@ -1009,7 +1017,7 @@ fn final_answers_cannot_abandon_parent_or_queued_delivery_terminals() {
 fn cancelled_and_draining_paths_keep_work_and_drop_answers_only_after_a_reported_fault() {
     let mut world = World::new(63, limits());
     world.live();
-    world.event(Event::Stop { agent: world.agent() });
+    world.event(Input::Parent(parent::Event::Stop { agent: world.agent() }));
     world.sent();
     call(&mut world, 20, 1, false, 100);
     world.up(Up::Fact { body: Box::new([]) });
@@ -1021,10 +1029,10 @@ fn cancelled_and_draining_paths_keep_work_and_drop_answers_only_after_a_reported
     for malformed in [false, true] {
         let mut world = World::new(64, limits());
         world.live();
-        world.event(Event::Stop { agent: world.agent() });
+        world.event(Input::Parent(parent::Event::Stop { agent: world.agent() }));
         world.sent();
         if malformed {
-            world.event(Event::Malformed { owner: world.owner() });
+            world.event(Input::Process(process::Event::Malformed { owner: world.owner() }));
         } else {
             world.up(Up::Long { span: Duration::from_secs(121) });
         }
@@ -1066,12 +1074,12 @@ fn cancelled_and_draining_paths_keep_work_and_drop_answers_only_after_a_reported
     world.settled();
     let mut world = World::new(66, limits());
     world.live();
-    world.event(Event::Exited { owner: world.owner() });
-    world.event(Event::Malformed { owner: world.owner() });
+    world.event(Input::Process(process::Event::Exited { owner: world.owner() }));
+    world.event(Input::Process(process::Event::Malformed { owner: world.owner() }));
     faulted(&mut world, Fault::Rules);
     let mut world = World::new(67, limits());
     world.live();
-    world.event(Event::Exited { owner: world.owner() });
+    world.event(Input::Process(process::Event::Exited { owner: world.owner() }));
     world.at(5);
     assert_eq!(world.seen.fault, Some(Fault::Exited));
     world.cleanup();
@@ -1090,11 +1098,11 @@ fn wall_shutdown_hangup_exit_and_breach_report_the_original_cause() {
         world.sent();
         match mode {
             0 => {
-                world.event(Event::Hangup { owner: world.owner() });
+                world.event(Input::Process(process::Event::Hangup { owner: world.owner() }));
                 assert_eq!(world.seen.fault, Some(Fault::WallTime));
             }
             1 => {
-                world.event(Event::Exited { owner: world.owner() });
+                world.event(Input::Process(process::Event::Exited { owner: world.owner() }));
                 last(&mut world, RunResult::Failed { failure: RunFailure::Cancelled }, 0, 3);
                 assert_eq!(world.seen.fault, Some(Fault::WallTime));
             }
@@ -1103,7 +1111,7 @@ fn wall_shutdown_hangup_exit_and_breach_report_the_original_cause() {
                 assert_eq!(world.seen.fault, Some(Fault::Rules));
             }
             3 => {
-                world.event(Event::Malformed { owner: world.owner() });
+                world.event(Input::Process(process::Event::Malformed { owner: world.owner() }));
                 assert_eq!(world.seen.fault, Some(Fault::Rules));
             }
             _ => unreachable!(),
@@ -1122,7 +1130,10 @@ fn continual_progress_reaches_only_the_independent_wall_deadline() {
     for second in [6, 12, 18] {
         world.schedule.send(
             Time::ZERO.saturating_add(Duration::from_secs(second)),
-            Event::Received { owner: world.owner(), message: Up::Fact { body: Box::from(&b"actual progress"[..]) } },
+            Input::Process(process::Event::Received {
+                owner: world.owner(),
+                message: Up::Fact { body: Box::from(&b"actual progress"[..]) },
+            }),
         );
         world.at(second);
         assert_eq!(world.seen.fault, None);
@@ -1153,7 +1164,7 @@ fn surviving_descendants_keep_reap_right_through_terminate_and_kill() {
     let mut world = World::new(70, limits());
     world.live();
     last(&mut world, RunResult::Parked, 0, 4);
-    world.event(Event::Exited { owner: world.owner() });
+    world.event(Input::Process(process::Event::Exited { owner: world.owner() }));
     assert!(world.lower.contains(Lower::Reap));
     assert_eq!(world.seen.gone, None);
     world.at(5);
@@ -1163,12 +1174,15 @@ fn surviving_descendants_keep_reap_right_through_terminate_and_kill() {
     assert_eq!(world.seen.signals, [Signal::Terminate, Signal::Kill]);
     assert_eq!(world.seen.gone, None);
     assert!(world.lower.contains(Lower::Reap), "descendant containment is still outstanding");
-    world.event(Event::Hangup { owner: world.owner() });
-    world.event(Event::Reaped { owner: world.owner(), detail: Box::from(&b"descendants gone"[..]) });
+    world.event(Input::Process(process::Event::Hangup { owner: world.owner() }));
+    world.event(Input::Process(process::Event::Reaped {
+        owner: world.owner(),
+        detail: Box::from(&b"descendants gone"[..]),
+    }));
     assert_eq!(world.seen.gone, None, "both actual signal rights also remain");
-    world.event(Event::Signalled { owner: world.owner() });
+    world.event(Input::Process(process::Event::Signalled { owner: world.owner() }));
     assert_eq!(world.seen.gone, None);
-    world.event(Event::Signalled { owner: world.owner() });
+    world.event(Input::Process(process::Event::Signalled { owner: world.owner() }));
     world.settled();
     assert_eq!(world.seen.fault, None);
     assert_eq!(world.seen.gone_detail.as_deref(), Some(b"descendants gone".as_slice()));
@@ -1178,20 +1192,20 @@ fn surviving_descendants_keep_reap_right_through_terminate_and_kill() {
 fn the_kit_counts_the_label_separator_at_the_exact_message_bound_and_one_byte_over() {
     let mut world = World::new(1051, smith_host_domain::Limits { message_bytes: 12, messages: 2, ..limits() });
     world.live();
-    world.event(Event::Message {
+    world.event(Input::Parent(parent::Event::Message {
         agent: world.agent(),
         name: Token::new(1),
         label: Box::from(*b"peer"),
         text: Box::from(*b"123456"),
-    });
+    }));
     assert!(world.seen.bounces.is_empty(), "twelve rendered bytes fit");
     world.sent();
-    world.event(Event::Message {
+    world.event(Input::Parent(parent::Event::Message {
         agent: world.agent(),
         name: Token::new(2),
         label: Box::from(*b"peer"),
         text: Box::from(*b"1234567"),
-    });
+    }));
     assert_eq!(world.seen.bounces, [MessageRefusal::TooLarge]);
     finish(&mut world);
 }

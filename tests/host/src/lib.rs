@@ -4,7 +4,8 @@
 //! exact terminals, parent-owned turns and no Gone before tree/EOF/rights.
 use skein_lib::{Duration, Time, Token};
 use skein_world::domain::{Ledger, Schedule, Stage, Trace};
-use smith_host_domain::{self as host, Answer, Down, End, Event, Fault, Grant, Limits, Request, Start, Up};
+use smith_host_domain::{self as host, Answer, Down, End, Fault, Grant, Input, Limits, Output, Start, Up};
+use smith_host_domain::{parent, process};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Distinct lower rights retained even after the process exits.
@@ -85,9 +86,9 @@ pub struct World {
     /// Real domain under test.
     pub domain: host::Domain,
     /// Bounded stage, injected clock and handed outputs.
-    pub stage: Stage<Limits, Event, Request>,
+    pub stage: Stage<Limits, Input, Output>,
     /// Shared deterministic scheduler for raced terminals.
-    pub schedule: Schedule<Event>,
+    pub schedule: Schedule<Input>,
     /// Independent exactly-once lower terminal accounting.
     pub lower: Ledger<Lower, Token>,
     /// Observable parent, agent and tree state.
@@ -170,7 +171,7 @@ impl World {
     }
 
     /// Deliver one typed input, with actual lower accounting and room-first flow.
-    pub fn event(&mut self, event: Event) {
+    pub fn event(&mut self, event: Input) {
         self.observe_terminal(&event);
         self.trace.log(self.stage.env.now, format!("up {event:?}"));
         self.stage.push(event);
@@ -199,23 +200,23 @@ impl World {
 
     /// Parent spawns the source run; tree owner exists before parent handle.
     pub fn spawn(&mut self, start: Start) {
-        self.event(Event::Spawn { client: Token::new(1), start });
+        self.event(Input::Parent(parent::Event::Spawn { client: Token::new(1), start }));
     }
 
     /// Actual process Started, distinct from agent admission.
     pub fn spawned(&mut self) {
         let owner = self.owner();
-        self.event(Event::Spawned { owner, process: Token::new(9) });
+        self.event(Input::Process(process::Event::Spawned { owner, process: Token::new(9) }));
     }
 
     /// Actual completion of the currently issued channel send.
     pub fn sent(&mut self) {
-        self.event(Event::Sent { owner: self.owner() });
+        self.event(Input::Process(process::Event::Sent { owner: self.owner() }));
     }
 
     /// Actual channel message on one previously demanded read.
     pub fn up(&mut self, message: Up) {
-        self.event(Event::Received { owner: self.owner(), message });
+        self.event(Input::Process(process::Event::Received { owner: self.owner(), message }));
     }
 
     /// Start, finish its Send terminal and admit through the actual read path.
@@ -246,17 +247,20 @@ impl World {
         }
         let owner = self.owner();
         if self.lower.contains(Lower::Wait) {
-            self.event(Event::Exited { owner });
+            self.event(Input::Process(process::Event::Exited { owner }));
         }
         if self.lower.contains(Lower::Reap) {
-            self.event(Event::Reaped { owner, detail: Box::from(&b"bounded operator tail"[..]) });
+            self.event(Input::Process(process::Event::Reaped {
+                owner,
+                detail: Box::from(&b"bounded operator tail"[..]),
+            }));
         }
         if self.lower.contains(Lower::Read) {
-            self.event(Event::Hangup { owner });
+            self.event(Input::Process(process::Event::Hangup { owner }));
         }
         for signal in [Lower::Terminate, Lower::Kill] {
             if self.lower.contains(signal) {
-                self.event(Event::Signalled { owner });
+                self.event(Input::Process(process::Event::Signalled { owner }));
             }
         }
     }
@@ -272,56 +276,67 @@ impl World {
         assert!(self.schedule.is_empty());
     }
 
-    fn observe_terminal(&mut self, event: &Event) {
+    fn observe_terminal(&mut self, event: &Input) {
         let key = match event {
-            Event::Spawned { .. } | Event::Unspawned { .. } => Some(Lower::Spawn),
-            Event::Sent { .. } | Event::Unsent { .. } => Some(Lower::Send),
-            Event::Received { .. } | Event::Malformed { .. } | Event::Hangup { .. } => Some(Lower::Read),
-            Event::Exited { .. } => {
+            Input::Process(process::Event::Spawned { .. } | process::Event::Unspawned { .. }) => Some(Lower::Spawn),
+            Input::Process(process::Event::Sent { .. } | process::Event::Unsent { .. }) => Some(Lower::Send),
+            Input::Process(
+                process::Event::Received { .. } | process::Event::Malformed { .. } | process::Event::Hangup { .. },
+            ) => Some(Lower::Read),
+            Input::Process(process::Event::Exited { .. }) => {
                 self.seen.exited = true;
                 Some(Lower::Wait)
             }
-            Event::Reaped { .. } => {
+            Input::Process(process::Event::Reaped { .. }) => {
                 assert!(self.seen.exited);
                 self.seen.empty = true;
                 Some(Lower::Reap)
             }
-            Event::Signalled { .. } => {
+            Input::Process(process::Event::Signalled { .. }) => {
                 if self.lower.contains(Lower::Terminate) {
                     Some(Lower::Terminate)
                 } else {
                     Some(Lower::Kill)
                 }
             }
-            Event::Answer { call, .. } => {
+            Input::Parent(parent::Event::Answer { call, .. }) => {
                 assert!(self.seen.calls.remove(call), "actual parent operation right");
                 None
             }
-            Event::Acknowledge { turn, .. } => {
+            Input::Parent(parent::Event::Acknowledge { turn, .. }) => {
                 self.seen.turns.remove(turn);
                 None
             }
-            Event::Spawn { .. } | Event::Message { .. } | Event::Grant { .. } | Event::Stop { .. } => None,
+            Input::Parent(
+                parent::Event::Spawn { .. }
+                | parent::Event::Message { .. }
+                | parent::Event::Grant { .. }
+                | parent::Event::Stop { .. },
+            ) => None,
         };
         if let Some(key) = key {
             self.lower.end(key);
         }
         match event {
-            Event::Hangup { .. } | Event::Malformed { .. } => self.seen.eof = true,
-            Event::Spawn { .. }
-            | Event::Spawned { .. }
-            | Event::Unspawned { .. }
-            | Event::Message { .. }
-            | Event::Answer { .. }
-            | Event::Acknowledge { .. }
-            | Event::Grant { .. }
-            | Event::Stop { .. }
-            | Event::Sent { .. }
-            | Event::Unsent { .. }
-            | Event::Received { .. }
-            | Event::Signalled { .. }
-            | Event::Exited { .. }
-            | Event::Reaped { .. } => {}
+            Input::Process(process::Event::Hangup { .. } | process::Event::Malformed { .. }) => self.seen.eof = true,
+            Input::Parent(
+                parent::Event::Spawn { .. }
+                | parent::Event::Message { .. }
+                | parent::Event::Answer { .. }
+                | parent::Event::Acknowledge { .. }
+                | parent::Event::Grant { .. }
+                | parent::Event::Stop { .. },
+            )
+            | Input::Process(
+                process::Event::Spawned { .. }
+                | process::Event::Unspawned { .. }
+                | process::Event::Sent { .. }
+                | process::Event::Unsent { .. }
+                | process::Event::Received { .. }
+                | process::Event::Signalled { .. }
+                | process::Event::Exited { .. }
+                | process::Event::Reaped { .. },
+            ) => {}
         }
     }
 
@@ -329,37 +344,37 @@ impl World {
         while let Some(request) = self.stage.out.pop() {
             self.trace.log(self.stage.env.now, format!("down {request:?}"));
             match request {
-                Request::Spawn { owner, .. } => {
+                Output::Process(process::Request::Spawn { owner, .. }) => {
                     self.seen.owner = Some(owner);
                     self.lower.open(Lower::Spawn, owner);
                 }
-                Request::Started { agent, .. } => {
+                Output::Parent(parent::Request::Started { agent, .. }) => {
                     assert!(self.seen.agent.replace(agent).is_none());
                 }
-                Request::Admitted { .. } => {
+                Output::Parent(parent::Request::Admitted { .. }) => {
                     assert!(!self.seen.admitted);
                     self.seen.admitted = true;
                 }
-                Request::Called { call, .. } => {
+                Output::Parent(parent::Request::Called { call, .. }) => {
                     assert!(self.seen.calls.insert(call));
                 }
-                Request::Withdrawn { call, .. } => {
+                Output::Parent(parent::Request::Withdrawn { call, .. }) => {
                     assert!(self.seen.calls.contains(&call));
                     assert!(self.seen.withdrawals.insert(call));
                 }
-                Request::Turn { turn, .. } => {
+                Output::Parent(parent::Request::Turn { turn, .. }) => {
                     self.seen.turn_metadata.push((turn.number, turn.spent));
                     assert!(self.seen.turns.insert(turn.number, turn.body).is_none());
                 }
-                Request::Answered { answer, .. } => {
+                Output::Parent(parent::Request::Answered { answer, .. }) => {
                     assert!(self.seen.fault.is_none());
                     assert!(self.seen.answer.replace(answer).is_none());
                 }
-                Request::Faulted { fault, .. } => {
+                Output::Parent(parent::Request::Faulted { fault, .. }) => {
                     assert!(self.seen.answer.is_none());
                     assert!(self.seen.fault.replace(fault).is_none());
                 }
-                Request::Gone { end, detail, .. } => {
+                Output::Parent(parent::Request::Gone { end, detail, .. }) => {
                     if end == End::Stopped {
                         assert!(
                             self.seen.exited && self.seen.empty && self.seen.eof,
@@ -372,14 +387,14 @@ impl World {
                     assert!(self.seen.gone.replace(end).is_none());
                     assert!(self.seen.gone_detail.replace(detail).is_none());
                 }
-                Request::Send { owner, message, .. } => {
+                Output::Process(process::Request::Send { owner, message, .. }) => {
                     self.lower.open(Lower::Send, owner);
                     self.seen.down.push(message);
                 }
-                Request::Read { owner, .. } => self.lower.open(Lower::Read, owner),
-                Request::Wait { owner, .. } => self.lower.open(Lower::Wait, owner),
-                Request::Reap { owner, .. } => self.lower.open(Lower::Reap, owner),
-                Request::Signal { owner, signal, .. } => {
+                Output::Process(process::Request::Read { owner, .. }) => self.lower.open(Lower::Read, owner),
+                Output::Process(process::Request::Wait { owner, .. }) => self.lower.open(Lower::Wait, owner),
+                Output::Process(process::Request::Reap { owner, .. }) => self.lower.open(Lower::Reap, owner),
+                Output::Process(process::Request::Signal { owner, signal, .. }) => {
                     self.seen.signals.push(signal);
                     let key = match signal {
                         host::Signal::Terminate => Lower::Terminate,
@@ -387,10 +402,17 @@ impl World {
                     };
                     self.lower.open(key, owner);
                 }
-                Request::MessageRefused { reason, .. } => self.seen.bounces.push(reason),
-                Request::Rejected { account, generation, .. } => self.seen.rejected.push((account, generation)),
-                Request::Told { .. } => self.seen.told += 1,
-                Request::Waiting { .. } | Request::Exhausted { .. } => {}
+                Output::Parent(parent::Request::MessageRefused { reason, .. }) => self.seen.bounces.push(reason),
+                Output::Parent(parent::Request::Rejected { account, generation, .. }) => {
+                    self.seen.rejected.push((account, generation));
+                }
+                Output::Parent(parent::Request::Told { .. }) => self.seen.told += 1,
+                Output::Parent(
+                    parent::Request::Waiting { .. }
+                    | parent::Request::Long { .. }
+                    | parent::Request::LongDone { .. }
+                    | parent::Request::Exhausted { .. },
+                ) => {}
             }
         }
     }

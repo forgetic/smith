@@ -9,7 +9,8 @@ use skein_lib::{Duration, Time, Token};
 use skein_world::domain::Span;
 use smith_agent_world::{BUDGET, CompletionTerminal, Job, Settings, World as Agent, messages_referee::Seen};
 use smith_domain::run;
-use smith_host_domain::{self as host, Down, Event, RunResult, Up};
+use smith_host_domain::{self as host, Down, Input, RunResult, Up};
+use smith_host_domain::{parent, process};
 use smith_host_world::{Lower, World as Host};
 
 fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bool) {
@@ -28,12 +29,12 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
             });
             if *number == 2 {
                 assert!(host.seen.turns.contains_key(&1));
-                host.event(Event::Acknowledge { agent: host.agent(), turn: 2 });
+                host.event(Input::Parent(parent::Event::Acknowledge { agent: host.agent(), turn: 2 }));
                 assert!(host.seen.turns.contains_key(&1), "ACK2 never commits the earlier parent-owned payload");
                 host.sent();
             }
             if *number == 4 {
-                host.event(Event::Acknowledge { agent: host.agent(), turn: 4 });
+                host.event(Input::Parent(parent::Event::Acknowledge { agent: host.agent(), turn: 4 }));
                 assert!(host.lower.contains(Lower::Send), "actual final ACK send right stays outstanding");
             }
         }
@@ -41,12 +42,12 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
             host.up(Up::Waiting { read: *read });
             if !*woke {
                 *woke = true;
-                host.event(Event::Message {
+                host.event(Input::Parent(parent::Event::Message {
                     agent: host.agent(),
                     name: Token::new(0),
                     label: b"person".as_slice().into(),
                     text: b"live host".as_slice().into(),
-                });
+                }));
                 let Down::Message { name, label, text } = host.seen.down.last().expect("actual downlink write") else {
                     panic!("parent input must become the actual Message Send")
                 };
@@ -118,15 +119,15 @@ fn host_turn_ack_and_send_rights_survive_root_parking_and_exit_tree_empty_eof() 
     assert_eq!(host.seen.turns[&1].as_ref(), actual_first.as_slice(), "parent retains the complete actual record");
 
     let owner = host.owner();
-    host.event(Event::Exited { owner });
+    host.event(Input::Process(process::Event::Exited { owner }));
     assert!(host.seen.gone.is_none());
-    host.event(Event::Reaped { owner, detail: b"actual tree empty".as_slice().into() });
+    host.event(Input::Process(process::Event::Reaped { owner, detail: b"actual tree empty".as_slice().into() }));
     assert!(host.seen.gone.is_none());
-    host.event(Event::Hangup { owner });
+    host.event(Input::Process(process::Event::Hangup { owner }));
     assert!(host.seen.exited && host.seen.empty && host.seen.eof);
     assert!(host.seen.gone.is_none(), "tree/EOF cannot consume parent commitment or pending ACK Send rights");
     for turn in [1, 3] {
-        host.event(Event::Acknowledge { agent: host.agent(), turn });
+        host.event(Input::Parent(parent::Event::Acknowledge { agent: host.agent(), turn }));
     }
     assert!(host.seen.turns.is_empty());
     assert!(host.seen.gone.is_none(), "parent committed all payloads, but actual ACK writes remain owed");
@@ -198,7 +199,7 @@ fn child_completions_and_raw_usage_cross_the_host_final_answer_once() {
                         body: format!("{turn:?}").into_bytes().into(),
                     },
                 });
-                host.event(Event::Acknowledge { agent: host.agent(), turn: *number });
+                host.event(Input::Parent(parent::Event::Acknowledge { agent: host.agent(), turn: *number }));
                 host.sent();
             }
             Seen::Answer { turns: observed, spent: actual, parked } => {

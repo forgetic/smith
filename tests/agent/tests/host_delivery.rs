@@ -10,7 +10,8 @@ use skein_lib::{Duration, Token};
 use skein_world::domain::Span;
 use smith_agent_world::{DeliverySubmission, Job, Settings, World as Agent, messages_referee::Seen};
 use smith_domain::{run, session::llm};
-use smith_host_domain::{self as host, Down, Event, Reply, RunResult, Up};
+use smith_host_domain::{self as host, Down, Input, Reply, RunResult, Up};
+use smith_host_domain::{parent, process};
 use smith_host_world::{Lower, World as Host};
 
 const RECEIPT: &[u8] = b"landed\xff\0\"\\\n";
@@ -87,7 +88,7 @@ fn forward(agent: &Agent, host: &mut Host, next: &mut usize) {
                     turn: host::Turn { number: *number, read: *read, spent: spent.units, body: body.into() },
                 });
                 if *number == 1 {
-                    host.event(Event::Acknowledge { agent: host.agent(), turn: 1 });
+                    host.event(Input::Parent(parent::Event::Acknowledge { agent: host.agent(), turn: 1 }));
                     assert!(host.lower.contains(Lower::Send), "actual early ACK send is retained");
                 }
             }
@@ -128,7 +129,7 @@ fn submitted(agent: &mut Agent, host: &mut Host, next: &mut usize) -> DeliverySu
     );
     assert!(fields.len() <= 4096, "actual host receiving cap");
     let expected_called = format!(
-        "down Called {{ client: {:?}, logical_run: {:?}, call: {:?}, name: {:?}, deadline: {:?}, ask: Deliver {{ fields: {:?} }} }}",
+        "down Parent(Called {{ client: {:?}, logical_run: {:?}, call: {:?}, name: {:?}, deadline: {:?}, ask: Deliver {{ fields: {:?} }} }})",
         Token::new(1),
         Token::new(1),
         submission.owner,
@@ -158,7 +159,7 @@ fn submitted(agent: &mut Agent, host: &mut Host, next: &mut usize) -> DeliverySu
 }
 
 fn cancel(agent: &mut Agent, host: &mut Host, submission: &DeliverySubmission, next: &mut usize) {
-    host.event(Event::Stop { agent: host.agent() });
+    host.event(Input::Parent(parent::Event::Stop { agent: host.agent() }));
     assert!(host.seen.calls.contains(&submission.owner));
     host.sent(); // Completes the earlier ACK; now the Cancel Send is issued.
     assert!(matches!(host.seen.down.last(), Some(Down::Cancel)));
@@ -192,9 +193,12 @@ fn finish_host(host: &mut Host) {
     assert!(host.seen.turns.is_empty());
     assert!(host.lower.contains(Lower::Send));
     assert!(matches!(host.seen.down.last(), Some(Down::Acknowledge { turn: 2 })));
-    host.event(Event::Exited { owner: host.owner() });
-    host.event(Event::Reaped { owner: host.owner(), detail: b"actual empty tree".as_slice().into() });
-    host.event(Event::Hangup { owner: host.owner() });
+    host.event(Input::Process(process::Event::Exited { owner: host.owner() }));
+    host.event(Input::Process(process::Event::Reaped {
+        owner: host.owner(),
+        detail: b"actual empty tree".as_slice().into(),
+    }));
+    host.event(Input::Process(process::Event::Hangup { owner: host.owner() }));
     assert!(host.seen.exited && host.seen.empty && host.seen.eof);
     assert!(host.seen.gone.is_none(), "the final ACK Send terminal is still owed");
     host.sent();
@@ -211,11 +215,11 @@ fn live_story() {
         agent.return_delivery(Token::new(u64::MAX), run::Delivery::Nothing),
         Err("no actual parent delivery right")
     );
-    host.event(Event::Answer {
+    host.event(Input::Parent(parent::Event::Answer {
         agent: host.agent(),
         call: submission.owner,
         reply: Reply::Delivery(host::Delivery::Delivered(receipt(RECEIPT))),
-    });
+    }));
     assert!(host.seen.calls.is_empty(), "only actual parent Reply consumes its operation right");
     let Some(Down::Answer { call, reply: Reply::Delivery(host::Delivery::Delivered(receipts)) }) =
         host.seen.down.last()
@@ -243,7 +247,7 @@ fn live_story() {
     let answer = final_answer(&agent);
     assert!(host.lower.contains(Lower::Send), "actual reply Send remains outstanding through the final Turn");
     let sends = host.seen.down.len();
-    host.event(Event::Acknowledge { agent: host.agent(), turn: 2 });
+    host.event(Input::Parent(parent::Event::Acknowledge { agent: host.agent(), turn: 2 }));
     assert!(host.seen.turns.is_empty(), "parent committed the exact final Turn while the channel listens");
     assert_eq!(host.seen.down.len(), sends, "final ACK queues behind the actual held reply Send");
     host.sent(); // Actual reply terminal releases the queued final ACK Send.
@@ -266,21 +270,24 @@ fn root_submission_parent_right_outlives_exit_tree_eof_without_fabricated_return
     let submission = submitted(&mut agent, &mut host, &mut next);
     cancel(&mut agent, &mut host, &submission, &mut next);
     let turns = agent.turns().len();
-    host.event(Event::Exited { owner: host.owner() });
+    host.event(Input::Process(process::Event::Exited { owner: host.owner() }));
     // The simulated root is deliberately never driven again after this actual
     // process exit. This branch claims no root terminal or post-EOF Turn.
     assert!(host.seen.withdrawals.contains(&submission.owner));
     assert!(host.seen.calls.contains(&submission.owner));
-    host.event(Event::Reaped { owner: host.owner(), detail: b"actual empty tree".as_slice().into() });
-    host.event(Event::Hangup { owner: host.owner() });
+    host.event(Input::Process(process::Event::Reaped {
+        owner: host.owner(),
+        detail: b"actual empty tree".as_slice().into(),
+    }));
+    host.event(Input::Process(process::Event::Hangup { owner: host.owner() }));
     assert!(host.seen.exited && host.seen.empty && host.seen.eof);
     assert!(host.seen.turns.is_empty() && !host.lower.contains(Lower::Send));
     assert!(host.seen.gone.is_none(), "withdrawal/tree/EOF/ACK/Send cannot consume parent operation");
-    host.event(Event::Answer {
+    host.event(Input::Parent(parent::Event::Answer {
         agent: host.agent(),
         call: submission.owner,
         reply: Reply::Delivery(host::Delivery::Delivered(receipt(RECEIPT))),
-    });
+    }));
     assert!(host.seen.calls.is_empty());
     assert!(
         !host.seen.down.iter().any(|message| matches!(message, Down::Answer { .. })),

@@ -16,6 +16,9 @@ extern crate alloc;
 
 mod boundary;
 
+pub mod parent;
+pub mod process;
+
 pub mod channel;
 
 mod delivery;
@@ -29,7 +32,7 @@ mod limits;
 #[cfg(test)]
 mod tests;
 
-pub use boundary::{End, Event, Fault, Invalid, MessageRefusal, Request, Signal};
+pub use boundary::{End, Fault, Input, Invalid, MessageRefusal, Output, Signal};
 
 pub use channel::{
     Answer, AnsweredCall, Ask, CallName, CompletionEvidence, CompletionFailure, Directory, Down, Effect, Exhausted,

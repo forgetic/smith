@@ -1,6 +1,7 @@
 //! Admission/source-law controls (Temper 19735a06; domain/host.md, 4 and 10).
 //! The independent V2 scripted world carries the remaining boundary histories.
-use crate::{Domain, End, Event, Request, Start};
+use crate::{Domain, End, Input, Output, Start};
+use crate::{parent, process};
 use alloc::boxed::Box;
 use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 
@@ -64,56 +65,83 @@ fn a_spawn_beyond_the_slots_is_refused_as_busy_without_displacing_the_active_own
     let mut domain = Domain::new(&limits);
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
     let mut out = Queue::with_capacity(crate::max_out(&limits));
-    crate::step(&mut domain, &env, Event::Spawn { client: Token::new(1), start: start() }, &mut out);
+    crate::step(
+        &mut domain,
+        &env,
+        Input::Parent(parent::Event::Spawn { client: Token::new(1), start: start() }),
+        &mut out,
+    );
     let first = match out.pop().expect("first spawn admitted") {
-        Request::Spawn { owner, .. } => owner,
-        Request::Started { .. }
-        | Request::Admitted { .. }
-        | Request::Called { .. }
-        | Request::Withdrawn { .. }
-        | Request::Turn { .. }
-        | Request::Waiting { .. }
-        | Request::Rejected { .. }
-        | Request::Exhausted { .. }
-        | Request::Told { .. }
-        | Request::Answered { .. }
-        | Request::Faulted { .. }
-        | Request::MessageRefused { .. }
-        | Request::Gone { .. }
-        | Request::Send { .. }
-        | Request::Read { .. }
-        | Request::Signal { .. }
-        | Request::Wait { .. }
-        | Request::Reap { .. } => panic!("expected actual Spawn"),
+        Output::Process(process::Request::Spawn { owner, .. }) => owner,
+        Output::Parent(
+            parent::Request::Started { .. }
+            | parent::Request::Admitted { .. }
+            | parent::Request::Called { .. }
+            | parent::Request::Withdrawn { .. }
+            | parent::Request::Turn { .. }
+            | parent::Request::Waiting { .. }
+            | parent::Request::Long { .. }
+            | parent::Request::LongDone { .. }
+            | parent::Request::Rejected { .. }
+            | parent::Request::Exhausted { .. }
+            | parent::Request::Told { .. }
+            | parent::Request::Answered { .. }
+            | parent::Request::Faulted { .. }
+            | parent::Request::MessageRefused { .. }
+            | parent::Request::Gone { .. },
+        )
+        | Output::Process(
+            process::Request::Send { .. }
+            | process::Request::Read { .. }
+            | process::Request::Signal { .. }
+            | process::Request::Wait { .. }
+            | process::Request::Reap { .. },
+        ) => panic!("expected actual Spawn"),
     };
-    crate::step(&mut domain, &env, Event::Spawn { client: Token::new(2), start: start() }, &mut out);
+    crate::step(
+        &mut domain,
+        &env,
+        Input::Parent(parent::Event::Spawn { client: Token::new(2), start: start() }),
+        &mut out,
+    );
     match out.pop().expect("second spawn refused") {
-        Request::Gone { client, end, detail } => {
+        Output::Parent(parent::Request::Gone { client, end, detail }) => {
             assert_eq!(client, Token::new(2));
             assert_eq!(end, End::Busy);
             assert!(detail.is_empty());
         }
-        Request::Spawn { .. }
-        | Request::Started { .. }
-        | Request::Admitted { .. }
-        | Request::Called { .. }
-        | Request::Withdrawn { .. }
-        | Request::Turn { .. }
-        | Request::Waiting { .. }
-        | Request::Rejected { .. }
-        | Request::Exhausted { .. }
-        | Request::Told { .. }
-        | Request::Answered { .. }
-        | Request::Faulted { .. }
-        | Request::MessageRefused { .. }
-        | Request::Send { .. }
-        | Request::Read { .. }
-        | Request::Signal { .. }
-        | Request::Wait { .. }
-        | Request::Reap { .. } => panic!("expected exact Busy terminal"),
+        Output::Process(
+            process::Request::Spawn { .. }
+            | process::Request::Send { .. }
+            | process::Request::Read { .. }
+            | process::Request::Signal { .. }
+            | process::Request::Wait { .. }
+            | process::Request::Reap { .. },
+        )
+        | Output::Parent(
+            parent::Request::Started { .. }
+            | parent::Request::Admitted { .. }
+            | parent::Request::Called { .. }
+            | parent::Request::Withdrawn { .. }
+            | parent::Request::Turn { .. }
+            | parent::Request::Waiting { .. }
+            | parent::Request::Long { .. }
+            | parent::Request::LongDone { .. }
+            | parent::Request::Rejected { .. }
+            | parent::Request::Exhausted { .. }
+            | parent::Request::Told { .. }
+            | parent::Request::Answered { .. }
+            | parent::Request::Faulted { .. }
+            | parent::Request::MessageRefused { .. },
+        ) => panic!("expected exact Busy terminal"),
     }
     assert_eq!(domain.agents(), 1);
-    crate::step(&mut domain, &env, Event::Unspawned { owner: first, detail: Box::new([]) }, &mut out);
+    crate::step(
+        &mut domain,
+        &env,
+        Input::Process(process::Event::Unspawned { owner: first, detail: Box::new([]) }),
+        &mut out,
+    );
     domain.reclaim();
     assert_eq!(domain.agents(), 0);
 }
@@ -126,11 +154,11 @@ fn mount(name: &[u8], writable: bool, git: bool, conflicts: &[&[u8]]) -> crate::
     crate::Directory { name: Box::from(name), writable, git, conflicts: paths.into_boxed() }
 }
 
-fn admit_start(start: Start, limits: crate::Limits) -> Request {
+fn admit_start(start: Start, limits: crate::Limits) -> Output {
     let mut domain = Domain::new(&limits);
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
     let mut out = Queue::with_capacity(crate::max_out(&limits));
-    crate::step(&mut domain, &env, Event::Spawn { client: Token::new(91), start }, &mut out);
+    crate::step(&mut domain, &env, Input::Parent(parent::Event::Spawn { client: Token::new(91), start }), &mut out);
     out.pop().expect("one actual spawn or invalid terminal")
 }
 
@@ -143,25 +171,31 @@ fn host_mount_metadata_admission_agrees_with_optional_workspace_and_git_kind() {
         ..start()
     };
     match admit_start(selected, receiving) {
-        Request::Spawn { .. } => {}
-        Request::Started { .. }
-        | Request::Admitted { .. }
-        | Request::Called { .. }
-        | Request::Withdrawn { .. }
-        | Request::Turn { .. }
-        | Request::Waiting { .. }
-        | Request::Rejected { .. }
-        | Request::Exhausted { .. }
-        | Request::Told { .. }
-        | Request::Answered { .. }
-        | Request::Faulted { .. }
-        | Request::MessageRefused { .. }
-        | Request::Gone { .. }
-        | Request::Send { .. }
-        | Request::Read { .. }
-        | Request::Signal { .. }
-        | Request::Wait { .. }
-        | Request::Reap { .. } => panic!("readonly git conflict evidence is valid"),
+        Output::Process(process::Request::Spawn { .. }) => {}
+        Output::Parent(
+            parent::Request::Started { .. }
+            | parent::Request::Admitted { .. }
+            | parent::Request::Called { .. }
+            | parent::Request::Withdrawn { .. }
+            | parent::Request::Turn { .. }
+            | parent::Request::Waiting { .. }
+            | parent::Request::Long { .. }
+            | parent::Request::LongDone { .. }
+            | parent::Request::Rejected { .. }
+            | parent::Request::Exhausted { .. }
+            | parent::Request::Told { .. }
+            | parent::Request::Answered { .. }
+            | parent::Request::Faulted { .. }
+            | parent::Request::MessageRefused { .. }
+            | parent::Request::Gone { .. },
+        )
+        | Output::Process(
+            process::Request::Send { .. }
+            | process::Request::Read { .. }
+            | process::Request::Signal { .. }
+            | process::Request::Wait { .. }
+            | process::Request::Reap { .. },
+        ) => panic!("readonly git conflict evidence is valid"),
     }
     let cases = [
         Start { workspace: None, directories: Box::new([mount(b"git", false, true, &[])]), ..start() },
@@ -185,25 +219,33 @@ fn host_mount_metadata_admission_agrees_with_optional_workspace_and_git_kind() {
     ];
     for rejected in cases {
         match admit_start(rejected, receiving) {
-            Request::Gone { end, .. } => assert_eq!(end, End::Invalid(crate::Invalid::Directories)),
-            Request::Spawn { .. }
-            | Request::Started { .. }
-            | Request::Admitted { .. }
-            | Request::Called { .. }
-            | Request::Withdrawn { .. }
-            | Request::Turn { .. }
-            | Request::Waiting { .. }
-            | Request::Rejected { .. }
-            | Request::Exhausted { .. }
-            | Request::Told { .. }
-            | Request::Answered { .. }
-            | Request::Faulted { .. }
-            | Request::MessageRefused { .. }
-            | Request::Send { .. }
-            | Request::Read { .. }
-            | Request::Signal { .. }
-            | Request::Wait { .. }
-            | Request::Reap { .. } => panic!("metadata refuses before lower spawn"),
+            Output::Parent(parent::Request::Gone { end, .. }) => {
+                assert_eq!(end, End::Invalid(crate::Invalid::Directories));
+            }
+            Output::Process(
+                process::Request::Spawn { .. }
+                | process::Request::Send { .. }
+                | process::Request::Read { .. }
+                | process::Request::Signal { .. }
+                | process::Request::Wait { .. }
+                | process::Request::Reap { .. },
+            )
+            | Output::Parent(
+                parent::Request::Started { .. }
+                | parent::Request::Admitted { .. }
+                | parent::Request::Called { .. }
+                | parent::Request::Withdrawn { .. }
+                | parent::Request::Turn { .. }
+                | parent::Request::Waiting { .. }
+                | parent::Request::Long { .. }
+                | parent::Request::LongDone { .. }
+                | parent::Request::Rejected { .. }
+                | parent::Request::Exhausted { .. }
+                | parent::Request::Told { .. }
+                | parent::Request::Answered { .. }
+                | parent::Request::Faulted { .. }
+                | parent::Request::MessageRefused { .. },
+            ) => panic!("metadata refuses before lower spawn"),
         }
     }
     assert!(crate::worst_case(&crate::Limits { path_bytes: 4097, ..receiving }).is_none());
@@ -215,30 +257,45 @@ fn message_admission_includes_the_label_separator_at_the_bound_and_one_byte_over
     let mut domain = Domain::new(&limits);
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
     let mut out = Queue::with_capacity(crate::max_out(&limits));
-    crate::step(&mut domain, &env, Event::Spawn { client: Token::new(1), start: start() }, &mut out);
-    let Some(Request::Spawn { owner, .. }) = out.pop() else { panic!("spawn admitted") };
-    crate::step(&mut domain, &env, Event::Spawned { owner, process: Token::new(2) }, &mut out);
+    crate::step(
+        &mut domain,
+        &env,
+        Input::Parent(parent::Event::Spawn { client: Token::new(1), start: start() }),
+        &mut out,
+    );
+    let Some(Output::Process(process::Request::Spawn { owner, .. })) = out.pop() else { panic!("spawn admitted") };
+    crate::step(&mut domain, &env, Input::Process(process::Event::Spawned { owner, process: Token::new(2) }), &mut out);
     while out.pop().is_some() {}
     crate::step(
         &mut domain,
         &env,
-        Event::Message { agent: owner, name: Token::new(10), label: Box::from(*b"peer"), text: Box::from(*b"123456") },
+        Input::Parent(parent::Event::Message {
+            agent: owner,
+            name: Token::new(10),
+            label: Box::from(*b"peer"),
+            text: Box::from(*b"123456"),
+        }),
         &mut out,
     );
     assert!(out.pop().is_none(), "exact rendered bound queues behind the first Send");
     crate::step(
         &mut domain,
         &env,
-        Event::Message { agent: owner, name: Token::new(11), label: Box::from(*b"peer"), text: Box::from(*b"1234567") },
+        Input::Parent(parent::Event::Message {
+            agent: owner,
+            name: Token::new(11),
+            label: Box::from(*b"peer"),
+            text: Box::from(*b"1234567"),
+        }),
         &mut out,
     );
     assert_eq!(
         out.pop(),
-        Some(Request::MessageRefused {
+        Some(Output::Parent(parent::Request::MessageRefused {
             client: Token::new(1),
             name: Token::new(11),
             reason: crate::MessageRefusal::TooLarge
-        })
+        }))
     );
     assert!(out.pop().is_none());
 }
