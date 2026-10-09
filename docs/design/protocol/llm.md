@@ -66,7 +66,7 @@ the dialect's cache markers go where skein's client puts them.
 | `finish` | the result contract's forms (below) |
 | `deliver` | the change's required fields |
 | `wait` | nothing |
-| a sub-agent | its task, the model it runs on, optionally, among the charter's |
+| a sub-agent | its task and tools; optionally a charter model and positive `max_turns` for its own completions |
 | a host tool | what the charter declared, as it came |
 
 - **Descriptions are the protocol layer's words.** They tell the LLM what
@@ -84,6 +84,15 @@ the dialect's cache markers go where skein's client puts them.
 - **Names are unique across sources.** A charter that declares a host tool
   named like one of smith's is refused at the entrance (domain/run.md,
   5.1).
+
+The sub-agent's optional `max_turns` is a positive `u32`, clamped to the
+remaining global turn budget by the run domain. It bounds the child's own
+completions, not its descendants; all completions still consume the global
+budget. Omission retains the current run remainder. Spend and time retain
+their existing inherited limits. When a child exhausts its own quota, its
+unanswered result lets the parent continue if the global budget permits it.
+Choosing a smaller quota can leave verification room, but does not reserve
+that room against other conversations.
 
 ## 4. Decoding
 

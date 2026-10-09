@@ -1439,9 +1439,9 @@ fn a_sub_agent_answers_with_its_last_message_once_it_has_ended() {
 }
 
 #[test]
-fn delegated_turns_reach_the_global_128_boundary_without_terminal_double_counting() {
-    for requested in [64_u32, 128] {
-        let ceiling = Budget { turns: 128, ..LIMITS.budget };
+fn delegated_turns_reach_the_global_256_boundary_without_terminal_double_counting() {
+    for requested in [64_u32, 128, 256] {
+        let ceiling = Budget { turns: 256, ..LIMITS.budget };
         let mut harness = Harness::new(Limits { budget: ceiling, ..LIMITS });
         let policy = Charter { budget: Budget { turns: requested, ..BUDGET }, ..agents() };
         let (_, main) = harness.running_on(1, 100, policy);
@@ -1501,6 +1501,58 @@ fn delegated_turns_reach_the_global_128_boundary_without_terminal_double_countin
         harness.domain.reclaim();
         assert_eq!((harness.domain.runs(), harness.domain.conversations(), harness.domain.calls()), (0, 0, 0));
     }
+}
+
+#[test]
+fn a_child_own_turn_quota_returns_an_error_without_consuming_parent_verification_room() {
+    let mut harness = Harness::new(LIMITS);
+    let (_, main) = harness.running_on(1, 100, agents());
+    let one = Spend { turns: 1, input: 1, ..Spend::ZERO };
+    drop(harness.step(Event::Used { conversation: main, spend: one }));
+    let emitted = harness.step(ask(
+        main,
+        7,
+        families(true, false, false),
+        None,
+        Some(crate::Share { turns: 2, spend: u64::MAX }),
+    ));
+    let [Request::Open { conversation: child, opening }] = emitted.as_ref() else {
+        panic!("the child opens with the requested own quota: {emitted:?}");
+    };
+    let child = *child;
+    assert_eq!(opening.budget.turns, 2);
+    assert_eq!(opening.budget.spend, BUDGET.spend, "the maximum sentinel preserves the ordinary remainder");
+    drop(harness.step(Event::Started { conversation: child, peer: Token::new(101) }));
+    for _ in 0..2_u32 {
+        drop(harness.step(Event::Used { conversation: child, spend: one }));
+    }
+    let emitted = harness.step(Event::Ended {
+        conversation: child,
+        end: End::Budget(Exhausted::Turns),
+        spend: Spend { turns: 2, input: 2, ..Spend::ZERO },
+    });
+    assert_eq!(emitted.as_ref(), &[returned(7, Returned::Unanswered { end: End::Budget(Exhausted::Turns) })]);
+    assert_eq!(crate::completion_permit(&harness.domain, main), crate::CompletionPermit::Allowed);
+    drop(harness.step(Event::Used { conversation: main, spend: one }));
+    drop(harness.step(finish(main, 8, verdict(b"approve", Box::new([])))));
+    let emitted = harness.step(Event::Ended {
+        conversation: main,
+        end: End::Closed,
+        spend: Spend { turns: 2, input: 2, ..Spend::ZERO },
+    });
+    assert_eq!(
+        answered(emitted),
+        (
+            1,
+            Answer::Accepted {
+                outcome: verdict(b"approve", Box::new([])),
+                spent: Spend { turns: 4, input: 4, ..Spend::ZERO },
+                turns: 0,
+            }
+        )
+    );
+    harness.domain.reclaim();
+    assert_eq!((harness.domain.runs(), harness.domain.conversations(), harness.domain.calls()), (0, 0, 0));
 }
 
 #[test]

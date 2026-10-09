@@ -134,7 +134,11 @@ fn call(kind: Kind, tokens: &[Token]) -> Result<llm::Decoded, llm::Problem> {
                 brief: required_string(tokens, b"brief")?,
                 families: families(tokens)?,
                 llm: optional_string(tokens, b"llm")?,
-                share: None,
+                share: match optional_u32(tokens, b"max_turns")? {
+                    // Clamp spend to the same run remainder as an omitted share.
+                    Some(turns) => Some(run::Share { turns, spend: u64::MAX }),
+                    None => None,
+                },
             },
         },
     };

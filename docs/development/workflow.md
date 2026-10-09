@@ -680,3 +680,27 @@ The scalar change leaves eager service allocation at 4,233,560 bytes and its
 checked worst case at 359,734,783,998 bytes. Formatting and affected all-target
 Clippy passed. Existing suite budgets remain unchanged; complete workspace
 gates apply before a main merge.
+
+### Child own-turn quota validation, 2026-10-09
+
+The standard aggregate run ceiling is now 256 completions, with retained
+message, request and acknowledgement windows unchanged. A production-limit
+run-domain start admits translated charters whose decoded budget is set to
+64, 128 or 256, and refuses 257 before effects. The existing accounting
+harness checks each admitted global boundary and duplicate child terminals.
+
+Both provider fixtures carry the actual optional `sub_agent.max_turns`
+schema and decode omitted, positive and malformed quotas through the adapter.
+A run-domain story opens a two-turn child, supplies its quota-exhausted
+terminal and proves parent continuation and an exact four-turn aggregate
+after verification. Existing session tests independently enforce the own
+completion limit. These are protocol and domain boundary checks, rather than
+an encoded-charter, process-wide end-to-end quota test.
+
+The affected focused selection passed 184 tests serially in 3.584 seconds.
+An independent two-test own-budget and production-memory selection passed in
+0.014 seconds. Eager service allocation remains 4,233,560 bytes against the
+checked 359,734,783,998-byte bound. Formatting and affected all-target Clippy
+passed. The added quota is scalar metadata; it adds no buffers, retained
+history or unbounded waits. Existing suite budgets remain unchanged; complete
+workspace gates apply before a main merge.

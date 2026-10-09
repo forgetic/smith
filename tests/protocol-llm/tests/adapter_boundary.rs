@@ -299,6 +299,94 @@ fn schema_inventory_admits_first_then_refuses_missing_duplicate_and_unoffered_en
     }
 }
 
+#[test]
+fn sub_agent_optional_own_quota_crosses_both_provider_schemas_and_actual_completions() {
+    let cases = [
+        (br#"{"brief":"inspect","tools":["inspect"]}"#.as_slice(), Some(None)),
+        (br#"{"brief":"inspect","tools":["inspect"],"max_turns":1}"#, Some(Some(1))),
+        (br#"{"brief":"inspect","tools":["inspect"],"max_turns":32}"#, Some(Some(32))),
+        (br#"{"brief":"inspect","tools":["inspect"],"max_turns":4294967295}"#, Some(Some(u32::MAX))),
+        (br#"{"brief":"inspect","tools":["inspect"],"max_turns":0}"#, None),
+        (br#"{"brief":"inspect","tools":["inspect"],"max_turns":-1}"#, None),
+        (br#"{"brief":"inspect","tools":["inspect"],"max_turns":1.5}"#, None),
+        (br#"{"brief":"inspect","tools":["inspect"],"max_turns":4294967296}"#, None),
+    ];
+    for configuration in &wire::configurations() {
+        for (arguments, expected) in cases {
+            let mut offered = input(configuration);
+            offered.prompt.served = Box::new([llm::Served::SubAgent]);
+            offered.application = adapter::schemas(&offered.prompt);
+            let schema = offered.application[0].schema.clone();
+            let endpoint = offered.endpoint.clone();
+            let credential = shared::Credential {
+                access_token: offered.credential.access_token.clone(),
+                account_id: offered.credential.account_id.clone(),
+            };
+            let adapter::Prepared { client, context } = adapter::prepare(offered, &limits()).expect("actual admission");
+            let script = Box::new([api::Script {
+                cue: b"@adapter-boundary".as_slice().into(),
+                turns: Box::new([api::Turn {
+                    lines: Box::new([api::Line::Call {
+                        name: b"sub_agent".as_slice().into(),
+                        arguments: arguments.into(),
+                    }]),
+                    finish: api::Finish::ToolCalls,
+                    tokens: 7,
+                }]),
+            }]);
+            let mut peer = Exchange::prepared(client, endpoint, credential, limits().client, script);
+            peer.start();
+            peer.run();
+            let [query] = peer.queries.as_slice() else { panic!("one actual provider query") };
+            let [tool] = query.tools.as_ref() else { panic!("one offered child tool") };
+            assert_eq!(tool.name.as_ref(), b"sub_agent");
+            assert_eq!(tool.parameters, schema, "the provider sees the complete production schema");
+            assert!(tool.parameters.windows(b"\"max_turns\"".len()).any(|part| part == b"\"max_turns\""));
+            let client::Event::Completed { owner, completion } = take_terminal(&mut peer) else {
+                panic!("one actual provider completion");
+            };
+            let [shared::Block::ToolCall { name, arguments: received, .. }] = completion.content.as_ref() else {
+                panic!("the provider retains the child call");
+            };
+            assert_eq!(received.as_ref(), arguments);
+            let resolved = Box::new([ResolvedCall {
+                position: 0,
+                name: name.clone(),
+                input: received.clone(),
+                call: adapter::decode(name, received, context.grants(), context.served(), &context.limits()),
+            }]);
+            let Event::Completed { completion, .. } =
+                adapter::completion(context, owner, completion, resolved).expect("actual checked adapter callback")
+            else {
+                panic!("the actual call has one root completion");
+            };
+            let [llm::Said::ToolCall { input, call, .. }] = completion.content.as_ref() else {
+                panic!("the root retains the original call");
+            };
+            assert_eq!(input.as_ref(), arguments);
+            match expected {
+                Some(turns) => {
+                    let llm::Decoded::Served { ask: run::Ask::SubAgent { share, .. } } = call else {
+                        panic!("valid child quota is admitted: {call:?}");
+                    };
+                    assert_eq!(*share, turns.map(|turns| run::Share { turns, spend: u64::MAX }));
+                }
+                None => match call {
+                    llm::Decoded::Invalid {
+                        problem: llm::Problem::BadValue { field } | llm::Problem::WrongType { field },
+                    } => assert_eq!(field.as_ref(), b"max_turns"),
+                    other @ (llm::Decoded::Owned { .. }
+                    | llm::Decoded::Served { .. }
+                    | llm::Decoded::Invalid { .. }) => {
+                        panic!("invalid quota is a named problem before dispatch: {other:?}");
+                    }
+                },
+            }
+            close_won(&mut peer);
+        }
+    }
+}
+
 fn result_input(configuration: &Configuration) -> Input {
     let mut input = input(configuration);
     input.prompt.tools.shell = true;

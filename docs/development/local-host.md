@@ -211,7 +211,7 @@ use the same window; connection and TLS handshake waits stay at 10 seconds.
 An earlier session or run time budget still cancels the call. This permits
 long reasoning responses while retaining a finite completion deadline.
 
-The standard profile admits a charter with up to 128 completions shared
+The standard profile admits a charter with up to 256 completions shared
 across its main and child conversations. The host selects the actual budget;
 a smaller admitted budget retains its original boundary. Returned child
 terminals do not charge already reported completions again. This scalar
@@ -219,6 +219,15 @@ ceiling is independent of retained history: each session still admits at most
 256 messages, provider requests at most 256 blocks and 1 MiB of encoded bytes.
 A conversation may reach those context bounds before the aggregate turn
 budget; admitting a larger turn budget does not expand them.
+
+The `sub_agent` tool accepts an optional positive `max_turns` count, bounded
+by `u32` and clamped to the run's remaining completions. It caps that child's
+own completions, rather than its descendants' completions. Omission shares
+the current run remainder. Spend and time retain the inherited remainder;
+all owners still consume the global budget. A child that exhausts its own
+quota returns an unanswered result, and the parent may continue while global
+budget remains. Choosing a smaller child quota can leave room for parent
+verification; it does not reserve that room against other owners.
 
 The [local-process world](../../tests/local-process/README.md) exercises the
 same shell library with both agent placements, OAuth peers and a fake checkout.

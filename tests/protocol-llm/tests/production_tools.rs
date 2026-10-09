@@ -135,3 +135,31 @@ fn wait_and_sub_agent_decode_into_run_asks() {
         }
     }
 }
+
+#[test]
+fn sub_agent_own_turn_limit_is_optional_positive_and_checked_before_dispatch() {
+    let served = [llm::Served::SubAgent];
+    for (input, expected) in [
+        (br#"{"brief":"look","tools":["inspect"]}"#.as_slice(), None),
+        (br#"{"brief":"look","tools":["inspect"],"max_turns":1}"#, Some(1)),
+        (br#"{"brief":"look","tools":["inspect"],"max_turns":32}"#, Some(32)),
+        (br#"{"brief":"look","tools":["inspect"],"max_turns":4294967295}"#, Some(u32::MAX)),
+    ] {
+        let decoded = adapter::decode(b"sub_agent", input, grants(), &served, &limits());
+        let llm::Decoded::Served { ask: run::Ask::SubAgent { share, .. } } = decoded else {
+            panic!("valid own quota must become a bounded run ask: {decoded:?}");
+        };
+        assert_eq!(share, expected.map(|turns| run::Share { turns, spend: u64::MAX }));
+    }
+    for invalid in ["0", "-1", "1.5", "4294967296", "null", "true", "\"2\""] {
+        let input = format!(r#"{{"brief":"look","tools":["inspect"],"max_turns":{invalid}}}"#);
+        match adapter::decode(b"sub_agent", input.as_bytes(), grants(), &served, &limits()) {
+            llm::Decoded::Invalid { problem: llm::Problem::BadValue { field } | llm::Problem::WrongType { field } } => {
+                assert_eq!(field.as_ref(), b"max_turns");
+            }
+            other @ (llm::Decoded::Owned { .. } | llm::Decoded::Served { .. } | llm::Decoded::Invalid { .. }) => {
+                panic!("invalid quota must refuse with its field before dispatch: {invalid}: {other:?}");
+            }
+        }
+    }
+}

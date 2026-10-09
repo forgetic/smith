@@ -74,8 +74,8 @@ pub fn schemas(prompt: &llm::Prompt) -> Box<[ToolSchema]> {
             llm::Served::SubAgent => add(&mut descriptors, descriptor(
                 ToolKind::SubAgent,
                 b"sub_agent",
-                b"Ask a sub-agent to work under the granted tool families and optional model.",
-                br#"{"type":"object","properties":{"brief":{"type":"string"},"tools":{"type":"array","items":{"type":"string","enum":["inspect","modify","shell"]}},"agents":{"type":"boolean"},"llm":{"type":"string"}},"required":["brief","tools"]}"#,
+                b"Ask a sub-agent to work under the granted tool families and optional model. Optional max_turns limits the child's own completions to leave room for parent verification; omitted allows the current run remainder. All child usage still counts against the global run budget.",
+                br#"{"type":"object","properties":{"brief":{"type":"string"},"tools":{"type":"array","items":{"type":"string","enum":["inspect","modify","shell"]}},"agents":{"type":"boolean"},"llm":{"type":"string"},"max_turns":{"type":"integer","minimum":1,"maximum":4294967295}},"required":["brief","tools"]}"#,
             )),
             llm::Served::Deliver => add(&mut descriptors, descriptor(
                 ToolKind::Deliver,
