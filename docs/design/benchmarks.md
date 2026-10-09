@@ -380,7 +380,7 @@ convention is a tag on the record, with a fixed mapping:
 
 | Convention | Fresh is | Not reported apart |
 |---|---|---|
-| Codex | input less cached input | reasoning, within output; cache writes |
+| Codex | input less cached input; cache writes (`cache_write_input_tokens`) are within input, reasoning (`reasoning_output_tokens`) within output | nothing, as codex-cli 0.160.0 reports them; a version that omits a field has it unavailable, never zero |
 | Claude Code | input plus cache writes | thinking, within output |
 | smith's events (protocol/events.md, section 3.10) | `input_tokens` plus `cache_write_tokens` | whatever is null |
 
