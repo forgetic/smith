@@ -73,7 +73,7 @@ impl World {
                 client_id: b"client".as_slice().into(),
                 client_secret: None,
                 redirect_uri: b"http://127.0.0.1:2345/callback".as_slice().into(),
-                refresh_token: b"refresh-old".as_slice().into(),
+                refresh_token: Some(b"refresh-old".as_slice().into()),
             },
             issuer_limits(),
             skein_http::server::Limits {
@@ -108,7 +108,7 @@ impl World {
             key: 7,
             generation: 1,
             access_token: b"old".as_slice().into(),
-            refresh_token: token.into(),
+            refresh_token: Some(token.into()),
             metadata: None,
             expires_at: sim_config.wall,
         });

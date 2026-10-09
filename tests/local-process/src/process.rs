@@ -266,7 +266,7 @@ pub fn issuer_with(transport: skein_fake_peers::Transport) -> Issuer {
             client_id: b"client".as_slice().into(),
             client_secret: None,
             redirect_uri: b"http://127.0.0.1:2345/callback".as_slice().into(),
-            refresh_token: b"refresh-old".as_slice().into(),
+            refresh_token: Some(b"refresh-old".as_slice().into()),
         },
         limits,
         skein_http::server::Limits { head: 8192, headers: 32, body: 16_384, read: 1024, response: 49_152, send: 1024 },

@@ -119,7 +119,7 @@ pub(crate) fn completion(
             provider::Part::ToolOutput { .. } => panic!("a fake completion contains no tool result"),
         })
         .collect();
-    agent::Completion { content, stop, usage }
+    agent::Completion { reasoning_dropped: Box::default(), content, stop, usage }
 }
 
 pub(crate) fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, served: &[agent::Served]) -> agent::Decoded {

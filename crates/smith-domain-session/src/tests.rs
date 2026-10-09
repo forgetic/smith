@@ -505,7 +505,7 @@ const USAGE: Usage = Usage {
 };
 
 fn completion(content: Box<[Block]>, stop: Stop) -> Completion {
-    Completion { content, stop, usage: USAGE }
+    Completion { reasoning_dropped: Box::default(), content, stop, usage: USAGE }
 }
 
 fn done() -> Completion {

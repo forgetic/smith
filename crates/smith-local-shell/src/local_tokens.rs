@@ -118,7 +118,7 @@ mod tests {
                 key: account,
                 generation: 1,
                 access_token: token.into(),
-                refresh_token: b"refresh".as_slice().into(),
+                refresh_token: Some(b"refresh".as_slice().into()),
                 metadata: None,
                 expires_at: Wall::from_nanos(30_000_000_000),
             },

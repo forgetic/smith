@@ -88,7 +88,7 @@ impl Invocation {
                 key: 0,
                 generation: 1,
                 access_token: b"token".as_slice().into(),
-                refresh_token: b"refresh".as_slice().into(),
+                refresh_token: Some(b"refresh".as_slice().into()),
                 metadata: None,
                 expires_at: Wall::from_nanos(
                     config.wall.as_nanos().saturating_add(Duration::from_secs(7200).as_nanos()),

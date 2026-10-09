@@ -66,6 +66,7 @@ pub fn completion_worst_case(client_limits: &client::Limits, decoded_call_bytes:
     u64::from(client_limits.dialect.answer_bytes)
         .checked_add(replay)?
         .checked_add(wrappers)?
+        .checked_add(parts.checked_mul(u64::try_from(size_of::<u64>()).ok()?)?)?
         .checked_add(decoded_call_bytes)
 }
 

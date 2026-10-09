@@ -182,6 +182,10 @@ pub enum Problem {
     },
     /// The call holds more than the agent takes at once.
     TooLarge,
+    /// The received call exceeded its argument bound; no input was retained.
+    Oversize { bytes: u64, bound: u32 },
+    /// The provider stopped while writing the call's input; no call runs.
+    CutOff { bytes: u64 },
 }
 
 /// One ordered conversation message, with sender and owned bounded content.
@@ -242,6 +246,8 @@ impl Prompt {
 /// The next assistant message.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Completion {
+    /// Bytes of each opted-in oversized reasoning item, never retained in history.
+    pub reasoning_dropped: Box<[u64]>,
     /// Ordered provider-neutral blocks; boxed storage and owned payloads count
     /// against the receiving session's aggregate ownership limits.
     pub content: Box<[Block]>,

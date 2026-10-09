@@ -414,6 +414,8 @@ pub struct Stats {
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Told {
+    /// Number of opted-in reasoning drops observed, without retained content.
+    pub reasoning_dropped: u32,
     /// Count of opened facts drained from the component.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
@@ -1860,6 +1862,7 @@ impl World {
         }
         let count = match fact {
             agent::FactKind::Opened { .. } => &mut told.opened,
+            agent::FactKind::ReasoningDropped { .. } => &mut told.reasoning_dropped,
             agent::FactKind::CompletionStarted { .. } => &mut told.completions_started,
             agent::FactKind::CompletionAnswered { .. } => &mut told.completions_answered,
             agent::FactKind::CompletionFailed { .. } => &mut told.completions_failed,

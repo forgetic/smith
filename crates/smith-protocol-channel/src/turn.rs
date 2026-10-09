@@ -153,6 +153,13 @@ fn encode_problem(source: &llm::Problem, limits: &wire::v3::Limits) -> Result<wi
             wire::FieldProblemParts { field: field.clone() },
         )?),
         llm::Problem::TooLarge => wire::CallProblem::TooLarge,
+        llm::Problem::Oversize { bytes, bound } => wire::CallProblem::Oversize(wire::OversizeProblem::new(
+            limits,
+            wire::OversizeProblemParts { bytes: *bytes, bound: *bound },
+        )?),
+        llm::Problem::CutOff { bytes } => {
+            wire::CallProblem::CutOff(wire::CutProblem::new(limits, wire::CutProblemParts { bytes: *bytes })?)
+        }
     };
     Ok(problem)
 }

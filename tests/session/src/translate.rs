@@ -145,7 +145,7 @@ fn completion(
         reasoning_tokens: None,
     };
     let content = answer.parts.into_iter().map(|part| block(part, tickets, opener, served)).collect();
-    agent::Completion { content, stop, usage }
+    agent::Completion { reasoning_dropped: Box::default(), content, stop, usage }
 }
 
 fn block(part: provider::Part, tickets: &mut Tickets, opener: u64, served: &[agent::Descriptor]) -> agent::Block {

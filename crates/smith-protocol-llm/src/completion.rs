@@ -40,6 +40,7 @@ pub fn completion(
     validate_resolved(&resolved)?;
     let count = u32::try_from(content.len()).or(Err(Error::Limit))?;
     let mut translated = List::with_capacity(count);
+    let mut reasoning_dropped = List::with_capacity(count);
     let mut resolutions = List::with_capacity(u32::try_from(resolved.len()).or(Err(Error::Limit))?);
     for call in resolved {
         resolutions.push(Some(call)).expect("one owned slot per admitted resolution");
@@ -47,6 +48,23 @@ pub fn completion(
     let mut held = 0_u64;
     for (position, block) in content.into_iter().enumerate() {
         let position = u32::try_from(position).or(Err(Error::Limit))?;
+        let block = match block {
+            shared::Block::Dropped { bytes } => {
+                held = held.checked_add(u64::try_from(size_of::<u64>()).or(Err(Error::Limit))?).ok_or(Error::Limit)?;
+                if held > context.receiving.max_completion_bytes {
+                    return Err(Error::Limit);
+                }
+                reasoning_dropped.push(bytes).expect("one drop per actual block");
+                continue;
+            }
+            block @ (shared::Block::Text { .. }
+            | shared::Block::Refusal { .. }
+            | shared::Block::Reasoning { .. }
+            | shared::Block::ToolCall { .. }
+            | shared::Block::ToolResult { .. }
+            | shared::Block::Oversize { .. }
+            | shared::Block::Cut { .. }) => block,
+        };
         let said = block_value(block, position, &context, &mut resolutions, &mut decoded_bytes)?;
         held = held.checked_add(said_bytes(&said)?).ok_or(Error::Limit)?;
         if held > context.receiving.max_completion_bytes {
@@ -75,7 +93,12 @@ pub fn completion(
     };
     Ok(Event::Completed {
         owner: context.owner,
-        completion: llm::Completion { content: translated.into_boxed(), stop, usage },
+        completion: llm::Completion {
+            reasoning_dropped: reasoning_dropped.into_boxed(),
+            content: translated.into_boxed(),
+            stop,
+            usage,
+        },
     })
 }
 
@@ -122,7 +145,30 @@ fn block_value(
             let call = receiving_call(call, decoded_bytes, context.receiving.decoded_call_bytes);
             Ok(llm::Said::ToolCall { id, name, input: arguments, call, replay: encode_replay(replay, context)? })
         }
+        shared::Block::Oversize { id, name, bytes } => Ok(invalid_call(
+            id,
+            name,
+            llm::Problem::Oversize { bytes, bound: context.limits.client.dialect.input_bytes },
+        )),
+        shared::Block::Cut { id, name, arguments } => {
+            let bytes = u64::try_from(arguments.len()).or(Err(Error::Limit))?;
+            Ok(invalid_call(id, name, llm::Problem::CutOff { bytes }))
+        }
         shared::Block::ToolResult { .. } => Err(Error::Invalid),
+        shared::Block::Dropped { .. } => unreachable!("drops are separate metadata"),
+    }
+}
+
+// Canonical replacement keeps the provider's name and correlation right, but
+// carries no incomplete or oversized input or native replay. The typed problem
+// supplies the note and error result retained by the session and transcript.
+fn invalid_call(id: Box<[u8]>, name: Box<[u8]>, problem: llm::Problem) -> llm::Said {
+    llm::Said::ToolCall {
+        id,
+        name,
+        input: bytes::copy_of(b"{}"),
+        call: llm::Decoded::Invalid { problem },
+        replay: None,
     }
 }
 
@@ -255,11 +301,14 @@ fn decoded_cells(content: &[shared::Block]) -> Result<u64, Error> {
     let mut calls = 0_u64;
     for block in content {
         match block {
-            shared::Block::ToolCall { .. } => calls = calls.checked_add(1).ok_or(Error::Limit)?,
+            shared::Block::ToolCall { .. } | shared::Block::Oversize { .. } | shared::Block::Cut { .. } => {
+                calls = calls.checked_add(1).ok_or(Error::Limit)?
+            }
             shared::Block::Text { .. }
             | shared::Block::Refusal { .. }
             | shared::Block::Reasoning { .. }
-            | shared::Block::ToolResult { .. } => {}
+            | shared::Block::ToolResult { .. }
+            | shared::Block::Dropped { .. } => {}
         }
     }
     calls.checked_mul(u64::try_from(size_of::<llm::Decoded>()).or(Err(Error::Limit))?).ok_or(Error::Limit)

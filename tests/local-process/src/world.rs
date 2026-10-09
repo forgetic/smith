@@ -391,7 +391,7 @@ impl World {
                 key: 0,
                 generation: 1,
                 access_token: b"token".as_slice().into(),
-                refresh_token: b"refresh".as_slice().into(),
+                refresh_token: Some(b"refresh".as_slice().into()),
                 metadata: None,
                 expires_at: Wall::from_nanos(
                     skein_tls_world::pki::VALID.as_nanos() + Duration::from_secs(7200).as_nanos(),
@@ -456,11 +456,11 @@ impl World {
                 } else {
                     b"old".as_slice().into()
                 },
-                refresh_token: if mode == Authentication::Refused {
+                refresh_token: Some(if mode == Authentication::Refused {
                     b"wrong".as_slice().into()
                 } else {
                     b"refresh-old".as_slice().into()
-                },
+                }),
                 metadata: None,
                 expires_at: Wall::from_nanos(
                     skein_tls_world::pki::VALID.as_nanos()

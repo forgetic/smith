@@ -44,9 +44,12 @@ enum Outcome {
 
 # The problem variants mirror smith-domain-session::llm::Problem.
 record FieldProblem { field: text 64 }
+record OversizeProblem { bytes: u64 bound: u32 }
+record CutProblem { bytes: u64 }
 enum CallProblem {
     unknown_tool, not_an_object, missing: FieldProblem,
-    wrong_type: FieldProblem, bad_value: FieldProblem, too_large
+    wrong_type: FieldProblem, bad_value: FieldProblem, too_large,
+    oversize: OversizeProblem, cut_off: CutProblem
 }
 record Said { text: text 1048576 error: bool }
 record Invalid { problem: CallProblem }

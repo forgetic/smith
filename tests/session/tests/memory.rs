@@ -254,7 +254,8 @@ fn fill(original: Limits, route: Route, full_service: bool) {
                 let call = Decoded::Owned { call: Call::Read { path, skip: 0, lines: None } };
                 let content =
                     Box::new([Block::ToolCall { id: bytes(1), name: bytes(1), input: bytes(1), call, replay: None }]);
-                let completion = Completion { content, stop: Stop::ToolUse, usage: Usage::ZERO };
+                let completion =
+                    Completion { reasoning_dropped: Box::default(), content, stop: Stop::ToolUse, usage: Usage::ZERO };
                 let Some(Asked::Io { owner: op }) = step(Event::Completed { owner, completion }) else {
                     panic!("the original maximum read has full reserved receiving space");
                 };
@@ -268,7 +269,8 @@ fn fill(original: Limits, route: Route, full_service: bool) {
                 let call = Decoded::Invalid { problem: Problem::Missing { field: bytes(field) } };
                 let content =
                     Box::new([Block::ToolCall { id: bytes(1), name: bytes(1), input: bytes(1), call, replay: None }]);
-                let completion = Completion { content, stop: Stop::ToolUse, usage: Usage::ZERO };
+                let completion =
+                    Completion { reasoning_dropped: Box::default(), content, stop: Stop::ToolUse, usage: Usage::ZERO };
                 let Some(Asked::Complete { .. }) = step(Event::Completed { owner, completion }) else {
                     panic!("the original maximum problem and exact repeated answer fit");
                 };
@@ -276,7 +278,8 @@ fn fill(original: Limits, route: Route, full_service: bool) {
             Route::Talk => {
                 let message = pressure - spec_cost - (block + 1) - block;
                 let content = Box::new([Block::Text { text: bytes(1), replay: None }]);
-                let completion = Completion { content, stop: Stop::EndTurn, usage: Usage::ZERO };
+                let completion =
+                    Completion { reasoning_dropped: Box::default(), content, stop: Stop::EndTurn, usage: Usage::ZERO };
                 let Some(Asked::Other) = step(Event::Completed { owner, completion }) else {
                     panic!("the original one-byte answer yields");
                 };
@@ -344,7 +347,12 @@ fn fill_service_tail(
         matches!(
             step(Event::Completed {
                 owner,
-                completion: Completion { content, stop: Stop::EndTurn, usage: Usage::ZERO }
+                completion: Completion {
+                    reasoning_dropped: Box::default(),
+                    content,
+                    stop: Stop::EndTurn,
+                    usage: Usage::ZERO
+                }
             }),
             Some(Asked::Other)
         ),
@@ -488,6 +496,7 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
     let (_, delegate) = drive(Event::Completed {
         owner: owner.expect("the counted scenario fits"),
         completion: Completion {
+            reasoning_dropped: Box::default(),
             content: Box::new([
                 Block::Opaque { bytes: bytes(1) },
                 Block::ToolCall {
@@ -845,7 +854,12 @@ fn read_completion(width: u32) -> Completion {
             },
         });
     }
-    Completion { content: blocks.into_boxed_slice(), stop: Stop::ToolUse, usage: Usage::ZERO }
+    Completion {
+        reasoning_dropped: Box::default(),
+        content: blocks.into_boxed_slice(),
+        stop: Stop::ToolUse,
+        usage: Usage::ZERO,
+    }
 }
 
 #[test]
@@ -976,6 +990,7 @@ fn maximum_admissible_backoff_preserves_the_exact_next_provider_credit() {
         Event::Completed {
             owner,
             completion: Completion {
+                reasoning_dropped: Box::default(),
                 content: Box::new([Block::Text { text: bytes(1), replay: None }]),
                 stop: Stop::EndTurn,
                 usage: Usage::ZERO,
@@ -1122,6 +1137,7 @@ fn the_original_four_message_cap_refuses_the_next_provider_before_work() {
                     Event::Completed {
                         owner,
                         completion: Completion {
+                            reasoning_dropped: Box::default(),
                             content: Box::new([Block::ToolCall {
                                 id: bytes(1),
                                 name: bytes(1),
@@ -1151,6 +1167,7 @@ fn the_original_four_message_cap_refuses_the_next_provider_before_work() {
                     Event::Completed {
                         owner,
                         completion: Completion {
+                            reasoning_dropped: Box::default(),
                             content: Box::new([Block::Text { text: bytes(1), replay: None }]),
                             stop: Stop::EndTurn,
                             usage: Usage::ZERO,

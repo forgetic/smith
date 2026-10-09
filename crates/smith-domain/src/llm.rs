@@ -160,6 +160,8 @@ pub enum Returned {
 /// The next assistant message.
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct Completion {
+    /// Bytes of each opted-in oversized reasoning item, never retained in history.
+    pub reasoning_dropped: Box<[u64]>,
     /// Ordered provider-neutral blocks; boxed storage and owned payloads count
     /// against the receiving session's aggregate ownership limits.
     pub content: Box<[Said]>,
@@ -238,7 +240,11 @@ impl Decoded {
                 crate::peer::ask_cost(ask)?.checked_sub(u64::try_from(size_of::<run::Ask>()).ok()?)?
             }
             Decoded::Invalid { problem } => match problem {
-                Problem::UnknownTool | Problem::NotAnObject | Problem::TooLarge => 0,
+                Problem::UnknownTool
+                | Problem::NotAnObject
+                | Problem::TooLarge
+                | Problem::Oversize { .. }
+                | Problem::CutOff { .. } => 0,
                 Problem::Missing { field } | Problem::WrongType { field } | Problem::BadValue { field } => {
                     u64::try_from(field.len()).ok()?
                 }

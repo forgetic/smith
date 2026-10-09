@@ -119,19 +119,18 @@ impl Credential {
             Some(record) if record.remaining(begin.wall) > self.limits.refresh_before => {
                 self.ready(record, begin.wall, out);
             }
-            Some(record) => {
-                self.refreshing = true;
-                let mut oauth_out = Queue::with_capacity(oauth::MAX_OUT);
-                self.client.step(
-                    oauth::Event::Refresh {
-                        registration: begin.registration,
-                        prior: record.refresh_state(),
-                        now: begin.now,
-                    },
-                    &mut oauth_out,
-                );
-                self.drain(&mut oauth_out, out);
-            }
+            Some(record) => match record.refresh_state() {
+                Some(prior) => {
+                    self.refreshing = true;
+                    let mut oauth_out = Queue::with_capacity(oauth::MAX_OUT);
+                    self.client.step(
+                        oauth::Event::Refresh { registration: begin.registration, prior, now: begin.now },
+                        &mut oauth_out,
+                    );
+                    self.drain(&mut oauth_out, out);
+                }
+                None => self.fail(CredentialFailure::Refresh, out),
+            },
             None => {
                 self.refreshing = false;
                 let mut oauth_out = Queue::with_capacity(oauth::MAX_OUT);
@@ -315,7 +314,7 @@ mod tests {
                 client_id: bytes(b"client"),
                 client_secret: None,
                 redirect_uri: bytes(b"http://127.0.0.1:2345/callback"),
-                refresh_token: bytes(b"refresh-old"),
+                refresh_token: Some(bytes(b"refresh-old")),
             },
             fake::Limits {
                 document: limits().oauth.document,
@@ -405,7 +404,7 @@ mod tests {
             key: 7,
             generation: 1,
             access_token: bytes(b"old"),
-            refresh_token: bytes(b"wrong-refresh"),
+            refresh_token: Some(bytes(b"wrong-refresh")),
             metadata: None,
             expires_at: wall(),
         };
@@ -435,7 +434,7 @@ mod tests {
             key: 7,
             generation: 1,
             access_token: bytes(b"old-access"),
-            refresh_token: bytes(b"refresh-old"),
+            refresh_token: Some(bytes(b"refresh-old")),
             metadata: None,
             expires_at: wall(),
         };

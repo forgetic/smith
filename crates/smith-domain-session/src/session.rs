@@ -457,7 +457,7 @@ pub(crate) fn completed(
     domain: &mut Domain,
     env: &Env<Limits>,
     owner: Token,
-    completion: Completion,
+    mut completion: Completion,
     out: &mut Queue<Request>,
 ) {
     let mark = out.len();
@@ -465,6 +465,19 @@ pub(crate) fn completed(
     let session = domain.sessions.get_mut(id).expect("a session lives until its requests have ended");
     let (opener, stop, blocks) = (session.conversation.opener, completion.stop, count(completion.content.len()));
     let (calls, invalid) = tally(&completion.content);
+    let reasoning_dropped = mem::replace(&mut completion.reasoning_dropped, Box::new([]));
+    assert!(
+        reasoning_dropped.len() <= usize::try_from(env.limits.completion_blocks).expect("u32 fits usize"),
+        "drop metadata obeys completion block receiving cap"
+    );
+    for bytes in &reasoning_dropped {
+        domain.facts.push_response(
+            FactKind::ReasoningDropped { opener, bytes: *bytes },
+            next_response(&session.conversation),
+            None,
+        );
+    }
+
     domain.facts.push_response(
         FactKind::CompletionAnswered { opener, stop, blocks, calls, invalid },
         next_response(&session.conversation),
@@ -2198,7 +2211,11 @@ fn outcome_cost(outcome: &Outcome) -> Option<u64> {
 
 fn problem_cost(problem: &Problem) -> Option<u64> {
     match problem {
-        Problem::UnknownTool | Problem::NotAnObject | Problem::TooLarge => Some(0),
+        Problem::UnknownTool
+        | Problem::NotAnObject
+        | Problem::TooLarge
+        | Problem::Oversize { .. }
+        | Problem::CutOff { .. } => Some(0),
         Problem::Missing { field } | Problem::WrongType { field } | Problem::BadValue { field } => len(field),
     }
 }

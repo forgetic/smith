@@ -514,7 +514,12 @@ impl Driver {
                 receiving.bytes.checked_sub(completion_cell_bytes).expect("admitted receiving cap holds one block");
             let size = if self.rng.chance(500) { available } else { self.rng.below(available + 1) };
             let text = Said::Text { text: bytes(size), replay: None };
-            return Completion { content: Box::new([text]), stop: Stop::EndTurn, usage };
+            return Completion {
+                reasoning_dropped: Box::default(),
+                content: Box::new([text]),
+                stop: Stop::EndTurn,
+                usage,
+            };
         }
         let classification = u64::try_from(core::mem::size_of::<Decoded>()).expect("fixed cell");
         let minimum = completion_cell_bytes + classification + 6;
@@ -545,7 +550,7 @@ impl Driver {
                 }
             })
             .collect();
-        Completion { content, stop: Stop::ToolUse, usage }
+        Completion { reasoning_dropped: Box::default(), content, stop: Stop::ToolUse, usage }
     }
 
     fn call(&mut self, limits: &Limits, size: u64, finish: bool, agents: bool) -> Decoded {

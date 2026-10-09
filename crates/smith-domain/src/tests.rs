@@ -158,6 +158,7 @@ fn decoded_batch_reserves_refusal_cells_before_any_payload() {
     };
     let mut peer = crate::peer::Peer::new(Token::new(17), 1, 0, offered, &LIMITS.session);
     let completion = Completion {
+        reasoning_dropped: Box::default(),
         content: Box::new([
             Said::ToolCall {
                 id: skein_lib::bytes::copy_of(b"oversized"),
@@ -400,13 +401,14 @@ impl Harness {
 
     /// The session `owner`'s LLM answers with `content`, stopping for tools.
     fn answer(&mut self, owner: Token, content: Box<[Said]>) -> Box<[Request]> {
-        let completion = Completion { content, stop: Stop::ToolUse, usage: USAGE };
+        let completion = Completion { reasoning_dropped: Box::default(), content, stop: Stop::ToolUse, usage: USAGE };
         self.step(Event::Completed { owner, completion })
     }
 
     /// The session `owner`'s LLM ends its turn saying `text`.
     fn says(&mut self, owner: Token, text: &[u8]) -> Box<[Request]> {
         let completion = Completion {
+            reasoning_dropped: Box::default(),
             content: Box::new([Said::Text { text: bytes(text), replay: None }]),
             stop: Stop::EndTurn,
             usage: USAGE,
@@ -1239,8 +1241,12 @@ fn full_history_reserves_every_child_answer_before_effect_and_keeps_late_bytes()
 fn the_asks_of_an_answer_that_yields_are_forgotten() {
     let mut h = Harness::new();
     let (_, main, _) = h.admit(7, charter());
-    let completion =
-        Completion { content: Box::new([served(b"f1", verdict(b"approve"))]), stop: Stop::MaxTokens, usage: USAGE };
+    let completion = Completion {
+        reasoning_dropped: Box::default(),
+        content: Box::new([served(b"f1", verdict(b"approve"))]),
+        stop: Stop::MaxTokens,
+        usage: USAGE,
+    };
     // The run nudges at once: the session is continued within the step.
     let (owner, prompt) = completing(h.step(Event::Completed { owner: main, completion }));
     assert_eq!(owner, main);

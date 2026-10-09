@@ -55,6 +55,8 @@ pub enum FactKind {
         /// Count of calls which could not be decoded or admitted.
         invalid: u32,
     },
+    /// An opted-in reasoning item was omitted from this completion and history.
+    ReasoningDropped { opener: Token, bytes: u64 },
     /// The completion produced no answer.
     CompletionFailed {
         opener: Token,

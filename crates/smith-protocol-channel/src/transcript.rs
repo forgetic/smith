@@ -176,6 +176,10 @@ fn problem(source: &wire::CallProblem) -> llm::Problem {
         wire::CallProblem::WrongType(field) => llm::Problem::WrongType { field: Box::from(field.field()) },
         wire::CallProblem::BadValue(field) => llm::Problem::BadValue { field: Box::from(field.field()) },
         wire::CallProblem::TooLarge => llm::Problem::TooLarge,
+        wire::CallProblem::Oversize(problem) => {
+            llm::Problem::Oversize { bytes: problem.bytes(), bound: problem.bound() }
+        }
+        wire::CallProblem::CutOff(problem) => llm::Problem::CutOff { bytes: problem.bytes() },
     }
 }
 

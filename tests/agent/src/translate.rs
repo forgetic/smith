@@ -135,7 +135,7 @@ pub fn completion(answer: provider::Answer, grants: tools::Grants, served: &[age
             provider::Part::ToolOutput { .. } => panic!("a fake completion contains no tool result"),
         })
         .collect();
-    agent::Completion { content, stop, usage }
+    agent::Completion { reasoning_dropped: Box::default(), content, stop, usage }
 }
 
 #[must_use]
