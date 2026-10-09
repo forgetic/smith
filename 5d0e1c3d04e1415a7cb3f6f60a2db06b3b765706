@@ -1,0 +1,9 @@
+Reliability Session03.3 final acceptance.
+
+Implements domain/host.md sections9.1,9.2 and9.4: bounded generation-safe inline slots with typed parent values and exact lower completion owners; cancel/answer settlement retains completion, relay and turn-ACK rights. Native facts and content remain drainable until iteration-end reclaim. Shared Skein fake-provider schedules, replay, referee and Counting/Meter memory kit cover two slots and actual Smith roots; no generic kit is duplicated.
+
+Organization departures: an internal Gone state retains native drains until both reach None; Domain::takes reserves own lifecycle and targeted root native-fact fanout before step. The latter adopts merged02.4 public max_facts/facts_room and keeps another slot runnable while one is held. These refine bounded ownership without changing the host contract. Workspace starts remain refused until03.4; drop/grace remains03.8.
+
+Serial measurement: task967, 67 scoped focused/0.754s, host fuzzy2/0.185s, inline fuzzy1/0.192s, no skips; workflow records world measures and unchanged15s/60s budgets. Final clean rebased tip5d0e1c3d04e1415a7cb3f6f60a2db06b3b765706 atop10183b1203be65c9c122f261fa70a2c5d108e0ad passed task999 (2026-10-09 15:32:48–15:33:27 UTC): fmt, workspace all-target Clippy -D warnings, focused1621/3.262s, fuzzy24/4.208s, 0 skipped. Prior task987 passed before main moved and is superseded.
+
+03.3 requires no live probe: deterministic stories cover its face. Credentialed smoke-tools evidence for the broader session remains pending Session00 backfill; fake-provider tests are not live evidence. Memory Verify used own source/snippets, both-direction traces and11-path clean metadata-match coverage at2026-10-09T15:28:05Z; resolver aliases for smith::step/Slab::get_mut were corrected by exact source, not treated as valid edges.
