@@ -64,7 +64,10 @@ impl Before {
             expected.extend([PathBuf::from("agent.json"), PathBuf::from("agent-trace.jsonl")]);
         }
         let endpoints = if binary {
-            smith::config::read(&root.join("agent.json")).expect("actual child config").service.channel_endpoints
+            smith_agent_shell::config::read(&root.join("agent.json"))
+                .expect("actual child config")
+                .service
+                .channel_endpoints
         } else {
             smith_local_process_world::process::lower_configuration().channel_endpoints
         };

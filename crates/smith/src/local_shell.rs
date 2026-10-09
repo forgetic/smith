@@ -17,8 +17,9 @@ use smith_host_protocol as protocol;
 use smith_local_domain as local;
 use smith_local_service as service;
 
+use smith_agent_shell::config;
+
 use crate::{
-    config,
     local_host::{Local, Resources},
     local_settings,
 };
@@ -210,7 +211,7 @@ fn host_limits(largest_turn: u64) -> host::Limits {
 mod tests {
     #[test]
     fn the_local_start_window_admits_the_standard_agents_largest_turn() {
-        let configuration = crate::config::parse(
+        let configuration = smith_agent_shell::config::parse(
             br#"{"profile":"standard","memory_bytes":1099511627776,"grace_ms":10,"endpoints":[],"environment":[]}"#,
         )
         .expect("standard agent");

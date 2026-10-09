@@ -562,7 +562,7 @@ mod tests {
             accounts: vec![],
             push: None,
         };
-        let prepared = policy(&settings, &endpoints, crate::limits::LIMITS).expect("bounded policy");
+        let prepared = policy(&settings, &endpoints, smith_agent_shell::LIMITS).expect("bounded policy");
         assert!(prepared.paths.is_empty());
         assert_eq!(prepared.limits.endpoints.as_ref(), &[run::charter::Endpoint(7)]);
         let encoded = charter(&prepared.config, &endpoints).expect("matching charter");

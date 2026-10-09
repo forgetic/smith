@@ -16,6 +16,7 @@ skein-fake-checkout.workspace = true
 skein-fake-llm-domain.workspace = true
 skein-tls-world.workspace = true
 smith.workspace = true
+smith-agent-shell.workspace = true
 smith-local-domain.workspace = true
 smith-local-process-world.workspace = true
 serde_json = "1"

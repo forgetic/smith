@@ -283,9 +283,11 @@ fn resolve(address: &str) -> Result<SocketAddr, String> {
 }
 
 // Startup trust material and decoded configuration are bounded together.
-pub(crate) const TRUST_BYTES: u64 = 16_777_216;
+/// Bound on startup trust material and decoded configuration, in bytes.
+pub const TRUST_BYTES: u64 = 16_777_216;
 
-pub(crate) fn trust(der: Option<&str>) -> Result<tls::Config, String> {
+/// Load the bounded startup trust roots used by agent and local endpoints.
+pub fn trust(der: Option<&str>) -> Result<tls::Config, String> {
     let mut roots = tls::RootCertStore::empty();
     match der {
         Some(path) => {

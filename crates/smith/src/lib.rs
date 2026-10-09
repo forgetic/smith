@@ -3,18 +3,14 @@
 //! output are shared by the binary and hosted process worlds. Kernel,
 //! simulator, neighbour and fault state belong to the caller.
 
-mod limits;
 mod local_auth;
 mod local_auth_http;
 
-pub mod agent_shell;
-pub mod config;
 pub mod local_host;
 pub mod local_settings;
 pub mod local_shell;
 pub mod local_store;
 pub mod local_tokens;
-pub mod trace;
 
 #[cfg(test)]
 mod local_auth_tests;

@@ -66,7 +66,7 @@ pub(crate) fn worst_case() -> Option<u64> {
         .checked_add(Queue::<CredentialRequest>::worst_case(8)?)?
         .checked_add(8_u64.checked_mul(32_768)?)?
         .checked_add(65_536)?
-        .checked_add(crate::config::TRUST_BYTES)?
+        .checked_add(smith_agent_shell::config::TRUST_BYTES)?
         .checked_add(u64::try_from(std::mem::size_of::<Auth>()).ok()?)
 }
 
@@ -116,7 +116,7 @@ impl Auth {
                 } else {
                     skein_llm_connection::Transport::Tls {
                         server_name: skein_tls::Name::new(&config.server_name).ok_or("invalid OAuth server name")?,
-                        trust: crate::config::trust(config.trust_der.as_deref())?,
+                        trust: smith_agent_shell::config::trust(config.trust_der.as_deref())?,
                     }
                 };
                 let destination = Destination {

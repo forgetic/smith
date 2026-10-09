@@ -2,9 +2,9 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
 use skein_world::Host;
-use smith::agent_shell::{Agent, Resources};
-use smith::{config, trace};
 use smith_agent_process_world as fixture;
+use smith_agent_shell::{Agent, Resources};
+use smith_agent_shell::{config, trace};
 
 #[derive(Clone)]
 struct Errors(Arc<Mutex<Vec<u8>>>);
