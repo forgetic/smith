@@ -27,6 +27,7 @@ skein-fake-machine.workspace = true
 skein-fake-checkout.workspace = true
 smith-local-shell.workspace = true
 smith-agent-service.workspace = true
+smith-agent-shell.workspace = true
 smith-agent-process-world.workspace = true
 smith-local-world.workspace = true
 smith-local-domain.workspace = true

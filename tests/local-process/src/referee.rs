@@ -366,7 +366,7 @@ impl skein_world::Referee<crate::process::Proc> for Run {
                         browser.shutdown();
                     }
                 }
-                Proc::Local(_) | Proc::Agent(_) | Proc::Git(_) => {}
+                Proc::Local(_) | Proc::Agent(_, _) | Proc::Git(_) => {}
             }
         }
     }

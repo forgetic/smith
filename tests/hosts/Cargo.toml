@@ -15,6 +15,7 @@ skein-fake-machine.workspace = true
 skein-world.workspace = true
 skein-tls-world.workspace = true
 smith-agent-service.workspace = true
+smith-agent-shell.workspace = true
 smith-agent-process-world.workspace = true
 smith-host-domain.workspace = true
 smith-host-protocol.workspace = true

@@ -2,11 +2,11 @@
 //! 2.1 and 5). It keeps only configuration and the settled outcome; scheduling,
 //! hosted-child ownership and teardown belong to Skein. The referee watches
 //! parent observations and requests shutdown or scripted child faults.
-use fixture::process::Agent;
 use skein_io::kernel;
 use skein_lib::{Duration, Queue, Time, Token, Wall};
 use skein_world::{Host, HostedProgram, Inherited, Memory, Outcome};
 use smith_agent_process_world as fixture;
+use smith_agent_shell::Agent;
 
 use crate::{HostService, Observation, Program, Seen, referee};
 
@@ -15,7 +15,7 @@ enum Proc {
     /// The scripted parent sends Start and watches the child until Gone.
     Parent(Box<HostService>),
     /// The actual agent service receives inherited streams until its exit.
-    Agent(Box<Agent>),
+    Agent { agent: Box<Agent>, errors: fixture::AgentErrors, paused: bool },
     /// The independent fake provider answers requests until shutdown.
     Peer(Box<skein_fake_peers::llm::Peer>),
     /// The failing startup writes stderr and waits to be killed.
@@ -26,7 +26,7 @@ impl Proc {
     fn host(&self) -> &dyn Host {
         match self {
             Self::Parent(parent) => parent.as_ref(),
-            Self::Agent(agent) => agent.as_ref(),
+            Self::Agent { agent, .. } => agent.as_ref(),
             Self::Peer(peer) => peer.as_ref(),
             Self::Error(error) => error.as_ref(),
         }
@@ -35,7 +35,7 @@ impl Proc {
     fn host_mut(&mut self) -> &mut dyn Host {
         match self {
             Self::Parent(parent) => parent.as_mut(),
-            Self::Agent(agent) => agent.as_mut(),
+            Self::Agent { agent, .. } => agent.as_mut(),
             Self::Peer(peer) => peer.as_mut(),
             Self::Error(error) => error.as_mut(),
         }
@@ -44,7 +44,9 @@ impl Proc {
 
 impl Host for Proc {
     fn iterate(&mut self, now: Time, wall: Wall) {
-        self.host_mut().iterate(now, wall);
+        if !matches!(self, Self::Agent { paused: true, .. }) {
+            self.host_mut().iterate(now, wall);
+        }
     }
 
     fn completions(&mut self) -> &mut Queue<kernel::Complete> {
@@ -56,11 +58,11 @@ impl Host for Proc {
     }
 
     fn work_pending(&self, now: Time) -> bool {
-        self.host().work_pending(now)
+        !matches!(self, Self::Agent { paused: true, .. }) && self.host().work_pending(now)
     }
 
     fn next_deadline(&self) -> Option<Time> {
-        self.host().next_deadline()
+        if matches!(self, Self::Agent { paused: true, .. }) { None } else { self.host().next_deadline() }
     }
 
     fn is_empty(&self) -> bool {
@@ -75,6 +77,7 @@ impl Host for Proc {
         self.host()
             .worst_case()
             .checked_add(u64::try_from(size_of::<Self>()).expect("process wrapper size"))
+            .and_then(|bound| bound.checked_add(4096))
             .expect("wrapper bound")
     }
 
@@ -192,8 +195,13 @@ impl Host for ErrorTail {
     }
 }
 
-fn make_agent(spawn: &kernel::Spawn, inherited: &Inherited) -> Proc {
-    Proc::Agent(Box::new(fixture::process::make(spawn, inherited)))
+fn make_agent(_spawn: &kernel::Spawn, inherited: &Inherited) -> Proc {
+    let errors = fixture::AgentErrors::default();
+    Proc::Agent {
+        agent: Box::new(fixture::configured(fixture::configuration(), 7, inherited, errors.clone())),
+        errors,
+        paused: false,
+    }
 }
 
 fn make_error(_spawn: &kernel::Spawn, inherited: &Inherited) -> Proc {
@@ -251,7 +259,7 @@ impl skein_world::Referee<Proc> for Referee {
             .iter()
             .find_map(|proc| match proc {
                 Proc::Parent(parent) => Some(parent),
-                Proc::Agent(_) | Proc::Peer(_) | Proc::Error(_) => None,
+                Proc::Agent { .. } | Proc::Peer(_) | Proc::Error(_) => None,
             })
             .expect("parent");
         let gone = parent.seen.gone.is_some();
@@ -276,10 +284,8 @@ impl skein_world::Referee<Proc> for Referee {
                         parent.stop_requested = true;
                     }
                 }
-                Proc::Agent(agent) => {
-                    if pause {
-                        agent.pause();
-                    }
+                Proc::Agent { paused, .. } => {
+                    *paused |= pause;
                 }
                 Proc::Peer(peer) => {
                     if gone {
@@ -297,7 +303,7 @@ impl skein_world::Referee<Proc> for Referee {
             .iter()
             .find_map(|proc| match proc {
                 Proc::Parent(parent) => Some(parent),
-                Proc::Agent(_) | Proc::Peer(_) | Proc::Error(_) => None,
+                Proc::Agent { .. } | Proc::Peer(_) | Proc::Error(_) => None,
             })
             .expect("parent");
         let observations = parent.observations();
@@ -305,6 +311,13 @@ impl skein_world::Referee<Proc> for Referee {
             self.meeting.observe(now, *observation, &mut Vec::new());
         }
         self.reviewed = observations.len();
+        if parent.seen.gone.is_some() {
+            for proc in procs {
+                if let Proc::Agent { errors, .. } = proc {
+                    referee::review_agent_errors(&errors.bytes(), parent.seen.answered.is_some());
+                }
+            }
+        }
         self.meeting.fire(now, &mut Vec::new());
         if matches!(self.meeting.verdict(), skein_world::domain::Verdict::Failed(_)) {
             self.meeting.assert_passed(self.seed);
@@ -399,7 +412,7 @@ impl World {
             .iter()
             .find_map(|proc| match proc {
                 Proc::Parent(parent) => Some(parent.as_ref()),
-                Proc::Agent(_) | Proc::Peer(_) | Proc::Error(_) => None,
+                Proc::Agent { .. } | Proc::Peer(_) | Proc::Error(_) => None,
             })
             .expect("parent survives")
     }
@@ -415,7 +428,7 @@ impl World {
     pub fn peer_replied(&self) -> bool {
         self.outcome.as_ref().expect("settled world").procs.iter().any(|proc| match proc {
             Proc::Peer(peer) => fixture::fake::replied(peer),
-            Proc::Parent(_) | Proc::Agent(_) | Proc::Error(_) => false,
+            Proc::Parent(_) | Proc::Agent { .. } | Proc::Error(_) => false,
         })
     }
     #[must_use]

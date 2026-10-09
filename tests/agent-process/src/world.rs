@@ -1,8 +1,9 @@
 //! Scripted parent and observation referee beside a hosted agent. The parent
 //! knows channel bytes and kernel terminals, never agent state; the referee
-//! reads those bytes, independent provider observations and service facts.
+//! reads those bytes and independent provider observations, including facts
+//! decoded from the host's channel.
 //! Scheduling, replay and process heaps belong to Skein (testing.md, 2–5).
-use crate::{fake, process};
+use crate::fake;
 use skein_io::kernel::{self, Done, Fd, Op, Pipe, Spawn, Way};
 use skein_lib::{Duration, Queue, Time, Token, Wall, bytes};
 use skein_world::{Host, HostedProgram, Inherited, Memory, Outcome};
@@ -23,14 +24,17 @@ struct Parent {
     status: Option<kernel::Exit>,
     signal: bool,
     signalled: bool,
+    hang_up: bool,
     closing: u32,
     next: u64,
 }
 
 impl Parent {
-    fn new(root: Fd, charter: &[u8]) -> Self {
+    fn new(root: Fd, charter: &[u8], hang_up: bool) -> Self {
         let mut peer = crate::host();
-        peer.play(crate::start(charter));
+        if !hang_up {
+            peer.play(crate::start(charter));
+        }
         let mut parent = Self {
             peer,
             completions: Queue::with_capacity(16),
@@ -46,6 +50,7 @@ impl Parent {
             status: None,
             signal: false,
             signalled: false,
+            hang_up,
             closing: 0,
             next: 0,
         };
@@ -90,6 +95,10 @@ impl Parent {
                 self.close(spawn.root);
                 self.pidfd = Some(pidfd);
                 self.input = spawn.pipes[0].parent;
+                if self.hang_up {
+                    let input = self.input.take().expect("child input");
+                    self.close(input);
+                }
                 self.output = spawn.pipes[1].parent;
                 self.error = spawn.pipes[2].parent;
                 self.submit(Op::Wait { pidfd });
@@ -232,21 +241,21 @@ impl Host for Parent {
 
 enum Proc {
     Parent(Box<Parent>),
-    Agent(Box<process::Agent>),
+    Agent(Box<smith_agent_shell::Agent>, crate::AgentErrors),
     Peer(Box<skein_fake_peers::llm::Peer>),
 }
 impl Proc {
     fn host(&self) -> &dyn Host {
         match self {
             Self::Parent(p) => p.as_ref(),
-            Self::Agent(p) => p.as_ref(),
+            Self::Agent(p, _) => p.as_ref(),
             Self::Peer(p) => p.as_ref(),
         }
     }
     fn host_mut(&mut self) -> &mut dyn Host {
         match self {
             Self::Parent(p) => p.as_mut(),
-            Self::Agent(p) => p.as_mut(),
+            Self::Agent(p, _) => p.as_mut(),
             Self::Peer(p) => p.as_mut(),
         }
     }
@@ -274,31 +283,48 @@ impl Host for Proc {
         self.host().exit()
     }
     fn worst_case(&self) -> u64 {
-        self.host().worst_case().checked_add(size_of::<Self>() as u64).expect("wrapper bound")
+        self.host()
+            .worst_case()
+            .checked_add(size_of::<Self>() as u64)
+            .and_then(|bound| bound.checked_add(4096))
+            .expect("wrapper bound")
     }
     fn operations(&self) -> u32 {
         self.host().operations()
     }
 }
-fn make(spawn: &Spawn, inherited: &Inherited) -> Proc {
-    Proc::Agent(Box::new(process::make(spawn, inherited)))
+fn make(_spawn: &Spawn, inherited: &Inherited) -> Proc {
+    let errors = crate::AgentErrors::default();
+    Proc::Agent(Box::new(crate::configured(crate::configuration(), 7, inherited, errors.clone())), errors)
 }
 
-fn make_discarding(spawn: &Spawn, inherited: &Inherited) -> Proc {
-    let mut agent = process::make(spawn, inherited);
-    agent.discard_facts();
-    Proc::Agent(Box::new(agent))
+fn unused_roots(_spawn: &Spawn) -> Vec<skein_world::StartupRoot> {
+    [b"unused-a", b"unused-b"]
+        .into_iter()
+        .map(|name| skein_world::StartupRoot { name: name.as_slice().into(), path: name.as_slice().into() })
+        .collect()
 }
 
 struct Machine(skein_fake_machine::Machine);
 impl skein_world::Machine for Machine {
+    fn open_root(&mut self, path: &[u8]) -> Result<skein_sim::Handle, kernel::Error> {
+        assert!(matches!(path, b"unused-a" | b"unused-b"), "scenario's unused startup roots");
+        Ok(skein_sim::Handle::new(self.0.lay(&[]).raw()))
+    }
+
+    fn close_root(&mut self, root: skein_sim::Handle) {
+        self.0.close(skein_fake_machine::Opened::new(root.raw()));
+    }
+
     fn step(&mut self, call: skein_sim::Call, answers: &mut Queue<skein_sim::Answer>) {
         skein_fake_machine::step(&mut self.0, call, answers);
     }
 }
 
 #[derive(Debug)]
-struct Terminal;
+struct Terminal {
+    hang_up: bool,
+}
 impl skein_world::Expectation<Proc> for Terminal {
     fn check(&self, _now: Time, procs: &[Proc]) -> Result<bool, String> {
         let parent = procs.iter().find_map(|p| if let Proc::Parent(p) = p { Some(p) } else { None }).expect("parent");
@@ -306,7 +332,11 @@ impl skein_world::Expectation<Proc> for Terminal {
         if answers > 1 {
             return Err("more than one Answer".into());
         }
-        Ok(answers == 1 && parent.status == Some(kernel::Exit::Code(0)))
+        Ok(if self.hang_up {
+            answers == 0 && parent.status == Some(kernel::Exit::Code(1))
+        } else {
+            answers == 1 && parent.status == Some(kernel::Exit::Code(0))
+        })
     }
     fn deadline(&self) -> Time {
         Time::from_nanos(Duration::from_secs(120).as_nanos())
@@ -314,7 +344,7 @@ impl skein_world::Expectation<Proc> for Terminal {
 }
 struct Referee {
     cancel: bool,
-    keep_facts: bool,
+    hang_up: bool,
     reviewed: usize,
     admitted_facts: usize,
     answer_facts: usize,
@@ -337,7 +367,7 @@ impl skein_world::Referee<Proc> for Referee {
                         peer.shutdown();
                     }
                 }
-                Proc::Agent(_) => {}
+                Proc::Agent(_, _) => {}
             }
         }
     }
@@ -351,45 +381,44 @@ impl skein_world::Referee<Proc> for Referee {
         );
         let peer = procs.iter().find_map(|p| if let Proc::Peer(p) = p { Some(p) } else { None }).expect("peer");
         assert!(fake::queries(peer).count() <= 1, "one completion request for the one-turn budget");
-        if parent.status.is_some() {
+        if !self.hang_up && parent.status.is_some() {
             assert!(parent.admitted(), "the host observed admission");
             let peer = procs.iter().find_map(|p| if let Proc::Peer(p) = p { Some(p) } else { None }).expect("peer");
             if !self.cancel {
                 assert!(fake::replied(peer), "provider answered before agent exit");
             }
         }
-        for proc in procs {
-            if let Proc::Agent(agent) = proc {
-                for fact in &agent.facts()[self.reviewed..] {
-                    match fact {
-                        smith_domain::Fact::Run { fact: smith_domain_run::facts::Fact::Admitted { .. } } => {
-                            self.admitted_facts += 1;
+        for frame in parent.peer.observed().get(self.reviewed..).expect("channel observations only grow") {
+            if frame.kind == 0x010f {
+                let fact =
+                    smith_channel::Fact::decode(&smith_channel::CEILINGS, &mut skein_lib::Reader::new(&frame.body))
+                        .expect("host's validated Fact");
+                match fact.kind() {
+                    smith_channel::FactKind::Admitted => self.admitted_facts += 1,
+                    smith_channel::FactKind::Ended => self.answer_facts += 1,
+                    smith_channel::FactKind::LlmFinished => {
+                        if self.full_completion {
+                            assert_eq!(
+                                fact.count(),
+                                u64::from(crate::limits().llm.adapter.client.dialect.parts),
+                                "all maximum provider parts decoded"
+                            );
                         }
-                        smith_domain::Fact::Run { fact: smith_domain_run::facts::Fact::Answered { .. } } => {
-                            self.answer_facts += 1;
-                        }
-                        smith_domain::Fact::Session {
-                            fact: smith_domain_session::Fact::CompletionAnswered { blocks, .. },
-                        } => {
-                            if self.full_completion {
-                                assert_eq!(
-                                    *blocks,
-                                    crate::limits().llm.adapter.client.dialect.parts,
-                                    "all maximum provider parts decoded"
-                                );
-                            }
-                        }
-                        smith_domain::Fact::Run { .. } | smith_domain::Fact::Session { .. } => {}
                     }
+                    smith_channel::FactKind::LlmStarted
+                    | smith_channel::FactKind::LlmRetried
+                    | smith_channel::FactKind::ToolStarted
+                    | smith_channel::FactKind::ToolFinished
+                    | smith_channel::FactKind::CheckStarted
+                    | smith_channel::FactKind::CheckFinished
+                    | smith_channel::FactKind::TextArrived => {}
                 }
-                self.reviewed = agent.facts().len();
             }
         }
+        self.reviewed = parent.peer.observed().len();
         assert!(self.admitted_facts <= 1 && self.answer_facts <= 1, "one fact terminal per activation");
-        if self.keep_facts && parent.status.is_some() {
-            // Facts are lossy; the framed service stops projecting them once
-            // Answer is queued. Wire terminals remain authoritative.
-            assert_eq!(self.admitted_facts, 1, "the retained admission agrees with the host");
+        if !self.hang_up && parent.status.is_some() {
+            assert_eq!(self.admitted_facts, 1, "the observed admission agrees with the host");
         }
         self.expected.observe(now, procs);
     }
@@ -409,8 +438,8 @@ pub struct World {
     seed: u64,
     charter: Box<[u8]>,
     cancel: bool,
+    hang_up: bool,
     memory: Memory,
-    keep_facts: bool,
     full_completion: bool,
     outcome: Option<Outcome<Proc, Machine>>,
 }
@@ -422,8 +451,8 @@ impl World {
             seed,
             charter: charter.into(),
             cancel: false,
+            hang_up: false,
             memory: Memory::Unchecked,
-            keep_facts: true,
             full_completion: false,
             outcome: None,
         }
@@ -432,9 +461,9 @@ impl World {
     pub fn signal(&mut self) {
         self.cancel = true;
     }
-    /// Drop all emitted facts while retaining identical process behavior.
-    pub fn discard_facts(&mut self) {
-        self.keep_facts = false;
+    /// Close the channel before Start, without signalling the process.
+    pub fn hang_up(&mut self) {
+        self.hang_up = true;
     }
 
     /// Ask the provider for the full configured decoded completion payload.
@@ -454,22 +483,25 @@ impl World {
         let root = machine.lay(&[]);
         let referee = Referee {
             cancel: self.cancel,
-            keep_facts: self.keep_facts,
+            hang_up: self.hang_up,
             reviewed: 0,
             admitted_facts: 0,
             answer_facts: 0,
             full_completion: self.full_completion,
-            expected: skein_world::Expectations::new(self.seed, vec![Terminal]),
+            expected: skein_world::Expectations::new(self.seed, vec![Terminal { hang_up: self.hang_up }]),
         };
         let mut world = skein_world::World::new(self.seed, config, referee, self.memory).with_machine(Machine(machine));
-        world.host(HostedProgram {
-            program: b"smith".as_slice().into(),
-            make: if self.keep_facts { make } else { make_discarding },
-            instances: 1,
-            operations: crate::limits().routes.checked_add(1).expect("routes"),
-        });
+        world.host_roots(
+            HostedProgram {
+                program: b"smith".as_slice().into(),
+                make,
+                instances: 1,
+                operations: crate::limits().routes.checked_add(3).expect("routes and inherited closes"),
+            },
+            unused_roots,
+        );
         world.spawn_root(skein_sim::Handle::new(root.raw()), |root| {
-            Proc::Parent(Box::new(Parent::new(root, &self.charter)))
+            Proc::Parent(Box::new(Parent::new(root, &self.charter, self.hang_up)))
         });
         world.spawn(|| {
             Proc::Peer(Box::new(if self.full_completion {
@@ -510,7 +542,7 @@ impl World {
         });
 
         self.outcome = Some(world.run());
-        self.parent().status == Some(kernel::Exit::Code(0))
+        self.parent().status == Some(kernel::Exit::Code(u8::from(self.hang_up)))
     }
     fn parent(&self) -> &Parent {
         self.outcome
@@ -609,6 +641,30 @@ impl World {
     pub fn assert_agent_clean(&self) {
         assert!(self.outcome.as_ref().expect("settled world").killed.is_empty());
     }
+    /// The process status actually received by its parent.
+    #[must_use]
+    pub fn exit(&self) -> Option<kernel::Exit> {
+        self.parent().status
+    }
+
+    /// Diagnostic bytes observed from the caller-supplied writer.
+    #[must_use]
+    pub fn errors(&self) -> Vec<u8> {
+        self.outcome
+            .as_ref()
+            .expect("settled world")
+            .procs
+            .iter()
+            .find_map(|proc| if let Proc::Agent(_, errors) = proc { Some(errors.bytes()) } else { None })
+            .expect("agent writer")
+    }
+
+    /// Whether the scripted host sent a termination signal.
+    #[must_use]
+    pub fn signalled(&self) -> bool {
+        self.parent().signalled
+    }
+
     /// Complete kernel trace for the generic replay assertion.
     #[must_use]
     pub fn trace(&self) -> Vec<String> {

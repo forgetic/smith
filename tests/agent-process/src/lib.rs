@@ -13,7 +13,53 @@ use smith_protocol_machine as machine;
 
 pub mod fake;
 
-pub mod process;
+/// The bounded diagnostic writer observed outside each hosted agent.
+#[derive(Clone, Default)]
+pub struct AgentErrors(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+
+impl AgentErrors {
+    /// Snapshot the agent's words without reading its service state.
+    #[must_use]
+    pub fn bytes(&self) -> Vec<u8> {
+        self.0.borrow().clone()
+    }
+}
+
+impl std::io::Write for AgentErrors {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let mut output = self.0.borrow_mut();
+        assert!(output.len().checked_add(bytes.len()).is_some_and(|size| size <= 4096), "finite agent diagnostics");
+        output.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Adopt scenario-specific service settings and mounts in Start order.
+#[must_use]
+pub fn configured(
+    configuration: agent::Config,
+    seed: u64,
+    inherited: &skein_world::Inherited,
+    errors: AgentErrors,
+) -> smith_agent_shell::Agent {
+    smith_agent_shell::Agent::new(
+        smith_agent_shell::config::Configuration { service: configuration, memory: u64::MAX, trace: None },
+        smith_agent_shell::Resources {
+            input: inherited.pipes.iter().find(|(child, _)| *child == 0).expect("stdin").1,
+            output: inherited.pipes.iter().find(|(child, _)| *child == 1).expect("stdout").1,
+            error: Some(inherited.pipes.iter().find(|(child, _)| *child == 2).expect("stderr").1),
+            signals: inherited.signal,
+            seed,
+            roots: Some(inherited.roots.iter().map(|(_, fd)| *fd).collect()),
+        },
+        Box::new(errors),
+    )
+    .expect("configured shipped agent")
+}
 
 /// Bounded agent-process settings shared by its direct and hosted worlds.
 #[must_use]

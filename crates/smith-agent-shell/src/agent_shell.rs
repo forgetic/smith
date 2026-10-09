@@ -8,8 +8,8 @@
 use std::io::Write;
 use std::path::Path;
 
-use skein_io::kernel::{Complete, Fd, Submit};
-use skein_lib::{Queue, Time, Wall};
+use skein_io::kernel::{Complete, Exit, Fd, Op, Submit};
+use skein_lib::{Queue, Time, Token, Wall};
 use skein_shell::{Clock, Config as KernelConfig, Kernel, Now, Wait};
 use skein_world::Host;
 use smith_agent_service as service;
@@ -22,8 +22,11 @@ pub struct Resources {
     pub output: Fd,
     pub signals: Fd,
     pub seed: u64,
-    /// When present, roots are adopted in Start order instead of opened on
-    /// the machine. The caller retains responsibility for any unused roots.
+    /// An inherited stderr descriptor whose close the invocation owns; the
+    /// supplied writer owns the diagnostic bytes.
+    pub error: Option<Fd>,
+    /// When present, roots are adopted in Start order; unused roots close at
+    /// the invocation's end instead of returning to the caller.
     pub roots: Option<Box<[Fd]>>,
 }
 
@@ -33,6 +36,10 @@ pub struct Agent {
     trace: Option<trace::Trace>,
     roots: Option<std::vec::IntoIter<Fd>>,
     errors: Box<dyn Write>,
+    error: Option<Fd>,
+    completions: Queue<Complete>,
+    submissions: Queue<Submit>,
+    closing: u32,
     result: Option<Result<(), String>>,
     worst: u64,
     operations: u32,
@@ -43,6 +50,7 @@ struct Prepared {
     trace: Option<trace::Trace>,
     worst: u64,
     operations: u32,
+    queue: u32,
 }
 
 impl Agent {
@@ -77,6 +85,10 @@ impl Agent {
             trace: prepared.trace,
             roots: resources.roots.map(|roots| roots.into_vec().into_iter()),
             errors,
+            error: resources.error,
+            completions: Queue::with_capacity(prepared.queue),
+            submissions: Queue::with_capacity(prepared.queue),
+            closing: 0,
             result: None,
             worst: prepared.worst,
             operations: prepared.operations,
@@ -86,7 +98,19 @@ impl Agent {
     /// The settled invocation's success or failure, already logged to error output.
     #[must_use]
     pub fn result(&self) -> Option<Result<(), &str>> {
-        self.result.as_ref().map(|result| result.as_ref().copied().map_err(String::as_str))
+        if self.is_empty() {
+            self.result.as_ref().map(|result| result.as_ref().copied().map_err(String::as_str))
+        } else {
+            None
+        }
+    }
+
+    fn close(&mut self, fd: Fd) {
+        self.closing = self.closing.checked_add(1).expect("bounded inherited closes");
+        self.submissions.push(Submit {
+            op: Token::new(u64::MAX.checked_sub(u64::from(self.closing)).expect("bounded close token")),
+            kind: Op::Close { fd },
+        });
     }
 
     fn finish(&mut self, answered: bool) {
@@ -115,16 +139,29 @@ fn prepare(configuration: config::Configuration, resources: &Resources) -> Resul
     if root_count > usize::try_from(configuration.service.limits.domain.run.directories).expect("directory bound") {
         return Err("inherited agent roots exceed the directory limit".into());
     }
+    let extra_operations = u32::try_from(root_count)
+        .map_err(|_| "inherited root count overflowed")?
+        .checked_add(u32::from(resources.error.is_some()))
+        .ok_or("inherited operations overflowed")?;
+    let queue =
+        configuration.service.limits.queue.checked_add(extra_operations).ok_or("agent queue calculation overflowed")?;
+    let operations = configuration
+        .service
+        .limits
+        .routes
+        .checked_add(extra_operations)
+        .ok_or("agent operations calculation overflowed")?;
     let reserve = if configuration.trace.is_some() { trace::MEMORY_RESERVE } else { 0 };
     let worst = service::worst_case(&configuration.service.limits)
         .and_then(|bytes| bytes.checked_add(reserve))
+        .and_then(|bytes| bytes.checked_add(Queue::<Complete>::worst_case(queue)?))
+        .and_then(|bytes| bytes.checked_add(Queue::<Submit>::worst_case(queue)?))
         .and_then(|bytes| bytes.checked_add(u64::try_from(size_of::<Agent>()).ok()?))
         .and_then(|bytes| bytes.checked_add(u64::try_from(root_count.checked_mul(size_of::<Fd>())?).ok()?))
         .ok_or("agent memory calculation overflowed")?;
     if worst > configuration.memory {
         return Err("agent shell exceeds memory_bytes".into());
     }
-    let operations = configuration.service.limits.routes;
     let trace = match configuration.trace {
         Some(config) => Some(trace::Trace::open(config)?),
         None => None,
@@ -134,11 +171,19 @@ fn prepare(configuration: config::Configuration, resources: &Resources) -> Resul
     service
         .adopt_streams(resources.input, resources.output, resources.signals)
         .map_err(|fd| format!("agent stream {} cannot be adopted", fd.raw()))?;
-    Ok(Prepared { service, trace, worst, operations })
+    Ok(Prepared { service, trace, worst, operations, queue })
 }
 
 impl Host for Agent {
     fn iterate(&mut self, now: Time, wall: Wall) {
+        while let Some(complete) = self.completions.pop() {
+            if complete.op.raw() >= u64::MAX.saturating_sub(u64::from(self.operations)) {
+                assert!(complete.result.is_ok(), "inherited descriptor closes");
+                self.closing = self.closing.checked_sub(1).expect("submitted inherited close");
+            } else {
+                self.service.completions().push(complete);
+            }
+        }
         if self.result.is_some() {
             return;
         }
@@ -170,27 +215,42 @@ impl Host for Agent {
         }
         if let Some(answered) = service::done(&self.service) {
             self.finish(answered);
+            while let Some(fd) = self.roots.as_mut().and_then(Iterator::next) {
+                self.close(fd);
+            }
+            if let Some(fd) = self.error.take() {
+                self.close(fd);
+            }
+        }
+        while let Some(submission) = self.service.submissions().pop() {
+            self.submissions.push(submission);
         }
     }
 
     fn completions(&mut self) -> &mut Queue<Complete> {
-        self.service.completions()
+        &mut self.completions
     }
 
     fn submissions(&mut self) -> &mut Queue<Submit> {
-        self.service.submissions()
+        &mut self.submissions
     }
 
     fn work_pending(&self, now: Time) -> bool {
-        self.result.is_none() && service::work_pending(&self.service, now)
+        (self.result.is_none() && service::work_pending(&self.service, now))
+            || !self.completions.is_empty()
+            || !self.submissions.is_empty()
     }
 
     fn next_deadline(&self) -> Option<Time> {
-        service::next_deadline(&self.service)
+        if self.result.is_none() { service::next_deadline(&self.service) } else { None }
     }
 
     fn is_empty(&self) -> bool {
-        service::done(&self.service).is_some()
+        self.result.is_some() && self.closing == 0 && self.completions.is_empty() && self.submissions.is_empty()
+    }
+
+    fn exit(&self) -> Option<Exit> {
+        self.result().map(|result| Exit::Code(u8::from(result.is_err())))
     }
 
     fn worst_case(&self) -> u64 {
@@ -223,7 +283,7 @@ pub fn run(path: &Path, mut errors: Box<dyn Write>) -> Result<(), String> {
         .inspect_err(|why| diagnostic(errors.as_mut(), why))?;
     let mut agent = Agent::new(
         configuration,
-        Resources { input: Fd::new(0), output: Fd::new(1), signals, seed, roots: None },
+        Resources { input: Fd::new(0), output: Fd::new(1), signals, seed, error: None, roots: None },
         errors,
     )?;
     let mut kernel = Kernel::open(KernelConfig { operations: agent.operations() })

@@ -528,7 +528,7 @@ pub enum Proc {
     /// The actual shared local shell, ending after its public result settles.
     Local(Box<LocalProcess>),
     /// The spawned agent service, ending after its channel and descriptors settle.
-    Agent(Box<smith_agent_process_world::process::Agent>),
+    Agent(Box<smith_agent_shell::Agent>, smith_agent_process_world::AgentErrors),
     /// The independent fake provider, stopped after the terminal exits.
     Peer(Box<Peer>),
     /// The independent fake issuer and observed POST timing.
@@ -543,7 +543,7 @@ impl Proc {
         match self {
             Self::Terminal(p) => p.as_ref(),
             Self::Local(p) => p.as_ref(),
-            Self::Agent(p) => p.as_ref(),
+            Self::Agent(p, _) => p.as_ref(),
             Self::Peer(p) => p.as_ref(),
             Self::Issuer(p) => p.as_ref(),
             Self::Browser(p) => p.as_ref(),
@@ -554,7 +554,7 @@ impl Proc {
         match self {
             Self::Terminal(p) => p.as_mut(),
             Self::Local(p) => p.as_mut(),
-            Self::Agent(p) => p.as_mut(),
+            Self::Agent(p, _) => p.as_mut(),
             Self::Peer(p) => p.as_mut(),
             Self::Issuer(p) => p.as_mut(),
             Self::Browser(p) => p.as_mut(),
@@ -585,7 +585,7 @@ impl Host for Proc {
         self.host().exit()
     }
     fn worst_case(&self) -> u64 {
-        self.host().worst_case() + size_of::<Self>() as u64
+        self.host().worst_case() + size_of::<Self>() as u64 + 4096
     }
     fn operations(&self) -> u32 {
         self.host().operations()
@@ -666,9 +666,14 @@ pub fn agent_roots(spawn: &kernel::Spawn) -> Vec<StartupRoot> {
 #[must_use]
 pub fn make_agent(spawn: &kernel::Spawn, inherited: &Inherited) -> Proc {
     let launch = Launch::read(spawn);
-    Proc::Agent(Box::new(smith_agent_process_world::process::configured(
-        lower_configuration_with(launch.tls),
-        launch.seed,
-        inherited,
-    )))
+    let errors = smith_agent_process_world::AgentErrors::default();
+    Proc::Agent(
+        Box::new(smith_agent_process_world::configured(
+            lower_configuration_with(launch.tls),
+            launch.seed,
+            inherited,
+            errors.clone(),
+        )),
+        errors,
+    )
 }

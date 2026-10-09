@@ -106,3 +106,19 @@ pub fn review(observations: &[Observation]) -> Referee<Meeting> {
     }
     referee
 }
+
+/// Until skein 02 bridges the hosted writer to its simulated pipe, compare
+/// the observed writer's terminal words directly (testing.md, section 2.1).
+pub fn review_agent_errors(errors: &[u8], answered: bool) {
+    let text = core::str::from_utf8(errors).expect("agent diagnostic UTF-8");
+    assert!(text.starts_with("smith: agent started; worst case "), "the shipped adapter supplied startup");
+    if answered {
+        assert!(!text.contains("could not answer"), "the answer and observed writer agree on success");
+    }
+    assert!(
+        text.lines().all(|line| line.starts_with("smith: agent started; worst case ")
+            || line.starts_with("smith: the run could not answer: ")
+            || line.ends_with(" observations were dropped")),
+        "only the shipped agent's words are observed"
+    );
+}
