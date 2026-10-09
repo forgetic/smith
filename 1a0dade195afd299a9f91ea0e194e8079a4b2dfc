@@ -1,0 +1,44 @@
+Use the shared shell drive and hosted stderr bridge
+
+Implement reliability smith01.7, following shell.md sections 2.2–2.4 and
+skein shell.md sections 12–13. Agent and Local implement skein-shell Host;
+their drain hooks render existing operator lines, run returns drive's Exit,
+and root glue maps that status. Shipped normal dependencies omit skein-world.
+Invocation remains unchanged.
+
+Use skein-world PipeWriter/PipeHost in all spawned-agent worlds and the
+shared local fixture. Accepted writer bytes reach the actual stderr pipe
+before its close; shared token and cancellation routing stays in skein.
+The parent and Gone referee compare actual stderr with the supplied writer.
+The bounded overflow-tail fixture remains separate.
+
+Adopt the merged endpoint-aware bounds through component_worst_case,
+service worst_case, effects_worst_case and in_process_worst_case. Configured
+endpoints carry client and credential limits; existing unconfigured fixtures
+supply explicit endpoint tables. No conservative helper or duplicated memory
+formula is introduced. Calls preserves prior admission, and the standard TLS
+send cap uses skein's native plaintext bound for the declared request heads.
+Mechanical compatibility preserves Child signal targets, observes then reaps
+scripted children, routes Append unchanged and exhaustively handles impossible
+Long/Skipped events in Next-only search, fixture and event readers.
+The machine-world adapter delegates Append to the shared fake machine.
+
+Original offline live-outcome control passes using the merged subreaper fix:
+nextest 920a9d4e-7325-411f-bcb0-da6aaea9e41f, 1 test / 0.443 seconds,
+heavy task398. The prior failure was process-wide subreaper state surviving
+the first Binary; the keeper now restores the prior state after the last
+keeper settles. The earlier cgroup-membership hypothesis was disproved.
+Final rebased-tip workflow gates pass at
+1a0dade195afd299a9f91ea0e194e8079a4b2dfc on
+5a85c8b4815f05361ca4a0f1ec04663b61ffcfc2, heavy task423:
+formatting and workspace all-target Clippy pass (Clippy 1m05s);
+1530 focused tests / 3.430s, nextest
+281f3bc3-0b88-411d-8a5e-29c2d6beef65; 20 fuzzy tests / 3.562s,
+nextest 4ae21aac-e8ae-457a-9da6-28c8f5fd9d06; neither suite skips.
+All suites remain within their 15s and 60s budgets. Build job1, nextest
+workers8, debug info disabled, assertions and overflow checks retained.
+Gate log: /tmp/smith-01-7-resume-final-gate.log.
+The normal Cargo dependency tree contains no skein testing crates, and
+crates/ has no binary target or src/main.rs. No design or STATUS edits.
+Smoke evidence pending smith00 back-fill for 01.7; no behavior probe is
+required for this invocation-preserving reshape. No credentials used.
