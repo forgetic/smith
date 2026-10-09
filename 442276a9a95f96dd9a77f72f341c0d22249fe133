@@ -1,0 +1,24 @@
+Final rebased-tip validation of increment 05.2, 2026-10-09.
+Tip 442276a9a95f96dd9a77f72f341c0d22249fe133, parent ddd9332aeefab30b1b44ba06992274cd0a454011.
+Format check passed. Heavy704 workspace all-target Clippy passed (1.89 s).
+Heavy706 focused workspace gate: 1561/1561 passed, 3.527 s, zero skips.
+Heavy709 fuzzy workspace gate: 21/21 passed, 3.798 s, zero skips.
+Heavy710 idle serial measure: 348/348 passed, 5.673 s, zero skips.
+Measured shares from listed test durations: agent85/2.030 s, channel40/0.474 s,
+run-world40/1.202 s, host49/0.513 s, run-unit127/1.340 s, host-unit7/0.070 s.
+Existing world/suite budgets remain unchanged. Unit tests use bounded Skein
+containers; carried provider opening and immediate finish satisfy the message
+oracle, preserving opaque name zero. Start count/byte/duplicate-name failures
+are atomic in run and kit; composed channel and maximum owned Start are covered.
+
+Memory Verify: own graph refreshed 13:09:51Z, 14405 nodes/117979 edges,
+no parse partial/unusable/skips. Ten material source paths metadata-match
+except subsequent test-helper relocation and unit-lint cleanup, verified in
+source. Earlier open/start/prepared and encode_start traces/snippets verified
+against this worktree; graph method-resolution overlinks not used as evidence.
+Channel/transcript 512 binary goldens intentionally excluded; codecs execute them.
+Primary smith graph remains BENCH, never used as shipping source truth.
+
+Evidence pending: first-request parent/fix and runtime smoke. Session00
+back-fill waits 05.13 product carry-line path. No credentials, live provider or
+probe execution in this domain increment. No design/coordinator files edited.
