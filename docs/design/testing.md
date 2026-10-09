@@ -179,14 +179,15 @@ Domain worlds use domains and fakes only, never protocol crates.
   (2.4).
   - **Credentials come from the caller,** named by environment variables.
     A test that lacks one fails, saying which.
-  - **A token directory of their own.** Refresh tokens rotate, so the live
-    tests keep a durable token directory, signed in once by hand with
-    `smith login` and refreshed by every run. It is never the user's own
-    directory, and no refresh token is copied into it.
+  - **The user's existing login by default.** The live tests borrow
+    `~/.codex` read-only, access token only, as benchmarks do
+    (benchmarks.md, section 10). Only the issuer-refresh story needs a
+    refresh token of smith's own: it runs when the caller names a durable
+    token directory, signed in once with `smith login`, never the user's
+    own tool directory, and is skipped otherwise.
   - **One credential guard, shared with `smith-bench`.** The same guard
-    refuses a token directory or a dedicated home placed under a user's
-    own tool directories, for the live tests and the benchmarks alike
-    (benchmarks.md, section 10). Neither keeps a copy; which crate holds
+    refuses to write into a user's tool directories or to copy a refresh
+    token, for the live tests and the benchmarks alike. Which crate holds
     it is benchmarks.md, section 15's.
   - **The small tier by default.** The live tests run on each provider's
     small-tier model unless the caller names another (benchmarks.md,
@@ -197,8 +198,8 @@ Domain worlds use domains and fakes only, never protocol crates.
     - a second run resumes it (`--chat`);
     - with a remote named, the push lands, and the test removes the
       branch afterwards;
-    - a borrowed login, from the other tool's dedicated login, lends a
-      grant, and its file is unchanged.
+    - a borrowed login, from the user's Codex login, lends a grant, and
+      smith leaves its file unchanged.
   - **Outcomes, not words.** An LLM's words vary, so a story asks for a
     precise outcome, such as a file with given content, and the referee
     checks that outcome and the typed events, read through `smith-events`
@@ -221,8 +222,8 @@ Domain worlds use domains and fakes only, never protocol crates.
 - **Beside the live suite, not inside it.** A live test checks once that
   a wire is right, by its outcome. A benchmark repeats, measures and
   compares.
-- **What they share:** dedicated credentials behind the one credential
-  guard (2.3), and the one typed reader of the event stream,
+- **What they share:** the user's existing logins behind the one
+  credential guard (2.3), and the one typed reader of the event stream,
   `smith-events`. Neither keeps a guard or a reader of its own.
 - **A probe's failure is a finding,** reproduced and fixed in the lowest
   tier that shows it (2.5). The probe stays, as the fix's guard in the

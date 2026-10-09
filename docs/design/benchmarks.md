@@ -24,9 +24,9 @@ shell.md's. What is still open is listed in section 15.
   failing before it and passing after it. A change to the runtime,
   limits, providers or host records a smoke run there.
 - **Agents are adapters.** `Smith`, `Codex` and `ClaudeCode` are a closed
-  set, each run in an isolated home with a pinned configuration and a
-  dedicated sign-in, under a hard deadline on its whole process tree.
-  smith is observed only through its event stream.
+  set, each run with a pinned configuration and the user's existing login,
+  never a copy of a refresh token, under a hard deadline on its whole
+  process tree. smith is observed only through its event stream.
 - **Unknown is never zero.** A measurement is observed, a lower bound, or
   unavailable with its reason. Tokens count once per response.
 - **Statistics fit the question.** A probe reruns once on failure. A
@@ -284,7 +284,7 @@ files.
 
 | Step | Smith | Codex | Claude Code |
 |---|---|---|---|
-| prepare | `XDG_CONFIG_HOME` holds the pinned settings as the user's layer, capturing `calls` so the scope gate sees each call's input (`everything` where a task needs prompts); `XDG_STATE_HOME` the state and the account's credential, made once with `smith login` (shell.md, section 4.5). Before an arm's first attempt, `smith check --json` records the effective limits, schema versions and credentials; a nonzero exit refuses the arm as setup | `CODEX_HOME`, signed in once with Codex's login; a pinned `config.toml`: no MCP servers, the attempt root trusted, workspace edits allowed, no approvals; its background service disabled where it can be, or ended with the tree | `CLAUDE_CONFIG_DIR`, signed in once; pinned settings, an empty MCP configuration, edits and commands allowed without asking |
+| prepare | `XDG_CONFIG_HOME` holds the pinned settings as the user's layer, capturing `calls` so the scope gate sees each call's input (`everything` where a task needs prompts); `XDG_STATE_HOME` the state; the account borrows the user's `~/.codex` login, read-only and access-token-only (shell.md, section 7). Before an arm's first attempt, `smith check --json` records the effective limits, schema versions and credentials; a nonzero exit refuses the arm as setup | the user's own `CODEX_HOME`, so its login and its refresh stay where they are; every key that shapes behaviour pinned by `-c` overrides: no MCP servers, the attempt root trusted, workspace edits allowed, no approvals, the model and effort; the user configuration's digest recorded with the attempt; its background service disabled where it can be, or ended with the tree | the user's own Claude login, the same way as Codex's; pinned settings and an empty MCP configuration passed on the command line, edits and commands allowed without asking |
 | command | `smith exec --json -C <workspace> -m <endpoint>/<model> --effort <effort> -`, overrides as `-c KEY=VALUE` (shell.md, section 4.2); interactive, `smith --trace <file>` at a pseudo-terminal | `codex exec --json -m <model> -c model_reasoning_effort=<effort> -C <workspace> -o <final> -` | `claude -p --output-format stream-json --verbose --model <model> --effort <effort> --max-budget-usd <ceiling> --settings <pinned> --mcp-config <empty>`; `--input-format stream-json` for later messages |
 | observe | the event stream, through `smith-events`; standard error is never parsed | JSON lines: thread, turns, items, and each turn's usage, of the root thread only, cached input within input | the opening record, assistant messages with usage, sub-agent messages with their parent's call, the result with durations, turns, cost and per-model usage, in the pinned version's recorded shapes |
 | collect | nothing beyond the stream | the rollouts of the thread named: per-response usage and child threads; where a child is not linked to its parent, child scopes are unavailable and totals lower bounds | nothing; transcripts are archived |
@@ -443,13 +443,20 @@ answer is a warning on a completed attempt.
 
 ## 10. Isolation
 
-- **Homes and credentials.** A dedicated home per agent and account,
-  signed in once by hand with the agent's own login; never the user's
-  home, configuration, trust, MCP servers or instruction files. A refresh
-  token is never copied: issuers rotate them, and a copy logs the other
-  holder out. The harness refuses a home under a user's tool directories,
-  as the live tier does. Attempts sharing a home run one at a time; an
-  attempt's records there are archived and removed after it.
+- **Credentials are the user's existing logins,** never a copy of a
+  refresh token: issuers rotate them, and a copy logs the other holder
+  out. smith borrows `~/.codex` read-only and takes its access token only
+  (domain/host.md, section 7). Codex runs in the user's own `CODEX_HOME`,
+  so its login and refresh stay in one place, and Claude Code later
+  likewise with its own. A login that has lapsed is a setup refusal
+  naming the CLI to run once. Nothing in the harness writes to a user's
+  tool directories.
+- **Configuration is pinned, not inherited.** An agent sharing the user's
+  home gets every key that shapes its behaviour from the command line
+  (MCP servers, trust, approvals, model, effort), and the digest of the
+  user's own configuration is recorded with each attempt, so a change
+  there is visible. smith's settings come only from the harness's layer
+  (shell.md, section 5).
 - **Out of sight, nothing shared.** Attempts run under the harness's
   scratch root, outside every repository and the benchmark tree, each
   with its own temporary directory, build caches and target directory,
@@ -495,7 +502,7 @@ Code.
 | `paths` | one path namespace (domain/tools.md, section 2) | `app` writable and `spec` read-only: read both, answer in `app`. `single`: one directory, its name never needed | no `missing` verdict or path refused as outside; at most two completions before `finish` | seconds |
 | `tool-output` | output budgets, read windows and timeouts as the model chooses them; UTF-8 passed through (domain/tools.md, sections 3 and 5) | `test-output`: which assertion fails, in over ten kilobytes of output. `quote`: a sentence deep in a long document. `timeout`: a command past its timeout, and one asking past the ceiling. `utf-8`: replace an en dash | one shell call; at most two reads; `timed_out` naming its bound, `clamped` set, no hang; one edit, matching first time | seconds each |
 | `process-tree` | a command in its own process group, signalled whole (domain/tools.md, section 5) | `sh -c 'sleep 600 & wait'` with a short timeout | no `sleep` left, by tree accounting; answered within timeout and grace; accepted | seconds |
-| `credentials` | the `borrow` source (domain/host.md, section 7) | an account borrowing the benchmark's dedicated Codex login | accepted; the login file's digest unchanged | seconds |
+| `credentials` | the `borrow` source (domain/host.md, section 7) | an account borrowing the user's Codex login | accepted; smith never writes the login file (its digest unchanged by smith's run) | seconds |
 | `slow-completion` | deadlines that measure progress; an oversized reasoning item as a typed failure (protocol/limits.md, section 7) | long reasoning at high effort | no timeout while events arrive; no reasoning-size failure; `first_byte_ms` and `largest_gap_ms`, per provider and model, for shell.md's `head` and `idle` | minutes; occasional |
 
 Later, as their behaviour is built: **`mid-work`**, a message offered
@@ -570,7 +577,8 @@ repository task's delegation and length.
 - **To the live tier** (testing.md, section 2.3). The live tier checks
   once, by outcome, that each wire, issuer refresh and push is right.
   Benchmarks repeat, measure and compare. Both read smith through
-  `smith-events`, keep dedicated sign-ins under one guard, and default to
+  `smith-events`, take the user's existing logins under one credential
+  guard, and default to
   the small tier.
 - **To skein's test kit.** The harness is not a world: no schedule,
   replay, counting allocator or referee plumbing of its own. What it
@@ -637,7 +645,7 @@ Each runs in milliseconds, within the focused and fuzzy budgets.
 - **Repository bundles:** where a bundle is kept durably, so that another
   machine can run the task.
 - **Concurrency:** attempts run serially; parallel ones would need
-  disjoint CPUs and a sign-in per slot.
+  disjoint CPUs.
 - **Task kinds beyond code,** such as chat, research or review, with
   graders of their own; and **audits:** how many attempts a run samples,
   and who audits them.
