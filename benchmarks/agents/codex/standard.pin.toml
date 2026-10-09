@@ -1,0 +1,5 @@
+name = "standard"
+agent = "codex"
+provider = "codex"
+version = "0.160.0"
+configuration = "overrides.toml"

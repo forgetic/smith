@@ -156,3 +156,136 @@ fn a_seed_symlink_cannot_reach_hidden_inputs() {
     assert!(error.reason.contains("symlinks"), "{error}");
     std::fs::remove_dir_all(&root).expect("test directory removed");
 }
+
+fn sample_suite() -> crate::Suite {
+    crate::read_suite(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/recorded/suites/sample.toml"))
+        .expect("recorded suite")
+}
+
+fn sample_catalogue() -> Vec<crate::CatalogueTask> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest = root.join("tests/recorded/tasks/valid/task.toml");
+    let mut task = check_task(&manifest, &root.join("../docs/design")).expect("recorded task");
+    task.behaviours.push("read".into());
+    task.variant.push(crate::Variant {
+        name: "short".into(),
+        prompt: None,
+        smith: std::collections::BTreeMap::new(),
+        environment: std::collections::BTreeMap::new(),
+        outcome: Vec::new(),
+        event: Vec::new(),
+        waives: Vec::new(),
+        budget: None,
+    });
+    vec![crate::CatalogueTask { name: "probes/recorded".into(), manifest, task }]
+}
+
+#[test]
+fn a_suite_resolves_task_variants_selectors_and_configuration_pins() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let models = crate::read_model_tiers(&root.join("agents/models.toml")).expect("model tiers");
+    let mut suite = sample_suite();
+    suite.tasks.push("probes/recorded/short".into());
+    suite.select.push(crate::Selection { kind: Kind::Probe, behaviours: vec!["read".into()] });
+    let selected =
+        crate::validate_suite(Path::new("suite.toml"), &suite, &sample_catalogue(), &root.join("agents"), &models)
+            .expect("suite references resolve");
+    assert_eq!(selected, ["probes/recorded", "probes/recorded/short"]);
+}
+
+#[test]
+fn a_suite_refuses_unknown_tasks_agents_tiers_and_empty_selectors() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let models = crate::read_model_tiers(&root.join("agents/models.toml")).expect("model tiers");
+    let tasks = sample_catalogue();
+    let agents = root.join("agents");
+    let mut suite = sample_suite();
+    suite.tasks[0] = "probes/recorded/unknown".into();
+    assert!(
+        crate::validate_suite(Path::new("suite.toml"), &suite, &tasks, &agents, &models)
+            .expect_err("unknown task")
+            .reason
+            .contains("unknown task")
+    );
+    suite = sample_suite();
+    suite.agents[0].config = "missing".into();
+    assert!(crate::validate_suite(Path::new("suite.toml"), &suite, &tasks, &agents, &models).is_err());
+    suite = sample_suite();
+    suite.tier = "unregistered".into();
+    assert!(crate::validate_suite(Path::new("suite.toml"), &suite, &tasks, &agents, &models).is_err());
+    suite = sample_suite();
+    suite.select.push(crate::Selection { kind: Kind::Probe, behaviours: vec!["absent".into()] });
+    assert!(
+        crate::validate_suite(Path::new("suite.toml"), &suite, &tasks, &agents, &models)
+            .expect_err("unmatched selector")
+            .reason
+            .contains("no existing task")
+    );
+}
+
+#[test]
+fn suite_keys_and_arms_are_strict() {
+    let document =
+        std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/recorded/suites/sample.toml"))
+            .expect("sample suite");
+    let error =
+        crate::formats::parse_document::<crate::Suite>(Path::new("suite.toml"), &format!("{document}\nextra = true"))
+            .expect_err("unknown nested agent key");
+    assert_eq!(error.key, "agents[0].extra");
+    let suite = crate::formats::parse_document::<crate::Suite>(Path::new("suite.toml"), &format!("{document}\n[[arm]]\nsource='binary'\nname='before'\ncommit='30259d8'\n[[arm]]\nsource='override'\nname='control'\n[arm.smith]\naffinity=false\n[[arm]]\nsource='agent'\nname='codex'\nagent='codex'\nprovider='codex'\nconfig='standard'\n")).expect("three arm kinds");
+    assert_eq!(suite.arms.len(), 3);
+    assert!(
+        crate::formats::parse_document::<crate::Suite>(
+            Path::new("suite.toml"),
+            &format!("{document}\n[[arm]]\nsource='unknown'\nname='new'\n")
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn the_small_tier_resolves_and_the_working_tier_never_guesses() {
+    let file = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("agents/models.toml");
+    let models = crate::read_model_tiers(&file).expect("committed model tiers");
+    let codex = models.lookup(&file, "small", crate::Provider::Codex).expect("codex small tier");
+    assert_eq!(codex.model.as_deref(), Some("gpt-6-luna"));
+    assert_eq!(codex.effort.as_deref(), Some("low"));
+    let anthropic = models.lookup(&file, "small", crate::Provider::Anthropic).expect("anthropic small tier");
+    assert_eq!(anthropic.model.as_deref(), Some("claude-haiku-5-5"));
+    let mut unresolved = models.clone();
+    unresolved
+        .0
+        .get_mut("working")
+        .expect("working tier")
+        .insert(crate::Provider::Codex, crate::ModelChoice { model: None, effort: None });
+    assert!(
+        unresolved
+            .lookup(&file, "working", crate::Provider::Codex)
+            .expect_err("unresolved choice refuses")
+            .reason
+            .contains("await")
+    );
+}
+
+#[test]
+fn guards_are_cheapest_first_and_report_budget_and_unknown_costs() {
+    let mut tasks = sample_catalogue();
+    let mut fast = tasks[0].clone();
+    fast.name = "probes/fast".into();
+    fast.task.estimate = Some(crate::Estimate { seconds: 2, tokens: 20 });
+    let mut expensive = fast.clone();
+    expensive.name = "probes/expensive".into();
+    expensive.task.estimate = Some(crate::Estimate { seconds: 20, tokens: 100 });
+    let mut overflow = fast.clone();
+    overflow.name = "probes/overflow".into();
+    overflow.task.estimate = Some(crate::Estimate { seconds: u64::MAX, tokens: 1 });
+    tasks.extend([expensive, fast, overflow]);
+    let mut suite = sample_suite();
+    suite.max_wall_seconds = 10;
+    let chosen = crate::choose_guards(&suite, &tasks, &["benchmarks.md, section 5.2".into()]);
+    assert_eq!(chosen.selected, ["probes/fast", "probes/fast/short"]);
+    assert_eq!((chosen.estimated_seconds, chosen.estimated_tokens), (8, 80));
+    assert!(chosen.omitted.contains(&("probes/recorded".into(), "cost unavailable".into())));
+    assert!(chosen.omitted.contains(&("probes/overflow".into(), "cost overflow".into())));
+    assert!(chosen.omitted.contains(&("probes/expensive".into(), "suite wall or token budget".into())));
+}

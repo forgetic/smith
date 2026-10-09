@@ -485,6 +485,13 @@ and remains within its one-second focused share. Existing suite budgets are
 unchanged; builds used one job with debug information disabled and assertions
 retained.
 
+Benchmark increment 00.2 extends that tier with suites, configuration pins,
+model tiers and guarded-task selection. Its idle serial `heavy` measurement
+on 2026-10-09 passed 29 unit/offline tests in 0.314 seconds. Missing cost or
+working-model choices are reported without guessed values. No fuzzy parser
+sweep exists yet, and the one-second focused share and suite budgets remain
+unchanged.
+
 ## 5. Opt-in live suite
 
 The `live` profile runs the shipped binary against real backends, serially,

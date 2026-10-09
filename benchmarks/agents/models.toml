@@ -1,0 +1,14 @@
+[small.codex]
+model = "gpt-6-luna"
+effort = "low"
+
+[small.anthropic]
+model = "claude-haiku-5-5"
+effort = "low"
+
+# The coordinator has asked the user; comparison/repository runs refuse
+# this tier until the answer is pinned here by commit.
+[working.codex]
+
+# Anthropic's working tier belongs to the next comparison pass.
+[working.anthropic]

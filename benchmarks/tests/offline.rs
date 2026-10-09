@@ -27,6 +27,28 @@ fn every_catalogue_manifest_is_checked_offline() {
 }
 
 #[test]
+fn every_committed_suite_and_configuration_pin_is_checked_offline() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let counts = smith_bench::check_benchmark_tree(&root, &design()).expect("all benchmark manifests validate");
+    assert!(counts.configurations > 0, "committed pins are actually checked");
+}
+
+#[test]
+fn the_recorded_suite_resolves_its_frozen_task_and_pin() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let suite_file = root.join("tests/recorded/suites/sample.toml");
+    let suite = smith_bench::read_suite(&suite_file).expect("recorded suite");
+    let tasks =
+        smith_bench::catalogue(&root.join("tests/recorded/tasks/valid"), &design()).expect("recorded catalogue");
+    let models = smith_bench::read_model_tiers(&root.join("agents/models.toml")).expect("committed models");
+    assert_eq!(
+        smith_bench::validate_suite(&suite_file, &suite, &tasks, &root.join("agents"), &models)
+            .expect("references resolve"),
+        ["probes/recorded"]
+    );
+}
+
+#[test]
 fn a_complete_recorded_task_is_accepted() {
     check_task(&recorded("valid"), &design()).expect("valid frozen task");
 }

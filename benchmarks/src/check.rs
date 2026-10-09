@@ -22,7 +22,56 @@ pub fn check_tree(directory: &Path, design: &Path) -> Result<usize, Refusal> {
     Ok(manifests.len())
 }
 
-fn find_manifests(directory: &Path, manifests: &mut Vec<PathBuf>) -> Result<(), Refusal> {
+/// Counts returned by the offline checker to its caller.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ManifestCounts {
+    pub tasks: usize,
+    pub suites: usize,
+    pub configurations: usize,
+}
+
+/// Validate a benchmark tree's tasks, suites, model tiers and configuration pins.
+pub fn check_benchmark_tree(root: &Path, design: &Path) -> Result<ManifestCounts, Refusal> {
+    let tasks = crate::catalogue(&root.join("tasks"), design)?;
+    let agents = root.join("agents");
+    let models = crate::read_model_tiers(&agents.join("models.toml"))?;
+    for provider in [crate::Provider::Codex, crate::Provider::Anthropic] {
+        models.lookup(&agents.join("models.toml"), "small", provider)?;
+    }
+    let mut configurations = 0;
+    for agent in fs::read_dir(&agents).map_err(|error| Refusal::new(&agents, "agents", error.to_string()))? {
+        let agent = agent.map_err(|error| Refusal::new(&agents, "agents", error.to_string()))?;
+        if !agent.file_type().map_err(|error| Refusal::new(&agent.path(), "agents", error.to_string()))?.is_dir() {
+            continue;
+        }
+        for file in
+            fs::read_dir(agent.path()).map_err(|error| Refusal::new(&agent.path(), "agents", error.to_string()))?
+        {
+            let file = file.map_err(|error| Refusal::new(&agent.path(), "agents", error.to_string()))?;
+            if file.file_name().to_str().is_some_and(|name| name.ends_with(".pin.toml")) {
+                let pin = crate::read_configuration(&file.path())?;
+                let expected = agents.join(pin.pin.agent.directory()).join(format!("{}.pin.toml", pin.pin.name));
+                if expected != file.path() {
+                    return Err(Refusal::new(&file.path(), "name/agent", "pin path disagrees with its name or agent"));
+                }
+                configurations += 1;
+            }
+        }
+    }
+    let mut suites = 0;
+    let directory = root.join("suites");
+    for file in fs::read_dir(&directory).map_err(|error| Refusal::new(&directory, "suites", error.to_string()))? {
+        let file = file.map_err(|error| Refusal::new(&directory, "suites", error.to_string()))?;
+        if file.path().extension().is_some_and(|extension| extension == "toml") {
+            let suite = crate::read_suite(&file.path())?;
+            crate::validate_suite(&file.path(), &suite, &tasks, &agents, &models)?;
+            suites += 1;
+        }
+    }
+    Ok(ManifestCounts { tasks: tasks.len(), suites, configurations })
+}
+
+pub(crate) fn find_manifests(directory: &Path, manifests: &mut Vec<PathBuf>) -> Result<(), Refusal> {
     let entries = fs::read_dir(directory).map_err(|error| Refusal::new(directory, "tasks", error.to_string()))?;
     for entry in entries {
         let entry = entry.map_err(|error| Refusal::new(directory, "tasks", error.to_string()))?;
@@ -155,7 +204,7 @@ fn check_budget(file: &Path, key: &str, budget: &crate::Budget) -> Result<(), Re
     Ok(())
 }
 
-fn check_path(file: &Path, key: &str, path: &Path) -> Result<(), Refusal> {
+pub(crate) fn check_path(file: &Path, key: &str, path: &Path) -> Result<(), Refusal> {
     if path.as_os_str().is_empty() || path.components().any(|part| !matches!(part, Component::Normal(_))) {
         return Err(Refusal::new(file, key, "expected a relative workspace path without traversal"));
     }

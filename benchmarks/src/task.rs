@@ -161,31 +161,10 @@ impl std::error::Error for Refusal {}
 
 /// Parse a task document and name the file and key path on refusal.
 pub fn read_task(file: &Path) -> Result<Task, Refusal> {
-    let text = std::fs::read_to_string(file).map_err(|error| Refusal::new(file, "document", error.to_string()))?;
-    parse_task(file, &text)
+    crate::formats::read_document(file)
 }
 
+#[cfg(test)]
 pub(crate) fn parse_task(file: &Path, text: &str) -> Result<Task, Refusal> {
-    let deserializer =
-        toml::de::Deserializer::parse(text).map_err(|error| Refusal::new(file, "document", error.to_string()))?;
-    serde_path_to_error::deserialize(deserializer).map_err(|error| {
-        let mut key = error.path().to_string();
-        let reason = error.inner().to_string();
-        // Internally tagged enum errors may stop at the enclosing record.
-        // Include serde's named unknown field in that record's path.
-        if let Some(rest) = reason.split("unknown field `").nth(1)
-            && let Some(field) = rest.split('`').next()
-        {
-            if key == "." {
-                key.clear();
-            }
-            if key != field && !key.ends_with(&format!(".{field}")) {
-                if !key.is_empty() {
-                    key.push('.');
-                }
-                key.push_str(field);
-            }
-        }
-        Refusal::new(file, &key, reason)
-    })
+    crate::formats::parse_document(file, text)
 }

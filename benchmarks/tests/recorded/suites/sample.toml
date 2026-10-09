@@ -1,0 +1,13 @@
+name = "recorded"
+tier = "small"
+design = "single"
+repetitions = 1
+rerun_failed = 1
+max_wall_seconds = 60
+max_tokens = 10000
+tasks = ["probes/recorded"]
+
+[[agents]]
+agent = "codex"
+provider = "codex"
+config = "standard"

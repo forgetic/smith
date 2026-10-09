@@ -9,11 +9,13 @@ Commands available so far:
 
 ```sh
 cargo run -p smith-bench -- check [TASKS_DIRECTORY]
+cargo run -p smith-bench -- guards --suite benchmarks/tests/recorded/suites/sample.toml --tasks benchmarks/tests/recorded/tasks/valid 'benchmarks.md, section 5.2'
 cargo nextest run -p smith-bench
 ```
 
-`check` validates every `task.toml` below the directory (by default,
-`benchmarks/tasks`). A refusal names its file and key path. Tasks carry
+`check` validates tasks, suites, model tiers and agent pins in this tree.
+With a directory argument, it checks only tasks below that directory.
+A refusal names its file and key path. Tasks carry
 the complete prompt, under 4,088 UTF-8 bytes, as one paragraph ending in
 a newline. `seed_sha256` freezes their `seed/` directory.
 
@@ -31,3 +33,21 @@ and attempt `scratch/`. Summaries and baselines are committed here.
 Agents use the user's existing login: Codex runs in `~/.codex`, and
 smith borrows it read-only. No one signs in for a benchmark or copies a
 refresh token.
+
+Suite task names are `<kind>/<id>[/<variant>]`; `[[select]]` can instead
+name a `kind` and `behaviours`, matching all those behaviours. An agent
+configuration names `agents/<agent>/<config>.pin.toml`: its agent,
+provider, version and relative configuration file. Its digest includes
+the exact metadata and configuration bytes, each framed with its byte
+length as a big-endian u64. `[[arm]]` has `source = "binary"`,
+`"override"` or `"agent"`, with the corresponding commit, smith settings
+or agent pin. Comparison schedules arrive with their tasks.
+
+`guards` uses a suite's wall and token budgets to list guarded tasks
+cheapest first and explain omissions. Estimates reserve the configured
+repetitions, agents, arms and failure rerun. Missing costs are reported
+as unavailable. Committed medians join after summaries exist.
+
+The `small` tier is pinned for both providers. `working.codex` awaits
+the user's model and effort; `working.anthropic` belongs to the next
+comparison pass. A run requiring an unresolved tier refuses setup.
