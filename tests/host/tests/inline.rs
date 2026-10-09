@@ -29,7 +29,11 @@ fn an_inline_run_answers_and_its_slot_is_released_after_its_last_completion() {
         world.at(next.max(world.stage.env.now.saturating_add(Duration::from_millis(1))));
     }
     let seen = &world.seen[&Token::new(1)];
-    assert!(matches!(seen.answer.as_ref().map(|answer| &answer.result), Some(RunResult::Accepted { .. })));
+    assert!(
+        matches!(seen.answer.as_ref().map(|answer| &answer.result), Some(RunResult::Accepted { .. })),
+        "{:?}",
+        seen.answer
+    );
     assert!(seen.gone.is_none(), "answered root retains exact told-turn ACK rights");
     assert_eq!(world.agent.hosted(), 1);
     world.lower.assert_settled();
@@ -47,7 +51,11 @@ fn an_inline_run_waits_parks_and_resumes_from_its_transcript() {
     spawn(&mut world, 1, Job::Waiting);
     world.run();
     world.settled();
-    assert!(matches!(world.seen[&Token::new(1)].answer.as_ref().expect("answer").result, RunResult::Parked));
+    assert!(
+        matches!(world.seen[&Token::new(1)].answer.as_ref().expect("answer").result, RunResult::Parked),
+        "{:?}",
+        world.seen[&Token::new(1)].answer
+    );
     let turns = world.history[&Token::new(1)].clone();
     assert!(!turns.is_empty());
     let endpoint = turns[0].endpoint;

@@ -7,8 +7,8 @@ use core::mem::size_of;
 use skein_lib::{Duration, Id, List, Map, Queue, Slab, Token};
 use smith_domain as smith;
 
-use crate::domain::{Agent, Relay, Slot};
-use crate::{Fact, Request};
+use crate::domain::{Domain, Relay, Slot};
+use crate::{Fact, Output};
 
 /// Startup allowances supplied by the parent, shared by every inline slot.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -38,7 +38,8 @@ fn output_count(limits: &Limits) -> Option<u32> {
 /// Retained roots, configuration, routing, scratch and caller queue ownership.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
-    if limits.window.turns == 0
+    if limits.facts < max_facts()
+        || limits.window.turns == 0
         || limits.window.bytes < smith::max_turn_bytes(&limits.smith)?
         || limits.wall_time == Duration::ZERO
     {
@@ -53,7 +54,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(Map::<Token, Id<Slot>>::worst_case(limits.slots)?)?
         .checked_add(u64::from(limits.slots).checked_mul(per_slot)?)?
         .checked_add(Queue::<smith::Request>::worst_case(smith::max_out(&limits.smith))?)?
-        .checked_add(Queue::<Request>::worst_case(outputs)?)?
+        .checked_add(Queue::<Output>::worst_case(outputs)?)?
         .checked_add(Queue::<Fact>::worst_case(limits.facts)?)?
         .checked_add(List::<Token>::worst_case(limits.slots)?)?
         .checked_add(List::<Token>::worst_case(limits.smith.run.calls)?)?
@@ -67,5 +68,11 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
             u64::from(limits.smith.endpoints)
                 .checked_mul(u64::try_from(size_of::<smith::run::charter::Endpoint>()).ok()?)?,
         )?
-        .checked_add(u64::try_from(size_of::<Agent>()).ok()?)
+        .checked_add(u64::try_from(size_of::<Domain>()).ok()?)
+}
+
+/// Maximum lifecycle facts emitted by any one entry point.
+#[must_use]
+pub const fn max_facts() -> u32 {
+    3
 }

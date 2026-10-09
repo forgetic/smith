@@ -4,7 +4,7 @@ use skein_lib::{Duration, Env, Id, Queue, Time, Token, Wall};
 use smith_domain::{self as smith, run};
 use smith_host_domain::{self as host, parent};
 
-use crate::{Agent, Completion, Limits, Request, domain, fire, reclaim, resume, step, terminal};
+use crate::{Below, Domain, Input, Limits, Lower, Output, fire, reclaim, resume, step, translate};
 
 fn bounds() -> Limits {
     let smith = smith_agent_world::LIMITS;
@@ -60,14 +60,14 @@ fn env() -> Env<Limits> {
 #[test]
 fn workspace_starts_are_refused_before_a_slot_or_provider_request() {
     let env = env();
-    let mut agent = Agent::new(&env.limits, configuration(), 1);
+    let mut agent = Domain::new(&env.limits, configuration(), 1);
     let mut out = Queue::with_capacity(crate::max_out(&env.limits));
     let mut source = start();
     source.workspace = Some(Token::new(8));
-    step(&mut agent, &env, parent::Event::Spawn { client: Token::new(1), start: source }, &mut out);
+    step(&mut agent, &env, Input::Parent(parent::Event::Spawn { client: Token::new(1), start: source }), &mut out);
     assert_eq!(
         out.pop(),
-        Some(Request::Parent(parent::Request::Gone {
+        Some(Output::Parent(parent::Request::Gone {
             client: Token::new(1),
             end: host::End::Invalid(host::Invalid::Directories),
             detail: Box::default()
@@ -80,10 +80,10 @@ fn workspace_starts_are_refused_before_a_slot_or_provider_request() {
 #[test]
 fn a_told_turn_keeps_the_roots_exact_concrete_value() {
     let env = env();
-    let mut agent = Agent::new(&env.limits, configuration(), 2);
+    let mut agent = Domain::new(&env.limits, configuration(), 2);
     let mut out = Queue::with_capacity(crate::max_out(&env.limits));
-    step(&mut agent, &env, parent::Event::Spawn { client: Token::new(1), start: start() }, &mut out);
-    let Some(Request::Parent(parent::Request::Started { agent: handle, .. })) = out.pop() else {
+    step(&mut agent, &env, Input::Parent(parent::Event::Spawn { client: Token::new(1), start: start() }), &mut out);
+    let Some(Output::Parent(parent::Request::Started { agent: handle, .. })) = out.pop() else {
         panic!("Started first")
     };
     for _ in 0..crate::max_out(&env.limits) {
@@ -106,10 +106,10 @@ fn a_told_turn_keeps_the_roots_exact_concrete_value() {
         spent: run::Spend::ZERO,
         turn: turn.clone(),
     });
-    domain::route(&mut agent, &env, Id::from_token(handle), &mut out);
+    translate::route(&mut agent, &env, Id::from_token(handle), &mut out);
     assert_eq!(
         out.pop(),
-        Some(Request::Parent(parent::Request::Turn {
+        Some(Output::Parent(parent::Request::Turn {
             client: Token::new(1),
             turn: host::Turn {
                 number: 1,
@@ -126,15 +126,15 @@ fn a_told_turn_keeps_the_roots_exact_concrete_value() {
 fn cancel_fire_resume_terminal_and_reclaim_settle_exactly_once() {
     let mut env = env();
     env.limits.wall_time = Duration::from_secs(1);
-    let mut agent = Agent::new(&env.limits, configuration(), 3);
+    let mut agent = Domain::new(&env.limits, configuration(), 3);
     let mut out = Queue::with_capacity(crate::max_out(&env.limits));
-    step(&mut agent, &env, parent::Event::Spawn { client: Token::new(1), start: start() }, &mut out);
-    let Some(Request::Parent(parent::Request::Started { agent: handle, .. })) = out.pop() else {
+    step(&mut agent, &env, Input::Parent(parent::Event::Spawn { client: Token::new(1), start: start() }), &mut out);
+    let Some(Output::Parent(parent::Request::Started { agent: handle, .. })) = out.pop() else {
         panic!("Started first")
     };
     let mut completion_owner = None;
     for _ in 0..crate::max_out(&env.limits) {
-        if let Some(Request::Lower { request: smith::Request::Complete { owner, .. }, .. }) = out.pop() {
+        if let Some(Output::Lower { request: Lower::Complete { owner, .. }, .. }) = out.pop() {
             completion_owner = Some(owner);
         }
     }
@@ -144,28 +144,30 @@ fn cancel_fire_resume_terminal_and_reclaim_settle_exactly_once() {
     env.now = Time::ZERO.saturating_add(Duration::from_secs(1));
     assert!(agent.is_due(env.now));
     fire(&mut agent, &env, &mut out);
-    assert_eq!(out.pop(), Some(Request::Lower { agent: handle, request: smith::Request::Cancel { owner } }));
+    assert_eq!(out.pop(), Some(Output::Lower { agent: handle, request: Lower::Cancel { owner } }));
     assert!(out.is_empty());
-    step(&mut agent, &env, parent::Event::Stop { agent: handle }, &mut out);
+    step(&mut agent, &env, Input::Parent(parent::Event::Stop { agent: handle }), &mut out);
     assert!(out.is_empty());
     assert_eq!(agent.hosted(), 1);
-    terminal(&mut agent, &env, handle, Completion::Cancelled { owner }, &mut out);
-    let Some(Request::Parent(parent::Request::Answered { answer, .. })) = out.pop() else { panic!("cancel answer") };
+    step(&mut agent, &env, Input::Below { agent: handle, terminal: Below::Cancelled { owner } }, &mut out);
+    let Some(Output::Parent(parent::Request::Answered { answer, .. })) = out.pop() else { panic!("cancel answer") };
     assert_eq!(answer.result, host::RunResult::Failed { failure: host::RunFailure::Cancelled });
     assert_eq!(
         out.pop(),
-        Some(Request::Parent(parent::Request::Gone {
+        Some(Output::Parent(parent::Request::Gone {
             client: Token::new(1),
             end: host::End::Stopped,
             detail: Box::default()
         }))
     );
-    terminal(&mut agent, &env, handle, Completion::Cancelled { owner }, &mut out);
+    step(&mut agent, &env, Input::Below { agent: handle, terminal: Below::Cancelled { owner } }, &mut out);
     assert!(out.is_empty());
     assert!(agent.pop_fact(Token::new(1)).is_some(), "native observations survive retirement");
+    while agent.pop_fact(Token::new(1)).is_some() {}
+    while agent.pop_content(Token::new(1)).is_some() {}
     reclaim(&mut agent);
     assert_eq!(agent.hosted(), 0);
-    terminal(&mut agent, &env, handle, Completion::Cancelled { owner }, &mut out);
+    step(&mut agent, &env, Input::Below { agent: handle, terminal: Below::Cancelled { owner } }, &mut out);
     assert!(out.is_empty());
 }
 

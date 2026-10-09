@@ -2,14 +2,16 @@
 //! No state, codec, policy interpretation or credential values live here.
 //! Values move into the root; its own admission checks decide their semantics.
 
+#![expect(clippy::manual_let_else, reason = "exhaustive bounded request draining")]
 #![expect(clippy::manual_map, reason = "no application closures or map in the strict subset")]
 
 use alloc::boxed::Box;
-use skein_lib::{List, ReplyTo, Token};
+use skein_lib::{Env, Id, List, Queue, ReplyTo, Token};
 use smith_domain::{self as smith, run};
-use smith_host_domain as host;
+use smith_host_domain::{self as host, parent};
 
-use crate::Limits;
+use crate::domain::{Domain, Relay, Slot};
+use crate::{Limits, Lower, Output, stop};
 
 pub(crate) fn start(client: Token, source: host::Start, limits: &Limits) -> Result<smith::Event, host::Invalid> {
     let count = checked_count(source.messages.len())?;
@@ -88,7 +90,10 @@ pub(crate) const fn grant(value: host::Grant) -> smith::Grant {
 
 pub(crate) fn host_reply(value: host::Reply) -> Option<run::HostReply> {
     match value {
-        host::Reply::Host { error, body } => Some(run::HostReply::Answered(run::HostAnswer::new(body, error)?)),
+        host::Reply::Host { error, body } => match run::HostAnswer::new(body, error) {
+            Some(answer) => Some(run::HostReply::Answered(answer)),
+            None => Some(run::HostReply::TooLarge),
+        },
         host::Reply::Busy => Some(run::HostReply::Busy),
         host::Reply::Unavailable => Some(run::HostReply::Unanswered(run::Unanswered::Lost)),
         host::Reply::Withdrawn => Some(run::HostReply::Withdrawn),
@@ -293,5 +298,139 @@ const fn delivery_reason(value: host::DeliveryReason) -> run::DeliveryReason {
         host::DeliveryReason::Unavailable => run::DeliveryReason::Unavailable,
         host::DeliveryReason::Cancelled => run::DeliveryReason::Cancelled,
         host::DeliveryReason::Unknown => run::DeliveryReason::Unknown,
+    }
+}
+
+#[expect(clippy::too_many_lines, reason = "every root request has one typed parent or lower route")]
+pub(crate) fn route(agent: &mut Domain, env: &Env<Limits>, id: Id<Slot>, out: &mut Queue<Output>) {
+    for _ in 0..smith::max_out(&env.limits.smith) {
+        let request = match agent.lower.pop() {
+            Some(request) => request,
+            None => break,
+        };
+        let slot = agent.slots.get_mut(id).expect("root output belongs to its slot");
+        let client = slot.client;
+        match request {
+            smith::Request::Admitted { host_run, run } => {
+                assert_eq!(slot.logical_run, host_run, "root output preserves its scoped identity and single right");
+                slot.run = Some(run);
+                out.push(Output::Parent(parent::Request::Admitted { client }));
+            }
+            smith::Request::MessageRefused { host_run, name, reason } => {
+                assert_eq!(slot.logical_run, host_run, "root output preserves its scoped identity and single right");
+                out.push(Output::Parent(parent::Request::MessageRefused {
+                    client,
+                    name,
+                    reason: message_refusal(reason),
+                }));
+            }
+            smith::Request::Turn { host_run, number, spent, read, turn, position: _ } => {
+                assert_eq!(slot.logical_run, host_run, "root output preserves its scoped identity and single right");
+                let body = host::TurnValue::new(turn, u64::MAX).expect("root concrete turns have checked ownership");
+                assert!(
+                    slot.turns
+                        .insert(number, body.owned_bytes())
+                        .expect("root respects the acknowledgement window")
+                        .is_none(),
+                    "root output preserves its scoped identity and single right"
+                );
+                out.push(Output::Parent(parent::Request::Turn {
+                    client,
+                    turn: host::Turn { number, spent: spent.units, read, body },
+                }));
+            }
+            smith::Request::Waiting { host_run, read } => {
+                assert_eq!(slot.logical_run, host_run, "root output preserves its scoped identity and single right");
+                out.push(Output::Parent(parent::Request::Waiting { client, read }));
+            }
+            smith::Request::Answer { to, answer, read } => {
+                assert_eq!(to.into_token(), client, "root output preserves its scoped identity and single right");
+                out.push(Output::Parent(parent::Request::Answered { client, answer: self::answer(answer, read) }));
+                stop::finish(agent, env.now, id, out);
+            }
+            smith::Request::Complete {
+                owner,
+                grant,
+                prompt,
+                timeout,
+                max_completion_bytes,
+                max_completion_blocks,
+                max_failure_bytes,
+                decoded_call_bytes,
+            } => {
+                assert!(
+                    slot.completions.insert(owner, false).expect("root bounds live completions").is_none(),
+                    "root output preserves its scoped identity and single right"
+                );
+                out.push(Output::Lower {
+                    agent: id.token(),
+                    request: Lower::Complete {
+                        owner,
+                        grant,
+                        prompt,
+                        timeout,
+                        max_completion_bytes,
+                        max_completion_blocks,
+                        max_failure_bytes,
+                        decoded_call_bytes,
+                    },
+                });
+            }
+            smith::Request::Cancel { owner } => {
+                match slot.completions.get_mut(&owner) {
+                    Some(cancelled) => *cancelled = true,
+                    None => unreachable!("cancel retains a live provider right"),
+                }
+                out.push(Output::Lower { agent: id.token(), request: Lower::Cancel { owner } });
+            }
+            smith::Request::HostCall { host_run, relay, name, tool, effect, input, deadline } => {
+                assert_eq!(slot.logical_run, host_run, "root output preserves its scoped identity and single right");
+                assert!(
+                    slot.relays
+                        .insert(relay.owner, Relay { name: relay, withdrawn: false })
+                        .expect("root bounds its host rights")
+                        .is_none(),
+                    "root output preserves its scoped identity and single right"
+                );
+                out.push(Output::Parent(parent::Request::Called {
+                    client,
+                    logical_run: host_run,
+                    call: relay.owner,
+                    name: host::CallName {
+                        activation: name.activation,
+                        completion: name.completion,
+                        position: name.position,
+                    },
+                    deadline,
+                    ask: host::Ask::Host { tool, effect: self::effect(effect), body: Box::from(input.bytes()) },
+                }));
+            }
+            smith::Request::WithdrawHost { relay } => {
+                if let Some(pending) = slot.relays.get_mut(&relay.owner) {
+                    assert_eq!(pending.name, relay, "root output preserves its scoped identity and single right");
+                    if !pending.withdrawn {
+                        pending.withdrawn = true;
+                        out.push(Output::Parent(parent::Request::Withdrawn { client, call: relay.owner }));
+                    }
+                }
+            }
+            smith::Request::Rejected { grant } => out.push(Output::Parent(parent::Request::Rejected {
+                client,
+                account: grant.account,
+                generation: grant.generation,
+            })),
+            smith::Request::Exhausted { account, retry_after } => {
+                out.push(Output::Parent(parent::Request::Exhausted { client, account, retry_after }));
+            }
+            smith::Request::Checking { .. }
+            | smith::Request::ChecksEnded { .. }
+            | smith::Request::Deliver { .. }
+            | smith::Request::Io { .. }
+            | smith::Request::CancelIo { .. }
+            | smith::Request::Read { .. }
+            | smith::Request::Probe { .. }
+            | smith::Request::Check { .. }
+            | smith::Request::Abort { .. } => unreachable!("workspace starts were refused before root admission"),
+        }
     }
 }

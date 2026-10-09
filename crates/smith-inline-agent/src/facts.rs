@@ -1,6 +1,6 @@
 //! Content-free slot observations (domain/host.md, sections 9.1 and 10).
 //! The agent bounds this queue independently of its roots' observation drains.
-//! Losing a diagnostic never changes admission, cancellation or settlement.
+//! The owner reserves room before each step and drains facts before reclaim.
 
 use skein_lib::{Time, Token};
 use smith_host_domain::End;

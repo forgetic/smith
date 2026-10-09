@@ -7,7 +7,7 @@ use skein_lib::{Duration, Env, Queue, ReplyTo, Time, Token};
 use skein_world::domain::{Ledger, Schedule, Stage, Trace};
 use smith_domain::{self as smith, run};
 use smith_host_domain::{self as host, parent};
-use smith_inline_agent::{self as inline, Completion, Request};
+use smith_inline_agent::{self as inline, Below, Input, Lower, Output};
 use std::collections::BTreeMap;
 
 use crate::Seen;
@@ -77,8 +77,8 @@ pub fn start(seed: u64, job: smith_agent_world::Job) -> host::Start {
 /// Real inline agent with native fake LLM and boundary-only rights accounting.
 #[derive(Debug)]
 pub struct World {
-    pub agent: inline::Agent,
-    pub stage: Stage<inline::Limits, parent::Event, Request>,
+    pub agent: inline::Domain,
+    pub stage: Stage<inline::Limits, parent::Event, Output>,
     pub schedule: Schedule<parent::Event>,
     pub seen: BTreeMap<Token, Seen>,
     pub history: BTreeMap<Token, Vec<smith::session::record::Turn>>,
@@ -105,7 +105,7 @@ impl World {
         let mut trace = Trace::default();
         trace.log(Time::ZERO, format!("seed {seed}"));
         Self {
-            agent: inline::Agent::new(&bounds, configuration_value(), seed),
+            agent: inline::Domain::new(&bounds, configuration_value(), seed),
             stage: Stage::new(bounds, inline::max_out(&bounds), inline::max_out(&bounds) + 2),
             schedule: Schedule::new(),
             seen: BTreeMap::new(),
@@ -151,9 +151,10 @@ impl World {
             | parent::Event::Stop { .. } => {}
         }
         self.trace.log(self.stage.env.now, format!("up {event:?}"));
+        assert!(self.agent.facts_room() >= inline::max_facts());
         self.stage.push(event);
         while let Some(event) = self.stage.next_event() {
-            inline::step(&mut self.agent, &self.stage.env, event, &mut self.stage.out);
+            inline::step(&mut self.agent, &self.stage.env, Input::Parent(event), &mut self.stage.out);
             self.outputs();
         }
         self.pass();
@@ -193,7 +194,7 @@ impl World {
                 .chain(self.agent.next_deadline())
                 .chain(self.schedule.next_time())
                 .min()
-                .expect("live owner has an alarm");
+                .unwrap_or_else(|| panic!("live owner has an alarm\n{}", self.trace.lines().join("\n")));
             self.at(next);
         }
         panic!("bounded inline story did not settle\n{}", self.trace.lines().join("\n"));
@@ -217,7 +218,7 @@ impl World {
         while let Some(request) = self.stage.out.pop() {
             self.trace.log(self.stage.env.now, format!("down {request:?}"));
             match request {
-                Request::Parent(request) => {
+                Output::Parent(request) => {
                     let client = parent_client(&request);
                     let seen = self.seen.entry(client).or_default();
                     if let parent::Request::Turn { turn, .. } = &request {
@@ -229,20 +230,20 @@ impl World {
                             });
                         }
                     }
-                    if let parent::Request::Called { call, .. } = &request {
-                        if self.auto_answer {
-                            self.pending.push(parent::Event::Answer {
-                                agent: seen.agent.expect("Started before Called"),
-                                call: *call,
-                                reply: host::Reply::Host { error: false, body: b"host completed".as_slice().into() },
-                            });
-                        }
+                    if let parent::Request::Called { call, .. } = &request
+                        && self.auto_answer
+                    {
+                        self.pending.push(parent::Event::Answer {
+                            agent: seen.agent.expect("Started before Called"),
+                            call: *call,
+                            reply: host::Reply::Host { error: false, body: b"host completed".as_slice().into() },
+                        });
                     }
                     let lower_settled = !self.bindings.values().any(|binding| Some(binding.agent) == seen.agent);
                     seen.observe_parent(request, lower_settled, lower_settled);
                 }
-                Request::Lower { agent, request } => match request {
-                    smith::Request::Complete { owner, prompt, .. } => {
+                Output::Lower { agent, request } => match request {
+                    Lower::Complete { owner, prompt, .. } => {
                         self.minted += 1;
                         let callback = Token::new(self.minted);
                         let tools = prompt.tools;
@@ -264,7 +265,7 @@ impl World {
                         );
                         self.provider_replies();
                     }
-                    smith::Request::Cancel { owner } => {
+                    Lower::Cancel { owner } => {
                         let binding = self
                             .bindings
                             .values_mut()
@@ -273,7 +274,6 @@ impl World {
                         assert!(!binding.cancelled, "cancel emitted once");
                         binding.cancelled = true;
                     }
-                    other => panic!("workspace-free lower request {other:?}"),
                 },
             }
         }
@@ -285,14 +285,14 @@ impl World {
             let binding = self.bindings.remove(&callback).expect("one fake terminal");
             self.lower.end(callback);
             let completion = if binding.cancelled {
-                Completion::Cancelled { owner: binding.owner }
+                Below::Cancelled { owner: binding.owner }
             } else {
                 match result {
-                    Ok(answer) => Completion::Completed {
+                    Ok(answer) => Below::Completed {
                         owner: binding.owner,
                         completion: smith_agent_world::translate::completion(answer, binding.tools, &binding.served),
                     },
-                    Err(error) => Completion::Failed {
+                    Err(error) => Below::Failed {
                         owner: binding.owner,
                         failure: smith_agent_world::translate::failure(error),
                         evidence: smith::llm::Evidence::Response,
@@ -300,7 +300,12 @@ impl World {
                     },
                 }
             };
-            inline::terminal(&mut self.agent, &self.stage.env, binding.agent, completion, &mut self.stage.out);
+            inline::step(
+                &mut self.agent,
+                &self.stage.env,
+                Input::Below { agent: binding.agent, terminal: completion },
+                &mut self.stage.out,
+            );
             self.outputs();
         }
         self.provider.reclaim();
@@ -327,7 +332,7 @@ impl World {
                 self.content.push((*client, content));
             }
         }
-        while let Some(fact) = self.agent.pop_observation() {
+        while let Some(fact) = self.agent.pop_slot_fact() {
             self.observations.push(fact);
         }
         inline::reclaim(&mut self.agent);

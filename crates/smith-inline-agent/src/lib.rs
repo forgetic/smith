@@ -34,7 +34,7 @@ mod translate;
 #[cfg(test)]
 mod tests;
 
-pub use boundary::{Completion, Request};
-pub use domain::{Agent, fire, reclaim, resume, step, terminal};
+pub use boundary::{Below, Input, Lower, Output};
+pub use domain::{Domain, fire, reclaim, resume, step};
 pub use facts::{Fact, FactKind};
-pub use limits::{Limits, max_out, worst_case};
+pub use limits::{Limits, max_facts, max_out, worst_case};
