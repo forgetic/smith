@@ -1,0 +1,8 @@
+id = "recorded"
+version = 1
+kind = "probe"
+tier = "small"
+deadline_seconds = 10
+prompt = "Read the README and finish."
+guards = ["benchmarks.md, section 5.2"]
+seed_sha256 = "452c822eb37147a50a5ddf1271245fad2f5884ded6513b8f813e81629627fb85"

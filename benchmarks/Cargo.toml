@@ -1,0 +1,30 @@
+[package]
+name = "smith-bench"
+description = "Offline checks and real-provider measurements of agent tasks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_path_to_error = "0.1"
+sha2 = "0.10"
+toml = "0.9"
+
+[lints.rust]
+unsafe_code = "forbid"
+elided_lifetimes_in_paths = "deny"
+unused_must_use = "deny"
+missing_debug_implementations = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+wildcard_enum_match_arm = "deny"
+match_wildcard_for_single_variants = "deny"
+unwrap_used = "deny"
+disallowed_types = "deny"
+disallowed_methods = "deny"

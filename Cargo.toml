@@ -3,7 +3,7 @@
 [workspace]
 default-members = [".", "crates/smith-agent-service", "crates/smith-agent-shell", "crates/smith-channel", "crates/smith-charter", "crates/smith-domain", "crates/smith-domain-run", "crates/smith-domain-session", "crates/smith-domain-tools", "crates/smith-host-domain", "crates/smith-host-protocol", "crates/smith-local-domain", "crates/smith-local-protocol", "crates/smith-local-service", "crates/smith-local-shell", "crates/smith-protocol-channel", "crates/smith-protocol-llm", "crates/smith-protocol-machine", "crates/smith-transcript", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine", "tests/channel", "tests/agent-process", "tests/hosts", "tests/local-process", "tests/real"]
 resolver = "3"
-members = ["crates/*", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine", "tests/channel", "tests/agent-process", "tests/hosts", "tests/local-process", "tests/real"]
+members = ["benchmarks", "crates/*", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine", "tests/channel", "tests/agent-process", "tests/hosts", "tests/local-process", "tests/real"]
 
 [workspace.package]
 version = "0.0.0"

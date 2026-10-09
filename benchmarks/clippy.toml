@@ -1,0 +1,11 @@
+# Ordinary Rust, with deterministic ordering and one clock (benchmarks.md, 5.1).
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "ordered observations use BTreeMap" },
+    { path = "std::collections::HashSet", reason = "ordered observations use BTreeSet" },
+    { path = "std::time::Instant", reason = "all measurement belongs to the clock module" },
+    { path = "std::time::SystemTime", reason = "all measurement belongs to the clock module" },
+]
+
+disallowed-methods = [
+    { path = "std::thread::spawn", reason = "one thread observes each attempt" },
+]

@@ -477,6 +477,14 @@ nextest workers. Heavy commands ran sequentially in a user systemd scope with
 `MemoryHigh=6G`, `MemoryMax=8G` and `MemorySwapMax=0`, after checking at least
 6 GiB available RAM. No memory-pressure or scope-limit failure occurred.
 
+Benchmark increment 00.1 adds the strict task-manifest offline tier. On
+2026-10-09, an idle `heavy cargo nextest run -p smith-bench --profile measure
+-j 1` run passed its 22 unit and offline tests in 0.214 seconds. The harness
+has no fuzzy parser sweep yet. It uses ordinary Rust, no agent or network,
+and remains within its one-second focused share. Existing suite budgets are
+unchanged; builds used one job with debug information disabled and assertions
+retained.
+
 ## 5. Opt-in live suite
 
 The `live` profile runs the shipped binary against real backends, serially,
