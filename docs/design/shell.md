@@ -479,11 +479,14 @@ source = "borrow"
 
 - **Presets.** `codex` and `anthropic` each supply an endpoint and an
   account of that name, and their known models' declared values
-  (section 6). A model a preset does not know declares its `window` and
-  `output` in settings.
+  (section 6). A model a preset does not know declares its `window`,
+  `output` and prices in settings.
 - **Prices.** A preset model carries notional prices, the provider's list
   prices, so that spend is real (domain/run.md, section 9). A
   subscription account's spend is shown as notional, never as a charge.
+  Every rate is positive: a model that costs nothing per token, such as
+  a local one, is given notional prices, and settings that price a model
+  at zero at any rate are refused, naming the key.
   The local host's unit is the micro-dollar; settings and the terminal
   use dollars.
 - **Raw byte limits are not settings.** Tests may override them; a person
@@ -500,7 +503,8 @@ source = "borrow"
   - the budget against the profile's ceilings, and against one
     completion's maximum cost, so an impossible spend is refused before
     a run starts (domain/run.md, section 9);
-  - each model known to a preset or declared;
+  - each model known to a preset or declared, and priced above zero at
+    every rate;
   - each endpoint's address resolved, and each account's source usable;
   - the tools' paths.
 - **A refusal names the relationship:** the keys on each side, their

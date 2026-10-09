@@ -89,10 +89,11 @@ A versioned record (skein's `codec.md`, section 3):
   - **`output`:** the most output tokens a completion may have, thinking
     included. It is sent where the dialect takes it, and reserved before
     each completion;
-  - its prices: integer amounts per a positive number of tokens, for
-    input, cached input, output and, optionally, cache writes. Without a
-    cache-write rate, cache writes are priced at the input rate
-    (domain/session.md, section 6).
+  - its prices: positive integer amounts per a positive number of
+    tokens, for input, cached input, output and, optionally, cache
+    writes. Without a cache-write rate, cache writes are priced at the
+    input rate (domain/session.md, section 6). A rate of zero is refused
+    at the entrance (domain/run.md, section 9).
 
   `window` and `output` are the effective values the host chose, at most
   what the agent's configuration declares for the model (limits.md,

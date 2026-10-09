@@ -212,8 +212,9 @@ that is not empty, or a message.
    or an output above what the configuration declares for the model or
    too small for the agent's limits, charter text too large for a
    window's host part, a host tool whose name is smith's or appears
-   twice, a contract that cannot be met, a budget that cannot hold its
-   reserve). The start's messages are admitted or refused with it.
+   twice, a contract that cannot be met, a model priced at zero at any
+   rate, a budget that cannot hold its reserve). The start's messages
+   are admitted or refused with it.
 2. **Prepares:** reads each workspace directory's guide and looks for its
    checks (8.1).
 3. **Equips** its main session: prompt, tools, workspace authority, LLM,
@@ -579,6 +580,15 @@ answers as it was ending; the host has the delivery's own answer.
   flat rate prices them notionally, so spend still bounds the work and
   weighs uncached input as a metered host's would; such prices are for
   the budget, not a bill.
+- **Every rate is positive:** input, cached input, output, and cache
+  writes when priced apart. Every completion uses a token, and its charge
+  is rounded upwards (session.md, section 6), so each costs at least one
+  unit: spend bounds how many completions a run makes as well as what
+  they cost, and neither a completion's maximum cost nor the reserve's
+  spend is ever zero. A charter that prices any model at zero at any rate
+  is refused at the entrance, naming the rate. A model that costs nothing
+  per token, a local one or one paid by subscription, is priced
+  notionally, as any flat-rate host's is.
 - **Prices are the charter's,** per model: integer amounts for input,
   cached input, cache writes and output per a number of tokens, cache
   writes at the input's rate unless priced apart. Each completion is
