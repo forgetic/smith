@@ -209,7 +209,7 @@ const fn calm_run_limits() -> run::Limits {
         verdicts: 4,
         calls: 16,
         budget: run::Budget { turns: 1000, spend: 1 << 32, time: Duration::from_secs(24 * 3600) },
-        max_tokens: 8192,
+
         models: 4,
         run_conversations: 4,
         answer_bytes: 512,

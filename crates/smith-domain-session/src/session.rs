@@ -162,7 +162,7 @@ struct Conversation {
     /// The families of its own tools it offers the LLM, as its kit has them.
     tools: Grants,
     delegated: Box<[Descriptor]>,
-    max_tokens: u32,
+    output: u32,
     /// The conversation so far, oldest first, starting with the spec's prompt.
     transcript: List<Message>,
     /// Bytes held, counted against `Limits::session_bytes`.
@@ -1643,7 +1643,7 @@ fn admit(
     limits: &Limits,
     now: Time,
 ) -> Option<(Conversation, tools::Authority)> {
-    if spec.max_tokens == 0 || spec.max_tokens > limits.max_tokens || !affordable(&spec.budget, &limits.budget) {
+    if spec.output == 0 || !affordable(&spec.budget, &limits.budget) {
         return None;
     }
     let content: Box<[Block]> = Box::new([Block::Text { text: spec.prompt, replay: None }]);
@@ -1660,7 +1660,7 @@ fn admit(
         system: spec.system,
         tools: spec.authority.grants,
         delegated: spec.delegated,
-        max_tokens: spec.max_tokens,
+        output: spec.output,
         transcript,
         bytes,
         reserved: 0,
@@ -1727,7 +1727,7 @@ fn spent(conversation: &Conversation, now: Time) -> Option<Dimension> {
 /// protocol layer holds the copy (copy at emission).
 fn complete(id: Id<Session>, conversation: &Conversation, limits: &Limits) -> Request {
     let left = conversation.budget.output.saturating_sub(conversation.usage.output_tokens);
-    let max_tokens = u32::try_from(left).unwrap_or(u32::MAX).min(conversation.max_tokens);
+    let max_tokens = u32::try_from(left).unwrap_or(u32::MAX).min(conversation.output);
     let prompt = Prompt {
         endpoint: conversation.endpoint,
         model: conversation.model.clone(),

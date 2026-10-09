@@ -51,3 +51,5 @@ pub fn scripted_provider(config: &skein_fake_llm_domain::Config, seed: u64) -> s
     skein_fake_llm_domain::Domain::configured(config, seed, script::all(), smith_session_world::provider::menu())
         .expect("shared agent scripts fit fake provider limits")
 }
+
+pub use world::charter as scripted_charter;

@@ -10,7 +10,7 @@ use crate::{Component, OpenEvent};
 pub struct Limits {
     pub bodies: smith_channel::Limits,
     /// This agent's bounded charter decoder allowances.
-    pub charter: smith_charter::v1::Limits,
+    pub charter: smith_charter::v2::Limits,
     /// This agent's bounded saved-turn decoder allowances.
     pub transcript: smith_transcript::v2::Limits,
     pub channel: skein_channel::Limits,
@@ -38,7 +38,7 @@ pub enum Error {
     /// Configured endpoint names exceed their count or byte allowance.
     Endpoints,
     /// The accepted result is outside the configured charter codec limits.
-    Result(smith_charter::v1::Problem),
+    Result(smith_charter::v2::Problem),
     /// A bounded result list had no room for a field or item.
     ResultCapacity,
     /// A saved answer decodes but fails the domain's sealed result bounds.
@@ -81,8 +81,8 @@ impl From<skein_channel::FrameError> for Error {
     }
 }
 
-impl From<smith_charter::v1::Problem> for Error {
-    fn from(problem: smith_charter::v1::Problem) -> Error {
+impl From<smith_charter::v2::Problem> for Error {
+    fn from(problem: smith_charter::v2::Problem) -> Error {
         Error::Result(problem)
     }
 }

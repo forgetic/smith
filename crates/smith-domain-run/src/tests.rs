@@ -51,7 +51,6 @@ pub(crate) const LIMITS: Limits = Limits {
     verdicts: 2,
     calls: 2,
     budget: Budget { turns: 100, spend: 1_000_000, time: Duration::from_secs(3600) },
-    max_tokens: 4096,
     models: 2,
     run_conversations: 3,
     answer_bytes: 16,
@@ -287,7 +286,8 @@ pub(crate) fn charter() -> Charter {
             account: 0,
             endpoint: Endpoint(1),
             model: bytes(b"model-a"),
-            max_tokens: 1024,
+            window: 8192,
+            output: 1024,
             dialect: 1,
         },
         models: Box::new([]),
@@ -488,7 +488,8 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
         account: 0,
         endpoint: Endpoint(2),
         model: bytes(b"model-b"),
-        max_tokens: 512,
+        window: 8192,
+        output: 512,
         dialect: 1,
     };
     let models = Box::new([llm.clone(), Llm { endpoint: Endpoint(3), ..llm }]);
@@ -504,7 +505,7 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
         (Charter { budget: Budget { time: Duration::from_secs(3601), ..BUDGET }, ..charter() }, Invalid::Budget),
         (Charter { budget: Budget { turns: 0, ..BUDGET }, ..charter() }, Invalid::Budget),
         (Charter { budget: Budget { spend: 0, ..BUDGET }, ..charter() }, Invalid::Budget),
-        (Charter { llm: Llm { max_tokens: 0, ..charter().llm }, ..charter() }, Invalid::Llm),
+        (Charter { llm: Llm { window: 8192, output: 0, ..charter().llm }, ..charter() }, Invalid::Llm),
         (
             Charter {
                 llm: Llm { prices: crate::Prices { unit: 0, ..charter().llm.prices }, ..charter().llm },
@@ -512,7 +513,7 @@ fn charters_beyond_the_limits_are_refused_as_invalid() {
             },
             Invalid::Llm,
         ),
-        (Charter { llm: Llm { max_tokens: 4097, ..charter().llm }, ..charter() }, Invalid::Llm),
+        (Charter { llm: Llm { window: 0, output: 512, ..charter().llm }, ..charter() }, Invalid::Llm),
         (Charter { models, ..charter() }, Invalid::Llm),
         (Charter { instructions: Box::from([b'x'; 4096].as_slice()), ..charter() }, Invalid::TooLarge),
         (Charter { grants: Grants { host_tools, ..charter().grants }, ..charter() }, Invalid::Grants),
@@ -1353,7 +1354,8 @@ fn agents() -> Charter {
         account: 0,
         endpoint: Endpoint(2),
         model: bytes(b"model-b"),
-        max_tokens: 512,
+        window: 8192,
+        output: 512,
         dialect: 1,
     }]);
     Charter { grants, models, ..charter() }

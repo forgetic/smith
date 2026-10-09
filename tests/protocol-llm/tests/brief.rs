@@ -68,7 +68,8 @@ fn charter(settings: &Settings, instructions: &str) -> run::Charter {
         account: 0,
         endpoint: Endpoint(0),
         model: b"fake-1".as_slice().into(),
-        max_tokens: 4096,
+        window: 8192,
+        output: 4096,
     };
     run::Charter {
         instructions: instructions.as_bytes().into(),

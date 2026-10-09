@@ -172,16 +172,42 @@ impl Config {
                 return Err(Invalid::Accounts);
             }
         }
-        for model in &self.models {
+        self.check_models(limits)?;
+        if crate::worst_case(limits).is_none() {
+            return Err(Invalid::Limits);
+        }
+        Ok(())
+    }
+
+    #[expect(clippy::manual_let_else, reason = "strict subset keeps checked construction exhaustive")]
+    fn check_models(&self, limits: &Limits) -> Result<(), Invalid> {
+        let mut model_bytes = 0_u64;
+        for (index, model) in self.models.iter().enumerate() {
+            if model.model.is_empty() || model.window == 0 || model.output == 0 {
+                return Err(Invalid::Models);
+            }
+            for other in self.models.get(index.saturating_add(1)..).unwrap_or_default() {
+                if model.endpoint == other.endpoint && model.model == other.model {
+                    return Err(Invalid::Models);
+                }
+            }
+            let owned = match smith_domain::ConfiguredModel::worst_case(model.model.len()) {
+                Some(owned) => owned,
+                None => return Err(Invalid::Limits),
+            };
+            model_bytes = match model_bytes.checked_add(owned) {
+                Some(bytes) => bytes,
+                None => return Err(Invalid::Limits),
+            };
+            if model_bytes > limits.agent.configured_model_bytes {
+                return Err(Invalid::Limits);
+            }
             if !self.accounts.contains(&model.account) {
                 return Err(Invalid::Accounts);
             }
             if !limits.endpoints.contains(&model.endpoint) {
                 return Err(Invalid::Endpoint);
             }
-        }
-        if crate::worst_case(limits).is_none() {
-            return Err(Invalid::Limits);
         }
         Ok(())
     }

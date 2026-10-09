@@ -112,6 +112,7 @@ pub fn limits() -> agent::Limits {
     client.sse.line = 32_768;
     client.sse.event = 65_536;
     let completion = llm::completion_worst_case(&client, 4096).expect("receiving bound");
+    limits.domain.configured_model_bytes = 4096;
     limits.domain.session.completion_bytes = completion;
     limits.llm.adapter.client = client;
     limits.llm.adapter.rendered_result = client.dialect.string_bytes;
@@ -170,7 +171,15 @@ pub fn configuration() -> agent::Config {
     .expect("one LLM endpoint");
     agent::Config {
         limits: limits(),
-        domain: smith_domain::Config { endpoints: Box::new([smith_domain::run::charter::Endpoint(0)]) },
+        domain: smith_domain::Config {
+            endpoints: Box::new([smith_domain::run::charter::Endpoint(0)]),
+            models: Box::new([smith_domain::ConfiguredModel {
+                endpoint: smith_domain::run::charter::Endpoint(0),
+                model: Box::from(&b"fake"[..]),
+                window: 8192,
+                output: 4096,
+            }]),
+        },
         channel_endpoints: channel::Endpoints::new(endpoints),
         llm_endpoints,
         environment: Box::new([]),
@@ -237,7 +246,7 @@ pub fn start(charter: &[u8]) -> skein_channel::Frame {
 /// A concrete charter within the process limits, with one report contract.
 #[must_use]
 pub fn charter() -> Box<[u8]> {
-    let smallest = include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin");
+    let smallest = include_bytes!("../../../crates/smith-charter/golden/v2/record_charter_smallest.bin");
     let source = smith_charter::Charter::decode(&smith_charter::CEILINGS, &mut skein_lib::Reader::new(smallest))
         .expect("golden charter");
     let mut parts = source.into_parts();
@@ -264,7 +273,8 @@ pub fn charter() -> Box<[u8]> {
     .expect("outcome contract");
     let mut llm = parts.main.into_parts();
     llm.model = Box::from(*b"fake");
-    llm.max_tokens = 1024;
+    llm.window = 8192;
+    llm.output = 1024;
     llm.prices = smith_charter::Prices::new(
         &smith_charter::CEILINGS,
         smith_charter::PricesParts { input: 0, cached: 0, output: 0, unit: 1 },

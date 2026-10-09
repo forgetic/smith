@@ -400,7 +400,8 @@ mod tests {
             smith_charter::LlmParts {
                 endpoint: Box::from(&b""[..]),
                 model: Box::from(&b""[..]),
-                max_tokens: 0,
+                window: 8192,
+                output: 0,
                 prices,
             },
         )

@@ -40,7 +40,7 @@ pub fn opening(transcript: Option<record::Transcript>, budget: u64) -> record::O
             },
             delegated: Box::new([llm::Descriptor { ticket: Token::new(19), effect: Effect::Write }]),
             prompt: b"wake".as_slice().into(),
-            max_tokens: 128,
+            output: 128,
             budget: crate::BUDGET,
         },
         dialect: 23,

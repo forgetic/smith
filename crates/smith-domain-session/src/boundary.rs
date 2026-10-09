@@ -246,7 +246,7 @@ pub struct Spec {
     pub prompt: Box<[u8]>,
     /// The most tokens each answer may take, and fewer once the output budget
     /// has less left.
-    pub max_tokens: u32,
+    pub output: u32,
     /// Allowance supplied at admission, checked before starting more work.
     pub budget: Budget,
 }
@@ -261,7 +261,7 @@ pub struct Spec {
 /// comes back, so it may take input and cache tokens past their budget: its
 /// turn still runs the tools it asked for, and the session ends where it
 /// would have started the next. The output budget it cannot pass, as the
-/// answer's `max_tokens` is cut to what is left. A zero cache budget
+/// answer's output cap is cut to what is left. A zero cache budget
 /// therefore ends a session only once a completion touches the cache. Time
 /// does not wait for the turn: when it runs out, the session closes at once.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

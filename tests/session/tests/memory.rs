@@ -58,7 +58,7 @@ const LIMITS: Limits = Limits {
         cache_write: 1 << 20,
         time: Duration::from_secs(3600),
     },
-    max_tokens: 1024,
+
     retries: 1,
     backoff_base: Duration::from_secs(60),
     backoff_max: Duration::from_secs(60),
@@ -390,7 +390,7 @@ fn fill_spec(limits: Limits) -> Spec {
             Descriptor { ticket: Token::new(2), effect: Effect::Read },
         ]),
         prompt: bytes(1),
-        max_tokens: 1,
+        output: 1,
         budget: limits.budget,
     }
 }
@@ -464,7 +464,7 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
         authority: authority(),
         delegated: Box::new([Descriptor { ticket: Token::new(2), effect: Effect::Write }]),
         prompt: bytes(1),
-        max_tokens: 1,
+        output: 1,
         budget: limits.budget,
     };
     let (owner, _) = drive(Event::Open {
@@ -538,7 +538,7 @@ fn restoring_a_maximum_recorded_history_stays_within_the_counted_bound() {
         authority: authority(),
         delegated: Box::new([Descriptor { ticket: Token::new(2), effect: Effect::Write }]),
         prompt: bytes(1),
-        max_tokens: 1,
+        output: 1,
         budget: limits.budget,
     };
     let history = record::Transcript {
@@ -647,7 +647,7 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
         authority: authority(),
         delegated: Box::new([Descriptor { ticket: Token::new(2), effect: Effect::Write }]),
         prompt: bytes(1),
-        max_tokens: 1,
+        output: 1,
         budget: limits.budget,
     };
     meter.start();

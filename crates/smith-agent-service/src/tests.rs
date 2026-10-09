@@ -16,7 +16,7 @@ fn standard_profile_builds_a_complete_bounded_service() {
     .expect("standard profile");
     let configuration = crate::Config {
         limits,
-        domain: smith_domain::Config { endpoints: Box::new([]) },
+        domain: smith_domain::Config { endpoints: Box::new([]), models: Box::new([]) },
         channel_endpoints: smith_protocol_channel::Endpoints::new(List::with_capacity(0)),
         llm_endpoints: smith_protocol_llm::Endpoints::new(
             Box::new([]),

@@ -58,7 +58,8 @@ fn config() -> Config {
                 account: 7,
                 endpoint: Endpoint(4),
                 model: Box::from(&b"small"[..]),
-                max_tokens: 128,
+                window: 8192,
+                output: 128,
             }]),
             budget: run::Budget { turns: 8, spend: 1, time: Duration::from_secs(60) },
             conventions: None,
@@ -378,7 +379,7 @@ fn colocated_config() -> (Config, smith_agent_service::Config) {
     config.local.models[0].account = 0;
     config.local.models[0].endpoint = Endpoint(0);
     config.local.models[0].prices = run::Prices { input: 0, cached: 0, output: 0, unit: 1 };
-    config.local.models[0].max_tokens = 1024;
+    config.local.models[0].output = 1024;
     config.local.budget.turns = 1;
     config.local.models[0].model = Box::from(b"fake".as_slice());
     (config, lower)

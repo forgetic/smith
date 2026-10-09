@@ -243,9 +243,20 @@ fn build(document: Document) -> Result<Configuration, String> {
     let endpoints = build_endpoints(document.endpoints, &limits.llm)?;
     let llm_endpoints =
         llm::Endpoints::new(endpoints.llm, ENDPOINTS, ACCOUNTS).map_err(|error| format!("LLM endpoints: {error:?}"))?;
+    let mut models = Vec::new();
+    for endpoint in &declarations.endpoints {
+        for model in &endpoint.models {
+            models.push(domain::ConfiguredModel {
+                endpoint: run::charter::Endpoint(endpoint.number),
+                model: model.name.clone(),
+                window: model.window,
+                output: model.output,
+            });
+        }
+    }
     let config = service::Config {
         limits,
-        domain: domain::Config { endpoints: endpoints.domain },
+        domain: domain::Config { endpoints: endpoints.domain, models: models.into_boxed_slice() },
         channel_endpoints: endpoints.channel,
         llm_endpoints,
         environment: environment.into_boxed_slice(),
@@ -695,7 +706,7 @@ fn profile_refusal(error: ProfileError) -> String {
     match error {
         ProfileError::Receiving => "LLM receiving bound overflows".into(),
         ProfileError::ChannelSchema(error) => format!("channel schema: {error:?}"),
-        ProfileError::ChannelVersion => "channel version 1 is absent".into(),
+        ProfileError::ChannelVersion => "channel version 2 is absent".into(),
         ProfileError::ChannelFrame => "channel frame size overflows".into(),
         ProfileError::IoRoutes => "IO route count overflows".into(),
         ProfileError::Memory => "profile.declared.memory is required".into(),

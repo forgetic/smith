@@ -44,7 +44,7 @@ mod translation_tests;
 mod waking;
 
 pub use boundary::{Answered, AnsweredCall, Event, Grant, GrantName, Request, Window};
-pub use config::Config;
+pub use config::{Config, ConfiguredModel};
 pub use domain::{Domain, fire, max_out, resume, step};
 pub use facts::{Content, Fact};
 

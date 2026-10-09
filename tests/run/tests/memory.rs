@@ -72,7 +72,7 @@ const LIMITS: Limits = Limits {
     verdicts: 1,
     calls: 2,
     budget: BUDGET,
-    max_tokens: 1024,
+
     models: 1,
     run_conversations: 2,
     answer_bytes: 128,
@@ -178,7 +178,8 @@ fn charter(held: u64) -> Charter {
             account: 0,
             endpoint: Endpoint(0),
             model: bytes(1),
-            max_tokens: 1,
+            window: 8192,
+            output: 1,
             dialect: 1,
         },
         models: Box::new([Llm {
@@ -186,7 +187,8 @@ fn charter(held: u64) -> Charter {
             account: 0,
             endpoint: Endpoint(0),
             model: bytes(1),
-            max_tokens: 1,
+            window: 8192,
+            output: 1,
             dialect: 1,
         }]),
         conventions: Some(smith_domain_run::Conventions {
@@ -642,7 +644,8 @@ fn full_delivery_charter(limits: Limits) -> Charter {
             account: 0,
             endpoint: Endpoint(0),
             model: bytes(1),
-            max_tokens: 1,
+            window: 8192,
+            output: 1,
             dialect: 1,
         },
         models: Box::new([]),

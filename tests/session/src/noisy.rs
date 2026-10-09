@@ -128,6 +128,6 @@ pub fn submit_noisily(world: &mut World, settings: &Settings, seed: u64) {
         }
         // Answers short enough that some are cut, a tool call included.
         let max_tokens = u32::try_from(rng.between(4, 64)).expect("a small number");
-        world.submit(at, Spec { budget, max_tokens, ..spec(b"make the tests pass") });
+        world.submit(at, Spec { budget, output: max_tokens, ..spec(b"make the tests pass") });
     }
 }

@@ -91,6 +91,7 @@ fn bounds(messages: u32) -> Limits {
     Limits {
         accounts: 1,
         endpoints: 1,
+        configured_model_bytes: 4096,
         decoded_call_bytes: 16_384,
         run: run::Limits {
             runs: 1,
@@ -196,7 +197,8 @@ fn charter(restoring: bool) -> run::Charter {
             account: 0,
             endpoint: run::charter::Endpoint(0),
             model: b"fixture-model".as_slice().into(),
-            max_tokens: 128,
+            window: 8192,
+            output: 128,
             dialect: 2,
         },
         models: Box::new([]),
@@ -745,7 +747,19 @@ impl Counted {
         let meter = Meter::new();
         meter.start();
         let out = Queue::with_capacity(root::max_out(limits));
-        let domain = Domain::new(limits, root::Config { endpoints: Box::new([run::charter::Endpoint(0)]) }, 41);
+        let domain = Domain::new(
+            limits,
+            root::Config {
+                endpoints: Box::new([run::charter::Endpoint(0)]),
+                models: Box::new([smith_domain::ConfiguredModel {
+                    endpoint: smith_domain::run::charter::Endpoint(0),
+                    model: Box::from(&b"fixture-model"[..]),
+                    window: 8192,
+                    output: 4096,
+                }]),
+            },
+            41,
+        );
         let measured = meter.end();
         let queue_bytes = Queue::<Request>::worst_case(root::max_out(limits)).expect("output container fits");
         meter.check(measured, root::worst_case(limits).expect("compatible root limits") + queue_bytes, limits);
@@ -1091,7 +1105,19 @@ impl Counted {
         self.calls = 0;
         self.records.clear();
         self.meter.start();
-        self.domain = Some(Domain::new(limits, root::Config { endpoints: Box::new([run::charter::Endpoint(0)]) }, 42));
+        self.domain = Some(Domain::new(
+            limits,
+            root::Config {
+                endpoints: Box::new([run::charter::Endpoint(0)]),
+                models: Box::new([smith_domain::ConfiguredModel {
+                    endpoint: smith_domain::run::charter::Endpoint(0),
+                    model: Box::from(&b"fixture-model"[..]),
+                    window: 8192,
+                    output: 4096,
+                }]),
+            },
+            42,
+        ));
         let measured = self.meter.end();
         self.drain(measured);
     }

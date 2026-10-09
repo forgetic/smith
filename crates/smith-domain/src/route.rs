@@ -48,11 +48,11 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
             transcript,
             answered,
         } => {
-            if !endpoints_known(domain, &charter) {
+            if let Err(invalid) = models_declared(domain, &charter) {
                 domain.notices.push(Request::Answer {
                     read: None,
                     to: reply_to,
-                    answer: run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Endpoint)),
+                    answer: run::Answer::Refused(run::Refusal::Invalid(invalid)),
                 });
                 return;
             }
@@ -188,16 +188,12 @@ fn priced_overflow(failure: Option<run::Failure>) -> Option<session::End> {
     }
 }
 
-fn endpoints_known(domain: &Domain, charter: &run::Charter) -> bool {
-    if !domain.config.contains(charter.llm.endpoint) {
-        return false;
-    }
+fn models_declared(domain: &Domain, charter: &run::Charter) -> Result<(), run::Invalid> {
+    domain.config.check_model(&charter.llm)?;
     for model in &charter.models {
-        if !domain.config.contains(model.endpoint) {
-            return false;
-        }
+        domain.config.check_model(model)?;
     }
-    true
+    Ok(())
 }
 
 /// Delivers a hand-off from the run that waited on the ready list.

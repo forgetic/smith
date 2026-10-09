@@ -1,4 +1,4 @@
-family smith-charter 1
+family smith-charter 2
 
 # Section bounds cover host brief text; admission also applies Limits.run_bytes.
 record Section { title: text 1024 body: text 262144 }
@@ -46,7 +46,7 @@ record Tools {
 }
 record Conventions { guide: text 1024 checks: text 1024 }
 record Prices { input: u64 cached: u64 output: u64 unit: u32 }
-record Llm { endpoint: text 64 model: text 128 max_tokens: u32 prices: Prices }
+record Llm { endpoint: text 64 model: text 128 window: u32 output: u32 prices: Prices }
 record Budget { turns: u32 spend: u64 time: duration }
 
 # The complete charter is also bounded by the receiving run's Limits.run_bytes.

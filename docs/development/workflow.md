@@ -690,3 +690,14 @@ in 4.887 seconds, with no skips. New configuration refusals and declaration
 overrides use deterministic fixtures; the checked render-to-machine property
 retains 256 deterministic cases. All six shipped-binary stories passed.
 The workspace focused and fuzzy budgets remain unchanged.
+
+Reliability limits increment 4.3 was measured through the serial heavy queue
+on 2026-10-09 with `measure -j 1`: the affected agent, protocol-LLM, codec,
+root, run, session, local-domain and local-settings packages passed 432
+focused tests in 7.345 seconds, with no skips. New stories refuse an
+undeclared model and an excessive effective window before provider work,
+and observe the charter's effective output cap in the fake provider request.
+Version-two charter goldens and seeded wire mutations retain distinct window
+and output quantities. The full workspace passed 1,568 focused tests in
+3.119 seconds and 21 fuzzy tests in 3.709 seconds, with no skips. Formatting
+and all-target Clippy passed. Workspace budgets remain unchanged.

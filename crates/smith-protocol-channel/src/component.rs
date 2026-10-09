@@ -92,7 +92,7 @@ pub struct Component {
     phase: Phase,
     ended: bool,
     bodies: smith_channel::Limits,
-    charter: smith_charter::v1::Limits,
+    charter: smith_charter::v2::Limits,
     transcript: smith_transcript::v2::Limits,
     endpoints: Endpoints,
     calls: Map<CallKey, CallRoute>,

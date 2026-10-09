@@ -2026,7 +2026,7 @@ mod tests {
         let llm_endpoints = llm::Endpoints::new(Box::new([]), 1, 1).expect("empty endpoint table");
         Config {
             limits,
-            domain: domain::Config { endpoints: Box::new([]) },
+            domain: domain::Config { endpoints: Box::new([]), models: Box::new([]) },
             channel_endpoints,
             llm_endpoints,
             environment: Box::new([]),
@@ -2079,7 +2079,7 @@ mod tests {
         let result = Service::new(
             Config {
                 limits,
-                domain: domain::Config { endpoints: Box::new([]) },
+                domain: domain::Config { endpoints: Box::new([]), models: Box::new([]) },
                 channel_endpoints,
                 llm_endpoints,
                 environment: Box::new([]),

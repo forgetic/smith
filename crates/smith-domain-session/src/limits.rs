@@ -60,8 +60,6 @@ pub struct Limits {
     /// together, up to this many, and a call that writes runs alone. Between
     /// one and [`MAX_PARALLEL`].
     pub parallel_tools: u32,
-    /// The largest `max_tokens` a spec may ask for.
-    pub max_tokens: u32,
     /// Retries of a call that failed transiently, after which the session
     /// fails.
     pub retries: u32,
@@ -211,7 +209,6 @@ pub fn derive(inputs: &Derivation) -> Option<Limits> {
             cache_write: 1 << 24,
             time: inputs.max_time,
         },
-        max_tokens: 4096,
         retries: 3,
         backoff_base: Duration::from_millis(200),
         backoff_max: Duration::from_secs(5),

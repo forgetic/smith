@@ -43,6 +43,7 @@ fn index(rng: &mut Rng, len: usize) -> usize {
 const LIMITS: Limits = Limits {
     accounts: 4,
     endpoints: 3,
+    configured_model_bytes: 4096,
     decoded_call_bytes: 4096,
     skew: Duration::ZERO,
     run: run::Limits {
@@ -164,7 +165,8 @@ fn charter(context_bytes: u64) -> Charter {
             account: 0,
             endpoint: Endpoint(0),
             model: (*b"m").into(),
-            max_tokens: 256,
+            window: 8192,
+            output: 256,
             dialect: 1,
         },
         models: Box::new([]),
@@ -706,7 +708,19 @@ fn churn(limits: &Limits, seed: u64, rounds: u32) -> [u32; 18] {
         seen: [0; 18],
     };
     let meter = Meter::new();
-    let mut domain = Domain::new(&limits, smith_domain::Config { endpoints: Box::new([Endpoint(0)]) }, seed);
+    let mut domain = Domain::new(
+        &limits,
+        smith_domain::Config {
+            endpoints: Box::new([Endpoint(0)]),
+            models: Box::new([smith_domain::ConfiguredModel {
+                endpoint: smith_domain::run::charter::Endpoint(0),
+                model: Box::from(&b"m"[..]),
+                window: 8192,
+                output: 4096,
+            }]),
+        },
+        seed,
+    );
     let mut measure = |domain: &mut Domain, env: &Env<Limits>, driver: &mut Driver, call: Point| {
         meter.start();
         match call {
@@ -752,6 +766,7 @@ enum Point {
 #[test]
 fn a_domain_driven_at_random_stays_within_its_worst_case_at_every_entry_point() {
     let wider = Limits {
+        configured_model_bytes: LIMITS.configured_model_bytes,
         accounts: LIMITS.accounts,
         endpoints: LIMITS.endpoints,
         decoded_call_bytes: LIMITS.decoded_call_bytes,

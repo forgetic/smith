@@ -52,8 +52,8 @@ fn arbitrary_and_mutated_wires_never_panic_and_round_trip_when_valid() {
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates");
     for (family, version, record) in [
-        ("smith-charter", "v1", "charter"),
-        ("smith-charter", "v1", "run_result"),
+        ("smith-charter", "v2", "charter"),
+        ("smith-charter", "v2", "run_result"),
         ("smith-transcript", "v2", "turn"),
         ("smith-channel", "v2", "start"),
         ("smith-channel", "v2", "message"),

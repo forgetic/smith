@@ -202,7 +202,7 @@ impl Domain {
     /// it.
     #[must_use]
     pub fn new(limits: &Limits, config: Config, seed: u64) -> Domain {
-        assert!(config.valid(limits), "configured endpoints fit the limits and are unique");
+        assert!(config.valid(limits), "configured endpoints and models fit their limits and are unique");
         let mut rng = Rng::new(seed);
         let peers = limits.run.conversations;
         let flights = limits::flights(limits).expect("worst_case accepted the limits");

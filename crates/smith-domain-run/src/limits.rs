@@ -89,8 +89,6 @@ pub struct Limits {
     pub calls: u32,
     /// The largest budget a charter may ask for, part by part.
     pub budget: Budget,
-    /// The largest `max_tokens` a charter's LLM may ask for.
-    pub max_tokens: u32,
     /// The LLMs a charter may list for sub-agents.
     pub models: u32,
     /// Conversations a run may have at once, main included.
@@ -210,7 +208,6 @@ pub fn derive(inputs: &Derivation) -> Option<Limits> {
         verdicts: inputs.verdicts,
         calls: inputs.calls_per_response,
         budget: Budget { turns: inputs.max_turns, spend: inputs.max_spend, time: inputs.max_time },
-        max_tokens: 4096,
         models: 2,
         run_conversations: inputs.conversations,
         answer_bytes: 1024,

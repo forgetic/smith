@@ -54,6 +54,7 @@ const CEILING: session::Budget = session::Budget {
 const LIMITS: Limits = Limits {
     accounts: 4,
     endpoints: 3,
+    configured_model_bytes: 4096,
     decoded_call_bytes: 4096,
     skew: Duration::ZERO,
     run: run::Limits {
@@ -76,7 +77,7 @@ const LIMITS: Limits = Limits {
         verdicts: 2,
         calls: 4,
         budget: run::Budget { turns: CEILING.turns, spend: 1, time: CEILING.time },
-        max_tokens: 1024,
+
         models: 1,
         run_conversations: 3,
         answer_bytes: 64,
@@ -105,7 +106,6 @@ const LIMITS: Limits = Limits {
         failure_bytes: 512,
         delegated_result_bytes: 262_144,
         budget: CEILING,
-        max_tokens: 1024,
         retries: 1,
         backoff_base: Duration::from_millis(100),
         backoff_max: Duration::from_secs(1),
@@ -222,7 +222,39 @@ impl Harness {
 
     fn with(limits: &Limits) -> Harness {
         Harness {
-            domain: Domain::new(limits, crate::Config { endpoints: Box::new([Endpoint(1), Endpoint(2)]) }, 1),
+            domain: Domain::new(
+                limits,
+                crate::Config {
+                    endpoints: Box::new([Endpoint(1), Endpoint(2)]),
+                    models: Box::new([
+                        crate::ConfiguredModel {
+                            endpoint: Endpoint(1),
+                            model: Box::from(&b"model-a"[..]),
+                            window: 8192,
+                            output: 1024,
+                        },
+                        crate::ConfiguredModel {
+                            endpoint: Endpoint(1),
+                            model: Box::from(&b"model-b"[..]),
+                            window: 8192,
+                            output: 1024,
+                        },
+                        crate::ConfiguredModel {
+                            endpoint: Endpoint(2),
+                            model: Box::from(&b"model-a"[..]),
+                            window: 8192,
+                            output: 1024,
+                        },
+                        crate::ConfiguredModel {
+                            endpoint: Endpoint(2),
+                            model: Box::from(&b"model-b"[..]),
+                            window: 8192,
+                            output: 1024,
+                        },
+                    ]),
+                },
+                1,
+            ),
             env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits: *limits },
             out: Queue::with_capacity(max_out(limits)),
             turns: List::with_capacity(CEILING.turns),
@@ -393,7 +425,8 @@ fn charter() -> Charter {
             account: 0,
             endpoint: Endpoint(1),
             model: bytes(b"model-a"),
-            max_tokens: 512,
+            window: 8192,
+            output: 512,
             dialect: 1,
         },
         models: Box::new([]),
@@ -1789,7 +1822,7 @@ fn a_priced_finish_settles_within_its_prior_reservation() {
     let selected = scalar_charter();
     let selected = Charter {
         budget: run::Budget { spend: 100_000, ..selected.budget },
-        llm: Llm { max_tokens: 10, ..selected.llm },
+        llm: Llm { window: 8192, output: 10, ..selected.llm },
         ..selected
     };
     let (_, main, _) = harness.admit(1, selected);
@@ -1809,7 +1842,7 @@ fn a_provider_charge_above_its_reserved_maximum_fails_without_recording_it() {
     let selected = scalar_charter();
     let selected = Charter {
         budget: run::Budget { spend: 100_000, ..selected.budget },
-        llm: Llm { max_tokens: 10, ..selected.llm },
+        llm: Llm { window: 8192, output: 10, ..selected.llm },
         ..selected
     };
     let (_, main, _) = harness.admit(1, selected);
@@ -1842,4 +1875,45 @@ fn overflowing_reservation_runs_no_calls_and_tells_no_turn() {
     assert_eq!((spent.units, spent.turns, *turns), (0, 0, 0));
     assert!(harness.turns.is_empty());
     assert_eq!(harness.domain.flights(), 0);
+}
+
+#[test]
+fn each_main_or_child_model_quantity_is_checked_before_admission() {
+    for child in [false, true] {
+        for bad in 0_u32..5 {
+            let mut requested = charter();
+            let mut model = requested.llm.clone();
+            match bad {
+                0 => model.model = bytes(b"not-configured"),
+                1 => model.window = 8193,
+                2 => model.output = 1025,
+                3 => model.window = 0,
+                4 => model.output = 0,
+                _ => unreachable!("five entrance refusals"),
+            }
+            if child {
+                requested.models = Box::new([model]);
+            } else {
+                requested.llm = model;
+            }
+            let mut harness = Harness::new();
+            let emitted = harness.step(Event::Start {
+                messages: Box::default(),
+                reply_to: ReplyTo::new(Token::new(7)),
+                host_run: Token::new(7),
+                activation: 1,
+                window: crate::Window { turns: u32::MAX, bytes: u64::MAX },
+                charter: requested,
+                workspace: None,
+                grants: Box::new([]),
+                transcript: None,
+                answered: Box::new([]),
+            });
+            let [Request::Answer { answer, .. }] = emitted.as_ref() else {
+                panic!("one admission refusal: {emitted:?}")
+            };
+            assert_eq!(answer, &run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Llm)));
+            assert!(harness.turns.is_empty());
+        }
+    }
 }

@@ -159,8 +159,10 @@ pub struct Llm {
     pub endpoint: Endpoint,
     /// The provider's name for the model.
     pub model: Box<[u8]>,
-    /// The most tokens each answer may take.
-    pub max_tokens: u32,
+    /// Usable input tokens for this conversation.
+    pub window: u32,
+    /// Output tokens reserved for one completion, thinking included.
+    pub output: u32,
 }
 
 /// A provider endpoint the agent is configured with: which provider, where,
@@ -186,11 +188,11 @@ pub(crate) fn check(charter: &Charter, workspace: Option<&crate::Workspace>, lim
     if !budget.is_workable() || !budget.within(&limits.budget) || *waiting > limits.waiting {
         return Err(Invalid::Budget);
     }
-    if !fits(llm, limits) || count(models.len()) > limits.models || repeated_model(models) {
+    if !valid_llm(llm) || count(models.len()) > limits.models || repeated_model(models) {
         return Err(Invalid::Llm);
     }
     for model in models {
-        if !fits(model, limits) {
+        if !valid_llm(model) {
             return Err(Invalid::Llm);
         }
     }
@@ -266,7 +268,7 @@ pub(crate) fn cost(charter: &Charter) -> Option<u64> {
         cost = cost.checked_add(len(&conventions.guide)?)?.checked_add(len(&conventions.checks)?)?;
     }
     let llm = u64::try_from(size_of::<Llm>()).ok()?;
-    for Llm { account: _, endpoint: _, model, max_tokens: _, dialect: _, prices: _ } in &charter.models {
+    for Llm { account: _, endpoint: _, model, window: _, output: _, dialect: _, prices: _ } in &charter.models {
         cost = cost.checked_add(llm)?.checked_add(len(model)?)?;
     }
     let host_tool = u64::try_from(size_of::<HostTool>()).ok()?;
@@ -283,12 +285,12 @@ pub(crate) fn cost(charter: &Charter) -> Option<u64> {
     cost.checked_add(outcome::cost(&charter.outcome)?)
 }
 
-/// Whether an LLM asks for an answer that fits the limits.
-fn fits(llm: &Llm, limits: &Limits) -> bool {
+/// Whether an LLM declares positive quantities and a positive price unit.
+fn valid_llm(llm: &Llm) -> bool {
     if llm.prices.unit == 0 {
         return false;
     }
-    llm.max_tokens > 0 && llm.max_tokens <= limits.max_tokens
+    llm.window > 0 && llm.output > 0
 }
 
 fn repeated_model(models: &[Llm]) -> bool {

@@ -69,7 +69,7 @@ pub fn derive(profile: &Profile, configuration: &Configuration) -> Result<servic
         close_timeout: policy.close,
         retry: Duration::from_millis(10),
     };
-    let mut domain = derive_domain(profile, configuration.environment_bytes)?;
+    let mut domain = derive_domain(profile, configuration)?;
     domain.session.completion_bytes = completion;
     // Before skein's derivation removes its sent-text cap, rendering takes the
     // smaller cap and marks oversized outcomes rather than refusing the call.
@@ -198,7 +198,7 @@ fn max_handshake(configuration: &Configuration) -> Duration {
     longest.max(Duration::from_millis(1))
 }
 
-fn derive_domain(profile: &Profile, environment_bytes: u32) -> Result<domain::Limits, ProfileError> {
+fn derive_domain(profile: &Profile, configuration: &Configuration) -> Result<domain::Limits, ProfileError> {
     let declared = profile.declared;
     let policy = profile.policy;
     let tools = tools::derive(&tools::Derivation {
@@ -211,7 +211,7 @@ fn derive_domain(profile: &Profile, environment_bytes: u32) -> Result<domain::Li
         search_hits: declared.search_hits,
         search_bytes: declared.search_bytes,
         list_entries: declared.list_entries,
-        environment_bytes,
+        environment_bytes: configuration.environment_bytes,
         tool_deadline: policy.tool_deadline,
         shell_timeout: policy.shell_timeout,
     })
@@ -243,9 +243,17 @@ fn derive_domain(profile: &Profile, environment_bytes: u32) -> Result<domain::Li
         tools,
     })
     .ok_or(ProfileError::Domain)?;
+    let mut configured_model_bytes = 0_u64;
+    for endpoint in &configuration.endpoints {
+        for model in &endpoint.models {
+            let owned = domain::ConfiguredModel::worst_case(model.name.len()).ok_or(ProfileError::Domain)?;
+            configured_model_bytes = configured_model_bytes.checked_add(owned).ok_or(ProfileError::Domain)?;
+        }
+    }
     Ok(domain::Limits {
         accounts: ACCOUNTS,
         endpoints: ENDPOINTS,
+        configured_model_bytes,
         decoded_call_bytes: 4096,
         skew: Duration::ZERO,
         run,

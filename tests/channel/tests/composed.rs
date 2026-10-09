@@ -45,8 +45,7 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
     assert!(wire.observations().contains(&Observation::HostSent(Token::new(2))));
     host_world.sent();
     let decoded = wire.take_agent_start().expect("translated Start reached agent side");
-    let mut domain =
-        agent::Domain::new(&limits, agent::Config { endpoints: Box::new([agent::run::charter::Endpoint(0)]) }, 7);
+    let mut domain = agent::Domain::new(&limits, configuration(), 7);
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
     let mut out = Queue::with_capacity(agent::max_out(&limits));
     agent::step(
@@ -170,7 +169,7 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
 }
 
 fn composed_charter() -> Box<[u8]> {
-    let smallest = include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin");
+    let smallest = include_bytes!("../../../crates/smith-charter/golden/v2/record_charter_smallest.bin");
     let source =
         smith_charter::Charter::decode(&smith_charter::CEILINGS, &mut Reader::new(smallest)).expect("golden charter");
     let mut parts = source.into_parts();
@@ -197,7 +196,8 @@ fn composed_charter() -> Box<[u8]> {
     .expect("outcome contract");
     let mut llm = parts.main.into_parts();
     llm.model = Box::from(*b"fake");
-    llm.max_tokens = 1024;
+    llm.window = 8192;
+    llm.output = 1024;
     llm.prices = smith_charter::Prices::new(
         &smith_charter::CEILINGS,
         smith_charter::PricesParts { input: 0, cached: 0, output: 0, unit: 1 },
@@ -243,8 +243,7 @@ fn carried_start_messages_cross_the_wire_in_order_and_an_overfull_start_is_refus
         assert_eq!(decoded.messages[1].name, Token::new(98));
         let mut limits = smith_agent_world::LIMITS;
         limits.run.messages = 2;
-        let mut domain =
-            agent::Domain::new(&limits, agent::Config { endpoints: Box::new([agent::run::charter::Endpoint(0)]) }, 7);
+        let mut domain = agent::Domain::new(&limits, configuration(), 7);
         let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
         let mut out = Queue::with_capacity(agent::max_out(&limits));
         agent::step(
@@ -301,5 +300,17 @@ fn carried_start_messages_cross_the_wire_in_order_and_an_overfull_start_is_refus
                 }]
             ));
         }
+    }
+}
+
+fn configuration() -> agent::Config {
+    agent::Config {
+        endpoints: Box::new([agent::run::charter::Endpoint(0)]),
+        models: Box::new([smith_domain::ConfiguredModel {
+            endpoint: smith_domain::run::charter::Endpoint(0),
+            model: Box::from(&b"fake"[..]),
+            window: 8192,
+            output: 4096,
+        }]),
     }
 }

@@ -15,7 +15,7 @@ fn a_completed_world_meets_the_answer_and_end_obligations() {
     let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
     world.settle();
     world.send_start(Box::from(
-        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+        &include_bytes!("../../../crates/smith-charter/golden/v2/record_charter_smallest.bin")[..],
     ));
     world.settle();
     world.agent_admits_and_parks();
@@ -28,7 +28,7 @@ fn a_host_call_terminal_pairs_across_both_halves() {
     let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
     world.settle();
     world.send_start(Box::from(
-        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+        &include_bytes!("../../../crates/smith-charter/golden/v2/record_charter_smallest.bin")[..],
     ));
     world.settle();
     world.agent_admits();

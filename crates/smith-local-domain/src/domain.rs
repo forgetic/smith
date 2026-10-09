@@ -124,7 +124,19 @@ impl Domain {
 
     fn with_placement(config: Config, limits: &Limits, seed: u64, placement: Placement) -> Result<Domain, Invalid> {
         config.validate(limits)?;
-        let agent_config = agent::Config { endpoints: Box::from(limits.endpoints.as_ref()) };
+        let mut models = List::with_capacity(u32::try_from(config.models.len()).expect("validated models count"));
+        for model in &config.models {
+            models
+                .push(agent::ConfiguredModel {
+                    endpoint: model.endpoint,
+                    model: model.model.clone(),
+                    window: model.window,
+                    output: model.output,
+                })
+                .expect("one cell per configured model");
+        }
+        let agent_config =
+            agent::Config { endpoints: Box::from(limits.endpoints.as_ref()), models: models.into_boxed() };
         Ok(Domain {
             config,
             placement,

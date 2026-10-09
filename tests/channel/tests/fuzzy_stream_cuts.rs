@@ -8,7 +8,7 @@ use skein_world::domain::assert_replays;
 use smith_channel::CEILINGS;
 use smith_channel_world::{Observation, World};
 
-const CHARTER: &[u8] = include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin");
+const CHARTER: &[u8] = include_bytes!("../../../crates/smith-charter/golden/v2/record_charter_smallest.bin");
 
 fn run(seed: u64) -> (Vec<String>, (usize, usize, usize)) {
     let mut rng = Rng::new(seed);

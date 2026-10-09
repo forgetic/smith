@@ -623,11 +623,7 @@ impl World {
             settings: *settings,
             now: Time::ZERO,
             rng: Rng::new(settings.seed ^ 0x0b),
-            agent: agent::Domain::new(
-                &settings.limits,
-                agent::Config { endpoints: Box::new([run::charter::Endpoint(0)]) },
-                settings.seed ^ 0x17,
-            ),
+            agent: agent::Domain::new(&settings.limits, configuration(), settings.seed ^ 0x17),
             stage,
             backend,
             parent_deliveries: false,
@@ -1894,8 +1890,10 @@ impl World {
     }
 }
 
-fn charter(settings: &Settings) -> run::Charter {
-    use run::charter::{Endpoint, Grants, Llm, Tools};
+/// The scripted host's complete charter, supplied to root admission by its world.
+#[must_use]
+pub fn charter(settings: &Settings) -> run::Charter {
+    use run::charter::{Grants, Llm, Tools};
 
     use run::outcome::{ChangeSpec, FieldRule, ItemRule, ItemSpec, OutcomeSpec, TextSpec, VerdictRule};
     let change = matches!(settings.job, Job::Coding | Job::Delegating | Job::Wandering | Job::MidChange);
@@ -1916,14 +1914,7 @@ fn charter(settings: &Settings) -> run::Charter {
             }]),
         },
     };
-    let llm = Llm {
-        prices: run::Prices { input: 0, cached: 0, output: 0, unit: 1 },
-        account: 0,
-        endpoint: Endpoint(0),
-        model: b"fake-1".as_slice().into(),
-        max_tokens: 4096,
-        dialect: 1,
-    };
+    let llm = main_model();
     run::Charter {
         instructions: Box::new([]),
         brief: run::Brief {
@@ -2063,6 +2054,34 @@ fn opening_observations(
         ));
     }
     messages_seen
+}
+
+fn configuration() -> agent::Config {
+    agent::Config {
+        endpoints: Box::new([run::charter::Endpoint(0)]),
+        models: [b"fake-1".as_slice(), b"fake-2".as_slice(), b"fake-3".as_slice()]
+            .iter()
+            .map(|name| smith_domain::ConfiguredModel {
+                endpoint: run::charter::Endpoint(0),
+                model: (*name).into(),
+                window: 8192,
+                output: 4096,
+            })
+            .collect(),
+    }
+}
+
+fn main_model() -> run::charter::Llm {
+    use run::charter::{Endpoint, Llm};
+    Llm {
+        prices: run::Prices { input: 0, cached: 0, output: 0, unit: 1 },
+        account: 0,
+        endpoint: Endpoint(0),
+        model: b"fake-1".as_slice().into(),
+        window: 8192,
+        output: 4096,
+        dialect: 1,
+    }
 }
 
 #[cfg(test)]

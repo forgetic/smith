@@ -103,7 +103,7 @@ pub(crate) fn spec(opening: Opening, receiving: Budget) -> Option<(Spec, Offered
         authority,
         delegated: delegated.into_boxed(),
         prompt,
-        max_tokens: llm.max_tokens,
+        output: llm.output,
         budget: Budget { turns, time, ..receiving },
     };
     Some((spec, offered))

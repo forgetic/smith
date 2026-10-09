@@ -21,6 +21,8 @@ pub struct Limits {
     pub accounts: u32,
     /// Maximum endpoint names in the agent configuration.
     pub endpoints: u32,
+    /// Owned configured model cells and names, derived from startup declarations.
+    pub configured_model_bytes: u64,
 
     /// Aggregate decoded application-call bytes admitted from one completion.
     /// The adapter includes these owning call fields in its translated completion
@@ -41,7 +43,7 @@ pub struct Limits {
 /// if it does not fit a `u64` or the limits cannot be honoured: the
 /// child domains' own, or limits under which a session would refuse what the
 /// run asks of it within its own limits whatever the charter (fewer sessions
-/// than the run's conversations, a smaller budget or `max_tokens`, fewer
+/// than the run's conversations, a smaller budget, fewer
 /// repositories). How many bytes an opening holds is the charter's, and for a
 /// sub-agent its brief's, which only its asker's session bounds: a session
 /// refuses one larger than its byte limit at its entrance, which refuses a run
@@ -59,14 +61,20 @@ pub struct Limits {
 #[must_use]
 #[expect(clippy::too_many_lines, reason = "the worst-case sum keeps each owning container and payload visible")]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
-    let Limits { run: run_limits, session: session_limits, accounts: _, endpoints: _, skew: _, decoded_call_bytes: _ } =
-        limits;
+    let Limits {
+        run: run_limits,
+        session: session_limits,
+        accounts: _,
+        endpoints: _,
+        configured_model_bytes: _,
+        skew: _,
+        decoded_call_bytes: _,
+    } = limits;
     let budget = run_limits.budget;
     let ceiling = session_limits.budget;
     let fits = budget.turns <= ceiling.turns && budget.spend <= session_limits.spend && budget.time <= ceiling.time;
     if !fits
         || run_limits.conversations > session_limits.sessions
-        || run_limits.max_tokens > session_limits.max_tokens
         || run_limits.directories > session_limits.tools.repos
         || run_limits.directory_name_bytes > session_limits.tools.path_bytes
         || u64::from(run_limits.answered_bytes) > session_limits.session_bytes
@@ -170,6 +178,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(
             u64::from(limits.endpoints).checked_mul(u64::try_from(size_of::<run::charter::Endpoint>()).ok()?)?,
         )?
+        .checked_add(limits.configured_model_bytes)?
         .checked_add(held)?
         .checked_add(found)?
         .checked_add(flights)?

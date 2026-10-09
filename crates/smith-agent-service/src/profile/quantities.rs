@@ -108,7 +108,9 @@ pub struct Profile {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Model {
     pub name: Box<[u8]>,
+    /// Declared usable input tokens.
     pub window: u32,
+    /// Declared maximum completion tokens, thinking included.
     pub output: u32,
     /// Largest opaque reasoning item, in bytes.
     pub reasoning_item: u32,

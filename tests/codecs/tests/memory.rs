@@ -4,7 +4,7 @@
 use skein_heap::{Counting, Meter};
 use skein_lib::{List, Reader, Writer};
 
-use smith_charter::v1 as charter;
+use smith_charter::v2 as charter;
 use smith_transcript::v2 as transcript;
 
 #[global_allocator]
@@ -79,7 +79,7 @@ fn charter_at_its_largest_instruction_payload_stays_within_the_configured_heap_b
     let limits = charter_limits();
     let smallest = std::fs::read(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../crates/smith-charter/golden/v1/record_charter_smallest.bin"),
+            .join("../../crates/smith-charter/golden/v2/record_charter_smallest.bin"),
     )
     .expect("smallest charter");
     let size = limits.charter_instructions;

@@ -200,7 +200,7 @@ impl Settings {
                 failure_bytes: 512,
                 delegated_result_bytes: 16_384,
                 budget: BUDGET,
-                max_tokens: 4096,
+
                 retries: 3,
                 backoff_base: Duration::from_millis(200),
                 backoff_max: Duration::from_secs(5),
@@ -265,7 +265,7 @@ pub fn spec(prompt: &[u8]) -> agent::Spec {
         authority,
         delegated: Box::new([]),
         prompt: prompt.into(),
-        max_tokens: 1024,
+        output: 1024,
         budget: BUDGET,
     }
 }
@@ -1747,7 +1747,7 @@ impl World {
         let session = Session {
             session: None,
             budget: spec.budget,
-            max_tokens: spec.max_tokens,
+            max_tokens: spec.output,
             yields: Vec::new(),
             turns: 0,
             usage: Usage::ZERO,

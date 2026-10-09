@@ -62,7 +62,6 @@ const LIMITS: Limits = Limits {
     failure_bytes: 512,
     delegated_result_bytes: 16_384,
     budget: BUDGET,
-    max_tokens: 1024,
     retries: 2,
     backoff_base: Duration::from_millis(100),
     backoff_max: Duration::from_secs(1),
@@ -276,7 +275,7 @@ fn spec() -> Spec {
         authority: authority(1),
         delegated: Box::new([FINISH]),
         prompt: bytes(b"fix the bug"),
-        max_tokens: 1024,
+        output: 1024,
         budget: BUDGET,
     }
 }
@@ -1049,9 +1048,9 @@ fn opens_beyond_the_session_slots_are_refused_as_busy() {
 
 #[test]
 fn specs_beyond_the_limits_are_refused_as_invalid() {
-    for limits in [Limits { session_bytes: 16, ..LIMITS }, Limits { max_tokens: 1, ..LIMITS }] {
+    for (limits, spec) in [(Limits { session_bytes: 16, ..LIMITS }, spec()), (LIMITS, Spec { output: 0, ..spec() })] {
         let mut h = Harness::new(limits);
-        let refused = h.step(Event::Open { opener: Token::new(1), opening: opening(spec()) });
+        let refused = h.step(Event::Open { opener: Token::new(1), opening: opening(spec) });
         assert_eq!(refused, Some(ended(End::Invalid, 0)));
         assert_eq!(h.domain.sessions(), 0);
     }
@@ -1414,9 +1413,9 @@ fn each_answer_may_take_no_more_than_the_output_budget_left() {
     let usage = usage_sum(USAGE, usage).expect("bounded fixture usage");
     assert_eq!(end, Some(Request::Ended { opener: Token::new(1), end: spent, turns: 2, usage }));
 
-    // A spec's own max_tokens stays the cap while more is left.
+    // A spec's own output stays the cap while more is left.
     let mut h = Harness::new(LIMITS);
-    let (_, prompt) = h.open_with(1, Spec { max_tokens: 100, ..budget(Budget { output: 1000, ..BUDGET }) });
+    let (_, prompt) = h.open_with(1, Spec { output: 100, ..budget(Budget { output: 1000, ..BUDGET }) });
     assert_eq!(prompt.max_tokens, 100);
 }
 
@@ -2048,4 +2047,11 @@ fn a_workspace_refusal_keeps_its_provider_identity_without_starting_work() {
             }
         }
     );
+}
+
+#[test]
+fn the_openers_output_cap_replaces_the_old_fixed_token_ceiling() {
+    let mut harness = Harness::new(LIMITS);
+    let (_, prompt) = harness.open_with(1, Spec { output: 4097, ..spec() });
+    assert_eq!(prompt.max_tokens, 4097);
 }

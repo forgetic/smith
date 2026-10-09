@@ -130,7 +130,8 @@ fn charter(settings: &Settings, cue: &[u8], rates: &[Rate]) -> run::Charter {
         account: 0,
         endpoint: Endpoint(0),
         model: rate.model.into(),
-        max_tokens: 4096,
+        window: 8192,
+        output: 4096,
         dialect: 1,
     };
     run::Charter {

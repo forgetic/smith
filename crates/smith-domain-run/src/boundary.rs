@@ -867,9 +867,8 @@ pub enum Invalid {
     /// The budget asks for more than the limits allow, or for no turns, input,
     /// output or time.
     Budget,
-    /// The LLM's `max_tokens`, or a sub-agent LLM's, is zero or beyond the
-    /// limits, or there are more sub-agent LLMs than a run may hold, or two of
-    /// one model.
+    /// A model is undeclared, its effective window/output are zero or above its
+    /// declaration, or the charter repeats a model or exceeds its model count.
     Llm,
     /// The main conversation was refused: its opening does not fit the
     /// conversations' limits.

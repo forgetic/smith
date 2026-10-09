@@ -577,7 +577,8 @@ impl Host {
             account: 0,
             endpoint: Endpoint(0),
             model: Box::from(model),
-            max_tokens: script.max_tokens,
+            window: 8192,
+            output: script.max_tokens,
             dialect: 1,
         };
         let workspace = Some(Workspace { directories: repositories.into_boxed_slice() });

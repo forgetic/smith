@@ -8,10 +8,10 @@
 extern crate alloc;
 
 #[rustfmt::skip]
-#[path = "generated/v1.rs"]
-pub mod v1;
+#[path = "generated/v2.rs"]
+pub mod v2;
 
-pub use v1::{
+pub use v2::{
     Budget, BudgetParts, CEILINGS, ChangeRule, ChangeRuleParts, Charter, CharterParts, Contract, ContractParts,
     Conventions, ConventionsParts, Effect, Families, FamiliesParts, Field, FieldParts, FieldRule, FieldRuleParts, Form,
     HostTool, HostToolParts, Item, ItemKind, ItemKindParts, ItemParts, Llm, LlmParts, Prices, PricesParts, RunResult,

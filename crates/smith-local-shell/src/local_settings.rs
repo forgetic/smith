@@ -190,7 +190,8 @@ pub fn policy(
             account: endpoint.account,
             endpoint: run::charter::Endpoint(endpoint.number),
             model: model.name.as_bytes().into(),
-            max_tokens: model.output,
+            window: model.window,
+            output: model.output,
         });
     }
     let mut paths = Vec::with_capacity(settings.directories.len());
@@ -399,7 +400,8 @@ fn llm(source: &run::charter::Llm, endpoints: &channel::Endpoints) -> Result<wir
         wire::LlmParts {
             endpoint: name.into(),
             model: source.model.clone(),
-            max_tokens: source.max_tokens,
+            window: source.window,
+            output: source.output,
             prices: wire::Prices::new(
                 bounds,
                 wire::PricesParts {
@@ -627,7 +629,26 @@ mod tests {
                     profile.declared.memory = Some(u64::MAX);
                     profile
                 },
-                &smith_agent_service::profile::Configuration { environment_bytes: 0, endpoints: Box::new([]) },
+                &smith_agent_service::profile::Configuration {
+                    environment_bytes: 0,
+                    endpoints: Box::new([smith_agent_service::profile::Endpoint {
+                        number: 7,
+                        connect: Duration::from_secs(10),
+                        handshake: Duration::from_secs(10),
+                        models: settings
+                            .models
+                            .iter()
+                            .map(|model| smith_agent_service::profile::Model {
+                                name: model.name.as_bytes().into(),
+                                window: model.window,
+                                output: model.output,
+                                reasoning_item: model.reasoning_item,
+                                head: Duration::from_millis(model.head),
+                                idle: Duration::from_millis(model.idle),
+                            })
+                            .collect(),
+                    }]),
+                },
             )
             .expect("profile derives")
             .domain,
@@ -637,5 +658,7 @@ mod tests {
         assert_eq!(prepared.limits.endpoints.as_ref(), &[run::charter::Endpoint(7)]);
         let encoded = charter(&prepared.config, &endpoints).expect("matching charter");
         assert!(!encoded.is_empty());
+        let decoded = channel::decode_charter(&encoded, &wire::CEILINGS, &endpoints).expect("version two charter");
+        assert_eq!((decoded.llm.window, decoded.llm.output), (8192, 32));
     }
 }
