@@ -126,6 +126,16 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
         kernel.reap(local_service.completions());
         let Now { now, wall } = clock.now();
         local_service.iterate(now, wall);
+        while let Some(diagnostic) = local_service.pop_diagnostic() {
+            match diagnostic {
+                service::Diagnostic::Faulted { fault } => eprintln!("smith: agent failure: {fault:?}"),
+                service::Diagnostic::Gone { end, detail } => {
+                    if !detail.is_empty() {
+                        eprintln!("smith: agent ended ({end:?}): {}", String::from_utf8_lossy(&detail));
+                    }
+                }
+            }
+        }
         if let Some(exit) = local_service.result() {
             let exit = exit.map_err(str::to_owned)?;
             return match exit {

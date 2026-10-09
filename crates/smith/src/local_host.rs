@@ -178,6 +178,11 @@ impl Local {
         Ok(local)
     }
 
+    /// Consume one operator-only hosted-agent diagnostic without changing its transcript.
+    pub fn pop_diagnostic(&mut self) -> Option<service::Diagnostic> {
+        self.service.pop_diagnostic()
+    }
+
     /// Content-free service facts available to the caller's independent referee.
     pub fn pop_fact(&mut self) -> Option<domain::Fact> {
         self.service.pop_fact()

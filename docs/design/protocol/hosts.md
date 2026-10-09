@@ -109,6 +109,11 @@ what its host's protocol layer would do:
   with the same line and name rather than treated as an agent failure.
 - **The run's words are shown** as its turns arrive: the LLM's text, each
   tool it calls by name, and how each ended.
+- **Hosted-agent failures** are reported separately on the operator's error
+  output: the typed process/channel failure, followed by the bounded standard-error
+  tail when the tree settles. These observations never enter person messages,
+  saved turns or LLM prompts. The shell drains the bounded diagnostic queue
+  between service passes; a full queue pauses host routing without dropping detail.
 - **While the run waits,** a prompt says so.
 - **Interrupting:**
   - the first interrupt is the run's cancel;

@@ -65,6 +65,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(Queue::<host::Request>::worst_case(limits.queue)?.checked_mul(2)?)?
         .checked_add(Queue::<protocol::TerminalEvent>::worst_case(limits.queue)?)?
         .checked_add(Queue::<Box<[u8]>>::worst_case(limits.queue)?)?
+        .checked_add(Queue::<Diagnostic>::worst_case(limits.queue)?)?
+        .checked_add(u64::from(limits.queue).checked_mul(u64::from(limits.host.detail_bytes))?)?
         .checked_add(Map::<u32, Box<[u8]>>::worst_case(limits.local.agent.accounts)?)?
         .checked_add(u64::from(limits.local.agent.accounts).checked_mul(limits.host.answer_bytes)?)?
         .checked_add(
@@ -80,6 +82,15 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
 #[must_use]
 pub fn in_process_worst_case(limits: &Limits, effects: &agent_service::Limits) -> Option<u64> {
     worst_case(limits)?.checked_add(agent_service::effects_worst_case(effects)?)
+}
+
+/// One bounded host failure observation for the operator, never the agent or its transcript.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Diagnostic {
+    /// The host reports a typed process or channel failure before its answer.
+    Faulted { fault: host::Fault },
+    /// The host reports process settlement and its bounded standard-error tail.
+    Gone { end: host::End, detail: Box<[u8]> },
 }
 
 #[derive(Debug)]
@@ -107,6 +118,7 @@ pub struct Service {
     terminal: protocol::Terminal,
     terminal_events: Queue<protocol::TerminalEvent>,
     output: Queue<Box<[u8]>>,
+    diagnostics: Queue<Diagnostic>,
     local_events: Queue<local::Event>,
     local_requests: Queue<local::Request>,
     host_events: Queue<host::Event>,
@@ -122,6 +134,7 @@ pub struct Service {
     host_agent: Option<Token>,
     sequence: u32,
     failed: bool,
+    diagnostic_failure: bool,
 }
 
 /// Ordered lower values paired with the host kit's opaque Start names.
@@ -219,6 +232,7 @@ impl Service {
             terminal,
             terminal_events: Queue::with_capacity(queue),
             output: Queue::with_capacity(queue),
+            diagnostics: Queue::with_capacity(queue),
             local_events: Queue::with_capacity(queue),
             local_requests: Queue::with_capacity(queue),
             host_events: Queue::with_capacity(queue),
@@ -234,6 +248,7 @@ impl Service {
             host_agent: None,
             sequence: 0,
             failed: false,
+            diagnostic_failure: false,
         })
     }
 
@@ -255,6 +270,11 @@ impl Service {
     /// Report standard-input closure to local policy.
     pub fn closed(&mut self) {
         self.terminal.closed(&mut self.terminal_events);
+    }
+
+    /// Consume one operator-only observation; the shell drains these between service passes.
+    pub fn pop_diagnostic(&mut self) -> Option<Diagnostic> {
+        self.diagnostics.pop()
     }
 
     /// Text ready for the terminal writer.
@@ -646,7 +666,10 @@ impl Service {
 
     fn route_host(&mut self, request: host::Request) {
         match request {
-            host::Request::Started { agent, .. } => self.host_agent = Some(agent),
+            host::Request::Started { agent, .. } => {
+                self.host_agent = Some(agent);
+                self.diagnostic_failure = false;
+            }
             host::Request::Admitted { .. } => {
                 let run = self.host_agent.expect("Started precedes Admitted");
                 self.local_events.push(local::Event::External(local::ExternalEvent::Admitted { run }));
@@ -693,15 +716,23 @@ impl Service {
             host::Request::Bounced { bounce: host::Bounce::Ending, name, .. } => {
                 self.local_events.push(local::Event::External(local::ExternalEvent::MessageBounced { name }));
             }
-            host::Request::Faulted { .. }
-            | host::Request::Bounced {
+            host::Request::Faulted { fault, .. } => {
+                self.diagnostics.push(Diagnostic::Faulted { fault });
+                self.diagnostic_failure = true;
+                self.failed = true;
+                self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
+            }
+            host::Request::Bounced {
                 bounce: host::Bounce::Full | host::Bounce::TooLarge | host::Bounce::ReusedName,
                 ..
             } => {
                 self.failed = true;
                 self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
             }
-            host::Request::Gone { .. } => {
+            host::Request::Gone { end, detail, .. } => {
+                if self.diagnostic_failure {
+                    self.diagnostics.push(Diagnostic::Gone { end, detail });
+                }
                 self.local_events.push(local::Event::External(local::ExternalEvent::Gone));
                 self.host_agent = None;
             }
@@ -876,7 +907,11 @@ fn host_pass(service: &mut Service, now: Time, wall: Wall) {
         host::fire(service.host.as_mut().expect("spawned mode owns watchdog"), &host_env, &mut service.host_requests);
     }
     for _ in 0..service.host_requests.capacity() {
-        if service.local_events.room() == 0 || service.lower.room() == 0 || service.host_events.room() == 0 {
+        if service.local_events.room() == 0
+            || service.lower.room() == 0
+            || service.host_events.room() == 0
+            || service.diagnostics.room() == 0
+        {
             break;
         }
         let Some(request) = service.host_requests.pop() else { break };
@@ -920,5 +955,45 @@ fn to_agent_io(event: agent::Event) -> local::AgentIo {
         | agent::Event::Grant { .. }
         | agent::Event::HostReturned { .. }
         | agent::Event::Delivered { .. } => unreachable!("effects emit only typed IO terminals"),
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn successful_process_tail_is_not_reported_as_a_failure() {
+        let mut service = Service::new(crate::tests::config(), 7).expect("bounded service");
+        service.route_host(host::Request::Gone {
+            client: Token::new(1),
+            end: host::End::Stopped,
+            detail: Box::from(&b"agent startup diagnostic"[..]),
+        });
+        assert_eq!(service.pop_diagnostic(), None);
+    }
+
+    #[test]
+    fn host_failure_detail_is_operator_only_and_ordered() {
+        let mut service = Service::new(crate::tests::config(), 7).expect("bounded service");
+        service.route_host(host::Request::Faulted { client: Token::new(1), fault: host::Fault::Exited });
+        service.route_host(host::Request::Gone {
+            client: Token::new(1),
+            end: host::End::Stopped,
+            detail: Box::from(&b"child panic tail"[..]),
+        });
+        assert_eq!(service.pop_diagnostic(), Some(Diagnostic::Faulted { fault: host::Fault::Exited }));
+        assert_eq!(
+            service.pop_diagnostic(),
+            Some(Diagnostic::Gone { end: host::End::Stopped, detail: Box::from(&b"child panic tail"[..]) })
+        );
+        assert_eq!(service.pop_diagnostic(), None);
+        assert!(service.output().is_empty(), "operator details are not shown as conversation text");
+        let Some(local::Event::External(local::ExternalEvent::Failed)) = service.local_events.pop() else {
+            panic!("typed failure only reaches local policy");
+        };
+        let Some(local::Event::External(local::ExternalEvent::Gone)) = service.local_events.pop() else {
+            panic!("typed settlement only reaches local policy");
+        };
     }
 }
