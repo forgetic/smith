@@ -177,6 +177,20 @@ fn the_shared_agent_pass_answers_the_host_and_writes_its_trace() {
             && records.lines().any(|line| line.contains("\"type\":\"completion\"")),
         "settled agent drains the accepted trace before returning: {records}"
     );
+    let terminal_facts = records
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|record| {
+            record.get("type").and_then(serde_json::Value::as_str) == Some("fact")
+                && record.get("fact").and_then(serde_json::Value::as_str).is_some_and(|fact| {
+                    fact.contains("Run { fact: Answered {") && fact.contains("answer: Failed(Budget(Turns))")
+                })
+        })
+        .count();
+    assert_eq!(
+        terminal_facts, 1,
+        "the actual budget failure terminal is captured exactly once after normal channel answer"
+    );
     assert!(!records.contains("acctoken"), "trace excludes credential values");
     assert!(!records.contains("616363746f6b656e"), "trace excludes hex credential values");
     std::fs::remove_file(path).expect("remove trace fixture");

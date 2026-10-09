@@ -293,6 +293,12 @@ impl Domain {
         self.session.is_ready() || self.ready.is_ready()
     }
 
+    /// Whether retained content-free observations still await their parent's drain.
+    #[must_use]
+    pub fn has_facts(&self) -> bool {
+        !self.facts.is_empty()
+    }
+
     /// The oldest fact not drained yet, the run's or the sessions' (which the
     /// tools' are among).
     pub fn pop_fact(&mut self) -> Option<Fact> {

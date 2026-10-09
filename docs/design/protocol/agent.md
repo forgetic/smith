@@ -128,6 +128,13 @@ machines. The local host writes its agent's from its own settings
   gives the accepted writer queue up to 50 milliseconds to drain. A stalled
   writer is left detached, its pending records counted as dropped; no thread
   join or filesystem write can extend that shutdown grace.
+  Final domain facts remain eligible for local capture after the channel's
+  terminal answer or closure; they never send frames after that answer.
+  Operator loss diagnostics separately count domain observations, projected
+  channel facts, local fact/prompt queues and the file writer. Channel loss
+  alone does not imply the local trace lost the corresponding record.
+  The file queue retains at most 32 exact-sized lines of 400,000 bytes each;
+  one active writer line and bounded formatting scratch are reserved at startup.
 
 ## 6. The process
 

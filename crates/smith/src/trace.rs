@@ -21,8 +21,20 @@ const CALL_BYTES: usize = 16_384;
 const TEXT_BYTES: usize = 65_536;
 const RECORD_BYTES: usize = 400_000;
 const SHUTDOWN_GRACE: Duration = Duration::from_millis(50);
-/// Reserved bytes for the writer's bounded line queue and one formatted line.
-pub const MEMORY_RESERVE: u64 = (RECORDS as u64 + 2) * RECORD_BYTES as u64;
+// Hex payloads, JSON-owned copies and serialization growth fit this scratch
+// bound under CALL_BYTES/TEXT_BYTES, including a maximally escaped completion.
+const FORMAT_BYTES: u64 = 2_097_152;
+/// Reserved record storage: bounded queue, one writer line and formatting scratch.
+pub const MEMORY_RESERVE: u64 = match (RECORDS as u64).checked_add(1) {
+    Some(records) => match records.checked_mul(RECORD_BYTES as u64) {
+        Some(bytes) => match bytes.checked_add(FORMAT_BYTES) {
+            Some(reserve) => reserve,
+            None => panic!("trace formatting reserve fits"),
+        },
+        None => panic!("trace record reserve fits"),
+    },
+    None => panic!("trace record count fits"),
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Capture {
@@ -37,7 +49,7 @@ pub struct TraceConfig {
 }
 
 pub struct Trace {
-    sender: Option<SyncSender<String>>,
+    sender: Option<SyncSender<Box<str>>>,
     drained: Option<Receiver<()>>,
     capture: Capture,
     dropped: u64,
@@ -52,7 +64,7 @@ impl Trace {
             .create(true)
             .open(&config.path)
             .map_err(|error| format!("trace file {}: {error}", config.path.display()))?;
-        let (sender, receiver) = sync_channel::<String>(RECORDS);
+        let (sender, receiver) = sync_channel::<Box<str>>(RECORDS);
         let (writer_done, drained) = sync_channel(1);
         let pending = Arc::new(AtomicU64::new(0));
         let write_failures = Arc::new(AtomicU64::new(0));
@@ -85,7 +97,8 @@ impl Trace {
             return;
         };
         self.pending.fetch_add(1, Ordering::Relaxed);
-        match sender.try_send(record) {
+        // Shrink before retention: serialized String capacity may exceed its length.
+        match sender.try_send(record.into_boxed_str()) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
                 self.pending.fetch_sub(1, Ordering::Relaxed);
@@ -99,6 +112,10 @@ impl Trace {
     }
 
     pub fn prompt(&mut self, owner: skein_lib::Token, prompt: &[u8], at_ns: u64) {
+        if prompt.len() > TEXT_BYTES {
+            self.dropped = self.dropped.saturating_add(1);
+            return;
+        }
         self.offer(
             json!({ "type": "prompt", "at_ns": at_ns, "owner": owner.raw(), "encoding": "hex", "bytes": hex(prompt) })
                 .to_string(),
@@ -176,7 +193,7 @@ impl Trace {
 
 fn write_records(
     mut file: File,
-    receiver: std::sync::mpsc::Receiver<String>,
+    receiver: std::sync::mpsc::Receiver<Box<str>>,
     pending: &AtomicU64,
     write_failures: &AtomicU64,
 ) {
@@ -225,7 +242,7 @@ mod tests {
     use super::*;
     use skein_lib::Token;
 
-    fn trace(capture: Capture) -> (Trace, std::sync::mpsc::Receiver<String>) {
+    fn trace(capture: Capture) -> (Trace, std::sync::mpsc::Receiver<Box<str>>) {
         let (sender, receiver) = sync_channel(2);
         (
             Trace {
@@ -302,6 +319,57 @@ mod tests {
         assert_eq!(records.lines().count(), RECORDS);
         assert!(records.lines().all(|line| line.contains("66696e697368")));
         std::fs::remove_file(path).expect("remove trace fixture");
+    }
+
+    #[test]
+    fn a_burst_to_an_actual_paused_writer_is_bounded_and_counts_only_overflow() {
+        let path = std::env::temp_dir().join(format!("smith-trace-burst-{}.jsonl", std::process::id()));
+        let file = File::create(&path).expect("trace fixture");
+        let (sender, receiver) = sync_channel(RECORDS);
+        let (writer_done, drained) = sync_channel(1);
+        let (release, paused) = sync_channel(1);
+        let pending = Arc::new(AtomicU64::new(0));
+        let write_failures = Arc::new(AtomicU64::new(0));
+        let writer_pending = Arc::clone(&pending);
+        let writer_failures = Arc::clone(&write_failures);
+        let writer = thread::spawn(move || {
+            paused.recv().expect("release actual writer after burst");
+            write_records(file, receiver, &writer_pending, &writer_failures);
+            let _ = writer_done.send(());
+        });
+        let mut trace = Trace {
+            sender: Some(sender),
+            drained: Some(drained),
+            capture: Capture::Everything,
+            dropped: 0,
+            pending,
+            write_failures,
+        };
+        for index in 0..RECORDS * 2 {
+            trace.offer(format!("{{\"burst\":{index}}}"));
+        }
+        assert_eq!(trace.pending.load(Ordering::Relaxed), RECORDS as u64);
+        assert_eq!(trace.dropped, RECORDS as u64, "only records beyond bounded capacity are lost");
+        release.send(()).expect("allow bounded drain");
+        assert_eq!(trace.finish(), RECORDS as u64);
+        writer.join().expect("fixture writer settles");
+        let records = std::fs::read_to_string(&path).expect("burst file");
+        assert_eq!(records.lines().count(), RECORDS);
+        assert_eq!(records.lines().last(), Some(format!("{{\"burst\":{}}}", RECORDS - 1).as_str()));
+        std::fs::remove_file(path).expect("remove burst fixture");
+    }
+
+    #[test]
+    fn maximum_escaped_completion_fits_exact_record_storage_and_prompt_cap() {
+        let (mut trace, receiver) = trace(Capture::Everything);
+        trace.content(domain::Content::Text { owner: Token::new(1), text: vec![1; TEXT_BYTES].into() }, 5);
+        let record = receiver.try_recv().expect("maximally escaped completion");
+        assert!(record.len() <= RECORD_BYTES);
+        let length = record.len();
+        assert_eq!(record.into_string().capacity(), length, "boxed record retains only serialized bytes");
+        trace.prompt(Token::new(1), &vec![0; TEXT_BYTES + 1], 6);
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(trace.dropped, 1);
     }
 
     #[test]

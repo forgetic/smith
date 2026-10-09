@@ -90,14 +90,23 @@ impl Agent {
 
     fn finish(&mut self, answered: bool) {
         let trace_dropped = self.trace.as_mut().map_or(0, trace::Trace::finish);
-        let lost = self
-            .service
-            .lost_channel_facts()
-            .saturating_add(self.service.lost_trace_facts())
-            .saturating_add(self.service.lost_trace_prompts())
+        let domain_dropped = self.service.lost_domain_observations();
+        let channel_dropped = self.service.lost_channel_facts();
+        let facts_dropped = self.service.lost_trace_facts();
+        let prompts_dropped = self.service.lost_trace_prompts();
+        let lost = domain_dropped
+            .saturating_add(channel_dropped)
+            .saturating_add(facts_dropped)
+            .saturating_add(prompts_dropped)
             .saturating_add(trace_dropped);
         if lost > 0 {
-            diagnostic(self.errors.as_mut(), &format!("{lost} observations were dropped"));
+            diagnostic(
+                self.errors.as_mut(),
+                &format!(
+                    "{lost} observations were dropped (domain: {domain_dropped}, channel: {channel_dropped}, \
+                     trace facts: {facts_dropped}, trace prompts: {prompts_dropped}, writer: {trace_dropped})"
+                ),
+            );
         }
         self.result = Some(if answered {
             Ok(())

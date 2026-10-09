@@ -498,6 +498,12 @@ impl Service {
         self.trace_prompt.take()
     }
 
+    /// Domain facts and content observations dropped before local capture.
+    #[must_use]
+    pub fn lost_domain_observations(&self) -> u64 {
+        self.domain.as_ref().expect("framed agent owns its domain").facts_lost()
+    }
+
     /// Number of local trace facts lost to its bounded service queue.
     #[must_use]
     pub const fn lost_trace_facts(&self) -> u64 {
@@ -1339,11 +1345,7 @@ fn domain_down(service: &mut Service) {
                 Some(fact) => fact,
                 None => break,
             };
-            if service.trace_facts.room() > 0 {
-                service.trace_facts.push(fact);
-            } else {
-                service.lost_trace_facts = service.lost_trace_facts.saturating_add(1);
-            }
+            trace_fact(service, fact);
             let token = service.next_send();
             if service
                 .channel
@@ -1361,6 +1363,24 @@ fn domain_down(service: &mut Service) {
                 service.mark_failed(Failure::Send);
             }
         }
+    } else if service.domain.is_some() {
+        // The terminal request may have closed channel projection above. Its
+        // domain facts still belong to local capture; no frame follows Answer.
+        for _ in 0..service.limits.queue {
+            let fact = match service.domain.as_mut().expect("framed agent owns its domain").pop_fact() {
+                Some(fact) => fact,
+                None => break,
+            };
+            trace_fact(service, fact);
+        }
+    }
+}
+
+fn trace_fact(service: &mut Service, fact: domain::Fact) {
+    if service.trace_facts.room() > 0 {
+        service.trace_facts.push(fact);
+    } else {
+        service.lost_trace_facts = service.lost_trace_facts.saturating_add(1);
     }
 }
 
@@ -1822,6 +1842,7 @@ pub fn work_pending(service: &Service, now: Time) -> bool {
     };
     due || service.io.is_ready()
         || service.llm.has_work()
+        || domain_facts_pending(service)
         || match &service.domain {
             Some(domain) => domain.is_ready(),
             None => false,
@@ -1854,6 +1875,7 @@ pub fn work_pending(service: &Service, now: Time) -> bool {
 #[must_use]
 pub fn done(service: &Service) -> Option<bool> {
     if service.channel_ended
+        && !domain_facts_pending(service)
         && service.channel_events.is_empty()
         && service.channel_below.is_empty()
         && service.llm_events.is_empty()
@@ -1880,6 +1902,13 @@ pub fn done(service: &Service) -> Option<bool> {
         Some(service.answer_sent && !service.failed)
     } else {
         None
+    }
+}
+
+fn domain_facts_pending(service: &Service) -> bool {
+    match service.domain.as_ref() {
+        Some(domain) => domain.has_facts(),
+        None => false,
     }
 }
 
@@ -2203,6 +2232,298 @@ mod tests {
         assert_eq!(done(&service), None);
         service.operations.remove(&Token::new(77));
         assert_eq!(done(&service), Some(true));
+    }
+
+    fn terminal_charter() -> run::Charter {
+        run::Charter {
+            resume: false,
+            waiting: Duration::ZERO,
+            instructions: Box::new([]),
+            brief: run::Brief { sections: Box::new([]) },
+            conventions: None,
+            grants: run::charter::Grants {
+                wait: false,
+                deliver: None,
+                tools: run::charter::Tools { inspect: true, modify: false, shell: false },
+                agents: false,
+                host_tools: Box::new([]),
+            },
+            outcome: run::outcome::OutcomeSpec {
+                change: None,
+                verdicts: Box::new([]),
+                report: Some(run::outcome::TextSpec { max: 1024, fields: Box::new([]) }),
+                failure: None,
+            },
+            budget: smith_agent_world::BUDGET,
+            llm: run::charter::Llm {
+                prices: run::Prices { input: 0, cached: 0, output: 0, unit: 1 },
+                account: 0,
+                endpoint: run::charter::Endpoint(1),
+                model: b"fixture".as_slice().into(),
+                max_tokens: 128,
+                dialect: 1,
+            },
+            models: Box::new([]),
+        }
+    }
+
+    fn cancelled_preparation() -> Service {
+        let mut service = service();
+        service.domain = Some(domain::Domain::new(
+            &service.limits.domain,
+            domain::Config { endpoints: Box::new([run::charter::Endpoint(1)]) },
+            1,
+        ));
+        let charter = terminal_charter();
+        let domain = service.domain.as_mut().expect("fixture domain");
+        let mut requests = Queue::with_capacity(domain::max_out(&service.limits.domain));
+        domain::step(
+            domain,
+            &service.domain_env,
+            domain::Event::Start {
+                reply_to: ReplyTo::new(Token::new(1)),
+                host_run: Token::new(1),
+                activation: 1,
+                window: domain::Window { turns: u32::MAX, bytes: u64::MAX },
+                charter,
+                workspace: Some(run::Workspace {
+                    directories: Box::new([run::Directory {
+                        name: b"workspace".as_slice().into(),
+                        root: Token::new(900),
+                        writable: false,
+                        git: false,
+                        conflicts: Box::new([]),
+                    }]),
+                }),
+                transcript: None,
+                answered: Box::new([]),
+                grants: Box::new([]),
+            },
+            &mut requests,
+        );
+        let run = match requests.pop().expect("actual admitted run") {
+            domain::Request::Admitted { run, .. } => run,
+            other => panic!("expected admission: {other:?}"),
+        };
+        let read = match requests.pop().expect("actual pending guide read") {
+            domain::Request::Read { owner, .. } => owner,
+            other => panic!("expected preparation: {other:?}"),
+        };
+        assert!(requests.is_empty());
+        domain::step(domain, &service.domain_env, domain::Event::Cancel { run }, &mut requests);
+        domain::step(domain, &service.domain_env, domain::Event::Cancel { run }, &mut requests);
+        assert!(requests.is_empty(), "preparation waits for its actual read terminal after cancellation");
+        domain::step(
+            domain,
+            &service.domain_env,
+            domain::Event::Read { owner: read, read: run::Read::Missing },
+            &mut requests,
+        );
+        let mut answers = 0_u32;
+        for _ in 0..16_u32 {
+            while let Some(request) = requests.pop() {
+                match request {
+                    domain::Request::Answer { to, answer } => {
+                        assert_eq!(to.into_token(), Token::new(1));
+                        match answer {
+                            run::Answer::Failed { failure: run::Failure::Cancelled, .. } => {}
+                            other => panic!("expected actual cancellation answer: {other:?}"),
+                        }
+                        answers = answers.checked_add(1).expect("bounded fixture answers");
+                    }
+                    other => panic!("unexpected cancellation request: {other:?}"),
+                }
+            }
+            domain.reclaim();
+            domain::resume(domain, &service.domain_env, &mut requests);
+        }
+        assert_eq!(answers, 1, "duplicate cancel retains one Start answer after the actual read settles");
+        service.admitted = Some(run);
+        service
+    }
+
+    fn assert_local_terminal_capture(mut service: Service) {
+        let events = service.channel_events.len();
+        let below = service.channel_below.len();
+        domain_down(&mut service);
+        let mut answered = 0_u32;
+        while let Some(fact) = service.pop_trace_fact() {
+            if let domain::Fact::Run {
+                fact: run::facts::Fact::Answered { answer: run::facts::Answered::Failed(run::Failure::Cancelled), .. },
+            } = fact
+            {
+                answered = answered.checked_add(1).expect("bounded captured facts");
+            }
+        }
+        assert_eq!(answered, 1, "actual terminal failure reaches local trace");
+        assert_eq!(service.channel_events.len(), events, "no terminal fact becomes a channel event");
+        assert_eq!(service.channel_below.len(), below, "no frame follows Answer or channel closure");
+        assert_eq!(service.lost_trace_facts(), 0);
+        assert_eq!(service.lost_domain_observations(), 0);
+        domain_down(&mut service);
+        assert!(service.pop_trace_fact().is_none(), "terminal capture does not repeat");
+    }
+
+    #[test]
+    fn an_answered_cancel_keeps_its_actual_terminal_fact_without_a_later_channel_frame() {
+        let mut service = cancelled_preparation();
+        service.answer_sent = true;
+        assert_local_terminal_capture(service);
+    }
+
+    #[test]
+    fn a_closed_channel_keeps_the_actual_failure_fact_without_sending_again() {
+        let mut service = cancelled_preparation();
+        service.channel_ended = true;
+        assert_local_terminal_capture(service);
+    }
+
+    fn report_completion() -> domain::llm::Completion {
+        domain::llm::Completion {
+            stop: domain::llm::Stop::ToolUse,
+            usage: domain::llm::Usage {
+                input_tokens: 1,
+                output_tokens: 1,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+            },
+            content: Box::new([domain::llm::Said::ToolCall {
+                id: b"finish".as_slice().into(),
+                name: b"finish".as_slice().into(),
+                input: br#"{"form":"report","text":"done"}"#.as_slice().into(),
+                call: domain::llm::Decoded::Served {
+                    ask: run::Ask::Finish {
+                        outcome: run::outcome::Declared::Report(run::outcome::Report {
+                            text: b"done".as_slice().into(),
+                            fields: Box::new([]),
+                        }),
+                    },
+                },
+                replay: None,
+            }]),
+        }
+    }
+
+    #[test]
+    fn a_normal_finish_keeps_one_accepted_terminal_after_channel_answer() {
+        let mut service = service();
+        service.domain = Some(domain::Domain::new(
+            &service.limits.domain,
+            domain::Config { endpoints: Box::new([run::charter::Endpoint(1)]) },
+            1,
+        ));
+        let mut charter = terminal_charter();
+        charter.brief.sections =
+            Box::new([run::Section { title: b"Task".as_slice().into(), text: b"Report done.".as_slice().into() }]);
+        let domain = service.domain.as_mut().expect("fixture domain");
+        let mut requests = Queue::with_capacity(domain::max_out(&service.limits.domain));
+        domain::step(
+            domain,
+            &service.domain_env,
+            domain::Event::Start {
+                reply_to: ReplyTo::new(Token::new(1)),
+                host_run: Token::new(1),
+                activation: 1,
+                window: domain::Window { turns: u32::MAX, bytes: u64::MAX },
+                charter,
+                workspace: None,
+                transcript: None,
+                answered: Box::new([]),
+                grants: Box::new([domain::Grant {
+                    name: domain::GrantName { account: 0, generation: 1 },
+                    valid: Duration::from_secs(600),
+                }]),
+            },
+            &mut requests,
+        );
+        let mut run = None;
+        let mut completions = 0_u32;
+        let mut answers = 0_u32;
+        for _ in 0..16_u32 {
+            while let Some(request) = requests.pop() {
+                match request {
+                    domain::Request::Admitted { run: admitted, .. } => run = Some(admitted),
+                    domain::Request::Complete { owner, .. } => {
+                        completions = completions.checked_add(1).expect("bounded completions");
+                        assert_eq!(completions, 1, "finish stops further provider work");
+                        domain::step(
+                            domain,
+                            &service.domain_env,
+                            domain::Event::Completed { owner, completion: report_completion() },
+                            &mut requests,
+                        );
+                    }
+                    domain::Request::Turn { number, .. } => domain::step(
+                        domain,
+                        &service.domain_env,
+                        domain::Event::Acknowledge { run: run.expect("admitted run"), turn: number },
+                        &mut requests,
+                    ),
+                    domain::Request::Answer { to, answer } => {
+                        assert_eq!(to.into_token(), Token::new(1));
+                        match answer {
+                            run::Answer::Accepted { .. } => {}
+                            other => panic!("expected accepted report: {other:?}"),
+                        }
+                        answers = answers.checked_add(1).expect("bounded answers");
+                    }
+                    other => panic!("unexpected normal finish request: {other:?}"),
+                }
+            }
+            domain.reclaim();
+            domain::resume(domain, &service.domain_env, &mut requests);
+        }
+        assert_eq!((completions, answers), (1, 1));
+        service.admitted = run;
+        service.answer_sent = true;
+        domain_down(&mut service);
+        let mut captured = 0_u32;
+        while let Some(fact) = service.pop_trace_fact() {
+            if let domain::Fact::Run {
+                fact: run::facts::Fact::Answered { answer: run::facts::Answered::Accepted, .. },
+            } = fact
+            {
+                captured = captured.checked_add(1).expect("bounded captured terminals");
+            }
+        }
+        assert_eq!(captured, 1);
+        assert!(service.channel_below.is_empty(), "no observation frame follows the accepted answer");
+        assert_eq!(service.lost_trace_facts(), 0);
+    }
+
+    #[test]
+    fn terminal_capture_counts_overflow_without_waiting_or_reopening_projection() {
+        let mut service = cancelled_preparation();
+        service.answer_sent = true;
+        let sentinel = domain::Fact::Run { fact: run::facts::Fact::Admitted { run: Token::new(900) } };
+        for _ in 0..service.trace_facts.capacity() {
+            service.trace_facts.push(sentinel);
+        }
+        domain_down(&mut service);
+        assert!(service.lost_trace_facts() > 0);
+        assert_eq!(service.trace_facts.len(), service.trace_facts.capacity());
+        assert!(service.channel_below.is_empty());
+    }
+
+    #[test]
+    fn settlement_waits_for_terminal_facts_beyond_one_bounded_capture_pass() {
+        let mut service = cancelled_preparation();
+        service.answer_sent = true;
+        service.channel_ended = true;
+        service.limits.queue = 1;
+        assert_eq!(done(&service), None, "pending terminal facts prevent final shutdown");
+        domain_down(&mut service);
+        assert_eq!(service.trace_facts.len(), 1);
+        assert_eq!(done(&service), None, "one capture pass cannot silently abandon the terminal backlog");
+        assert!(work_pending(&service, Time::ZERO), "the scheduler must continue local draining without kernel IO");
+        for _ in 0..16_u32 {
+            domain_down(&mut service);
+        }
+        assert_eq!(done(&service), Some(true));
+        assert!(!work_pending(&service, Time::ZERO), "a drained settled service parks without a busy loop");
+        assert!(service.trace_facts.len() > 1);
+        assert_eq!(service.lost_trace_facts(), 0);
+        assert!(service.channel_below.is_empty());
     }
 
     #[test]
