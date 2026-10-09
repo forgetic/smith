@@ -78,7 +78,10 @@ A versioned record. Every turn starts with its version.
       host tool's answer;
     - invalid, with the problem found in the call (domain/tools.md,
       section 4);
-    - not run;
+    - not run, with why: outside the tool choice, naming the calls that
+      were allowed (protocol/llm.md, section 5); a completion's calls
+      after its session ended; or a compaction's. A resumed history
+      renders it as it rendered when told, so the prefix stays stable;
     - withdrawn;
   - **an opaque block:** the provider's bytes, tagged with its dialect.
 
