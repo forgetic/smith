@@ -75,6 +75,9 @@ impl Domain {
     /// Whether a live root has deferred work for the owner's next pass.
     #[must_use]
     pub fn is_ready(&self) -> bool {
+        if self.facts_room() < crate::max_facts() {
+            return false;
+        }
         for (_, id) in &self.clients {
             let slot = self.slots.get(*id).expect("client binding names its retained slot");
             match slot.state {
