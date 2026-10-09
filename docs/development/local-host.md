@@ -91,7 +91,7 @@ Each model has this shape:
 {
   "endpoint": "codex",
   "name": "registered-model",
-  "max_tokens": 8192,
+  "max_tokens": 4096,
   "input_price": 10,
   "cached_price": 2,
   "output_price": 30,
