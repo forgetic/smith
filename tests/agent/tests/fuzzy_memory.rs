@@ -793,6 +793,7 @@ fn a_domain_driven_at_random_stays_within_its_worst_case_at_every_entry_point() 
             failure_bytes: 512,
             delegated_result_bytes: 131_072,
             parallel_tools: 3,
+            facts: 37,
             tools: smith_domain::tools::Limits { kits: 8, calls: 3, ..LIMITS.session.tools },
             ..LIMITS.session
         },
