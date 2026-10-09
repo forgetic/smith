@@ -376,17 +376,7 @@ fn build_endpoints(endpoints: Vec<Endpoint>, limits: &llm::ComponentLimits) -> R
             reasoning_effort: endpoint.reasoning_effort.map(|value| value.into_bytes().into()),
             cache_key: endpoint.cache_key.map(|value| value.into_bytes().into()),
             identity,
-            models: endpoint
-                .models
-                .iter()
-                .map(|model| {
-                    Ok(llm::ConfiguredModel {
-                        name: model.name.as_bytes().into(),
-                        oversized_reasoning: reasoning_policy(model.oversized_reasoning.as_deref())?,
-                    })
-                })
-                .collect::<Result<Vec<_>, String>>()?
-                .into_boxed_slice(),
+            models: endpoint_models(&endpoint.models)?,
         });
     }
     Ok(PreparedEndpoints {
@@ -394,6 +384,17 @@ fn build_endpoints(endpoints: Vec<Endpoint>, limits: &llm::ComponentLimits) -> R
         channel: channel::Endpoints::new(channel_endpoints),
         llm: llm_endpoints.into_boxed_slice(),
     })
+}
+
+fn endpoint_models(models: &[ModelDocument]) -> Result<Box<[llm::ConfiguredModel]>, String> {
+    let mut configured = Vec::with_capacity(models.len());
+    for model in models {
+        configured.push(llm::ConfiguredModel {
+            name: model.name.as_bytes().into(),
+            oversized_reasoning: reasoning_policy(model.oversized_reasoning.as_deref())?,
+        });
+    }
+    Ok(configured.into_boxed_slice())
 }
 
 fn build_profile(document: &ProfileDocument) -> Result<service::profile::Profile, String> {

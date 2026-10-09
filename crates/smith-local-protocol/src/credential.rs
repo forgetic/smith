@@ -486,7 +486,13 @@ mod tests {
                 CredentialRequest::Failed { event: local::Event::NoCredential { reason, .. } } if !fresh => {
                     assert_eq!(reason, CredentialFailure::Refresh);
                 }
-                _ => panic!("access-only token produces a terminal without sign-in or HTTP"),
+                CredentialRequest::Visit { .. }
+                | CredentialRequest::Http(_)
+                | CredentialRequest::Save { .. }
+                | CredentialRequest::Ready { .. }
+                | CredentialRequest::Failed { .. } => {
+                    panic!("access-only token produces a terminal without sign-in or HTTP")
+                }
             }
             assert!(out.is_empty());
             assert!(credential.next_deadline().is_none());

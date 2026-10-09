@@ -254,8 +254,7 @@ fn fill(original: Limits, route: Route, full_service: bool) {
                 let call = Decoded::Owned { call: Call::Read { path, skip: 0, lines: None } };
                 let content =
                     Box::new([Block::ToolCall { id: bytes(1), name: bytes(1), input: bytes(1), call, replay: None }]);
-                let completion =
-                    Completion { reasoning_dropped: Box::default(), content, stop: Stop::ToolUse, usage: Usage::ZERO };
+                let completion = received(content, Stop::ToolUse);
                 let Some(Asked::Io { owner: op }) = step(Event::Completed { owner, completion }) else {
                     panic!("the original maximum read has full reserved receiving space");
                 };
@@ -269,8 +268,7 @@ fn fill(original: Limits, route: Route, full_service: bool) {
                 let call = Decoded::Invalid { problem: Problem::Missing { field: bytes(field) } };
                 let content =
                     Box::new([Block::ToolCall { id: bytes(1), name: bytes(1), input: bytes(1), call, replay: None }]);
-                let completion =
-                    Completion { reasoning_dropped: Box::default(), content, stop: Stop::ToolUse, usage: Usage::ZERO };
+                let completion = received(content, Stop::ToolUse);
                 let Some(Asked::Complete { .. }) = step(Event::Completed { owner, completion }) else {
                     panic!("the original maximum problem and exact repeated answer fit");
                 };
@@ -278,8 +276,7 @@ fn fill(original: Limits, route: Route, full_service: bool) {
             Route::Talk => {
                 let message = pressure - spec_cost - (block + 1) - block;
                 let content = Box::new([Block::Text { text: bytes(1), replay: None }]);
-                let completion =
-                    Completion { reasoning_dropped: Box::default(), content, stop: Stop::EndTurn, usage: Usage::ZERO };
+                let completion = received(content, Stop::EndTurn);
                 let Some(Asked::Other) = step(Event::Completed { owner, completion }) else {
                     panic!("the original one-byte answer yields");
                 };
@@ -311,6 +308,10 @@ fn fill(original: Limits, route: Route, full_service: bool) {
         && priced >= turns
         && ended == full_service));
     assert_retained_payload(&meter, &limits, route, full_service, pressure);
+}
+
+fn received(content: Box<[Block]>, stop: Stop) -> Completion {
+    Completion { reasoning_dropped: Box::default(), content, stop, usage: Usage::ZERO }
 }
 
 fn assert_retained_payload(meter: &Meter, limits: &Limits, route: Route, full_service: bool, pressure: u64) {

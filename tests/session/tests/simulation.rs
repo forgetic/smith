@@ -6,6 +6,7 @@ use skein_lib::{Duration, Time};
 use smith_domain_session::llm::Failure;
 use smith_domain_session::{Budget, Dimension, End, Limits, Spec, Yield};
 use smith_domain_tools::{self as tools, Authority, Grants};
+use smith_session_world::recorded;
 use smith_session_world::{BUDGET, Count, Ended, Settings, Span, World, noisy, spec, submit_noisily};
 
 const ITERATIONS: u32 = 100_000;
@@ -446,7 +447,6 @@ fn the_token_budgets_end_a_session_after_the_turn_that_uses_them_up() {
     }
     // The shared fake caches its fresh input; this typed peer explicitly reports
     // ordinary input so the separate Input ceiling is still observed outside.
-    use smith_session_world::recorded;
     let mut world = recorded::World::new(16, 256);
     let mut opening = recorded::opening(None, 100);
     opening.spec.budget.input = 30;

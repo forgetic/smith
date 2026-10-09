@@ -837,7 +837,19 @@ fn dropped_reasoning_has_one_fact_per_item_and_never_enters_history() {
                 assert!(fact.response.is_some());
                 Some(bytes)
             }
-            _ => None,
+            session::FactKind::Opened { .. }
+            | session::FactKind::CompletionStarted { .. }
+            | session::FactKind::CompletionAnswered { .. }
+            | session::FactKind::CompletionFailed { .. }
+            | session::FactKind::CompletionCancelled { .. }
+            | session::FactKind::CompletionRetried { .. }
+            | session::FactKind::Tools { .. }
+            | session::FactKind::DelegateStarted { .. }
+            | session::FactKind::DelegateAnswered { .. }
+            | session::FactKind::DelegateCancelled { .. }
+            | session::FactKind::Yielded { .. }
+            | session::FactKind::Used { .. }
+            | session::FactKind::Ended { .. } => None,
         })
         .collect();
     assert_eq!(observed, sizes.as_ref());
