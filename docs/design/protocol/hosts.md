@@ -48,11 +48,15 @@ The contract is domain/host.md's.
   its order (channel.md, section 5), then hands `smith-host-domain` what it
   carries:
   - numbers, names, effects and deadlines, typed;
-  - the turns' bodies, the result, the host tools' inputs and the delivery's
-    fields, as bytes or as smith's records.
+  - the turns, the result and the delivery's fields, decoded into the
+    vocabulary's typed values, since the domain never parses
+    (domain/host.md, section 3);
+  - a host tool's input, as the bytes the LLM wrote, for the host's own
+    protocol layer to read.
 
-  On the way down, it encodes the domain's start, messages, answers,
-  acknowledgements, grants and cancel.
+  On the way down, it encodes the domain's start (its charter and
+  transcript among it), messages, answers, acknowledgements, grants and
+  cancel.
 - **Deadlines become durations** on the way down, and durations become
   deadlines on the host's clock on the way up.
 - **Grants:** the domain names an account and a generation. The half fills

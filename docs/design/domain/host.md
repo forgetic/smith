@@ -130,14 +130,18 @@ not decode.
   read. The charter and transcripts carry versions of their own. Every
   format is pre-release: one version at a time, and none read but its
   own (protocol/README.md, section 8).
-- **Payloads are smith's vocabulary:** a charter, a workspace, a
-  transcript and turns (`smith-transcript`), calls and their answers,
-  results. A host may keep any of them as bytes, reading only what the
-  channel exposes beside them: a turn's number, size, spend and last
-  message read; a call's name, tool and effect.
-- **A host carries the charter opaque** if it likes: one who prepared it
-  elsewhere (temper's engine) sends it through as bytes, and the host
-  adds only the workspace it prepared.
+- **Payloads are smith's vocabulary, as values:** a charter, a
+  workspace, a transcript and turns, calls and their answers, results.
+  A host's domain holds them as the vocabulary's typed values and never
+  encodes or decodes them, since a domain never parses (skein's
+  `programming-model.md`, section 4). Bytes belong to protocol layers:
+  `smith-host-protocol` encodes a spawned agent's start and decodes what
+  it tells (protocol/hosts.md, section 2), and a host's store encodes the
+  turns it keeps (`smith-transcript`). A host that prepared a charter
+  elsewhere (temper's engine) decodes it in its own protocol layer as it
+  reads it, like any input, and adds the workspace it prepared. Only a
+  host tool's input stays the bytes the LLM wrote, for the host's own
+  protocol layer to read.
 - **Bounded.** Every payload has a limit, sealed by its value
   constructor; a host's limits may be smaller, never larger.
 
@@ -233,8 +237,8 @@ policy.
   its own channel's losses; a host that keeps no transcript acknowledges
   at once.
 - **Only the current window goes back.** Each told turn says whether it
-  opens a window (section 2), so a host that keeps turns as bytes knows
-  where the current window starts without decoding them. Resuming a run,
+  opens a window (section 2), so a host, or its store with the turns
+  encoded, knows where the current window starts from that flag alone. Resuming a run,
   it sends the turns from the last that opens a window. Earlier windows'
   turns it may keep for people to read, and never sends
   (protocol/transcript.md, section 3).
@@ -363,10 +367,10 @@ A child a host embeds, beside or instead of `smith-host-domain`:
   end. A host's root
   translates both kinds with the same functions.
 - **A run is a composed `smith-domain`,** one per run in flight, on the
-  slots its host gives it. Only what the vocabulary carries as bytes is
-  encoded: the charter, decoded at the start, and turns, encoded as they
-  are told, which a host keeps as bytes anyway. The rest crosses as
-  entities.
+  slots its host gives it. Everything crosses as the vocabulary's typed
+  values: the charter and the transcript go down to the run as values,
+  and turns come up as values. The inline agent encodes and decodes
+  nothing (section 3).
 - **Messages as the kit takes them** (section 4): rendered and checked
   with the run's own arithmetic, refused typed at its entrance, followed
   to each fence, and the unread named once.
@@ -443,10 +447,16 @@ A child a host embeds, beside or instead of `smith-host-domain`:
   from the face its process io speaks, and the inline agent speaks the
   parent face's own types, so a root's translations are the same by
   construction.
-- **Bytes where the vocabulary carries bytes.** The charter and turns
-  cross as bytes, so the two kinds stay interchangeable. The cost is one
-  charter decoded per start, and turns encoded that a host keeps as
-  bytes anyway.
+- **Values, never bytes.** The parent face carries smith's vocabulary as
+  typed values for both kinds of agent. So the two stay interchangeable
+  and no domain parses: the spawned kind's bytes are
+  `smith-host-protocol`'s, below `smith-host-domain` (skein's
+  `programming-model.md`, section 4).
+- **smith's own.** `smith-inline-agent` is built in smith, with jig's
+  `jig-inline-agent` as a reference for its shape, not as code to keep in
+  step: the typed face, the workspace routing and the stop ladder (9.2)
+  are smith's design. jig is not changed by this work; whether it later
+  takes smith's is jig's (section 11).
 - **A wall bound, and no progress watchdog** (9.1).
 
 ## 10. The world
@@ -516,9 +526,10 @@ budgets.
 - **`smith-host-domain`** is temper's worker's agent child domain, as
   temper's `worker.md` described it: one process per run, the watchdog,
   cancel then kill.
-- **The inline agent** is jig's `jig-inline-agent`, the first of its
-  kind, moved to smith with a workspace and the drop's settlement. jig
-  repins smith and retires its own on its own schedule.
+- **The inline agent** follows jig's `jig-inline-agent`, the first of its
+  kind, in shape, and is smith's own: typed, with a workspace and the
+  drop's settlement. smith's APIs change freely for it; jig and temper
+  adapt separately, on their own schedule.
 - **The local host** is new.
 
 ## 12. Open questions

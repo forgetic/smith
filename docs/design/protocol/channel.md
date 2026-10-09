@@ -37,12 +37,14 @@ of domain/host.md, section 2.
   - notices about credentials;
   - facts;
   - the answer, its last word, with the last message read.
-- **The host reads what it acts on,** and keeps the rest as bytes. It reads
-  numbers, names, effects, deadlines and a delivery's fields. It keeps as
-  bytes:
-  - the charter and the result;
-  - turns' bodies;
-  - host tools' inputs, and the text of answers and messages.
+- **The host's half decodes what its domain holds.** On the wire the
+  charter, the result and turns' bodies are bytes in their own codecs.
+  The host's half (`smith-host-protocol`) encodes the charter and the
+  transcript into the start, and decodes the result and each turn's body
+  into the vocabulary's typed values for the host's domain, which never
+  parses (domain/host.md, section 3). Host tools' inputs, and the text of
+  answers and messages, stay bytes: the host's own protocol layer reads a
+  tool's input.
 - **Calls carry their names** (domain/run.md, 5.2): the activation, the
   completion and the position. Each is answered once.
 - **Credentials travel as grants.** Their values cross the channel and stop
@@ -186,9 +188,9 @@ with no fence.
 
 **`opens_window`** is true for a turn of kind window and for a
 conversation's first turn, the two turns a transcript can start from
-(transcript.md, section 3), and false for every other. A host that keeps
-turns as bytes reads where the current window starts from it, without
-decoding a body: resuming a run, it sends back only the turns from the
+(transcript.md, section 3), and false for every other. A host, or its
+store with the turns encoded, reads where the current window starts from
+it alone: resuming a run, it sends back only the turns from the
 last one with `opens_window` (domain/host.md, section 6).
 
 **What a call asks:**

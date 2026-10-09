@@ -125,7 +125,7 @@ host would be another.
 |---|---|---|---|
 | a spawned agent | the host spawns `smith-agent`, and the channel runs over its standard input and output | skein's contained processes and smith's host half | the `smith-agent` binary |
 | a connected agent, later | `smith-agent` runs as a daemon; a host connects to it, with one connection per run, over TLS when remote | a connection and smith's host half | the `smith-agent` binary, listening |
-| one process | the consumer owns smith's inline agent as a child, with no channel: the charter and turns cross as bytes, everything else as entities (domain/host.md, 9.4) | its own domain and protocol layer | as the consumer's child, `smith-inline-agent`: smith's domain, with its LLM and machine components in the consumer's protocol layer |
+| one process | the consumer owns smith's inline agent as a child, with no channel: everything crosses as typed values, the charter and turns included, and nothing is encoded (domain/host.md, 9.4) | its own domain and protocol layer | as the consumer's child, `smith-inline-agent`: smith's domain, with its LLM and machine components in the consumer's protocol layer |
 
 - **A spawned agent** is how temper's worker runs smith. The local host
   offers it later, with contained trees (hosts.md, section 5.6). The
@@ -146,11 +146,10 @@ host would be another.
   vocabulary, so a host treats both kinds of agent alike, and its
   requests below the domain go to smith's LLM and machine components in
   the consumer's own protocol layer, which also hands the LLM component
-  its credentials directly. What the vocabulary carries as bytes still
-  crosses as bytes: the charter, encoded with `smith-charter` and decoded
-  at the start, and turns, encoded with `smith-transcript` as they are
-  told, which a host keeps as bytes anyway (domain/host.md, 9.4). The
-  rest crosses as entities, with no frames. The event stream is encoded
+  its credentials directly. Everything crosses as the vocabulary's typed
+  values, the charter and turns included, with no frames and no codec in
+  any domain (domain/host.md, 9.4). A host's store encodes the turns it
+  keeps with `smith-transcript`. The event stream is encoded
   with `smith-events`.
 
 ## 5. Components
