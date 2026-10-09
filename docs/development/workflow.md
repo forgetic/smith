@@ -506,6 +506,14 @@ end, keeps unavailable grades and metrics explicit, and compares only
 complete interleaved arms. There is no fuzzy parser sweep yet. The
 one-second focused share and suite budgets remain unchanged.
 
+Benchmark increment 00.5 adds Codex's typed JSON-lines observer and its
+credential-scanned archived and explicitly synthetic fixtures. Its idle serial
+`heavy` measurement on 2026-10-09 passed 52 focused unit/offline tests in
+0.645 seconds and one seeded fuzzy parser sweep in 0.129 seconds. Root-only
+turn aggregates never stand in for non-root usage or provider response counts.
+The harness remains within its one-second focused and five-second fuzzy shares;
+no agent, network or login is used by these tests.
+
 ## 5. Opt-in live suite
 
 The `live` profile runs the shipped binary against real backends, serially,

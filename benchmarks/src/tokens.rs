@@ -50,7 +50,7 @@ pub struct TokenCounts {
 }
 
 impl TokenCounts {
-    fn unavailable(reason: &str) -> Self {
+    pub(crate) fn unavailable(reason: &str) -> Self {
         Self {
             fresh: Measure::unavailable(reason),
             cache_read: Measure::unavailable(reason),
@@ -60,7 +60,7 @@ impl TokenCounts {
         }
     }
 
-    fn add(&self, other: &Self) -> Result<Self, String> {
+    pub(crate) fn add(&self, other: &Self) -> Result<Self, String> {
         Ok(Self {
             fresh: add_measure(&self.fresh, &other.fresh)?,
             cache_read: add_measure(&self.cache_read, &other.cache_read)?,
@@ -85,7 +85,7 @@ pub struct TokenRecord {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Usage {
     /// Codex input includes cached input and output includes reasoning.
-    Codex { input: u64, cached_input: u64, output: u64 },
+    Codex { input: u64, cached_input: u64, cache_write: Option<u64>, output: u64, reasoning: Option<u64> },
     /// Claude's fresh input and writes are added; cache reads stay separate.
     ClaudeCode { input: u64, cache_read: u64, cache_write: u64, output: u64 },
     /// smith's event fields remain unavailable wherever the event reports null.
@@ -103,7 +103,7 @@ impl Usage {
     #[must_use]
     pub const fn convention(&self) -> Convention {
         match self {
-            Self::Codex { input: _, cached_input: _, output: _ } => Convention::Codex,
+            Self::Codex { input: _, cached_input: _, cache_write: _, output: _, reasoning: _ } => Convention::Codex,
             Self::ClaudeCode { input: _, cache_read: _, cache_write: _, output: _ } => Convention::ClaudeCode,
             Self::SmithEvents { input: _, cache_read: _, cache_write: _, output: _, reasoning: _ } => {
                 Convention::SmithEvents
@@ -114,13 +114,21 @@ impl Usage {
     /// Apply the convention, rejecting impossible or overflowing provider values.
     pub fn normalise(&self) -> Result<TokenCounts, String> {
         match *self {
-            Self::Codex { input, cached_input, output } => Ok(TokenCounts {
-                fresh: observed(input.checked_sub(cached_input).ok_or("cached input exceeds input")?),
-                cache_read: observed(cached_input),
-                cache_write: Measure::unavailable("Codex does not report cache writes separately"),
-                output: observed(output),
-                reasoning: Measure::unavailable("Codex reasoning is included in output, not reported separately"),
-            }),
+            Self::Codex { input, cached_input, cache_write, output, reasoning } => {
+                let fresh = input.checked_sub(cached_input).ok_or("cached input exceeds input")?;
+                if cache_write.is_some_and(|writes| writes > fresh) || reasoning.is_some_and(|tokens| tokens > output) {
+                    return Err("Codex cache writes or reasoning exceed their containing total".into());
+                }
+                Ok(TokenCounts {
+                    fresh: observed(fresh),
+                    cache_read: observed(cached_input),
+                    cache_write: cache_write
+                        .map_or_else(|| Measure::unavailable("Codex cache_write_input_tokens omitted"), observed),
+                    output: observed(output),
+                    reasoning: reasoning
+                        .map_or_else(|| Measure::unavailable("Codex reasoning_output_tokens omitted"), observed),
+                })
+            }
             Self::ClaudeCode { input, cache_read, cache_write, output } => Ok(TokenCounts {
                 fresh: observed(input.checked_add(cache_write).ok_or("fresh token overflow")?),
                 cache_read: observed(cache_read),

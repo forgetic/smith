@@ -291,7 +291,7 @@ fn guards_are_cheapest_first_and_report_budget_and_unknown_costs() {
 }
 
 fn codex_usage(input: u64) -> crate::Usage {
-    crate::Usage::Codex { input, cached_input: 20, output: 10 }
+    crate::Usage::Codex { input, cached_input: 20, cache_write: None, output: 10, reasoning: None }
 }
 
 fn ledger() -> crate::TokenLedger {
@@ -310,6 +310,23 @@ fn token_conventions_preserve_cache_and_reasoning_boundaries() {
     assert_eq!(codex.output, Measure::Observed { value: 10 });
     assert!(matches!(codex.cache_write, Measure::Unavailable { .. }));
     assert!(matches!(codex.reasoning, Measure::Unavailable { .. }));
+    let reported = Usage::Codex { input: 100, cached_input: 20, cache_write: Some(5), output: 10, reasoning: Some(4) }
+        .normalise()
+        .expect("reported optional subsets");
+    assert_eq!(reported.fresh, Measure::Observed { value: 80 });
+    assert_eq!(reported.cache_write, Measure::Observed { value: 5 });
+    assert_eq!(reported.output, Measure::Observed { value: 10 });
+    assert_eq!(reported.reasoning, Measure::Observed { value: 4 });
+    assert!(
+        Usage::Codex { input: 100, cached_input: 20, cache_write: Some(81), output: 10, reasoning: None }
+            .normalise()
+            .is_err()
+    );
+    assert!(
+        Usage::Codex { input: 100, cached_input: 20, cache_write: None, output: 10, reasoning: Some(11) }
+            .normalise()
+            .is_err()
+    );
     let claude =
         Usage::ClaudeCode { input: 30, cache_read: 70, cache_write: 5, output: 9 }.normalise().expect("Claude mapping");
     assert_eq!(claude.fresh, Measure::Observed { value: 35 });
@@ -337,7 +354,11 @@ fn token_conventions_preserve_cache_and_reasoning_boundaries() {
 
 #[test]
 fn impossible_and_overflowing_token_records_are_errors() {
-    assert!(crate::Usage::Codex { input: 1, cached_input: 2, output: 0 }.normalise().is_err());
+    assert!(
+        crate::Usage::Codex { input: 1, cached_input: 2, cache_write: None, output: 0, reasoning: None }
+            .normalise()
+            .is_err()
+    );
     assert!(
         crate::Usage::ClaudeCode { input: u64::MAX, cache_read: 0, cache_write: 1, output: 0 }.normalise().is_err()
     );

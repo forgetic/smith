@@ -79,3 +79,19 @@ unavailable reason.
 The `small` tier is pinned for both providers. `working.codex` awaits
 the user's model and effort; `working.anthropic` belongs to the next
 comparison pass. A run requiring an unresolved tier refuses setup.
+
+Codex's JSON-lines observer is pinned to codex-cli 0.160.0. It retains typed
+thread, turn and item records, skips unknown kinds, and reports known shape
+changes with their field path. The final turn and settled exit decide the end;
+a forced teardown after its answer is a warning. Turn usage is root-only and
+repeated terminals count once. Cache writes remain within input, and reasoning
+within output; omitted fields are unavailable. JSON lines have no provider
+response ids or complete child scopes, so response counts stay unavailable
+and totals name the missing non-root evidence. Rollout collection supplies
+those scopes later.
+
+The recordings' manifest under `tests/recorded/codex/` pins archive sources,
+retained lines and SHA-256 hashes. Completed and children are archived;
+failed and repeated are explicitly synthetic derivatives awaiting the first
+live recordings. The fuzzy parser sweep is `cargo nextest run -p smith-bench
+--profile fuzzy`. These tests read no login and run no agent.

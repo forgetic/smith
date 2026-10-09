@@ -9,6 +9,8 @@ use sha2::{Digest, Sha256};
 
 use crate::Refusal;
 
+pub mod codex;
+
 /// The adapter selected by a suite author for each attempt.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]

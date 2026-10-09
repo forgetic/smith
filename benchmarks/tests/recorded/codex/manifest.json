@@ -1,0 +1,68 @@
+{
+  "agent_version": "codex-cli 0.160.0",
+  "records": [
+    {
+      "file": "completed.jsonl",
+      "provenance": "archived",
+      "source": "runs/baseline-01_backoff-codex-1/agent/events.jsonl",
+      "source_sha256": "5e7d92811734a98bc795d687e4b5e8174a935f1c1214b914fe4de3ccccf3ca07",
+      "kept_source_lines": [
+        1,
+        2,
+        5,
+        10,
+        20,
+        21
+      ],
+      "change": "All omitted records removed; retained records are exact source lines.",
+      "sha256": "509b792308618e22226aec8e577c307d06ebcbce47fc573c76cd5adf2f0a3b1c"
+    },
+    {
+      "file": "children.jsonl",
+      "provenance": "archived",
+      "source": "runs/iteration4-07_shell_cwd-codex-1/agent/events.jsonl",
+      "source_sha256": "f74dc608ba6a76d783365d29a9aa7a9c618ac59cd1c5e87056d44520ff721bde",
+      "kept_source_lines": [
+        1,
+        2,
+        5,
+        28,
+        66,
+        67,
+        117,
+        118
+      ],
+      "change": "All omitted records removed; retained records are exact source lines.",
+      "sha256": "fea3c9f0bfdaccc573ca38741a600f908389b966488139c55dd35f94e8935de1"
+    },
+    {
+      "file": "failed.jsonl",
+      "provenance": "synthetic",
+      "source": "completed.jsonl",
+      "archive_source": "runs/baseline-01_backoff-codex-1/agent/events.jsonl",
+      "change": "Replace final turn.completed with synthetic turn.failed using the pinned SDK shape; no real failure was archived.",
+      "sha256": "29ddcde77e55266b5e270584d8ab4d46ee31a8069e4129f9f410133080343374",
+      "replace_in_increment": 10
+    },
+    {
+      "file": "repeated.jsonl",
+      "provenance": "synthetic",
+      "source": "completed.jsonl",
+      "archive_source": "runs/baseline-01_backoff-codex-1/agent/events.jsonl",
+      "change": "Repeat the final turn.completed line verbatim to exercise duplicate aggregate usage; no repeated usage was archived.",
+      "sha256": "f8e2ed360f220456b7f696bf5a879390cd73411d4851e018e544344e17dcb759",
+      "replace_in_increment": 10
+    }
+  ],
+  "credential_scan": {
+    "patterns": [
+      "JWT triples",
+      "Bearer tokens",
+      "private key headers",
+      "credential assignment names",
+      "API token prefixes"
+    ],
+    "matches": 0
+  },
+  "failure_shape_source": "https://github.com/openai/codex/blob/rust-v0.160.0/sdk/typescript/src/events.ts"
+}
