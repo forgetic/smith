@@ -1363,7 +1363,7 @@ fn domain_down(service: &mut Service) {
                 service.mark_failed(Failure::Send);
             }
         }
-    } else if service.domain.is_some() {
+    } else if service.domain.is_some() && (service.answer_sent || service.channel_ended) {
         // The terminal request may have closed channel projection above. Its
         // domain facts still belong to local capture; no frame follows Answer.
         for _ in 0..service.limits.queue {
@@ -1842,7 +1842,7 @@ pub fn work_pending(service: &Service, now: Time) -> bool {
     };
     due || service.io.is_ready()
         || service.llm.has_work()
-        || domain_facts_pending(service)
+        || ((service.answer_sent || service.channel_ended) && domain_facts_pending(service))
         || match &service.domain {
             Some(domain) => domain.is_ready(),
             None => false,
@@ -2503,6 +2503,37 @@ mod tests {
         assert!(service.lost_trace_facts() > 0);
         assert_eq!(service.trace_facts.len(), service.trace_facts.capacity());
         assert!(service.channel_below.is_empty());
+    }
+
+    #[test]
+    fn pre_admission_backpressure_preserves_facts_for_the_later_channel_projection() {
+        let mut service = cancelled_preparation();
+        service.admitted = None;
+        for _ in 0..service.channel_below.capacity() {
+            service.channel_below.push(ChannelLower::FinishWrite);
+        }
+        service.domain_requests.push(domain::Request::Admitted { host_run: Token::new(1), run: Token::new(0) });
+        domain_down(&mut service);
+        assert!(service.admitted.is_none(), "channel backpressure delays the admission notice");
+        assert!(service.pop_trace_fact().is_none(), "pre-admission facts remain available for normal projection");
+        assert!(domain_facts_pending(&service));
+        assert_eq!(service.domain_requests.len(), 1);
+        assert_eq!(service.lost_trace_facts(), 0);
+        assert_eq!(service.lost_channel_facts(), 0);
+    }
+
+    #[test]
+    fn retained_active_facts_alone_do_not_keep_the_scheduler_spinning() {
+        let mut service = cancelled_preparation();
+        let admitted = service.admitted.take();
+        assert!(domain_facts_pending(&service));
+        assert!(!service.answer_sent && !service.channel_ended);
+        assert!(!work_pending(&service, Time::ZERO), "pre-admission facts do not bypass channel readiness");
+        domain_down(&mut service);
+        assert!(service.pop_trace_fact().is_none());
+        assert!(domain_facts_pending(&service), "the later admission can still project retained facts");
+        service.admitted = admitted;
+        assert!(!work_pending(&service, Time::ZERO), "active facts alone do not bypass channel readiness");
     }
 
     #[test]
