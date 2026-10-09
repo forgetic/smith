@@ -214,6 +214,7 @@ verdict = "written"
 | `[[outcome]]`, `[[event]]`, `[[grade]]`, `waives` | the checks, and the passive checks the task expects to fail |
 | `repetitions` | where the kind's default does not fit, as for a probe judged on a median |
 | `[[variant]]` | a named change to the prompt, overrides or checks, reported as a task of its own (`large-write/oversized`) |
+| `[[person]]` | for an interactive task: the scripted person's lines, each sent at the start or when an event the task names is observed (for example `follow-up` sends its request when `finish` is called), and an end of input |
 
 - **`seed/`** is the workspace as the agent first sees it, committed in a
   fresh repository the agent's configuration trusts, its digest in the
@@ -248,7 +249,8 @@ config = "standard"
 A suite names its tasks (`<kind>/<id>[/<variant>]`, or by kind and
 behaviour), its agent configurations, a tier overriding the tasks' own,
 its design, repetitions and budgets, and its arms where it compares. A
-new schedule is a new file.
+task listed under `when_asked` runs only when a run names it
+(`--include`). A new schedule is a new file.
 
 ### 5.4 Agent configurations and results
 
@@ -361,6 +363,7 @@ dropped, never read across versions.
 | timing | on the harness's one clock: process wall, to the tree's end; task wall, to the answer observed; teardown, from the answer to the tree's end; grading wall. The agent's own times beside them: smith's `first_byte_ms`, `largest_gap_ms` and longest completion, and its `t_ms`, from its own start |
 | tokens | per scope (section 8.2) |
 | counts | responses, provider attempts and retries; completions; tool calls by name, not comparable across agents; tool failures by verdict; children; conversations and compactions; messages by terminal |
+| delegation | for each child: its effective share, how it ended (an answer, its budget, failed, closed) and its turns and seconds; the time the parent was blocked on children |
 | resources | CPU time and peak memory, each with its scope: the tree's accounting, the agent's process alone, or unavailable |
 | spend | the agent's own figure, such as smith's `spent` or Claude Code's cost, with its basis: notional, priced or reported |
 | outcome | the end; the exit, a code or a signal; whether the harness forced it (no, terminated, killed); each check's verdict and evidence; protected files changed; writes outside the workspace |
@@ -468,6 +471,8 @@ answer is a warning on a completed attempt.
 - **Process trees.** An attempt ends when its whole tree has ended. At
   the hard deadline the tree is terminated, then killed after a grace;
   after an observed answer, the deadline is the agent's teardown bound
+  (smith's from its effective limits, read by `smith check --json`;
+  another agent's from its pinned configuration)
   plus that grace. Accounting of a whole tree (a cgroup scope, its CPU
   and peak memory) is skein's to add first; until then each attempt runs
   in its own process group, and its resources carry the narrower scope.

@@ -34,8 +34,8 @@ profile numbers (section 6); everything else derives from them
 - **Four commands.** `smith`, the interactive chat; `smith exec`, one
   headless run; `smith check`, validation; `smith login`, sign-in
   (section 4). A headless run says how it ended in its exit code (4.3).
-- **Instrumented as it ships.** `--json`, `--trace` and `--trace-fd`
-  carry the versioned event stream (protocol/events.md). The terminal
+- **Instrumented as it ships.** `--json` and `--trace` carry the
+  versioned event stream (protocol/events.md). The terminal
   renders the same records, never `Debug` text.
 - **Settings are TOML,** layered, strict and bounded, with presets for
   `codex` and `anthropic`. A first run needs a model and an account.
@@ -250,7 +250,6 @@ Shared flags:
 | `--chat NAME` | the chat to resume or start |
 | `-c KEY=VALUE` | a setting, by its dotted path, as a TOML value; repeatable (5.1) |
 | `--trace PATH` | append the event stream to `PATH` |
-| `--trace-fd FD` | write the event stream to the inherited descriptor `FD`, a pipe or a file the caller opened, adopted as an append stream; a harness reads it as it is written |
 
 ### 4.1 `smith`
 
@@ -290,10 +289,9 @@ The interactive chat, the local host of domain/host.md, section 8:
   run's text per turn and each tool by name. It is for scripts and the
   worlds' scripted person, and it is the mode when standard input is not
   a terminal.
-- **Its event stream,** with `--trace-fd FD`, goes to a descriptor its
-  caller passed, such as a pipe a benchmark harness reads as records
-  arrive while a scripted person types at the terminal. `--trace PATH`
-  appends to a file instead.
+- **Its event stream,** with `--trace PATH`, is appended to a file. A
+  benchmark harness reads it as it grows, while a scripted person types
+  at the terminal.
 - **It exits** 0 once its input ends, and 2 or 3 when startup refuses.
 
 ### 4.2 `smith exec`
@@ -344,9 +342,9 @@ A headless run's code follows its answer (domain/run.md, section 10):
 | Code | Meaning | When |
 |---|---|---|
 | 0 | accepted | an accepted answer, however long its teardown took |
-| 1 | run failed | a failed answer: the model (a provider's failure past its retries, an exhausted account, a limit that fired), policy, stale, a transcript it could not resume; or a spawned agent that ended without answering |
+| 1 | run failed | a failed answer: the model (a provider's failure past its retries, an exhausted account, a limit that fired), policy, stale, a transcript it could not resume; a spawned agent that ended without answering; a host failure while the run went on, such as its chat store failing; or a start refused as busy |
 | 2 | usage or configuration | arguments, a settings refusal (5.3), a start the run refused as invalid |
-| 3 | credentials | an account the run needs without a usable credential: not signed in, rejected, a borrowed login expired, a variable unset |
+| 3 | credentials | an account the run needs without a usable credential: not signed in, rejected, a borrowed login expired, a variable unset; also a run that failed because the provider refused its credential (a model failure of class `unauthorized`) |
 | 4 | budget | a failed answer for its budget: spend, time or turns |
 | 5 | needs input | a parked answer |
 | 130 | interrupted | a cancelled answer, after an interrupt or a termination signal |
@@ -768,7 +766,7 @@ Within the focused suite's 15 seconds and the fuzzy suite's 60:
   - a startup refusal of each layer;
   - `smith` on a terminal: a first sign-in and a change committed in
     place, then a second invocation that resumes; and one with
-    `--trace-fd`, its records read from the pipe as they arrive;
+    `--trace`, its records read from the file as it grows;
   - `smith login` against the fake issuer;
   - `smith-agent`, spawned by a host in the test's loop.
 
