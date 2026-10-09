@@ -879,6 +879,7 @@ fn cleanup(service: &mut Service) {
     }
     if !service.cleanup_started && service.io_requests.room() >= 3 {
         service.cleanup_started = true;
+        service.llm.close();
         if let Some(entity) = service.input {
             service.io_requests.push(io::Request::Close { entity });
         }

@@ -148,7 +148,9 @@ machines. The local host writes its agent's from its own settings
 - **Signals:** a termination signal is the domain's cancel. The run winds
   down and answers, as it would on the host's cancel.
 - **The end:** after its answer, the agent finishes its channel, waits for
-  its trees to be empty, and exits with success. It exits with failure
+  its trees to be empty, closes its active and reusable LLM bindings, and
+  waits for their physical io settlement before exiting with success.
+  It exits with failure
   only when it could not answer: startup, or a broken channel.
 
 ## 7. What the domain is owed, and what skein owes
@@ -175,7 +177,8 @@ machines. The local host writes its agent's from its own settings
 - **The process,** as a simulated world: the agent's `iterate` with a
   scripted host on its channel and a fake LLM peer. It covers startup
   refusals, a run from start to answer, a termination signal mid-turn, and
-  standard error's last line.
+  standard error's last line. Normal answer shutdown must settle a live
+  provider connection before its idle keep deadline, without host signals.
 - **Configuration:** every refusal of a malformed or oversized one.
 
 ## 9. From temper

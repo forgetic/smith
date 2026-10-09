@@ -606,3 +606,16 @@ passed 1,449 focused tests in 8.840 seconds and 17 fuzzy tests in 7.532 seconds;
 formatting and workspace all-target Clippy also passed. Existing budgets
 remain unchanged. The actual saved-chat greeting followed by all four gate
 commands passed through the shipped binary, with each command exiting zero.
+
+### LLM pool shutdown validation, 2026-10-09
+
+The shutdown increment was measured from `3fae871` with the canonical Skein
+lock at `f5fca44f`. Serial focused checks of the LLM protocol, agent service
+and agent process passed 77 tests in 1.904 seconds. The agent-process fuzzy
+sweep passed serially in 0.732 seconds. Formatting and all-target Clippy for
+those affected crates passed. The new hosted-process regression requires
+normal descriptor settlement against a live provider before the one-second
+idle keep deadline and replays the outside trace. Protocol controls retain
+single cancellation terminals and close both providers' TLS text and tool
+completions without a second terminal. Existing workspace budgets remain
+unchanged; the complete workspace gates still apply before a main merge.

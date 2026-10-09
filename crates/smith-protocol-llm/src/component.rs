@@ -1,6 +1,7 @@
 //! A bounded LLM component over skein's connection pool.
 //! It keeps endpoint names, two grant generations per account, and a context
-//! for each accepted call. It never knows retry policy, host credentials, or
+//! for each accepted call. `close` settles the shared pool at owner shutdown.
+//! It never knows retry policy, host credentials, or
 //! provider wire grammar. `from_domain`, `from_below`, `fire` and `reclaim`
 //! route one bounded pass; accepted calls have one typed terminal.
 //! Contract: protocol/llm.md, sections 1, 6 to 10.
@@ -145,6 +146,15 @@ impl Component {
     /// Install a validated generation from the channel or a colocated host.
     pub fn grant(&mut self, name: GrantName, credential: Credential, lapses: Time) -> Result<(), GrantError> {
         self.grants.grant(name, credential, lapses)
+    }
+
+    /// Stops accepting calls and schedules active and idle bindings to close.
+    /// The owner keeps routing io answers until their physical settlement.
+    pub fn close(&mut self) {
+        for _ in 0..self.next.len() {
+            let _call = self.next.pop_first().expect("each retained demand is counted");
+        }
+        self.connection.close();
     }
 
     /// Route one root-domain request to the connection child.
@@ -328,7 +338,7 @@ impl Component {
                         None => 0,
                     };
                     let error = match why {
-                        connection::Refusal::Endpoint => Error::Invalid,
+                        connection::Refusal::Closed | connection::Refusal::Endpoint => Error::Invalid,
                         connection::Refusal::Pool => Error::Limit,
                         connection::Refusal::Client(error) => error,
                     };

@@ -319,3 +319,31 @@ fn the_whole_deadline_is_armed_even_without_phase_deadlines() {
         Some(ToDomain::Failed { failure: llm::Failure::TimedOut, evidence: llm::Evidence::Unsent, .. })
     ));
 }
+
+#[test]
+fn owner_close_refuses_future_calls_before_io_and_cancels_active_calls_once() {
+    let limits = limits();
+    let mut component = Component::new(&limits, endpoints()).expect("component");
+    let mut up = Queue::with_capacity(adapter::MAX_OUT.above);
+    let mut io = Queue::with_capacity(adapter::MAX_OUT.below);
+    component
+        .grant(GrantName { account: 0, generation: 1 }, credential(b"first"), Time::from_nanos(100))
+        .expect("grant");
+    let env = env(0, &limits);
+    component.from_domain(&env, complete(7, 1, limits.receiving), &mut up, &mut io);
+    let Some(IoRequest::Connect { owner, .. }) = io.pop() else { panic!("one connect") };
+    component.close();
+    component.close();
+    component.fire(&env, &mut up, &mut io);
+    component.from_below(&env, skein_io::Event::Connecting { owner, socket: Token::new(100) }, &mut up, &mut io);
+    assert!(matches!(io.pop(), Some(IoRequest::Abort { entity }) if entity == Token::new(100)));
+    component.from_below(&env, skein_io::Event::Closed { owner }, &mut up, &mut io);
+    assert!(matches!(up.pop(), Some(ToDomain::Cancelled { owner }) if owner == Token::new(7)));
+    component.reclaim();
+    component.from_domain(&env, complete(8, 1, limits.receiving), &mut up, &mut io);
+    assert!(matches!(up.pop(), Some(ToDomain::Failed {
+        owner, failure: llm::Failure::Invalid, evidence: llm::Evidence::Unsent, ..
+    }) if owner == Token::new(8)));
+    component.fire(&env, &mut up, &mut io);
+    assert!(io.is_empty() && up.is_empty() && !component.has_work());
+}

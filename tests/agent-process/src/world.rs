@@ -605,6 +605,12 @@ impl World {
         (count, bytes)
     }
 
+    /// The shared harness clock when all processes and their descriptors settled.
+    #[must_use]
+    pub fn settled_at(&self) -> Time {
+        self.outcome.as_ref().expect("settled world").end
+    }
+
     /// Settlement already checked all descriptors and in-flight operations.
     pub fn assert_agent_clean(&self) {
         assert!(self.outcome.as_ref().expect("settled world").killed.is_empty());

@@ -50,3 +50,15 @@ fn full_kernel_replay_and_discarded_facts_leave_the_same_answer() {
         assert_eq!(kept.observed(), discarded.observed());
     }
 }
+
+#[test]
+fn answered_agent_settles_a_live_provider_before_the_idle_keep_deadline() {
+    skein_world::domain::assert_replays(19, 2, |seed| {
+        let mut world = World::new(seed, &charter());
+        assert!(world.settle(), "the hosted agent exits normally");
+        world.assert_agent_clean();
+        assert!(world.settled_at() < skein_lib::Time::from_nanos(1_000_000_000));
+        assert_eq!(world.peer_queries().len(), 1);
+        (world.trace(), world.answer())
+    });
+}

@@ -59,7 +59,7 @@ fn limits() -> ComponentLimits {
 }
 
 #[expect(clippy::too_many_lines, reason = "the protocol story drives the component, io and fake peer")]
-fn run(dialect: Provider, calls: bool) {
+fn run(dialect: Provider, calls: bool, close: bool) {
     let mut call = skein_llm_world::call(7);
     match dialect {
         Provider::OpenAiCodex => {}
@@ -143,6 +143,7 @@ fn run(dialect: Provider, calls: bool) {
     let mut received = 0_usize;
     let mut owner = None;
     let mut completed = 0_u32;
+    let mut closed = false;
     provider::start(&mut peer, &mut service, &peer_credential, &peer_env, &mut peer_up, &mut peer_down);
     component.from_domain(
         &env,
@@ -192,13 +193,20 @@ fn run(dialect: Provider, calls: bool) {
                         )));
                     }
                     completed += 1;
+                    if close {
+                        component.close();
+                        component.close();
+                    }
                 }
                 ToDomain::Failed { .. } | ToDomain::Cancelled { .. } => {
                     panic!("unexpected component event: {event:?}");
                 }
             }
         }
-        if let Some(request) = io.pop() {
+        // The prompt TLS wire answers synchronously. Route the component's
+        // entire bounded batch before answering a demand it may withdraw.
+        for _ in 0..MAX_OUT.below {
+            let Some(request) = io.pop() else { break };
             match request {
                 IoRequest::Connect { owner: token, .. } => {
                     assert!(owner.replace(token).is_none());
@@ -216,6 +224,8 @@ fn run(dialect: Provider, calls: bool) {
                 }
                 IoRequest::Close { entity } | IoRequest::Abort { entity } => {
                     assert_eq!(entity, Token::new(100));
+                    assert!(!closed, "one physical close");
+                    closed = true;
                     component.from_below(
                         &env,
                         IoEvent::Closed { owner: owner.expect("connected owner") },
@@ -300,30 +310,49 @@ fn run(dialect: Provider, calls: bool) {
         if component.has_work() {
             component.fire(&env, &mut up, &mut io);
         }
-        if completed == 1 && !component.has_work() && io.is_empty() && up.is_empty() && !peer.has_work() {
+        if completed == 1
+            && (!close || closed)
+            && !component.has_work()
+            && io.is_empty()
+            && up.is_empty()
+            && !peer.has_work()
+        {
             break;
         }
     }
     assert_eq!(service.count(), 1, "the independent fake decoded the call");
     assert_eq!(completed, 1);
+    if close {
+        assert!(closed, "owner shutdown settled TLS at the original clock");
+        assert!(component.next_deadline().is_none());
+        component.reclaim();
+    }
 }
 
 #[test]
 fn codex_fake_peer_over_tls() {
-    run(Provider::OpenAiCodex, false);
+    run(Provider::OpenAiCodex, false, false);
 }
 
 #[test]
 fn anthropic_fake_peer_over_tls() {
-    run(Provider::Anthropic, false);
+    run(Provider::Anthropic, false, false);
 }
 
 #[test]
 fn codex_tool_input_is_typed_through_the_owned_connection() {
-    run(Provider::OpenAiCodex, true);
+    run(Provider::OpenAiCodex, true, false);
 }
 
 #[test]
 fn anthropic_tool_input_is_typed_through_the_owned_connection() {
-    run(Provider::Anthropic, true);
+    run(Provider::Anthropic, true, false);
+}
+
+#[test]
+fn owner_shutdown_settles_tls_after_each_provider_completion_without_another_terminal() {
+    for provider in [Provider::OpenAiCodex, Provider::Anthropic] {
+        run(provider, false, true);
+        run(provider, true, true);
+    }
 }

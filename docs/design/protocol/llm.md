@@ -31,6 +31,10 @@ schemas, decodes what the LLM calls, and renders what the tools return.
   (channel.md, section 6).
 - **Provider-neutral.** The endpoint's dialect is the agent's
   configuration's (agent.md), and skein's client speaks it.
+- **Owner shutdown.** `close` stops future calls and schedules the shared
+  pool to close, including reusable idle connections. Active calls keep
+  their single cancellation terminal; completed calls get no second one.
+  The service continues routing io answers until physical settlement.
 
 ## 2. Prompts
 
