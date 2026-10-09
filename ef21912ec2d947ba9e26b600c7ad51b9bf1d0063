@@ -1,0 +1,7 @@
+Final gates at ef21912ec2d947ba9e26b600c7ad51b9bf1d0063 on
+839ac739941628ea551375da0dbf20159f27dd95: format passed; heavy595
+workspace all-target Clippy7.47s; heavy596 focused1538/1538 in3.263s;
+heavy597 fuzzy21/21 in3.689s. All zero skips. Bench serial heavy580
+63/63 in.943s, zero skips. Pure offline compatibility correction, no
+runtime/probe/credential/provider use. Own ff-only merge under shared lock;
+left main immediately, clean branch. Original05.1/05.4 probes remain pending.
