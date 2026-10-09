@@ -9,6 +9,10 @@ use crate::{Component, OpenEvent};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
     pub bodies: smith_channel::Limits,
+    pub charter: smith_charter::v2::Limits,
+    pub transcript: smith_transcript::v2::Limits,
+    /// Maximum configured endpoint names retained by this component.
+    pub endpoints: u32,
     pub channel: skein_channel::Limits,
     /// Maximum live calls awaiting one host terminal.
     pub calls: u32,
@@ -35,6 +39,8 @@ pub enum Error {
     Write(skein_lib::Overflow),
     /// An answer's decoded fields do not form a typed host-domain result.
     InvalidAnswer,
+    /// A charter or transcript could not be represented by its codec.
+    Value,
 }
 
 impl From<smith_channel::v2::Problem> for Error {
@@ -78,6 +84,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     }
     let bytes = skein_channel::worst_case(&schema, &limits.channel)?
         .checked_add(duplicate)?
+        .checked_add(smith_protocol_channel::Endpoints::worst_case(limits.endpoints, limits.charter.llm_endpoint)?)?
         .checked_add(Queue::<skein_channel::Event>::worst_case(8)?)?
         .checked_add(Queue::<OpenEvent>::worst_case(1)?)?
         .checked_add(Queue::<Lower>::worst_case(6)?)?;

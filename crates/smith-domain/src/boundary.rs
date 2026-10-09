@@ -51,7 +51,7 @@ use alloc::boxed::Box;
 pub struct Window {
     /// Maximum turns awaiting acknowledgement.
     pub turns: u32,
-    /// Maximum encoded bytes of those turns.
+    /// Maximum owned concrete message and payload bytes of those turns.
     pub bytes: u64,
 }
 

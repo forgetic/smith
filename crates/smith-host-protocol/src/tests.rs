@@ -12,6 +12,9 @@ fn a_start_keeps_host_bytes_and_service_values_in_order() {
 
     let limits = Limits {
         bodies: smith_channel::CEILINGS,
+        charter: smith_charter::CEILINGS,
+        transcript: smith_transcript::CEILINGS,
+        endpoints: 1,
         calls: 8,
         channel: skein_channel::Limits {
             chunk: 8,
@@ -27,8 +30,8 @@ fn a_start_keeps_host_bytes_and_service_values_in_order() {
         logical_run: Token::new(2),
         activation: 3,
         workspace: Some(Token::new(4)),
-        charter: Box::from(*b"charter"),
-        transcript: Some(Box::from([Box::from(*b"turn")])),
+        charter: smith_host_world::charter_value(7),
+        transcript: Some(smith_host_world::transcript_value(512)),
         answered: Box::from([channel::AnsweredCall {
             name: channel::CallName { activation: 1, completion: 2, position: 3 },
             tool: Box::from(*b"check"),
@@ -44,14 +47,30 @@ fn a_start_keeps_host_bytes_and_service_values_in_order() {
     };
     let values =
         crate::Values { paths: Box::from([Box::from(*b"/tmp/src")]), credentials: Box::from([Box::from(*b"secret")]) };
-    let frame = crate::encode_start(start, channel::Window { turns: 1, bytes: 4096 }, values, &limits.bodies)
-        .expect("bounded Start");
+    let frame = crate::encode_start(
+        start,
+        channel::Window { turns: 1, bytes: 4096 },
+        values,
+        &limits.bodies,
+        &limits.charter,
+        &limits.transcript,
+        &endpoints(),
+    )
+    .expect("bounded Start");
     assert_eq!(frame.kind(), 0x0100);
     let mut reader = Reader::new(&frame.bytes()[8..]);
     let start = smith_channel::Start::decode(&limits.bodies, &mut reader).expect("Start decodes");
     assert_eq!(start.activation(), 3);
-    assert_eq!(start.charter(), b"charter");
-    assert_eq!(start.transcript().get(0).expect("saved turn").as_ref(), b"turn");
+    assert_eq!(
+        smith_protocol_channel::decode_charter(start.charter(), &limits.charter, &endpoints()).expect("typed charter"),
+        smith_host_world::charter_value(7).into_value()
+    );
+    assert_eq!(
+        smith_protocol_channel::decode_transcript(start.transcript().as_slice(), &limits.transcript, &endpoints())
+            .expect("typed transcript")
+            .expect("history"),
+        smith_host_world::transcript_value(512).into_value()
+    );
     assert_eq!(start.answered().get(0).expect("answered call").tool(), b"check");
     assert_eq!(
         start.workspace().as_ref().expect("workspace").directories().get(0).expect("directory").path(),
@@ -64,6 +83,9 @@ fn a_start_keeps_host_bytes_and_service_values_in_order() {
 fn the_host_sends_open_before_the_domain_hears_anything() {
     let limits = Limits {
         bodies: smith_channel::CEILINGS,
+        charter: smith_charter::CEILINGS,
+        transcript: smith_transcript::CEILINGS,
+        endpoints: 1,
         calls: 8,
         channel: skein_channel::Limits {
             chunk: 8,
@@ -74,7 +96,7 @@ fn the_host_sends_open_before_the_domain_hears_anything() {
             kinds: 18,
         },
     };
-    let mut component = Component::new(&limits, StreamMode::Two).expect("checked schema");
+    let mut component = Component::new(&limits, StreamMode::Two, endpoints()).expect("checked schema");
     let mut to_service = Queue::<OpenEvent>::with_capacity(2);
     let mut below = Queue::<Lower>::with_capacity(8);
     component.open(&mut to_service, &mut below);
@@ -92,6 +114,9 @@ fn the_host_sends_open_before_the_domain_hears_anything() {
 fn process_limits() -> Limits {
     Limits {
         bodies: smith_channel::CEILINGS,
+        charter: smith_charter::CEILINGS,
+        transcript: smith_transcript::CEILINGS,
+        endpoints: 1,
         calls: 8,
         channel: skein_channel::Limits {
             chunk: 8,
@@ -121,7 +146,7 @@ fn spawn_has_three_credential_free_standard_pipes() {
     use skein_lib::{Time, Token};
 
     let agent = Token::new(7);
-    let mut process = crate::Process::new(agent, &process_limits(), 8).expect("channel");
+    let mut process = crate::Process::new(agent, &process_limits(), 8, endpoints()).expect("channel");
     let mut below = Queue::with_capacity(8);
     process.spawn(launch(), Time::from_nanos(100), &mut below);
     assert_eq!(process.next_deadline(), Some(Time::from_nanos(100)));
@@ -145,7 +170,7 @@ fn refused_spawn_reports_one_unspawned_terminal() {
     use skein_lib::{Time, Token};
 
     let agent = Token::new(7);
-    let mut process = crate::Process::new(agent, &process_limits(), 8).expect("channel");
+    let mut process = crate::Process::new(agent, &process_limits(), 8, endpoints()).expect("channel");
     let io_owner = process.io_owner();
     let mut below = Queue::with_capacity(8);
     let mut above = Queue::with_capacity(8);
@@ -180,7 +205,7 @@ fn expired_opening_kills_child_and_keeps_errors_tail() {
     let input = Token::new(9);
     let output = Token::new(10);
     let error = Token::new(11);
-    let mut process = crate::Process::new(agent, &process_limits(), 4).expect("channel");
+    let mut process = crate::Process::new(agent, &process_limits(), 4, endpoints()).expect("channel");
     let io_owner = process.io_owner();
     let mut below = Queue::with_capacity(16);
     let mut above = Queue::with_capacity(8);
@@ -243,7 +268,7 @@ fn host_stop_signals_keep_the_child_identity() {
 
     let agent = Token::new(7);
     let child = Token::new(8);
-    let mut process = crate::Process::new(agent, &process_limits(), 4).expect("channel");
+    let mut process = crate::Process::new(agent, &process_limits(), 4, endpoints()).expect("channel");
     let io_owner = process.io_owner();
     let mut below = Queue::with_capacity(16);
     let mut above = Queue::with_capacity(8);
@@ -263,4 +288,46 @@ fn host_stop_signals_keep_the_child_identity() {
         Some(IoRequest::Signal { child, to: kernel::Target::Child, signal: kernel::Signal::Terminate })
     );
     assert_eq!(below.pop(), Some(IoRequest::Signal { child, to: kernel::Target::Child, signal: kernel::Signal::Kill }));
+}
+
+fn endpoints() -> smith_protocol_channel::Endpoints {
+    let mut names = skein_lib::List::with_capacity(1);
+    names
+        .push(smith_protocol_channel::Endpoint { name: Box::new([]), number: 0, dialect: 0, account: 0 })
+        .expect("one endpoint");
+    smith_protocol_channel::Endpoints::new(names)
+}
+
+#[test]
+fn a_delivery_ask_decodes_into_its_named_values_before_domain_ingress() {
+    use alloc::boxed::Box;
+    use skein_lib::{Duration, List};
+    use smith_channel as wire;
+    use smith_domain::run::outcome::{Change, Field};
+
+    let limits = wire::CEILINGS;
+    let source = Change { fields: Box::new([Field { name: Box::from(*b"ticket"), value: Box::from(*b"host value") }]) };
+    let mut fields = List::with_capacity(1);
+    fields
+        .push(
+            wire::Field::new(
+                &limits,
+                wire::FieldParts { name: source.fields[0].name.clone(), text: source.fields[0].value.clone() },
+            )
+            .expect("bounded field"),
+        )
+        .expect("one field");
+    let ask = wire::Ask::Deliver(wire::DeliverAsk::new(&limits, wire::DeliverAskParts { fields }).expect("delivery"));
+    let name = wire::CallName::new(&limits, wire::CallNameParts { activation: 1, completion: 2, position: 3 })
+        .expect("call name");
+    let record = wire::Call::new(
+        &limits,
+        wire::CallParts { name, effect: wire::Effect::Write, deadline: Duration::from_secs(30), ask },
+    )
+    .expect("call envelope");
+    let Some(smith_host_domain::Ask::Deliver { fields }) = crate::translate::decode_ask(&record).expect("typed ask")
+    else {
+        panic!("delivery enters the typed parent face")
+    };
+    assert_eq!(fields.into_value(), source);
 }

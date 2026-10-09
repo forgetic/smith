@@ -520,14 +520,11 @@ fn valid_start(start: &Start, limits: &Limits) -> Option<Invalid> {
     if start.activation == 0 {
         return Some(Invalid::Activation);
     }
-    if !within(&start.charter, limits.charter_bytes) {
+    if start.charter.owned_bytes() > limits.charter_bytes {
         return Some(Invalid::Charter);
     }
     let transcript_fits = match &start.transcript {
-        Some(transcript) => match transcript_bytes(transcript) {
-            Some(bytes) => bytes <= limits.transcript_bytes,
-            None => false,
-        },
+        Some(transcript) => transcript.owned_bytes() <= limits.transcript_bytes && transcript.value().turns.len() <= 64,
         None => true,
     };
     if !transcript_fits {
@@ -610,17 +607,6 @@ fn safe_name(name: &[u8]) -> bool {
 
 fn within(bytes: &[u8], limit: u64) -> bool {
     u64::try_from(bytes.len()).expect("length fits u64") <= limit
-}
-
-fn transcript_bytes(turns: &[Box<[u8]>]) -> Option<u64> {
-    if turns.len() > 64 {
-        return None;
-    }
-    let mut total = 0_u64;
-    for turn in turns {
-        total = total.checked_add(u64::try_from(turn.len()).ok()?)?;
-    }
-    Some(total)
 }
 
 fn answered_bytes(calls: &[AnsweredCall], name_bytes: u32) -> Option<u64> {
@@ -938,7 +924,7 @@ fn receive(agent: &mut Agent, owner: Token, message: Up, env: &Env<Limits>, out:
             mark_read(agent, turn.read);
             agent.number = turn.number;
             agent.spent = turn.spent;
-            let bytes = u64::try_from(turn.body.len()).expect("bounded turn length");
+            let bytes = turn.body.owned_bytes();
             agent.turn_bytes = agent.turn_bytes.checked_add(bytes).expect("validated byte credit");
             agent
                 .turns
@@ -1026,12 +1012,12 @@ fn too_large(message: &Up, limits: &Limits) -> bool {
             Ask::Host { tool, body, .. } => {
                 !within(tool, u64::from(limits.name_bytes)) || !within(body, limits.call_bytes)
             }
-            Ask::Deliver { fields } => !within(fields, limits.call_bytes),
+            Ask::Deliver { fields } => fields.owned_bytes() > limits.call_bytes,
         },
-        Up::Turn { turn } => !within(&turn.body, limits.turn_bytes),
+        Up::Turn { turn } => turn.body.owned_bytes() > limits.turn_bytes,
         Up::Fact { body } => !within(body, limits.fact_bytes),
         Up::Answer { answer } => match &answer.result {
-            RunResult::Accepted { outcome } => !within(outcome, limits.outcome_bytes),
+            RunResult::Accepted { outcome } => outcome.owned_bytes() > limits.outcome_bytes,
             RunResult::Refused { .. } | RunResult::Parked | RunResult::Failed { .. } => false,
         },
         Up::Admitted
@@ -1074,7 +1060,7 @@ fn valid_record(agent: &Agent, message: &Up, env: &Env<Limits>) -> bool {
                     Kind::Host
                 }
                 Ask::Deliver { fields } => {
-                    if !within(fields, limits.call_bytes) {
+                    if fields.owned_bytes() > limits.call_bytes {
                         return false;
                     }
                     Kind::Delivery
@@ -1125,9 +1111,9 @@ fn valid_record(agent: &Agent, message: &Up, env: &Env<Limits>) -> bool {
                 && agent.number.checked_add(1) == Some(turn.number)
                 && valid_spend(agent, turn.spent)
                 && known_read(agent, turn.read)
-                && within(&turn.body, limits.turn_bytes)
+                && turn.body.owned_bytes() <= limits.turn_bytes
                 && agent.turns.len() < limits.turns
-                && match agent.turn_bytes.checked_add(u64::try_from(turn.body.len()).expect("bounded payload length")) {
+                && match agent.turn_bytes.checked_add(turn.body.owned_bytes()) {
                     Some(bytes) => bytes <= limits.unacknowledged_bytes,
                     None => false,
                 }
@@ -1163,7 +1149,7 @@ fn valid_answer(agent: &Agent, answer: &crate::Answer, limits: &Limits) -> bool 
     }
     match &answer.result {
         RunResult::Refused { .. } => !agent.admitted && answer.turns == 0 && answer.spent == 0,
-        RunResult::Accepted { outcome } => agent.admitted && within(outcome, limits.outcome_bytes),
+        RunResult::Accepted { outcome } => agent.admitted && outcome.owned_bytes() <= limits.outcome_bytes,
         RunResult::Parked | RunResult::Failed { .. } => agent.admitted,
     }
 }

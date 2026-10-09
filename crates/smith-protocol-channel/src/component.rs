@@ -110,7 +110,7 @@ pub struct Component {
 impl Component {
     /// Build one channel with configured endpoint names and either stream shape.
     pub fn new(limits: &Limits, mode: StreamMode, endpoints: Endpoints) -> Result<Component, Error> {
-        if !endpoints.fits(limits.endpoints) {
+        if !endpoints.fits(limits.endpoints, limits.charter.llm_endpoint) {
             return Err(Error::Endpoints);
         }
         let schema = match smith_channel::schema(&limits.bodies) {
@@ -345,9 +345,7 @@ impl Component {
         }
         let body = encode_turn(turn, &self.transcript, &self.endpoints)?;
         let window = self.window.ok_or(Error::Order)?;
-        let Ok(body_bytes) = u64::try_from(body.len()) else {
-            return Err(Error::Window);
-        };
+        let body_bytes = turn.owned_bytes().ok_or(Error::Window)?;
         let next = self.last_sent_turn.checked_add(1).ok_or(Error::Window)?;
         let held_bytes = self.held_turn_bytes.checked_add(body_bytes).ok_or(Error::Window)?;
         if number != next || self.turns.len() >= window.turns || held_bytes > window.bytes {

@@ -1,18 +1,16 @@
-//! Turn the wire last word into the host domain's typed result while leaving
-//! accepted outcome bytes opaque (protocol/channel.md, sections 4 and 5;
+//! Turn the wire last word into the host domain's concrete result (protocol/channel.md, sections 4 and 5;
 //! domain/host.md, sections 2 and 6).
 //!
 //! This module keeps no state, never learns policy or credential values, and
 //! enters through `decode_answer` after the channel body decoder succeeds.
 
-use alloc::boxed::Box;
 use smith_channel as wire;
 use smith_host_domain::channel as host;
 
 use crate::Error;
 
-#[expect(clippy::manual_map, reason = "the protocol subset keeps option projection exhaustive")]
-pub(crate) fn decode_answer(record: &wire::Answer) -> Result<host::Answer, Error> {
+#[expect(clippy::manual_map, clippy::manual_let_else, reason = "exhaustive result and fence decoding")]
+pub(crate) fn decode_answer(record: &wire::Answer, limits: &smith_charter::v2::Limits) -> Result<host::Answer, Error> {
     let result = match record.result() {
         wire::RunResult::Refused(refused) => {
             let refusal = match refused.reason() {
@@ -21,7 +19,15 @@ pub(crate) fn decode_answer(record: &wire::Answer) -> Result<host::Answer, Error
             };
             host::RunResult::Refused { refusal }
         }
-        wire::RunResult::Accepted(accepted) => host::RunResult::Accepted { outcome: Box::from(accepted.result()) },
+        wire::RunResult::Accepted(accepted) => {
+            let value = match smith_protocol_channel::decode_declared(accepted.result(), limits) {
+                Ok(value) => value,
+                Err(_) => return Err(Error::InvalidAnswer),
+            };
+            host::RunResult::Accepted {
+                outcome: smith_host_domain::Declared::new(value, u64::MAX).ok_or(Error::InvalidAnswer)?,
+            }
+        }
         wire::RunResult::Parked => host::RunResult::Parked,
         wire::RunResult::Failed(failed) => host::RunResult::Failed { failure: failure(failed.reason())? },
     };

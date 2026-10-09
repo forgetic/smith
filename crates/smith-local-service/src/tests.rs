@@ -41,6 +41,9 @@ fn config() -> Config {
         },
         channel: smith_host_protocol::Limits {
             bodies: agent_limits.channel.bodies,
+            charter: agent_limits.channel.charter,
+            transcript: agent_limits.channel.transcript,
+            endpoints: agent_limits.channel.endpoints,
             channel: agent_limits.channel.channel,
             calls: host_limits.calls,
         },
@@ -73,7 +76,6 @@ fn config() -> Config {
             push: None,
         },
         limits: Limits { local: local_limits, host: host_limits, process, queue },
-        charter: Box::new([]),
         endpoints: smith_protocol_channel::Endpoints::new(List::with_capacity(0)),
         paths: Box::new([]),
         launch: Launch {
@@ -117,7 +119,8 @@ fn original_conflict_files_are_read_through_the_services_kernel_routes() {
     let pid = sim.spawn_process();
     let root = sim.root(pid, skein_sim::Handle::new(handle.raw()));
     let config = config();
-    let mut process = crate::process::ProcessAdapter::new(config.limits.process, config.launch).unwrap();
+    let mut process =
+        crate::process::ProcessAdapter::new(&config.limits.process, config.launch, config.endpoints).unwrap();
     process.adopt_delivery_roots(Box::new([root]), Box::new([]));
     let mut local_events = Queue::with_capacity(256);
     let mut host_events = Queue::with_capacity(256);
@@ -214,7 +217,8 @@ fn plain_status_uses_the_runs_snapshot_and_refreshes_it_before_the_next_run() {
     let pid = sim.spawn_process();
     let root = sim.root(pid, skein_sim::Handle::new(handle.raw()));
     let config = config();
-    let mut process = crate::process::ProcessAdapter::new(config.limits.process, config.launch).unwrap();
+    let mut process =
+        crate::process::ProcessAdapter::new(&config.limits.process, config.launch, config.endpoints).unwrap();
     process.adopt_delivery_roots(Box::new([root]), Box::new([]));
     let mut events = Queue::with_capacity(256);
     let mut directories = List::with_capacity(1);

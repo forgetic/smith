@@ -29,6 +29,8 @@ mod facts;
 
 mod limits;
 
+mod values;
+
 #[cfg(test)]
 mod tests;
 
@@ -50,3 +52,5 @@ pub use domain::{Domain, fire, max_out, step};
 pub use facts::Fact;
 
 pub use limits::{Limits, worst_case};
+
+pub use values::{Charter, Declared, Fields, Transcript, TurnValue};

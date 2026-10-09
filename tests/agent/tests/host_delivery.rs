@@ -82,11 +82,9 @@ fn forward(agent: &Agent, host: &mut Host, next: &mut usize) {
         match seen {
             Seen::Admitted => host.up(Up::Admitted),
             Seen::Turn { number, read, spent, turn } => {
-                let body = format!("{turn:?}").into_bytes();
-                assert!(body.len() <= 65_536);
-                host.up(Up::Turn {
-                    turn: host::Turn { number: *number, read: *read, spent: spent.units, body: body.into() },
-                });
+                let body = host::TurnValue::new(turn.clone(), u64::MAX).expect("actual bounded turn");
+                assert!(body.owned_bytes() <= 65_536);
+                host.up(Up::Turn { turn: host::Turn { number: *number, read: *read, spent: spent.units, body } });
                 if *number == 1 {
                     host.event(Input::Parent(parent::Event::Acknowledge { agent: host.agent(), turn: 1 }));
                     assert!(host.lower.contains(Lower::Send), "actual early ACK send is retained");
@@ -122,13 +120,8 @@ fn submitted(agent: &mut Agent, host: &mut Host, next: &mut usize) -> DeliverySu
     assert!(field.value.len() <= 128, "actual charter field cap");
     assert_eq!(agent.checked(), [true]);
     assert_eq!(agent.code(), b"pub fn answer() -> u32 { 43 }\n");
-    let fields = format!("{:?}", submission.change).into_bytes();
-    assert_eq!(
-        fields,
-        format!("Change {{ fields: [Field {{ name: {:?}, value: {:?} }}] }}", b"ticket", b"opaque-host-value")
-            .into_bytes()
-    );
-    assert!(fields.len() <= 4096, "actual host receiving cap");
+    let fields = host::Fields::new(submission.change.clone(), 4096).expect("bounded delivery fields");
+    assert_eq!(fields.value(), &submission.change);
     let expected_called = format!(
         "down Parent(Called {{ client: {:?}, logical_run: {:?}, call: {:?}, name: {:?}, deadline: {:?}, ask: Deliver {{ fields: {:?} }} }})",
         Token::new(1),
@@ -146,7 +139,7 @@ fn submitted(agent: &mut Agent, host: &mut Host, next: &mut usize) -> DeliverySu
             position: submission.name.position,
         },
         deadline: submission.deadline,
-        ask: host::Ask::Deliver { fields: fields.into() },
+        ask: host::Ask::Deliver { fields },
     });
     assert!(
         host.trace.lines().iter().any(|line| line.ends_with(&expected_called)),

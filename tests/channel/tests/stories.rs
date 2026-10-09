@@ -164,7 +164,7 @@ fn the_full_charter_keeps_contracts_tools_and_model_prices() {
 }
 
 #[test]
-fn an_accepted_report_keeps_its_fields_in_charter_v1() {
+fn an_accepted_report_keeps_its_fields_in_charter_v2() {
     let result = smith_domain::run::outcome::Declared::Report(smith_domain::run::outcome::Report {
         text: Box::from(*b"done"),
         fields: Box::from([smith_domain::run::outcome::Field {
@@ -451,8 +451,8 @@ fn a_run_parked_resumed_and_parked_again_numbers_turns_per_activation() {
             logical_run: skein_lib::Token::new(1),
             activation: 2,
             workspace: None,
-            charter,
-            transcript: Some(Box::from([saved])),
+            charter: smith_channel_world::typed_charter(&charter),
+            transcript: smith_channel_world::typed_transcript(&[saved]),
             answered: Box::default(),
             directories: Box::default(),
             grants: Box::default(),
@@ -846,7 +846,7 @@ fn a_host_tool_answered_as_the_channel_is_lost_is_asked_again_under_its_name() {
             logical_run: skein_lib::Token::new(1),
             activation: 2,
             workspace: None,
-            charter,
+            charter: smith_channel_world::typed_charter(&charter),
             transcript: None,
             answered: Box::default(),
             directories: Box::default(),
@@ -919,16 +919,14 @@ fn a_delivery_keeps_fields_and_a_settled_landing_or_stale_terminal() {
     world.settle();
     let fields = world.observations().iter().find_map(|observation| match observation {
         Observation::HostCall { call, ask: boxed, .. } if *call == skein_lib::Token::new(1) => match boxed.as_ref() {
-            smith_host_domain::channel::Ask::Deliver { fields } => Some(fields.as_ref()),
+            smith_host_domain::channel::Ask::Deliver { fields } => Some(fields.value()),
             smith_host_domain::channel::Ask::Host { .. } => None,
         },
         _ => None,
     });
     let fields = fields.expect("host receives generic delivery fields");
-    let decoded = smith_channel::DeliverAsk::decode(&CEILINGS, &mut skein_lib::Reader::new(fields))
-        .expect("bounded structured fields");
-    assert_eq!(decoded.fields().get(0).expect("title").name(), b"title");
-    assert_eq!(decoded.fields().get(0).expect("title").text(), b"Fix");
+    assert_eq!(fields.fields[0].name.as_ref(), b"title");
+    assert_eq!(fields.fields[0].value.as_ref(), b"Fix");
     let receipt = smith_host_domain::Receipt::new(0, Box::from(*b"commit-1")).expect("bounded receipt");
     let landed = smith_host_domain::Delivered::new(Box::from([receipt])).expect("one receipt");
     world.host_answers(
@@ -985,4 +983,44 @@ fn a_fact_projects_its_emission_time_relative_to_the_activation_start() {
         elapsed: skein_lib::Duration::from_nanos(8),
         count: 1,
     }));
+}
+
+#[cfg(test)]
+mod charter_round_trip {
+    use skein_lib::{List, Reader};
+    use smith_protocol_channel::{Endpoints, encode_charter};
+
+    #[test]
+    fn complete_charter_policy_round_trips_without_local_contract_assumptions() {
+        let bytes = include_bytes!("../../../crates/smith-charter/golden/v2/record_charter_full.bin");
+        let wire =
+            smith_charter::Charter::decode(&smith_charter::CEILINGS, &mut Reader::new(bytes)).expect("full golden");
+        let mut names = List::with_capacity(16);
+        names
+            .push(smith_protocol_channel::Endpoint {
+                name: Box::from(wire.main().endpoint()),
+                number: 0,
+                dialect: 0,
+                account: 0,
+            })
+            .expect("main endpoint");
+        for model in wire.models() {
+            if model.endpoint() != wire.main().endpoint() {
+                let number = names.len();
+                names
+                    .push(smith_protocol_channel::Endpoint {
+                        name: Box::from(model.endpoint()),
+                        number,
+                        dialect: 0,
+                        account: number,
+                    })
+                    .expect("child endpoint");
+            }
+        }
+        let endpoints = Endpoints::new(names);
+        let policy = smith_protocol_channel::decode_charter(bytes, &smith_charter::CEILINGS, &endpoints)
+            .expect("typed full policy");
+        let encoded = encode_charter(&policy, &smith_charter::CEILINGS, &endpoints).expect("full policy encodes");
+        assert_eq!(smith_protocol_channel::decode_charter(&encoded, &smith_charter::CEILINGS, &endpoints), Ok(policy));
+    }
 }

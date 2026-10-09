@@ -86,10 +86,15 @@ pub fn process_worst_case(limits: &Limits, detail_bytes: u32) -> Option<u64> {
 
 impl Process {
     /// Construct one process half, including its framed pipe channel.
-    pub fn new(agent: Token, limits: &Limits, detail_bytes: u32) -> Result<Process, Error> {
+    pub fn new(
+        agent: Token,
+        limits: &Limits,
+        detail_bytes: u32,
+        endpoints: smith_protocol_channel::Endpoints,
+    ) -> Result<Process, Error> {
         assert!(agent.raw() < (1_u64 << 63_u32), "domain owner fits the process-owner namespace");
         Ok(Process {
-            channel: Component::new(limits, StreamMode::Two)?,
+            channel: Component::new(limits, StreamMode::Two, endpoints)?,
             agent,
             io_owner: Token::new(agent.raw() | (1_u64 << 63_u32)),
             phase: Phase::Idle,

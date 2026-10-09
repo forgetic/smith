@@ -43,6 +43,8 @@ pub enum Error {
     ResultCapacity,
     /// A saved answer decodes but fails the domain's sealed result bounds.
     InvalidSavedAnswer,
+    /// A result or delivery record does not form the concrete typed value.
+    InvalidResult,
     /// A concrete turn cannot be written to the durable transcript format.
     Transcript(smith_domain_session::record::Refusal),
     /// A concrete turn exceeds the transcript codec bounds.

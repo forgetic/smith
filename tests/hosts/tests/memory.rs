@@ -16,14 +16,23 @@ mod tests {
     #[test]
     fn spawned_process_and_its_channel_fit_the_checked_memory_bound() {
         let agent = agent_fixture::limits();
-        let limits = host::Limits { bodies: agent.channel.bodies, channel: agent.channel.channel, calls: 8 };
+        let limits = host::Limits {
+            bodies: agent.channel.bodies,
+            charter: agent.channel.charter,
+            transcript: agent.channel.transcript,
+            endpoints: agent.channel.endpoints,
+            channel: agent.channel.channel,
+            calls: 8,
+        };
         let bound = host::process_worst_case(&limits, 32)
             .expect("checked process bound")
             .checked_add(Queue::<io::Request>::worst_case(8).expect("bounded output queue"))
             .expect("combined process bound");
         let meter = Meter::new();
         meter.start();
-        let mut process = host::Process::new(Token::new(1), &limits, 32).expect("bounded process");
+        let mut process =
+            host::Process::new(Token::new(1), &limits, 32, agent_fixture::configuration().channel_endpoints)
+                .expect("bounded process");
         let mut below = Queue::with_capacity(8);
         process.spawn(
             host::Launch {

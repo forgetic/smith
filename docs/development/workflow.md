@@ -701,3 +701,13 @@ Version-two charter goldens and seeded wire mutations retain distinct window
 and output quantities. The full workspace passed 1,568 focused tests in
 3.119 seconds and 21 fuzzy tests in 3.709 seconds, with no skips. Formatting
 and all-target Clippy passed. Workspace budgets remain unchanged.
+
+Reliability inline increment 3.2 was measured through the serial heavy queue
+on 2026-10-09 with `measure -j 1`: the affected host, channel, local protocol,
+local service, local settings and local process packages passed 254 focused
+tests in 4.304 seconds, with no skips. The five affected world fuzzy tests
+passed serially in 5.086 seconds. These existing worlds now compare typed
+parent values, including full ownership-cap turns, decoded delivery fields,
+charter/history round trips and malformed bodies refused before domain
+ingress. The store's durable turn format and goldens are unchanged. Workspace
+focused and fuzzy budgets remain unchanged.

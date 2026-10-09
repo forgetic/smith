@@ -1,6 +1,5 @@
 //! Live composition: each loop round drives the root/run/session/shared
-//! fake, then translates its actual outputs into the host kit. Opaque turn
-//! bytes use a test-only full Debug record, not a claimed production codec.
+//! fake, then moves its actual typed outputs into the host kit.
 //! Parent commitment and lower IO rights remain independent of agent settlement.
 //! Contract: domain/host.md, sections 6 and 9; domain/run.md, sections 6 and 13;
 //! testing-strategy.md, sections 2.3, 6 and 7.
@@ -24,7 +23,7 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
                     number: *number,
                     read: *read,
                     spent: spent.units,
-                    body: format!("{turn:?}").into_bytes().into(),
+                    body: host::TurnValue::new(turn.clone(), u64::MAX).expect("actual bounded turn"),
                 },
             });
             if *number == 2 {
@@ -119,8 +118,7 @@ fn host_turn_ack_and_send_rights_survive_root_parking_and_exit_tree_empty_eof() 
     let run::Answer::Parked { spent, turns } = agent.answer() else { panic!("the actual final root word is Parked") };
     assert_accounting(host.seen.answer.as_ref().expect("actual forwarded answer"), *turns, *spent);
     assert_eq!(host.seen.turns.keys().copied().collect::<Vec<_>>(), [1, 3]);
-    let actual_first = format!("{:?}", agent.turns()[0]).into_bytes();
-    assert_eq!(host.seen.turns[&1].as_ref(), actual_first.as_slice(), "parent retains the complete actual record");
+    assert_eq!(host.seen.turns[&1].value(), &agent.turns()[0], "parent retains the complete actual record");
 
     let owner = host.owner();
     host.event(Input::Process(process::Event::Exited { owner }));
@@ -200,7 +198,7 @@ fn child_completions_and_raw_usage_cross_the_host_final_answer_once() {
                         number: *number,
                         read: *read,
                         spent: spent.units,
-                        body: format!("{turn:?}").into_bytes().into(),
+                        body: host::TurnValue::new(turn.clone(), u64::MAX).expect("actual bounded turn"),
                     },
                 });
                 host.event(Input::Parent(parent::Event::Acknowledge { agent: host.agent(), turn: *number }));

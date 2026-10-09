@@ -20,8 +20,8 @@ fn maximum_start(limits: Limits) -> Start {
         logical_run: Token::new(7),
         activation: 1,
         workspace: (limits.directories > 0).then_some(Token::new(8)),
-        charter: bytes(limits.charter_bytes),
-        transcript: Some(Box::new([bytes(limits.transcript_bytes)])),
+        charter: smith_host_world::charter_value(limits.charter_bytes),
+        transcript: Some(smith_host_world::transcript_value(limits.transcript_bytes)),
         answered: if limits.answered_bytes > 0 {
             Box::new([AnsweredCall {
                 name: CallName { activation: 1, completion: 1, position: 0 },
@@ -234,7 +234,12 @@ fn maximum_v2_starts_and_full_queued_replies_fit_every_slot() {
                 measured.up(
                     owner,
                     Up::Turn {
-                        turn: Turn { number, spent: u64::from(number), read: None, body: bytes(limits.turn_bytes) },
+                        turn: Turn {
+                            number,
+                            spent: u64::from(number),
+                            read: None,
+                            body: smith_host_world::turn_value(limits.turn_bytes),
+                        },
                     },
                 );
                 measured.step(Input::Parent(parent::Event::Acknowledge { agent: owner, turn: number }), false);
@@ -318,7 +323,7 @@ fn delivery_replies_and_shutdown_rights_stay_priced() {
                 call: Token::new(20),
                 name: CallName { activation: 1, completion, position: 0 },
                 deadline: Time::ZERO.saturating_add(Duration::from_secs(5)),
-                ask: Ask::Deliver { fields: bytes(limits.call_bytes) },
+                ask: Ask::Deliver { fields: smith_host_world::fields_value(limits.call_bytes) },
             },
         );
         measured.step(
@@ -339,7 +344,7 @@ fn delivery_replies_and_shutdown_rights_stay_priced() {
             call: Token::new(21),
             name: CallName { activation: 1, completion: 3, position: 0 },
             deadline: Time::ZERO.saturating_add(Duration::from_secs(5)),
-            ask: Ask::Deliver { fields: bytes(limits.call_bytes) },
+            ask: Ask::Deliver { fields: smith_host_world::fields_value(limits.call_bytes) },
         },
     );
     measured.fire(5);

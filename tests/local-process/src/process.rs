@@ -115,7 +115,6 @@ pub fn configuration_with_tools(
     let settings: local_settings::Settings = serde_json::from_value(source).expect("host settings");
     let endpoints = lower.channel_endpoints.clone();
     let policy = local_settings::policy(&settings, &endpoints, lower.limits.domain).expect("host charter policy");
-    let charter = local_settings::charter(&policy.config, &endpoints).expect("wire charter");
     let mut host = smith_host_world::limits();
     host.accounts = 1;
     host.charter_bytes = 65_536;
@@ -134,6 +133,9 @@ pub fn configuration_with_tools(
         io: lower.limits.io,
         channel: smith_host_protocol::Limits {
             bodies: lower.limits.channel.bodies,
+            charter: lower.limits.channel.charter,
+            transcript: lower.limits.channel.transcript,
+            endpoints: lower.limits.channel.endpoints,
             channel: lower.limits.channel.channel,
             calls: host.calls,
         },
@@ -144,7 +146,6 @@ pub fn configuration_with_tools(
         service::Config {
             local: policy.config,
             limits: service::Limits { local: policy.limits, host, process, queue },
-            charter,
             endpoints,
             paths: policy.paths,
             launch: service::Launch {

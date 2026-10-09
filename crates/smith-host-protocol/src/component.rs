@@ -59,7 +59,7 @@ pub enum OpenEvent {
     Long { span: Duration },
     /// The run ended its previously announced long operation.
     LongDone,
-    /// One concrete turn's opaque transcript bytes and checked envelope.
+    /// One concrete turn and its checked host envelope.
     Turn { turn: channel::Turn },
     /// One content-free, best-effort fact kept in its bounded wire body.
     Fact { body: Box<[u8]> },
@@ -89,11 +89,22 @@ pub struct Component {
     next_call: u64,
     now: Time,
     cancelled: bool,
+    endpoints: smith_protocol_channel::Endpoints,
+    charter: smith_charter::v2::Limits,
+    transcript: smith_transcript::v2::Limits,
+    sequence: u32,
 }
 
 impl Component {
     /// Build one channel with a pipe pair or one socket-like stream.
-    pub fn new(limits: &Limits, mode: StreamMode) -> Result<Component, Error> {
+    pub fn new(
+        limits: &Limits,
+        mode: StreamMode,
+        endpoints: smith_protocol_channel::Endpoints,
+    ) -> Result<Component, Error> {
+        if !endpoints.fits(limits.endpoints, limits.charter.llm_endpoint) {
+            return Err(Error::Value);
+        }
         let schema = match smith_channel::schema(&limits.bodies) {
             Ok(schema) => schema,
             Err(error) => return Err(Error::Codec(error)),
@@ -114,6 +125,10 @@ impl Component {
             next_call: 1,
             now: Time::ZERO,
             cancelled: false,
+            endpoints,
+            charter: limits.charter,
+            transcript: limits.transcript,
+            sequence: 0,
         })
     }
 
@@ -138,10 +153,19 @@ impl Component {
         to_service: &mut Queue<OpenEvent>,
         below: &mut Queue<Lower>,
     ) -> Result<(), Error> {
-        let frame = encode_start(start, window, values, &self.bodies)?;
+        let sequence = match &start.transcript {
+            Some(history) => match history.value().turns.last() {
+                Some(turn) => turn.sequence,
+                None => 0,
+            },
+            None => 0,
+        };
+        let frame =
+            encode_start(start, window, values, &self.bodies, &self.charter, &self.transcript, &self.endpoints)?;
         if self.phase != Phase::Opened {
             return Err(Error::MissingValue);
         }
+        self.sequence = sequence;
         self.phase = Phase::Started;
         self.machine.down(Request::Send { token, frame }, &mut self.events, below);
         self.drain(to_service, below);
@@ -426,18 +450,36 @@ impl Component {
                     0x0109 if self.phase == Phase::Admitted => {
                         match smith_channel::Turn::decode(&self.bodies, &mut Reader::new(&body)) {
                             Ok(turn) => {
-                                to_service.push(OpenEvent::Turn {
-                                    turn: channel::Turn {
-                                        number: turn.number(),
-                                        spent: turn.spent(),
-                                        read: match turn.last_read() {
-                                            Some(name) => Some(Token::new(*name)),
-                                            None => None,
-                                        },
-                                        body: Box::from(turn.body()),
-                                    },
-                                });
-                                self.machine.down(Request::Read, &mut self.events, below);
+                                let decoded = match self.sequence.checked_add(1) {
+                                    Some(sequence) => smith_protocol_channel::decode_turn(
+                                        turn.body(),
+                                        sequence,
+                                        &self.transcript,
+                                        &self.endpoints,
+                                    )
+                                    .ok(),
+                                    None => None,
+                                };
+                                match decoded {
+                                    Some(value) => {
+                                        self.sequence = value.sequence;
+                                        let body = smith_host_domain::TurnValue::new(value, u64::MAX)
+                                            .expect("codec bounds ensure representable ownership");
+                                        to_service.push(OpenEvent::Turn {
+                                            turn: channel::Turn {
+                                                number: turn.number(),
+                                                spent: turn.spent(),
+                                                read: match turn.last_read() {
+                                                    Some(name) => Some(Token::new(*name)),
+                                                    None => None,
+                                                },
+                                                body,
+                                            },
+                                        });
+                                        self.machine.down(Request::Read, &mut self.events, below);
+                                    }
+                                    None => self.refuse_rules(below),
+                                }
                             }
                             Err(_) => self.refuse_rules(below),
                         }
@@ -512,7 +554,7 @@ impl Component {
                                 | smith_channel::RunResult::Failed(_) => self.phase == Phase::Admitted,
                             };
                             if permitted {
-                                match decode_answer(&record) {
+                                match decode_answer(&record, &self.charter) {
                                     Ok(answer) => {
                                         self.phase = Phase::Answered;
                                         to_service.push(OpenEvent::Answer { answer, record });
@@ -583,5 +625,117 @@ fn hex(nibble: u8) -> u8 {
         b'0'.checked_add(nibble).expect("hex digit fits")
     } else {
         b'a'.checked_add(nibble.checked_sub(10).expect("letter digit")).expect("hex digit fits")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Component, Event, OpenEvent, Phase};
+    use alloc::boxed::Box;
+    use skein_channel::{Lower, LowerEvent, StreamMode};
+    use skein_lib::{Queue, Writer, stream};
+
+    fn component() -> Component {
+        let mut names = skein_lib::List::with_capacity(1);
+        names
+            .push(smith_protocol_channel::Endpoint { name: Box::new([]), number: 0, dialect: 0, account: 0 })
+            .expect("endpoint");
+        let limits = crate::Limits {
+            bodies: smith_channel::CEILINGS,
+            charter: smith_charter::CEILINGS,
+            transcript: smith_transcript::CEILINGS,
+            endpoints: 1,
+            calls: 1,
+            channel: skein_channel::Limits {
+                chunk: 8,
+                credential: 0,
+                skip: 8,
+                output_bytes: u32::MAX,
+                output_frames: 2,
+                kinds: 18,
+            },
+        };
+        let mut component =
+            Component::new(&limits, StreamMode::Two, smith_protocol_channel::Endpoints::new(names)).expect("component");
+        component.phase = Phase::Admitted;
+        component
+    }
+
+    fn turn_body(payload: Box<[u8]>) -> Box<[u8]> {
+        let record = smith_channel::Turn::new(
+            &smith_channel::CEILINGS,
+            smith_channel::TurnParts { number: 1, spent: 2, last_read: None, body: payload },
+        )
+        .expect("envelope");
+        let mut writer = Writer::new(usize::try_from(record.measure()).expect("measure"));
+        record.encode(&mut writer).expect("encode");
+        writer.finish()
+    }
+
+    fn accepted_body(payload: Box<[u8]>) -> Box<[u8]> {
+        let result =
+            smith_channel::Accepted::new(&smith_channel::CEILINGS, smith_channel::AcceptedParts { result: payload })
+                .expect("accepted");
+        let result =
+            smith_channel::RunResult::new(&smith_channel::CEILINGS, smith_channel::RunResult::Accepted(result))
+                .expect("result");
+        let record = smith_channel::Answer::new(
+            &smith_channel::CEILINGS,
+            smith_channel::AnswerParts { turns: 0, spent: 0, last_read: None, result },
+        )
+        .expect("answer");
+        let mut writer = Writer::new(usize::try_from(record.measure()).expect("measure"));
+        record.encode(&mut writer).expect("encode");
+        writer.finish()
+    }
+
+    #[test]
+    fn malformed_typed_bodies_send_rules_before_the_domain_hears_payloads() {
+        for (kind, body) in [
+            (0x0109, turn_body(Box::from(&b"malformed turn"[..]))),
+            (0x0110, accepted_body(Box::from(&b"malformed result"[..]))),
+        ] {
+            let mut component = component();
+            let mut above = Queue::with_capacity(8);
+            let mut below = Queue::with_capacity(16);
+            component.events.push(Event::Body { kind, body });
+            component.drain(&mut above, &mut below);
+            component.fire(&mut above, &mut below);
+            assert!(above.is_empty(), "malformed value never reaches the host domain");
+            let Some(Lower::Write(stream::OutputDown::Room { right, .. })) = below.pop() else {
+                panic!("rules refusal requests write room")
+            };
+            component.from_below(
+                LowerEvent::Write(stream::OutputUp::Settled { right, outcome: stream::OutputOutcome::Granted }),
+                &mut above,
+                &mut below,
+            );
+            let Some(Lower::Write(stream::OutputDown::Send { bytes, .. })) = below.pop() else {
+                panic!("rules refusal is sent")
+            };
+            assert_eq!(skein_channel::parse_header(&bytes[..8]).expect("header").kind, 3);
+            assert_eq!(u16::from_be_bytes([bytes[8], bytes[9]]), super::RULES);
+        }
+    }
+
+    #[test]
+    fn a_concrete_turn_and_result_reach_the_host_as_equal_values() {
+        let mut component = component();
+        let source = smith_host_world::turn_value(512).into_value();
+        let bytes = smith_protocol_channel::encode_turn(&source, &component.transcript, &component.endpoints)
+            .expect("turn codec");
+        let mut above = Queue::with_capacity(8);
+        let mut below = Queue::with_capacity(16);
+        component.events.push(Event::Body { kind: 0x0109, body: turn_body(bytes) });
+        component.drain(&mut above, &mut below);
+        let Some(OpenEvent::Turn { turn }) = above.pop() else { panic!("typed turn") };
+        assert_eq!(turn.body.into_value(), source);
+        let source = smith_host_world::declared_value(32).into_value();
+        let bytes = smith_protocol_channel::encode_result(&source, &component.charter).expect("result codec");
+        component.events.push(Event::Body { kind: 0x0110, body: accepted_body(bytes) });
+        component.drain(&mut above, &mut below);
+        let Some(OpenEvent::Answer { answer, .. }) = above.pop() else { panic!("typed result") };
+        let smith_host_domain::RunResult::Accepted { outcome } = answer.result else { panic!("accepted result") };
+        assert_eq!(outcome.into_value(), source);
     }
 }

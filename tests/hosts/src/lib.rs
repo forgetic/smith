@@ -136,7 +136,16 @@ fn start() -> host::Start {
         logical_run: Token::new(1),
         activation: 1,
         workspace: None,
-        charter: agent_fixture::charter(),
+        charter: host::Charter::new(
+            smith_protocol_channel::decode_charter(
+                &agent_fixture::charter(),
+                &smith_charter::CEILINGS,
+                &agent_fixture::configuration().channel_endpoints,
+            )
+            .expect("typed fixture charter"),
+            host_limits().charter_bytes,
+        )
+        .expect("host charter bound"),
         transcript: None,
         answered: Box::new([]),
         directories: Box::new([]),
@@ -161,6 +170,9 @@ impl HostService {
             domain_owner: None,
             process_limits: protocol::Limits {
                 bodies: agent_limits.channel.bodies,
+                charter: agent_limits.channel.charter,
+                transcript: agent_limits.channel.transcript,
+                endpoints: agent_limits.channel.endpoints,
                 channel: agent_limits.channel.channel,
                 calls: domain_limits.calls,
             },
@@ -351,9 +363,13 @@ impl HostService {
         match request {
             host::Output::Process(host::process::Request::Spawn { owner, deadline, .. }) => {
                 self.domain_owner = Some(owner);
-                let mut process =
-                    protocol::Process::new(owner, &self.process_limits, self.domain_env.limits.detail_bytes)
-                        .expect("bounded host process");
+                let mut process = protocol::Process::new(
+                    owner,
+                    &self.process_limits,
+                    self.domain_env.limits.detail_bytes,
+                    agent_fixture::configuration().channel_endpoints,
+                )
+                .expect("bounded host process");
                 process.spawn(
                     protocol::Launch {
                         program: Box::from(&b"smith"[..]),

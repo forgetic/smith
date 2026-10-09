@@ -21,10 +21,12 @@
 extern crate alloc;
 
 mod calls;
+mod charter;
 mod component;
 mod credentials;
 mod facts;
 mod limits;
+mod result;
 mod transcript;
 mod translate;
 mod turn;
@@ -32,8 +34,10 @@ mod turn;
 #[cfg(test)]
 mod tests;
 
+pub use charter::encode_charter;
 pub use component::{Component, OpenEvent};
 pub use limits::{Error, Limits, MaxOut, max_out, worst_case};
+pub use result::decode_declared;
 pub use transcript::{decode_transcript, decode_turn};
 pub use translate::{
     DecodedStart, Endpoint, Endpoints, Grant, Mount, answer_record, decode_charter, encode_result, start_context,

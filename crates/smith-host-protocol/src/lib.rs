@@ -1,8 +1,9 @@
 //! Host's agent channel opening, Start and final answer (protocol/channel.md, sections 2, 3 and 5;
 //! domain/host.md, section 3).
 //!
-//! The component keeps Skein's framed channel and its run phase. It never
-//! knows credentials' values, host policy or stream handles. `new`, `open`,
+//! The component keeps Skein's framed channel, its run phase, transcript
+//! position and configured endpoint names. It never decides host policy or
+//! knows credential values or stream handles. `new`, `open`,
 //! `send_start`, `from_below` and `fire` accept stream events and return lower
 //! demands, admission and a decoded last word. A service attaches one component per agent.
 //!

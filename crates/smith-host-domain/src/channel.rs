@@ -1,10 +1,10 @@
 //! V2 typed host channel (domain/host.md, sections 2, 3, 6 and 7;
 //! protocol/channel.md, sections 3 and 7).
-//! Opaque payloads move; metadata controls sequence, spend, read fences and ACKs.
+//! Concrete parent values move; metadata controls sequence, spend, read fences and ACKs.
 //! No framing, secrets, policy decoding or V1 compatibility. All payloads are
 //! checked against receiving Limits before retained state changes. Durable decisions
 //! belong to the parent, which scopes `CallName` by the same logical run after restart.
-use crate::Delivery;
+use crate::{Charter, Declared, Delivery, Fields, Transcript, TurnValue};
 use alloc::boxed::Box;
 use skein_lib::{Duration, Time, Token};
 
@@ -27,10 +27,10 @@ pub struct Start {
     pub activation: u64,
     /// Optional prepared workspace resolved by the lower process adapter.
     pub workspace: Option<Token>,
-    /// Opaque charter at most `Limits::charter_bytes`.
-    pub charter: Box<[u8]>,
-    /// Opaque turn bodies, each kept as told, with aggregate `Limits::transcript_bytes`.
-    pub transcript: Option<Box<[Box<[u8]>]>>,
+    /// Checked charter ownership at most `Limits::charter_bytes`.
+    pub charter: Charter,
+    /// Concrete saved history with aggregate `Limits::transcript_bytes`.
+    pub transcript: Option<Transcript>,
     /// Calls answered after the last saved turn, bounded in aggregate.
     pub answered: Box<[AnsweredCall]>,
     /// At most `Limits::directories` unique named mounts.
@@ -121,8 +121,8 @@ pub struct Turn {
 
     /// Last named message actually sent and read; never a queued or unknown name.
     pub read: Option<Token>,
-    /// Opaque transcript turn at most `Limits::turn_bytes`.
-    pub body: Box<[u8]>,
+    /// Concrete transcript turn owning at most `Limits::turn_bytes`.
+    pub body: TurnValue,
 }
 
 /// Agent-described host tool effect forwarded to durable parent policy.
@@ -148,8 +148,8 @@ pub enum Ask {
     },
     /// Actual delivery of checked workspace; no cancellation after submission.
     Deliver {
-        /// Opaque generic metadata bounded by `Limits::call_bytes`, with no title/body assumption.
-        fields: Box<[u8]>,
+        /// Checked generic fields bounded by `Limits::call_bytes`.
+        fields: Fields,
     },
 }
 
@@ -416,7 +416,7 @@ pub enum RunInvalid {
     Endpoint,
 }
 
-/// Agent last-word result; Accepted bytes remain opaque to kit.
+/// Agent last-word result; the kit does not judge the accepted declaration.
 #[derive(PartialEq, Eq, Debug)]
 pub enum RunResult {
     /// Run refused before Admitted; requires zero turns/spend.
@@ -426,8 +426,8 @@ pub enum RunResult {
     },
     /// Agent-declared result allowed by its contract.
     Accepted {
-        /// Opaque result bounded by `Limits::outcome_bytes`.
-        outcome: Box<[u8]>,
+        /// Concrete declared result bounded by `Limits::outcome_bytes`.
+        outcome: Declared,
     },
     /// V2 parking resumes from transcript, with no snapshot.
     Parked,
@@ -451,7 +451,7 @@ pub struct Answer {
     /// refused starts have zero.
     pub spent: u64,
 
-    /// Opaque accepted result or typed refusal/parking/failure/delivery evidence.
+    /// Concrete accepted result or typed refusal, parking or failure.
     pub result: RunResult,
 }
 
@@ -513,19 +513,15 @@ pub enum Up {
     },
     /// Agent last word; no further records may follow before EOF.
     Answer {
-        /// Checked final counts and opaque or typed result.
+        /// Checked final counts and concrete result.
         answer: Answer,
     },
 }
 
 /// Owned V2 downlink; Start first, ordered controls and at most one Cancel.
 #[derive(PartialEq, Eq, Debug)]
-#[expect(
-    clippy::large_enum_variant,
-    reason = "sealed host diagnostic keeps a fixed inline tail; queue/state bounds price the full variant"
-)]
 pub enum Down {
-    /// First and exactly once; opaque payloads moved from Spawn.
+    /// First and exactly once; concrete values moved from Spawn.
     Start {
         /// Validated parent start including post-transcript answers.
         start: Start,

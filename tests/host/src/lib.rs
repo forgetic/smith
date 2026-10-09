@@ -57,7 +57,7 @@ pub struct Seen {
     /// Calls whose operation terminal still belongs to the parent.
     pub calls: BTreeSet<Token>,
     /// Turn payload bytes owned by the parent until its exact ACK.
-    pub turns: BTreeMap<u32, Box<[u8]>>,
+    pub turns: BTreeMap<u32, host::TurnValue>,
     /// Last read fence observed in an actual parent Turn or Waiting notice.
     pub read: Option<Token>,
     /// Actual parent Turn metadata: sequence, scalar prefix and independent
@@ -110,7 +110,7 @@ pub fn limits() -> Limits {
         name_bytes: 64,
         accounts: 2,
         charter_bytes: 256,
-        transcript_bytes: 256,
+        transcript_bytes: 1024,
         answered_bytes: 256,
         message_bytes: 64,
         messages: 3,
@@ -118,8 +118,8 @@ pub fn limits() -> Limits {
         call_bytes: 128,
         answer_bytes: host::Delivered::worst_case(),
         turns: 2,
-        turn_bytes: 64,
-        unacknowledged_bytes: 128,
+        turn_bytes: 512,
+        unacknowledged_bytes: 1024,
         fact_bytes: 64,
         outcome_bytes: 128,
         detail_bytes: 32,
@@ -141,8 +141,8 @@ pub fn start() -> Start {
         logical_run: Token::new(7),
         activation: 1,
         workspace: None,
-        charter: Box::from(&b"charter"[..]),
-        transcript: Some(Box::new([Box::from(&b"transcript"[..])])),
+        charter: charter_value(7),
+        transcript: Some(transcript_value(512)),
         answered: Box::new([smith_host_domain::AnsweredCall {
             name: smith_host_domain::CallName { activation: 1, completion: 1, position: 0 },
             tool: Box::from(&b"tool"[..]),
@@ -418,4 +418,116 @@ impl World {
             }
         }
     }
+}
+
+/// Typed policy with exactly the requested instruction ownership.
+#[must_use]
+pub fn charter_value(bytes: u64) -> host::Charter {
+    use smith_domain::run;
+    let value = run::Charter {
+        resume: false,
+        waiting: Duration::ZERO,
+        instructions: vec![b'x'; usize::try_from(bytes).expect("fixture size")].into_boxed_slice(),
+        brief: run::charter::Brief { sections: Box::new([]) },
+        conventions: None,
+        grants: run::charter::Grants {
+            wait: false,
+            deliver: None,
+            tools: run::charter::Tools { inspect: false, modify: false, shell: false },
+            agents: false,
+            host_tools: Box::new([]),
+        },
+        outcome: run::outcome::OutcomeSpec { change: None, verdicts: Box::new([]), report: None, failure: None },
+        budget: run::Budget { turns: 0, spend: 0, time: Duration::ZERO },
+        llm: run::charter::Llm {
+            prices: run::Prices { input: 0, cached: 0, output: 0, unit: 0 },
+            dialect: 0,
+            account: 0,
+            endpoint: run::charter::Endpoint(0),
+            model: Box::new([]),
+            window: 0,
+            output: 0,
+        },
+        models: Box::new([]),
+    };
+    host::Charter::new(value, bytes).expect("bounded charter fixture")
+}
+
+/// Concrete turn padded to the requested ownership when one message fits.
+#[must_use]
+pub fn turn_value(bytes: u64) -> host::TurnValue {
+    use smith_domain::session::{llm, record};
+    let overhead = u64::try_from(core::mem::size_of::<llm::Message>() + core::mem::size_of::<llm::Block>())
+        .expect("fixture footprint");
+    let messages = if bytes >= overhead {
+        Box::from([llm::Message {
+            role: llm::Role::Assistant,
+            content: Box::from([llm::Block::Text {
+                text: vec![b't'; usize::try_from(bytes - overhead).expect("fixture size")].into_boxed_slice(),
+                replay: None,
+            }]),
+        }])
+    } else {
+        Box::<[llm::Message]>::default()
+    };
+    host::TurnValue::new(
+        record::Turn {
+            version: record::VERSION,
+            endpoint: llm::Endpoint(0),
+            dialect: 0,
+            sequence: 1,
+            usage: llm::Usage::ZERO,
+            spent: 0,
+            messages,
+        },
+        bytes,
+    )
+    .expect("bounded turn fixture")
+}
+
+/// One saved concrete turn with exactly the requested retained ownership.
+#[must_use]
+pub fn transcript_value(bytes: u64) -> host::Transcript {
+    use smith_domain::session::{llm, record};
+    let turn_bytes = u64::try_from(core::mem::size_of::<record::Turn>()).expect("turn footprint");
+    let turns = if bytes >= turn_bytes {
+        Box::from([turn_value(bytes - turn_bytes).into_value()])
+    } else {
+        Box::<[record::Turn]>::default()
+    };
+    host::Transcript::new(
+        record::Transcript { version: record::VERSION, endpoint: llm::Endpoint(0), dialect: 0, turns },
+        bytes,
+    )
+    .expect("bounded history fixture")
+}
+
+/// Generic delivery fields padded to the requested checked ownership.
+#[must_use]
+pub fn fields_value(bytes: u64) -> host::Fields {
+    use smith_domain::run::outcome::{Change, Field};
+    let overhead = u64::try_from(core::mem::size_of::<Field>()).expect("field footprint");
+    let fields = if bytes >= overhead {
+        Box::from([Field {
+            name: Box::new([]),
+            value: vec![b'f'; usize::try_from(bytes - overhead).expect("fixture size")].into_boxed_slice(),
+        }])
+    } else {
+        Box::<[Field]>::default()
+    };
+    host::Fields::new(Change { fields }, bytes).expect("bounded fields fixture")
+}
+
+/// An accepted report owning exactly the requested text bytes.
+#[must_use]
+pub fn declared_value(bytes: u64) -> host::Declared {
+    use smith_domain::run::outcome::{Declared, Report};
+    host::Declared::new(
+        Declared::Report(Report {
+            text: vec![b'r'; usize::try_from(bytes).expect("fixture size")].into_boxed_slice(),
+            fields: Box::new([]),
+        }),
+        bytes,
+    )
+    .expect("bounded outcome fixture")
 }

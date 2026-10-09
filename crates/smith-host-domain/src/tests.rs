@@ -53,7 +53,7 @@ fn start() -> Start {
         logical_run: Token::new(1),
         activation: 1,
         workspace: None,
-        charter: Box::new([]),
+        charter: empty_charter(),
         transcript: None,
         answered: Box::new([]),
         directories: Box::new([]),
@@ -335,4 +335,37 @@ fn carried_messages_are_checked_before_spawn_with_the_runs_rendered_byte_arithme
         }
         assert!(out.is_empty());
     }
+}
+
+fn empty_charter() -> crate::Charter {
+    use smith_domain::run;
+
+    let bytes = 0_u64;
+    let value = run::Charter {
+        resume: false,
+        waiting: Duration::ZERO,
+        instructions: Box::new([]),
+        brief: run::charter::Brief { sections: Box::new([]) },
+        conventions: None,
+        grants: run::charter::Grants {
+            wait: false,
+            deliver: None,
+            tools: run::charter::Tools { inspect: false, modify: false, shell: false },
+            agents: false,
+            host_tools: Box::new([]),
+        },
+        outcome: run::outcome::OutcomeSpec { change: None, verdicts: Box::new([]), report: None, failure: None },
+        budget: run::Budget { turns: 0, spend: 0, time: Duration::ZERO },
+        llm: run::charter::Llm {
+            prices: run::Prices { input: 0, cached: 0, output: 0, unit: 0 },
+            dialect: 0,
+            account: 0,
+            endpoint: run::charter::Endpoint(0),
+            model: Box::new([]),
+            window: 0,
+            output: 0,
+        },
+        models: Box::new([]),
+    };
+    crate::Charter::new(value, bytes).expect("bounded charter fixture")
 }

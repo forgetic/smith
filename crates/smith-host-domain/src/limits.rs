@@ -23,9 +23,9 @@ pub struct Limits {
     pub name_bytes: u32,
     /// Distinct credential names.
     pub accounts: u32,
-    /// Opaque start charter bytes.
+    /// Typed start charter ownership, in bytes.
     pub charter_bytes: u64,
-    /// Opaque transcript bytes.
+    /// Concrete transcript ownership, in bytes.
     pub transcript_bytes: u64,
     /// Opaque post-transcript answer bytes.
     pub answered_bytes: u64,
@@ -47,7 +47,7 @@ pub struct Limits {
     pub unacknowledged_bytes: u64,
     /// Opaque agent fact bytes.
     pub fact_bytes: u64,
-    /// Opaque declared answer bytes.
+    /// Concrete declared answer ownership, in bytes.
     pub outcome_bytes: u64,
     /// Operator process-tail bytes.
     pub detail_bytes: u32,
@@ -103,7 +103,6 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
                 .checked_mul(u64::try_from(size_of::<crate::Message>()).ok()?.checked_add(limits.message_bytes)?)?,
         )?
         .checked_add(limits.transcript_bytes)?
-        .checked_add(64_u64.checked_mul(u64::try_from(size_of::<Box<[u8]>>()).ok()?)?)?
         .checked_add(limits.answered_bytes)?
         .checked_add(128_u64.checked_mul(u64::try_from(size_of::<AnsweredCall>()).ok()?)?)?
         .checked_add(directories)?

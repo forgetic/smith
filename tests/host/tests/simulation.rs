@@ -10,7 +10,7 @@ use smith_host_world::{Lower, World, limits, start};
 
 fn call(world: &mut World, callback: u64, completion: u32, delivery: bool, deadline: u64) {
     let ask = if delivery {
-        Ask::Deliver { fields: Box::from(&b"generic fields"[..]) }
+        Ask::Deliver { fields: smith_host_world::fields_value(64) }
     } else {
         Ask::Host { tool: Box::from(&b"tool"[..]), effect: Effect::Write, body: Box::from(&b"request"[..]) }
     };
@@ -59,7 +59,14 @@ fn receipts(text: &[u8]) -> Delivered {
     Delivered::new(Box::new([Receipt::new(0, Box::from(text)).expect("valid receipt")])).expect("valid sealed delivery")
 }
 fn turn(world: &mut World, number: u32, spent: u64, read: Option<Token>, bytes: usize) {
-    world.up(Up::Turn { turn: Turn { number, spent, read, body: vec![b't'; bytes].into_boxed_slice() } });
+    world.up(Up::Turn {
+        turn: Turn {
+            number,
+            spent,
+            read,
+            body: smith_host_world::turn_value(u64::try_from(bytes).expect("fixture bytes")),
+        },
+    });
 }
 fn message(world: &mut World, name: u64, bytes: usize) {
     world.event(Input::Parent(parent::Event::Message {
@@ -143,11 +150,11 @@ fn admission_refusals_preserve_separate_process_rights() {
         let mut request = start();
         let invalid = match field {
             0 => {
-                request.charter = vec![0; 257].into_boxed_slice();
+                request.charter = smith_host_world::charter_value(257);
                 Invalid::Charter
             }
             1 => {
-                request.transcript = Some(Box::new([vec![0; 257].into_boxed_slice()]));
+                request.transcript = Some(smith_host_world::transcript_value(1025));
                 Invalid::Transcript
             }
             2 => {
@@ -247,7 +254,7 @@ fn a_live_run_calls_tells_waits_and_finishes() {
     assert_eq!(world.seen.fault, None);
     reply(&mut world, 20, Reply::Host { error: false, body: Box::from(&b"result"[..]) });
     world.sent();
-    last(&mut world, RunResult::Accepted { outcome: Box::from(&b"accepted"[..]) }, 0, 9);
+    last(&mut world, RunResult::Accepted { outcome: smith_host_world::declared_value(8) }, 0, 9);
     world.cleanup();
     world.settled();
 }
@@ -355,13 +362,15 @@ fn an_overflow_name_is_fenced_until_its_busy_answer_terminal_then_reusable() {
 #[test]
 fn payloads_beyond_the_limits_break_the_rules() {
     for record in [
-        Up::Fact { body: vec![0; 65].into_boxed_slice() },
-        Up::Turn { turn: Turn { number: 1, spent: 0, read: None, body: vec![0; 65].into_boxed_slice() } },
+        Up::Fact { body: vec![0; usize::try_from(limits().fact_bytes + 1).expect("fact bound")].into() },
+        Up::Turn {
+            turn: Turn { number: 1, spent: 0, read: None, body: smith_host_world::turn_value(limits().turn_bytes + 1) },
+        },
         Up::Call {
             call: Token::new(20),
             name: CallName { activation: 1, completion: 1, position: 1 },
             deadline: Time::ZERO,
-            ask: Ask::Deliver { fields: vec![0; 129].into_boxed_slice() },
+            ask: Ask::Deliver { fields: smith_host_world::fields_value(129) },
         },
         Up::Answer {
             answer: Answer {
@@ -369,7 +378,7 @@ fn payloads_beyond_the_limits_break_the_rules() {
                 turns: 0,
                 spent: 0,
 
-                result: RunResult::Accepted { outcome: vec![0; 129].into_boxed_slice() },
+                result: RunResult::Accepted { outcome: smith_host_world::declared_value(129) },
             },
         },
     ] {
@@ -539,8 +548,11 @@ fn old_acknowledged_name_history_is_a_parent_namespace_promise() {
 fn exact_ack_metadata_preserves_parent_payloads_and_shutdown_rights() {
     let mut world = World::new(29, limits());
     world.live();
-    turn(&mut world, 1, 1, None, 64);
-    turn(&mut world, 2, 2, None, 64);
+    let bytes = usize::try_from(limits().turn_bytes).expect("turn ownership cap");
+    turn(&mut world, 1, 1, None, bytes);
+    turn(&mut world, 2, 2, None, bytes);
+    assert_eq!(world.seen.turns[&1].owned_bytes(), limits().turn_bytes);
+    assert_eq!(world.seen.turns[&2].owned_bytes(), limits().turn_bytes);
     assert!(!world.lower.contains(Lower::Read));
     world.at(40);
     assert_eq!(world.seen.fault, None);
@@ -702,7 +714,7 @@ fn wall_clock_never_pauses_and_cancelled_spend_is_preserved() {
         assert_eq!(world.seen.fault, None);
         world.sent();
         if mode == 0 {
-            last(&mut world, RunResult::Accepted { outcome: Box::new([]) }, 0, 12);
+            last(&mut world, RunResult::Accepted { outcome: smith_host_world::declared_value(0) }, 0, 12);
             world.cleanup();
             world.settled();
             assert_eq!(world.seen.answer.as_ref().expect("answer").spent, 12);
@@ -982,9 +994,10 @@ fn a_seed_replays_the_same_v2_boundary_history() {
 #[test]
 fn final_answers_cannot_abandon_parent_or_queued_delivery_terminals() {
     for queued in [false, true] {
-        for result in
-            [RunResult::Accepted { outcome: Box::new([]) }, RunResult::Failed { failure: RunFailure::Cancelled }]
-        {
+        for result in [
+            RunResult::Accepted { outcome: smith_host_world::declared_value(0) },
+            RunResult::Failed { failure: RunFailure::Cancelled },
+        ] {
             let mut world = World::new(61, limits());
             world.live();
             if queued {

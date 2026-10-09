@@ -18,11 +18,15 @@ pub struct Values {
 }
 
 /// Encode a domain Start and its service-owned values as the first downlink frame.
+#[expect(clippy::manual_let_else, clippy::single_match, reason = "exhaustive typed Start translation without closures")]
 pub fn encode_start(
     start: channel::Start,
     window: channel::Window,
     values: Values,
     limits: &wire::Limits,
+    charter_limits: &smith_charter::v2::Limits,
+    transcript_limits: &smith_transcript::v2::Limits,
+    endpoints: &smith_protocol_channel::Endpoints,
 ) -> Result<Frame, Error> {
     let mut messages = List::with_capacity(limits.start_messages);
     for message in start.messages {
@@ -36,11 +40,24 @@ pub fn encode_start(
     }
     let workspace = encode_workspace(&start.directories, &values.paths, limits)?;
     let mut transcript = List::with_capacity(limits.start_transcript);
-    for turn in start.transcript.unwrap_or_default() {
-        if transcript.push(turn).is_err() {
-            return Err(Error::MissingValue);
+    match &start.transcript {
+        Some(history) => {
+            for turn in &history.value().turns {
+                let body = match smith_protocol_channel::encode_turn(turn, transcript_limits, endpoints) {
+                    Ok(body) => body,
+                    Err(_) => return Err(Error::Value),
+                };
+                if transcript.push(body).is_err() {
+                    return Err(Error::MissingValue);
+                }
+            }
         }
+        None => {}
     }
+    let charter = match smith_protocol_channel::encode_charter(start.charter.value(), charter_limits, endpoints) {
+        Ok(body) => body,
+        Err(_) => return Err(Error::Value),
+    };
     let mut answered = List::with_capacity(limits.start_answered);
     for call in start.answered {
         let name = wire::CallName::new(
@@ -77,7 +94,7 @@ pub fn encode_start(
         wire::StartParts {
             messages,
             activation: start.activation,
-            charter: start.charter,
+            charter,
             workspace,
             transcript,
             answered,
@@ -216,12 +233,16 @@ pub(crate) fn decode_ask(call: &wire::Call) -> Result<Option<channel::Ask>, Erro
             if call.effect() != &wire::Effect::Write {
                 return Ok(None);
             }
-            let Ok(length) = usize::try_from(deliver.measure()) else {
-                return Err(Error::MissingValue);
-            };
-            let mut writer = Writer::new(length);
-            deliver.encode(&mut writer)?;
-            channel::Ask::Deliver { fields: writer.finish() }
+            let mut fields = List::with_capacity(deliver.fields().len());
+            for field in deliver.fields() {
+                let item =
+                    smith_domain::run::outcome::Field { name: Box::from(field.name()), value: Box::from(field.text()) };
+                if fields.push(item).is_err() {
+                    return Err(Error::MissingValue);
+                }
+            }
+            let value = smith_domain::run::outcome::Change { fields: fields.into_boxed() };
+            channel::Ask::Deliver { fields: host::Fields::new(value, u64::MAX).ok_or(Error::Value)? }
         }
     };
     Ok(Some(ask))

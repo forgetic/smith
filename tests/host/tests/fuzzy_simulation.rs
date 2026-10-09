@@ -34,7 +34,7 @@ fn random_worlds_settle_and_reach_every_ending() {
                         call: Token::new(20),
                         name: CallName { activation: 1, completion: 1, position: 2 },
                         deadline: world.stage.env.now.saturating_add(Duration::from_secs(5)),
-                        ask: Ask::Deliver { fields: Box::new([]) },
+                        ask: Ask::Deliver { fields: smith_host_world::fields_value(0) },
                     });
                     world.up(Up::Withdraw { call: Token::new(20) });
                 } else {
@@ -46,7 +46,7 @@ fn random_worlds_settle_and_reach_every_ending() {
                     });
                 }
                 match fate {
-                    2 => last(&mut world, RunResult::Accepted { outcome: Box::new([]) }, 2),
+                    2 => last(&mut world, RunResult::Accepted { outcome: smith_host_world::declared_value(0) }, 2),
                     3 => last(&mut world, RunResult::Parked, 3),
                     4 => last(&mut world, RunResult::Failed { failure: RunFailure::Model(ModelFault::Provider) }, 4),
                     5 => world.event(Input::Process(process::Event::Malformed { owner: world.owner() })),

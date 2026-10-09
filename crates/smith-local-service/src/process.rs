@@ -71,6 +71,7 @@ struct PlainScan {
 pub(crate) struct ProcessAdapter {
     limits: ProcessLimits,
     launch: Launch,
+    endpoints: smith_protocol_channel::Endpoints,
     io: io::Io,
     process: Option<protocol::Process>,
     git: Option<local_protocol::GitChild>,
@@ -106,14 +107,19 @@ pub(crate) struct ProcessAdapter {
 }
 
 impl ProcessAdapter {
-    pub(crate) fn new(limits: ProcessLimits, launch: Launch) -> Option<Self> {
+    pub(crate) fn new(
+        limits: &ProcessLimits,
+        launch: Launch,
+        endpoints: smith_protocol_channel::Endpoints,
+    ) -> Option<Self> {
         if !limits.io.is_usable() || limits.queue < io::MAX_OUT_UP.events.max(io::MAX_OUT_UP.submissions) {
             return None;
         }
         Some(Self {
             io: io::Io::new(&limits.io),
-            limits,
+            limits: *limits,
             launch,
+            endpoints,
             process: None,
             git: None,
             markers: None,
@@ -150,6 +156,10 @@ impl ProcessAdapter {
 
     pub(crate) fn worst_case(limits: &ProcessLimits) -> Option<u64> {
         io::worst_case(&limits.io)?
+            .checked_add(smith_protocol_channel::Endpoints::worst_case(
+                limits.channel.endpoints,
+                limits.channel.charter.llm_endpoint,
+            )?)?
             .checked_add(file_layer::FileIo::worst_case(65, 4096, 256, 65_536)?)?
             .checked_add(local_protocol::plain_worst_case(&plain_limits())?.checked_mul(65)?)?
             .checked_add(Map::<u32, local_protocol::Snapshot>::worst_case(64)?)?
@@ -749,8 +759,12 @@ impl ProcessAdapter {
     ) {
         match request {
             host::process::Request::Spawn { owner, deadline, .. } => {
-                let Ok(mut process) = protocol::Process::new(owner, &self.limits.channel, self.limits.detail_bytes)
-                else {
+                let Ok(mut process) = protocol::Process::new(
+                    owner,
+                    &self.limits.channel,
+                    self.limits.detail_bytes,
+                    self.endpoints.clone(),
+                ) else {
                     self.failed = true;
                     host_events.push(host::Input::Process(host::process::Event::Unspawned {
                         owner,

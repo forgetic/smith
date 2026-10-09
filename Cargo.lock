@@ -836,6 +836,7 @@ name = "smith-host-domain"
 version = "0.0.0"
 dependencies = [
  "skein-lib",
+ "smith-domain",
 ]
 
 [[package]]
@@ -846,7 +847,12 @@ dependencies = [
  "skein-io",
  "skein-lib",
  "smith-channel",
+ "smith-charter",
+ "smith-domain",
  "smith-host-domain",
+ "smith-host-world",
+ "smith-protocol-channel",
+ "smith-transcript",
 ]
 
 [[package]]
@@ -855,6 +861,7 @@ version = "0.0.0"
 dependencies = [
  "skein-lib",
  "skein-world",
+ "smith-domain",
  "smith-host-domain",
 ]
 
@@ -874,10 +881,12 @@ dependencies = [
  "smith-agent-service",
  "smith-agent-shell",
  "smith-channel",
+ "smith-charter",
  "smith-host-domain",
  "smith-host-protocol",
  "smith-host-world",
  "smith-local-service",
+ "smith-protocol-channel",
 ]
 
 [[package]]

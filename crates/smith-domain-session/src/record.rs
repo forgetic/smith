@@ -100,6 +100,14 @@ pub struct Turn {
     pub messages: Box<[Message]>,
 }
 
+impl Turn {
+    /// Checked ownership of this turn's message envelopes and their payloads.
+    #[must_use]
+    pub fn owned_bytes(&self) -> Option<u64> {
+        messages_bytes(&self.messages)
+    }
+}
+
 /// Concrete versioned session history, with provider endpoint and dialect identity checked before replay.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Transcript {

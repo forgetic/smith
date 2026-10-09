@@ -4,11 +4,10 @@
 //! saved call name and answer into the host domain's parallel sealed types.
 
 use alloc::boxed::Box;
-use skein_lib::{List, Reader};
+use skein_lib::List;
 use smith_domain::{Answered, run};
 use smith_host_domain::{self as host, channel};
 use smith_local_domain::{ExternalFinal, ExternalStart};
-use smith_protocol_channel as protocol;
 
 /// A sealed local terminal did not fit the host's matching sealed vocabulary.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -29,7 +28,7 @@ pub enum BridgeError {
 /// absent from the host channel's scalar spend.
 pub fn answer_to_local(answer: channel::Answer) -> Result<ExternalFinal, BridgeError> {
     match answer.result {
-        channel::RunResult::Accepted { outcome } => Ok(ExternalFinal::Accepted { outcome: decode_declared(&outcome)? }),
+        channel::RunResult::Accepted { outcome } => Ok(ExternalFinal::Accepted { outcome: outcome.into_value() }),
         channel::RunResult::Parked => Ok(ExternalFinal::Parked),
         channel::RunResult::Refused { refusal: _ } => Ok(ExternalFinal::Refused),
         channel::RunResult::Failed { failure } => match failure {
@@ -43,80 +42,6 @@ pub fn answer_to_local(answer: channel::Answer) -> Result<ExternalFinal, BridgeE
     }
 }
 
-/// Decode the accepted outcome body after the host channel has bounded it.
-pub fn decode_declared(bytes: &[u8]) -> Result<run::outcome::Declared, BridgeError> {
-    let Ok(record) = smith_charter::RunResult::decode(&smith_charter::CEILINGS, &mut Reader::new(bytes)) else {
-        return Err(BridgeError::Result);
-    };
-    let fields = decode_fields(record.fields())?;
-    let declared = match record.form() {
-        smith_charter::Form::Change => {
-            if record.label().is_some() || !record.text().is_empty() || !record.items().is_empty() {
-                return Err(BridgeError::Result);
-            }
-            run::outcome::Declared::Change(run::outcome::Change { fields })
-        }
-        smith_charter::Form::Report => {
-            if record.label().is_some() || !record.items().is_empty() {
-                return Err(BridgeError::Result);
-            }
-            run::outcome::Declared::Report(run::outcome::Report { text: Box::from(record.text()), fields })
-        }
-        smith_charter::Form::Failure => {
-            if record.label().is_some() || !record.items().is_empty() {
-                return Err(BridgeError::Result);
-            }
-            run::outcome::Declared::Failure(run::outcome::DeclaredFailure { reason: Box::from(record.text()), fields })
-        }
-        smith_charter::Form::Verdict => {
-            let Some(label) = record.label() else { return Err(BridgeError::Result) };
-            let mut items = List::with_capacity(record.items().len());
-            for item in record.items() {
-                let value = run::outcome::Item { kind: Box::from(item.kind()), fields: decode_fields(item.fields())? };
-                if items.push(value).is_err() {
-                    return Err(BridgeError::Result);
-                }
-            }
-            run::outcome::Declared::Verdict(run::outcome::Verdict {
-                name: label.clone(),
-                text: Box::from(record.text()),
-                fields,
-                items: items.into_boxed(),
-            })
-        }
-    };
-    Ok(declared)
-}
-
-/// Decode the channel's field-only Deliver ask (protocol/channel.md, section 5).
-pub fn decode_change(bytes: &[u8]) -> Result<run::outcome::Change, BridgeError> {
-    let mut reader = Reader::new(bytes);
-    let Ok(record) = smith_channel::DeliverAsk::decode(&smith_channel::CEILINGS, &mut reader) else {
-        return Err(BridgeError::Result);
-    };
-    if reader.remaining() != 0 {
-        return Err(BridgeError::Result);
-    }
-    let mut fields = List::with_capacity(record.fields().len());
-    for field in record.fields() {
-        if fields.push(run::outcome::Field { name: Box::from(field.name()), value: Box::from(field.text()) }).is_err() {
-            return Err(BridgeError::Result);
-        }
-    }
-    Ok(run::outcome::Change { fields: fields.into_boxed() })
-}
-
-fn decode_fields(source: &List<smith_charter::Field>) -> Result<Box<[run::outcome::Field]>, BridgeError> {
-    let mut fields = List::with_capacity(source.len());
-    for field in source {
-        let item = run::outcome::Field { name: Box::from(field.name()), value: Box::from(field.text()) };
-        if fields.push(item).is_err() {
-            return Err(BridgeError::Result);
-        }
-    }
-    Ok(fields.into_boxed())
-}
-
 /// Host start and its parallel paths and credential envelopes, in domain order.
 #[derive(Debug)]
 pub struct PreparedStart {
@@ -125,20 +50,13 @@ pub struct PreparedStart {
     pub credentials: Box<[Box<[u8]>]>,
 }
 
-/// Check the configured charter and move a local run into the spawned host's Start.
+/// Bound the typed local policy and history while moving them into the host Start.
 pub fn prepare_start(
     source: ExternalStart,
-    charter: Box<[u8]>,
-    endpoints: &protocol::Endpoints,
+    limits: &host::Limits,
     paths: Box<[Box<[u8]>]>,
     credentials: Box<[Box<[u8]>]>,
 ) -> Result<PreparedStart, BridgeError> {
-    let Ok(decoded) = protocol::decode_charter(&charter, &smith_charter::CEILINGS, endpoints) else {
-        return Err(BridgeError::Charter);
-    };
-    if decoded != source.charter {
-        return Err(BridgeError::Charter);
-    }
     if source.grants.len() != credentials.len() {
         return Err(BridgeError::Values);
     }
@@ -171,22 +89,9 @@ pub fn prepare_start(
             (None, Box::<[channel::Directory]>::default())
         }
     };
+    let charter = host::Charter::new(source.charter, limits.charter_bytes).ok_or(BridgeError::Charter)?;
     let transcript = match source.transcript {
-        Some(history) => {
-            let Ok(count) = u32::try_from(history.turns.len()) else {
-                return Err(BridgeError::Transcript);
-            };
-            let mut turns = List::with_capacity(count);
-            for turn in &history.turns {
-                let Ok(bytes) = protocol::encode_turn(turn, &smith_transcript::CEILINGS, endpoints) else {
-                    return Err(BridgeError::Transcript);
-                };
-                if turns.push(bytes).is_err() {
-                    return Err(BridgeError::Transcript);
-                }
-            }
-            Some(turns.into_boxed())
-        }
+        Some(history) => Some(host::Transcript::new(history, limits.transcript_bytes).ok_or(BridgeError::Transcript)?),
         None => None,
     };
     let Ok(count) = u32::try_from(source.answered.len()) else {
@@ -304,13 +209,11 @@ pub fn delivery_to_host(delivery: run::Delivery) -> Result<host::Delivery, Bridg
 #[cfg(test)]
 mod tests {
     use alloc::boxed::Box;
+    use skein_lib::Duration;
     use smith_domain::run;
     use smith_host_domain as host;
 
-    use super::{
-        answer_to_local, decode_change, decode_declared, delivery_to_host, name_to_host, prepare_start,
-        saved_reply_to_host,
-    };
+    use super::{answer_to_local, delivery_to_host, name_to_host, prepare_start, saved_reply_to_host};
 
     #[test]
     fn a_spawned_last_word_keeps_its_local_display_class() {
@@ -326,50 +229,6 @@ mod tests {
         })
         .expect("cancelled word");
         let smith_local_domain::ExternalFinal::Cancelled = final_word else { panic!("cancelled local chat") };
-    }
-
-    #[test]
-    fn a_change_and_report_decode_from_the_agent_result_body() {
-        let change = run::outcome::Declared::Change(run::outcome::Change {
-            fields: Box::from([run::outcome::Field {
-                name: Box::from(&b"title"[..]),
-                value: Box::from(&b"Commit"[..]),
-            }]),
-        });
-        let bytes = smith_protocol_channel::encode_result(&change, &smith_charter::CEILINGS).expect("change bytes");
-        assert_eq!(decode_declared(&bytes), Ok(change));
-        let limits = &smith_channel::CEILINGS;
-        let mut fields = skein_lib::List::with_capacity(1);
-        fields
-            .push(
-                smith_channel::Field::new(
-                    limits,
-                    smith_channel::FieldParts { name: Box::from(&b"title"[..]), text: Box::from(&b"Commit"[..]) },
-                )
-                .expect("field"),
-            )
-            .expect("one field");
-        let ask = smith_channel::DeliverAsk::new(limits, smith_channel::DeliverAskParts { fields }).expect("ask");
-        let mut writer = skein_lib::Writer::new(usize::try_from(ask.measure()).expect("ask measure"));
-        ask.encode(&mut writer).expect("ask encode");
-        let bytes = writer.finish();
-        assert_eq!(
-            decode_change(&bytes),
-            Ok(run::outcome::Change {
-                fields: Box::from([run::outcome::Field {
-                    name: Box::from(&b"title"[..]),
-                    value: Box::from(&b"Commit"[..])
-                }]),
-            })
-        );
-
-        let report = run::outcome::Declared::Report(run::outcome::Report {
-            text: Box::from(&b"finished"[..]),
-            fields: Box::new([]),
-        });
-        let bytes = smith_protocol_channel::encode_result(&report, &smith_charter::CEILINGS).expect("report bytes");
-        assert_eq!(decode_declared(&bytes), Ok(report));
-        assert_eq!(decode_change(&bytes), Err(super::BridgeError::Result));
     }
 
     #[test]
@@ -416,12 +275,12 @@ mod tests {
                 conventions: None,
                 budget: smith_charter::Budget::new(
                     limits,
-                    smith_charter::BudgetParts { turns: 0, spend: 0, time: skein_lib::Duration::ZERO },
+                    smith_charter::BudgetParts { turns: 0, spend: 0, time: Duration::ZERO },
                 )
                 .expect("budget"),
                 main,
                 models: skein_lib::List::with_capacity(0),
-                waiting: skein_lib::Duration::ZERO,
+                waiting: Duration::ZERO,
                 resume: false,
             },
         )
@@ -444,12 +303,46 @@ mod tests {
             answered: Box::new([]),
             grants: Box::new([]),
         };
-        let prepared =
-            prepare_start(start, bytes.clone(), &endpoints, Box::new([]), Box::new([])).expect("matching local start");
+        let prepared = prepare_start(start, &host_limits(), Box::new([]), Box::new([])).expect("matching local start");
         assert_eq!(prepared.start.activation, 7);
         assert_eq!(prepared.start.logical_run, skein_lib::Token::new(1));
-        assert_eq!(prepared.start.charter, bytes);
+        assert_eq!(
+            prepared.start.charter.into_value(),
+            smith_protocol_channel::decode_charter(&bytes, &smith_charter::CEILINGS, &endpoints).expect("same policy")
+        );
         assert!(prepared.start.transcript.is_none());
+    }
+
+    fn host_limits() -> host::Limits {
+        host::Limits {
+            agents: 1,
+            directories: 0,
+            conflicts: 0,
+            path_bytes: 0,
+            name_bytes: 64,
+            accounts: 0,
+            charter_bytes: 4096,
+            transcript_bytes: 64,
+            answered_bytes: 64,
+            message_bytes: 64,
+            messages: 1,
+            calls: 1,
+            call_bytes: 64,
+            answer_bytes: host::Delivered::worst_case(),
+            turns: 1,
+            turn_bytes: 64,
+            unacknowledged_bytes: 64,
+            fact_bytes: 64,
+            outcome_bytes: 64,
+            detail_bytes: 64,
+            spawn_timeout: Duration::from_secs(1),
+            no_progress: Duration::from_secs(10),
+            long_span: Duration::from_secs(60),
+            wall_time: Duration::from_secs(100),
+            grace: Duration::from_secs(5),
+            kill_after: Duration::from_secs(2),
+            facts: 4,
+        }
     }
 
     #[test]

@@ -103,6 +103,11 @@ enum Half {
     Agent(Box<agent::Component>),
 }
 
+struct RawStart {
+    charter: Box<[u8]>,
+    transcript: Option<Box<[Box<[u8]>]>>,
+}
+
 struct Peer {
     half: Half,
     below: Queue<Lower>,
@@ -117,12 +122,15 @@ struct Peer {
     received_bytes: usize,
     host_answer: Option<smith_host_domain::channel::Answer>,
     agent_start: Option<Box<agent::DecodedStart>>,
+    raw_start: Option<RawStart>,
 }
 
 impl Peer {
-    fn host(limits: host::Limits, mode: StreamMode) -> Peer {
+    fn host(limits: &host::Limits, mode: StreamMode) -> Peer {
         let mut peer = Peer {
-            half: Half::Host(Box::new(host::Component::new(&limits, mode).expect("checked host channel"))),
+            half: Half::Host(Box::new(
+                host::Component::new(limits, mode, test_endpoints()).expect("checked host channel"),
+            )),
             below: Queue::with_capacity(64),
             host_events: Queue::with_capacity(16),
             agent_events: Queue::with_capacity(16),
@@ -135,6 +143,7 @@ impl Peer {
             received_bytes: 0,
             host_answer: None,
             agent_start: None,
+            raw_start: None,
         };
         if let Half::Host(host) = &mut peer.half {
             host.open(&mut peer.host_events, &mut peer.below);
@@ -159,6 +168,7 @@ impl Peer {
             received_bytes: 0,
             host_answer: None,
             agent_start: None,
+            raw_start: None,
         }
     }
 
@@ -197,6 +207,31 @@ impl Peer {
                     self.receive(LowerEvent::Write(stream::OutputUp::Settled { right, outcome }));
                 }
                 Lower::Write(stream::OutputDown::Send { bytes, .. }) => {
+                    let bytes = match self.raw_start.take() {
+                        Some(RawStart { charter, transcript }) => {
+                            let start = smith_channel::Start::decode(
+                                &smith_channel::CEILINGS,
+                                &mut skein_lib::Reader::new(&bytes[8..]),
+                            )
+                            .expect("host Start frame");
+                            let mut parts = start.into_parts();
+                            parts.charter = charter;
+                            let mut turns = skein_lib::List::with_capacity(smith_channel::CEILINGS.start_transcript);
+                            for turn in transcript.unwrap_or_default() {
+                                turns.push(turn).expect("fixture transcript");
+                            }
+                            parts.transcript = turns;
+                            let start = smith_channel::Start::new(&smith_channel::CEILINGS, parts)
+                                .expect("wire fixture bounds");
+                            let mut writer =
+                                skein_lib::Writer::new(usize::try_from(start.measure()).expect("measured body"));
+                            start.encode(&mut writer).expect("wire fixture");
+                            let mut frame = skein_channel::frame_writer(0x0100, start.measure()).expect("Start frame");
+                            frame.put(&writer.finish()).expect("frame body");
+                            frame.finish().expect("frame").bytes().into()
+                        }
+                        None => bytes,
+                    };
                     if !other.incoming_ended {
                         let keep = other.cut_after.map_or(bytes.len(), |remaining| remaining.min(bytes.len()));
                         other.incoming.extend(bytes[..keep].iter().copied());
@@ -251,7 +286,8 @@ impl Peer {
                     number: turn.number,
                     spent: turn.spent,
                     read: turn.read,
-                    body: turn.body,
+                    body: agent::encode_turn(turn.body.value(), &smith_transcript::CEILINGS, &test_endpoints())
+                        .expect("store codec"),
                 }),
                 host::OpenEvent::Fact { body } => {
                     let fact =
@@ -389,7 +425,17 @@ impl World {
     #[must_use]
     pub fn new(host_bodies: smith_channel::Limits, agent_bodies: smith_channel::Limits, mode: StreamMode) -> World {
         let channel = channel_limits(smith_channel::CEILINGS);
-        let host = Peer::host(host::Limits { bodies: host_bodies, channel, calls: 8 }, mode);
+        let host = Peer::host(
+            &host::Limits {
+                bodies: host_bodies,
+                charter: smith_charter::CEILINGS,
+                transcript: smith_transcript::CEILINGS,
+                endpoints: 1,
+                channel,
+                calls: 8,
+            },
+            mode,
+        );
         let agent = Peer::agent(
             &agent::Limits {
                 bodies: agent_bodies,
@@ -447,13 +493,23 @@ impl World {
 
     /// Send a Start carrying saved turn bytes, if present.
     pub fn send_start_with_turns(&mut self, charter: Box<[u8]>, transcript: Option<Box<[Box<[u8]>]>>) {
+        let typed_charter = typed_charter(&charter);
+        let typed_transcript = agent::decode_transcript(
+            transcript.as_deref().unwrap_or(&[]),
+            &smith_transcript::CEILINGS,
+            &test_endpoints(),
+        )
+        .ok()
+        .flatten()
+        .map(|value| smith_host_domain::Transcript::new(value, u64::MAX).expect("fixture ownership"));
+        self.host.raw_start = Some(RawStart { charter, transcript });
         let start = smith_host_domain::channel::Start {
             messages: Box::default(),
             logical_run: skein_lib::Token::new(1),
             activation: 1,
             workspace: None,
-            charter,
-            transcript,
+            charter: typed_charter,
+            transcript: typed_transcript,
             answered: Box::default(),
             directories: Box::default(),
             grants: Box::default(),
@@ -499,13 +555,23 @@ impl World {
         transcript: Option<Box<[Box<[u8]>]>>,
     ) {
         self.observed.push(Observation::HostStarted);
+        let typed_charter = typed_charter(&charter);
+        let typed_transcript = agent::decode_transcript(
+            transcript.as_deref().unwrap_or(&[]),
+            &smith_transcript::CEILINGS,
+            &test_endpoints(),
+        )
+        .ok()
+        .flatten()
+        .map(|value| smith_host_domain::Transcript::new(value, u64::MAX).expect("fixture ownership"));
+        self.host.raw_start = Some(RawStart { charter, transcript });
         let start = smith_host_domain::channel::Start {
             messages: Box::default(),
             logical_run: skein_lib::Token::new(1),
             activation: 7,
             workspace: Some(skein_lib::Token::new(2)),
-            charter,
-            transcript,
+            charter: typed_charter,
+            transcript: typed_transcript,
             answered: Box::from([smith_host_domain::channel::AnsweredCall {
                 name: smith_host_domain::channel::CallName { activation: 6, completion: 1, position: 0 },
                 tool: Box::from(*b"check"),
@@ -885,4 +951,26 @@ impl World {
     pub fn take_agent_start(&mut self) -> Option<Box<agent::DecodedStart>> {
         self.agent.agent_start.take()
     }
+}
+
+/// Decode fixture policy for the typed host boundary; malformed wire fixtures use a neutral fallback.
+#[must_use]
+pub fn typed_charter(bytes: &[u8]) -> smith_host_domain::Charter {
+    let value = agent::decode_charter(bytes, &smith_charter::CEILINGS, &test_endpoints()).unwrap_or_else(|_| {
+        agent::decode_charter(
+            include_bytes!("../../../crates/smith-charter/golden/v2/record_charter_smallest.bin"),
+            &smith_charter::CEILINGS,
+            &test_endpoints(),
+        )
+        .expect("fallback fixture policy")
+    });
+    smith_host_domain::Charter::new(value, u64::MAX).expect("fixture ownership")
+}
+
+/// Decode a valid history fixture before a typed host Start.
+#[must_use]
+pub fn typed_transcript(bytes: &[Box<[u8]>]) -> Option<smith_host_domain::Transcript> {
+    agent::decode_transcript(bytes, &smith_transcript::CEILINGS, &test_endpoints())
+        .expect("typed fixture history")
+        .map(|value| smith_host_domain::Transcript::new(value, u64::MAX).expect("fixture ownership"))
 }

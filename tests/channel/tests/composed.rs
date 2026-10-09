@@ -21,7 +21,7 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
     limits.run.messages = 1;
     let largest_turn = agent::max_turn_bytes(&limits).expect("bounded concrete turn");
     let mut host_limits = smith_host_world::limits();
-    host_limits.charter_bytes = u64::try_from(charter.len()).expect("small charter");
+    host_limits.charter_bytes = charter.owned_bytes();
     host_limits.turn_bytes = largest_turn;
     host_limits.unacknowledged_bytes = largest_turn;
     let mut host_world = smith_host_world::World::new(1, host_limits);
@@ -168,7 +168,7 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
     assert_eq!(host_world.seen.gone, Some(host::End::Stopped));
 }
 
-fn composed_charter() -> Box<[u8]> {
+fn composed_charter() -> host::Charter {
     let smallest = include_bytes!("../../../crates/smith-charter/golden/v2/record_charter_smallest.bin");
     let source =
         smith_charter::Charter::decode(&smith_charter::CEILINGS, &mut Reader::new(smallest)).expect("golden charter");
@@ -207,7 +207,7 @@ fn composed_charter() -> Box<[u8]> {
     let record = smith_charter::Charter::new(&smith_charter::CEILINGS, parts).expect("valid charter record");
     let mut writer = Writer::new(usize::try_from(record.measure()).expect("small charter"));
     record.encode(&mut writer).expect("measured charter");
-    writer.finish()
+    smith_channel_world::typed_charter(&writer.finish())
 }
 
 #[test]

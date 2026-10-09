@@ -25,12 +25,11 @@ pub struct Limits {
     pub queue: u32,
 }
 
-/// Startup choices and the configured wire charter for spawned agents.
+/// Startup policy, configured endpoint names and spawned-agent launch choices.
 #[derive(Debug)]
 pub struct Config {
     pub local: local::Config,
     pub limits: Limits,
-    pub charter: Box<[u8]>,
     pub endpoints: channel::Endpoints,
     pub paths: Box<[Box<[u8]>]>,
     pub launch: Launch,
@@ -118,10 +117,7 @@ pub struct Service {
     paths: Box<[Box<[u8]>]>,
     start_values: Option<StartValues>,
     pending_start: Option<local::ExternalStart>,
-    charter: Box<[u8]>,
-    endpoints: channel::Endpoints,
     host_agent: Option<Token>,
-    sequence: u32,
     failed: bool,
 }
 
@@ -196,7 +192,8 @@ impl Service {
             Err(error) => return Err(Error::Local(error)),
         };
         let host = if effects.is_some() { None } else { Some(host::Domain::new(&config.limits.host)) };
-        let process = ProcessAdapter::new(config.limits.process, config.launch).ok_or(Error::Process)?;
+        let process =
+            ProcessAdapter::new(&config.limits.process, config.launch, config.endpoints).ok_or(Error::Process)?;
         let terminal = protocol::Terminal::new(protocol::TerminalLimits {
             line_bytes: config.limits.local.line_bytes,
             show_bytes: config.limits.local.show_bytes,
@@ -230,10 +227,7 @@ impl Service {
             paths: config.paths,
             start_values: None,
             pending_start: None,
-            charter: config.charter,
-            endpoints: config.endpoints,
             host_agent: None,
-            sequence: 0,
             failed: false,
         })
     }
@@ -527,13 +521,6 @@ impl Service {
     fn route_external(&mut self, now: Time, request: local::ExternalRequest) {
         match request {
             local::ExternalRequest::Start(start) => {
-                self.sequence = match &start.transcript {
-                    Some(transcript) => match transcript.turns.last() {
-                        Some(turn) => turn.sequence,
-                        None => 0,
-                    },
-                    None => 0,
-                };
                 let mut directories = List::with_capacity(64);
                 if let Some(workspace) = &start.workspace {
                     for (position, directory) in workspace.directories.iter().enumerate() {
@@ -612,13 +599,8 @@ impl Service {
                     let value = self.values.get(&grant.name.account).expect("grant value supplied before Start");
                     credentials.push(value.clone()).expect("bounded grant count");
                 }
-                let prepared = protocol::prepare_start(
-                    start,
-                    self.charter.clone(),
-                    &self.endpoints,
-                    self.paths.clone(),
-                    credentials.into_boxed(),
-                );
+                let prepared =
+                    protocol::prepare_start(start, &self.limits.host, self.paths.clone(), credentials.into_boxed());
                 match prepared {
                     Ok(prepared) => {
                         self.start_values =
@@ -658,26 +640,12 @@ impl Service {
                 self.local_events.push(local::Event::External(local::ExternalEvent::Admitted { run }));
             }
             host::Output::Parent(host::parent::Request::Turn { turn, .. }) => {
-                let decoded = match self.sequence.checked_add(1) {
-                    Some(sequence) => {
-                        channel::decode_turn(&turn.body, sequence, &smith_transcript::CEILINGS, &self.endpoints).ok()
-                    }
-                    None => None,
-                };
-                match decoded {
-                    Some(decoded) => {
-                        self.sequence = decoded.sequence;
-                        self.local_events.push(local::Event::External(local::ExternalEvent::Turn {
-                            number: turn.number,
-                            read: turn.read,
-                            turn: decoded,
-                        }));
-                    }
-                    None => {
-                        self.failed = true;
-                        self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
-                    }
-                }
+                let value = turn.body.into_value();
+                self.local_events.push(local::Event::External(local::ExternalEvent::Turn {
+                    number: turn.number,
+                    read: turn.read,
+                    turn: value,
+                }));
             }
             host::Output::Parent(host::parent::Request::Answered { answer, .. }) => {
                 match protocol::answer_to_local(answer) {
@@ -725,30 +693,18 @@ impl Service {
     fn called(&mut self, call: Token, name: host::CallName, deadline: Time, ask: host::Ask) {
         let agent = self.host_agent.expect("call belongs to started host agent");
         match ask {
-            host::Ask::Deliver { fields } => match protocol::decode_change(&fields) {
-                Ok(change) => self.local_events.push(local::Event::External(local::ExternalEvent::Deliver {
+            host::Ask::Deliver { fields } => {
+                self.local_events.push(local::Event::External(local::ExternalEvent::Deliver {
                     name: agent::run::CallName {
                         activation: name.activation,
                         completion: name.completion,
                         position: name.position,
                     },
                     owner: call,
-                    change,
+                    change: fields.into_value(),
                     deadline,
-                })),
-                Err(_) => {
-                    self.failed = true;
-                    self.host_events.push(host::Input::Parent(host::parent::Event::Answer {
-                        agent,
-                        call,
-                        reply: host::Reply::Delivery(host::Delivery::Failed(host::DeliveryFailure {
-                            directory: 0,
-                            reason: host::DeliveryReason::Broken,
-                            diagnostic: host::Diagnostic::empty(),
-                        })),
-                    }));
-                }
-            },
+                }));
+            }
             host::Ask::Host { .. } => {
                 self.host_events.push(host::Input::Parent(host::parent::Event::Answer {
                     agent,

@@ -8,7 +8,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 use serde_json::Value;
-use skein_lib::{Duration, List, Token, Writer};
+#[cfg(test)]
+use skein_lib::List;
+use skein_lib::{Duration, Token};
+#[cfg(test)]
 use smith_charter as wire;
 use smith_domain::{self as domain, run};
 use smith_local_domain as local;
@@ -295,157 +298,6 @@ fn fields_of(source: &[Field]) -> Box<[run::outcome::FieldRule]> {
     source.iter().map(|field| run::outcome::FieldRule { name: field.name.as_bytes().into(), max: field.max }).collect()
 }
 
-/// Encode the local domain's chosen charter in the version-one wire family.
-/// Decoding it with the configured endpoint table must recover this policy.
-pub fn charter(policy: &local::Config, endpoints: &channel::Endpoints) -> Result<Box<[u8]>, String> {
-    let source = local::charter(policy);
-    let bounds = &wire::CEILINGS;
-    let mut brief =
-        List::with_capacity(u32::try_from(source.brief.sections.len()).map_err(|_| "too many brief sections")?);
-    for section in &source.brief.sections {
-        brief
-            .push(
-                wire::Section::new(
-                    bounds,
-                    wire::SectionParts { title: section.title.clone(), body: section.text.clone() },
-                )
-                .map_err(|error| format!("charter section: {error:?}"))?,
-            )
-            .map_err(|_| "too many brief sections")?;
-    }
-    let tools = wire::Tools::new(
-        bounds,
-        wire::ToolsParts {
-            families: wire::Families::new(
-                bounds,
-                wire::FamiliesParts {
-                    skein_bools: [
-                        source.grants.tools.inspect,
-                        source.grants.tools.modify,
-                        source.grants.tools.shell,
-                        source.grants.agents,
-                    ],
-                },
-            )
-            .map_err(|error| format!("charter families: {error:?}"))?,
-            wait: source.grants.wait,
-            deliver: source.grants.deliver.as_ref().map(change_rule).transpose()?,
-            host: List::with_capacity(0),
-        },
-    )
-    .map_err(|error| format!("charter tools: {error:?}"))?;
-    let contract = wire::Contract::new(
-        bounds,
-        wire::ContractParts {
-            report: source.outcome.report.as_ref().map(text_rule).transpose()?,
-            verdicts: List::with_capacity(0),
-            change: source.outcome.change.as_ref().map(change_rule).transpose()?,
-            failure: None,
-        },
-    )
-    .map_err(|error| format!("charter contract: {error:?}"))?;
-    let conventions = source
-        .conventions
-        .as_ref()
-        .map(|paths| {
-            wire::Conventions::new(
-                bounds,
-                wire::ConventionsParts { guide: paths.guide.clone(), checks: paths.checks.clone() },
-            )
-            .map_err(|error| format!("charter conventions: {error:?}"))
-        })
-        .transpose()?;
-    let budget = wire::Budget::new(
-        bounds,
-        wire::BudgetParts { turns: source.budget.turns, spend: source.budget.spend, time: source.budget.time },
-    )
-    .map_err(|error| format!("charter budget: {error:?}"))?;
-    let main = llm(&source.llm, endpoints)?;
-    let mut models = List::with_capacity(u32::try_from(source.models.len()).map_err(|_| "too many charter models")?);
-    for model in &source.models {
-        models.push(llm(model, endpoints)?).map_err(|_| "too many charter models")?;
-    }
-    let charter = wire::Charter::new(
-        bounds,
-        wire::CharterParts {
-            instructions: source.instructions,
-            brief,
-            tools,
-            contract,
-            conventions,
-            budget,
-            main,
-            models,
-            waiting: source.waiting,
-            resume: source.resume,
-        },
-    )
-    .map_err(|error| format!("charter: {error:?}"))?;
-    let mut writer = Writer::new(usize::try_from(charter.measure()).map_err(|_| "charter byte count overflow")?);
-    charter.encode(&mut writer).map_err(|_| "charter encoder overflow")?;
-    let bytes = writer.finish();
-    let decoded =
-        channel::decode_charter(&bytes, bounds, endpoints).map_err(|error| format!("charter decode: {error:?}"))?;
-    if decoded != local::charter(policy) {
-        return Err("encoded charter differs from local policy".into());
-    }
-    Ok(bytes)
-}
-
-fn llm(source: &run::charter::Llm, endpoints: &channel::Endpoints) -> Result<wire::Llm, String> {
-    let bounds = &wire::CEILINGS;
-    let name = endpoints.name_of(source.endpoint.0, source.dialect).ok_or("model endpoint name is absent")?;
-    wire::Llm::new(
-        bounds,
-        wire::LlmParts {
-            endpoint: name.into(),
-            model: source.model.clone(),
-            window: source.window,
-            output: source.output,
-            prices: wire::Prices::new(
-                bounds,
-                wire::PricesParts {
-                    input: source.prices.input,
-                    cached: source.prices.cached,
-                    output: source.prices.output,
-                    unit: source.prices.unit,
-                },
-            )
-            .map_err(|error| format!("model prices: {error:?}"))?,
-        },
-    )
-    .map_err(|error| format!("model: {error:?}"))
-}
-
-fn field_rules(source: &[run::outcome::FieldRule]) -> Result<List<wire::FieldRule>, String> {
-    let mut fields = List::with_capacity(u32::try_from(source.len()).map_err(|_| "too many contract fields")?);
-    for field in source {
-        fields
-            .push(
-                wire::FieldRule::new(
-                    &wire::CEILINGS,
-                    wire::FieldRuleParts { name: field.name.clone(), max: field.max },
-                )
-                .map_err(|error| format!("contract field: {error:?}"))?,
-            )
-            .map_err(|_| "too many contract fields")?;
-    }
-    Ok(fields)
-}
-
-fn change_rule(source: &run::outcome::ChangeSpec) -> Result<wire::ChangeRule, String> {
-    wire::ChangeRule::new(
-        &wire::CEILINGS,
-        wire::ChangeRuleParts { checks_must_pass: source.checks_must_pass, fields: field_rules(&source.fields)? },
-    )
-    .map_err(|error| format!("change rule: {error:?}"))
-}
-
-fn text_rule(source: &run::outcome::TextSpec) -> Result<wire::TextRule, String> {
-    wire::TextRule::new(&wire::CEILINGS, wire::TextRuleParts { max: source.max, fields: field_rules(&source.fields)? })
-        .map_err(|error| format!("report rule: {error:?}"))
-}
-
 fn default_title() -> String {
     "title".into()
 }
@@ -656,7 +508,8 @@ mod tests {
         .expect("bounded policy");
         assert!(prepared.paths.is_empty());
         assert_eq!(prepared.limits.endpoints.as_ref(), &[run::charter::Endpoint(7)]);
-        let encoded = charter(&prepared.config, &endpoints).expect("matching charter");
+        let encoded = channel::encode_charter(&local::charter(&prepared.config), &wire::CEILINGS, &endpoints)
+            .expect("matching charter");
         assert!(!encoded.is_empty());
         let decoded = channel::decode_charter(&encoded, &wire::CEILINGS, &endpoints).expect("version two charter");
         assert_eq!((decoded.llm.window, decoded.llm.output), (8192, 32));

@@ -60,6 +60,14 @@ pub struct Charter {
     pub models: Box<[Llm]>,
 }
 
+impl Charter {
+    /// Checked ownership of the policy's boxed values, without encoding them.
+    #[must_use]
+    pub fn owned_bytes(&self) -> Option<u64> {
+        cost(self)
+    }
+}
+
 /// Host-written context for one main activation, retained with its Charter.
 /// No context is derived or reordered; empty context is valid. Section count
 /// and owning bytes are bounded at admission, with `Invalid::TooLarge` terminal

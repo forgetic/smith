@@ -41,7 +41,6 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
     let agent_config = config::parse(&agent_bytes)?;
     let endpoints = agent_config.service.channel_endpoints.clone();
     let prepared = local_settings::policy(&settings, &endpoints, agent_config.service.limits.domain)?;
-    let charter = local_settings::charter(&prepared.config, &endpoints)?;
     fs::create_dir_all(state_root).map_err(|error| format!("state directory: {error}"))?;
     let agent_path = state_root.join("agent.json");
     save_agent_config(&agent_path, &agent_bytes)?;
@@ -68,6 +67,9 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
         io: agent_config.service.limits.io,
         channel: protocol::Limits {
             bodies: agent_config.service.limits.channel.bodies,
+            charter: agent_config.service.limits.channel.charter,
+            transcript: agent_config.service.limits.channel.transcript,
+            endpoints: agent_config.service.limits.channel.endpoints,
             channel: agent_config.service.limits.channel.channel,
             calls: host_limits.calls,
         },
@@ -79,7 +81,6 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
     let local_config = service::Config {
         local: prepared.config,
         limits,
-        charter,
         endpoints,
         paths: prepared.paths,
         launch: service::Launch {

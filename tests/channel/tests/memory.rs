@@ -28,7 +28,14 @@ fn channel_limits() -> skein_channel::Limits {
 #[test]
 fn ceiling_limit_halves_and_their_opening_fit_their_combined_worst_case() {
     let channel = channel_limits();
-    let host_limits = host::Limits { bodies: CEILINGS, channel, calls: 8 };
+    let host_limits = host::Limits {
+        bodies: CEILINGS,
+        charter: smith_charter::CEILINGS,
+        transcript: smith_transcript::CEILINGS,
+        endpoints: 1,
+        channel,
+        calls: 8,
+    };
     let agent_limits = agent::Limits {
         bodies: CEILINGS,
         charter: smith_charter::CEILINGS,
@@ -50,7 +57,7 @@ fn ceiling_limit_halves_and_their_opening_fit_their_combined_worst_case() {
         .expect("combined bound");
     let meter = Meter::new();
     meter.start();
-    let mut host = host::Component::new(&host_limits, StreamMode::Two).expect("ceiling host");
+    let mut host = host::Component::new(&host_limits, StreamMode::Two, endpoints.clone()).expect("ceiling host");
     let agent = agent::Component::new(&agent_limits, StreamMode::Two, endpoints).expect("ceiling agent");
     let mut host_events = Queue::with_capacity(host::max_out(&host_limits).to_domain);
     let mut below = Queue::with_capacity(host::max_out(&host_limits).below);

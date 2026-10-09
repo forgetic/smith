@@ -9,7 +9,6 @@ use skein_lib::{Time, Token};
 
 /// Commands sent by a parent to either kind of agent capability.
 #[derive(PartialEq, Eq, Debug)]
-#[expect(clippy::large_enum_variant, reason = "sealed payloads are priced by bounded queues and state")]
 pub enum Event {
     /// Parent requests one agent capability; exactly one Gone.
     Spawn {

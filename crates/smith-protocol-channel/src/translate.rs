@@ -217,17 +217,23 @@ impl Endpoints {
 
     /// Whether the configured names fit the channel's endpoint allowance.
     #[must_use]
-    pub(crate) fn fits(&self, count: u32) -> bool {
+    pub fn fits(&self, count: u32, name_bytes: u32) -> bool {
         if self.len() > count {
             return false;
         }
         for endpoint in &self.entries {
             match u32::try_from(endpoint.name.len()) {
-                Ok(length) if length <= wire::CEILINGS.llm_endpoint => {}
+                Ok(length) if length <= name_bytes => {}
                 Ok(_) | Err(_) => return false,
             }
         }
         true
+    }
+
+    /// Checked retained table storage for bounded names, in bytes.
+    #[must_use]
+    pub fn worst_case(count: u32, name_bytes: u32) -> Option<u64> {
+        List::<Endpoint>::worst_case(count)?.checked_add(u64::from(count).checked_mul(u64::from(name_bytes))?)
     }
 
     /// Find a charter name without exposing endpoint addresses.
