@@ -80,10 +80,10 @@ while inheriting the global agent, model, budget and account settings:
 | `push` | Optional ordered array matching `directories`, each entry `null` or `{ "remote", "branch" }`. Omitted means no push. |
 
 When the first terminal message arrives during preparation, it is the opening
-user message. An empty brief with waiting enabled otherwise opens by asking
-the model to call `wait` and end the turn. Later terminal messages are queued
-until the model ends a turn without tool calls. Instructions need not force
-a startup `wait` when the requested task is already present.
+user message. An empty brief with waiting enabled stays ready for that message
+without making a provider request. Later terminal messages are queued until
+the model ends a turn without tool calls. Instructions need not force a startup
+`wait` when the requested task is already present.
 
 Each model has this shape:
 
