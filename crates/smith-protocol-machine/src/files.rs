@@ -1,12 +1,20 @@
 //! Whole files, conditional stores, and bounded scans over skein's file io
 //! (protocol/agent.md, section 2; domain/tools.md, sections 4 and 6).
 
+use alloc::boxed::Box;
+
 use skein_io::{digest, file, kernel};
 use skein_lib::{List, Token};
 use smith_domain::tools;
 
 use crate::component::{Kind, Root};
 use crate::limits::Limits;
+
+/// Translate a root-relative domain path once: the directory itself is `.`
+/// at io (domain/tools.md, section 2), and every nested path stays unchanged.
+pub(crate) fn io_path(path: Box<[u8]>) -> Box<[u8]> {
+    if path.is_empty() { Box::from(&b"."[..]) } else { path }
+}
 
 /// Prepare one file request, or refuse before io sees an unsafe path.
 pub(crate) fn request(
@@ -21,7 +29,10 @@ pub(crate) fn request(
             if max > limits.file_bytes {
                 return Err(other());
             }
-            Ok((Kind::Load, file::Request::Load { owner, root: at.root, path: at.path, max, no_follow: false }))
+            Ok((
+                Kind::Load,
+                file::Request::Load { owner, root: at.root, path: io_path(at.path), max, no_follow: false },
+            ))
         }
         tools::Op::Scan { at, max, max_bytes } => {
             check(roots, limits, at.root, &at.path, false)?;
@@ -30,7 +41,7 @@ pub(crate) fn request(
             }
             Ok((
                 Kind::Scan,
-                file::Request::Scan { owner, root: at.root, path: at.path, max, max_bytes, no_follow: false },
+                file::Request::Scan { owner, root: at.root, path: io_path(at.path), max, max_bytes, no_follow: false },
             ))
         }
         tools::Op::Store { at, content, expect } => {
@@ -44,7 +55,14 @@ pub(crate) fn request(
             };
             Ok((
                 Kind::Store,
-                file::Request::Store { owner, root: at.root, path: at.path, bytes: content, expected, no_follow: true },
+                file::Request::Store {
+                    owner,
+                    root: at.root,
+                    path: io_path(at.path),
+                    bytes: content,
+                    expected,
+                    no_follow: true,
+                },
             ))
         }
         tools::Op::Spawn { .. } | tools::Op::Search { .. } => Err(other()),

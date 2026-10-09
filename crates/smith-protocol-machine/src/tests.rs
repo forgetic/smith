@@ -468,3 +468,97 @@ fn deadline_sends_term_then_kill_and_answers_after_reap() {
         Some(ToDomain::Checked { owner, ran: run::Ran { exit: run::Exit::TimedOut, output: Box::new([]), cut: 0 } })
     );
 }
+
+#[test]
+fn every_operation_translates_the_directory_itself_and_nested_paths_once() {
+    for path in [&b""[..], &b"src/file"[..]] {
+        let expected = if path.is_empty() { &b"."[..] } else { path };
+        for operation in 0_u32..8 {
+            let owner = Token::new(1);
+            let deadline = Time::from_nanos(u64::MAX);
+            let at = run::Place { root: Token::new(10), path: Box::from(path) };
+            let request = match operation {
+                0 => FromDomain::Op { owner, op: tools::Op::Load { at: place(path), max: 16 }, deadline },
+                1 => FromDomain::Op {
+                    owner,
+                    op: tools::Op::Store { at: place(path), content: Box::new([]), expect: tools::Expect::Absent },
+                    deadline,
+                },
+                2 => {
+                    FromDomain::Op { owner, op: tools::Op::Scan { at: place(path), max: 2, max_bytes: 512 }, deadline }
+                }
+                3 => FromDomain::Op {
+                    owner,
+                    op: tools::Op::Spawn {
+                        cwd: place(path),
+                        command: Box::from(&b"true"[..]),
+                        env: Box::new([]),
+                        roots: Box::new([]),
+                        head: 4,
+                        tail: 4,
+                    },
+                    deadline,
+                },
+                4 => FromDomain::Op {
+                    owner,
+                    op: tools::Op::Search {
+                        at: place(path),
+                        pattern: Box::from(&b"x"[..]),
+                        glob: None,
+                        hits: 2,
+                        bytes: 16,
+                    },
+                    deadline,
+                },
+                5 => FromDomain::Read { owner, at, max: 16, deadline },
+                6 => FromDomain::Probe { owner, at, deadline },
+                7 => FromDomain::Check {
+                    owner,
+                    program: run::Place { root: Token::new(10), path: Box::from(&b"check"[..]) },
+                    deadline,
+                    tail: 4,
+                },
+                _ => unreachable!(),
+            };
+            let mut component = component();
+            let mut to_domain = Queue::with_capacity(2);
+            let mut below = Queue::with_capacity(2);
+            component.from_domain(&env(), request, &mut to_domain, &mut below);
+            assert!(to_domain.is_empty(), "operation {operation}, path {path:?}");
+            match below.pop().expect("one io request") {
+                Below::File { request, .. } => match request {
+                    file::Request::Load { path, .. }
+                    | file::Request::Store { path, .. }
+                    | file::Request::Scan { path, .. } => assert_eq!(path.as_ref(), expected),
+                    other @ (file::Request::Create { .. }
+                    | file::Request::CreateNoFollow { .. }
+                    | file::Request::OpenRead { .. }
+                    | file::Request::OpenReadNoFollow { .. }
+                    | file::Request::OpenDirectory { .. }
+                    | file::Request::Stat { .. }
+                    | file::Request::WriteAt { .. }
+                    | file::Request::ReadAt { .. }
+                    | file::Request::Sync { .. }
+                    | file::Request::Close { .. }
+                    | file::Request::SyncDirectory { .. }
+                    | file::Request::Rename { .. }
+                    | file::Request::Remove { .. }
+                    | file::Request::List { .. }) => panic!("unexpected file request: {other:?}"),
+                },
+                Below::OpenRead { path, .. } => assert_eq!(path.as_ref(), expected),
+                Below::Spawn { spawn, .. } => {
+                    if operation == 3 {
+                        assert_eq!(spawn.dir.as_ref(), expected);
+                    } else {
+                        assert_eq!(spawn.dir.as_ref(), b".");
+                        if operation == 4 {
+                            assert_eq!(spawn.args.last().expect("search path").as_ref(), expected);
+                        }
+                    }
+                }
+                other @ (Below::CancelFile { .. } | Below::Process(_)) => panic!("unexpected request: {other:?}"),
+            }
+            assert!(below.is_empty());
+        }
+    }
+}

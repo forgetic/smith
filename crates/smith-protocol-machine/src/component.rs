@@ -158,7 +158,8 @@ impl Component {
                 {
                     to_domain.push(ToDomain::Read { owner, read: run::Read::Failed });
                 } else if self.guides.insert(owner, Guide::OpeningRead { max, deadline }).is_ok() {
-                    below.push(Below::OpenRead { owner, root: at.root, path: at.path, deadline });
+                    let path = crate::files::io_path(at.path);
+                    below.push(Below::OpenRead { owner, root: at.root, path, deadline });
                 } else {
                     to_domain.push(ToDomain::Read { owner, read: run::Read::Failed });
                 }
@@ -170,7 +171,8 @@ impl Component {
                 {
                     to_domain.push(ToDomain::Probed { owner, executable: false });
                 } else if self.guides.insert(owner, Guide::OpeningProbe { deadline }).is_ok() {
-                    below.push(Below::OpenRead { owner, root: at.root, path: at.path, deadline });
+                    let path = crate::files::io_path(at.path);
+                    below.push(Below::OpenRead { owner, root: at.root, path, deadline });
                 } else {
                     to_domain.push(ToDomain::Probed { owner, executable: false });
                 }

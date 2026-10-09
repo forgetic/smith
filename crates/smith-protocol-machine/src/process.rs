@@ -367,7 +367,7 @@ pub(crate) fn shell(
     }
     let env = environment(&vars, limits.env_bytes)?;
     let args = Box::new([Box::from(&b"-c"[..]), command]);
-    let dir = if cwd.path.is_empty() { Box::from(&b"."[..]) } else { cwd.path };
+    let dir = crate::files::io_path(cwd.path);
     let spawn = Spawn { program: Box::from(&b"/bin/sh"[..]), args, env, dir, pipes: pipes() };
     Some((Process::new(Purpose::Shell, deadline, head, tail, None), Below::Spawn { owner, root: cwd.root, spawn }))
 }
@@ -408,12 +408,12 @@ pub(crate) fn search(
         None => {}
     }
     args.push(Box::from(&b"--"[..])).ok()?;
-    args.push(if at.path.is_empty() { Box::from(&b"."[..]) } else { at.path }).ok()?;
+    args.push(crate::files::io_path(at.path)).ok()?;
     let spawn = Spawn {
         program: Box::from(&b"/usr/bin/rg"[..]),
         args: args.into_boxed(),
         env: Box::new([]),
-        dir: Box::from(&b"."[..]),
+        dir: crate::files::io_path(Box::new([])),
         pipes: pipes(),
     };
     let parser = Search::new(hits, bytes, limits.search_line_bytes);
@@ -435,7 +435,13 @@ pub(crate) fn check(
         return None;
     }
     let env = environment(vars, limits.env_bytes)?;
-    let spawn = Spawn { program: program.path, args: Box::new([]), env, dir: Box::from(&b"."[..]), pipes: pipes() };
+    let spawn = Spawn {
+        program: program.path,
+        args: Box::new([]),
+        env,
+        dir: crate::files::io_path(Box::new([])),
+        pipes: pipes(),
+    };
     Some((Process::new(Purpose::Check, deadline, 0, tail, None), Below::Spawn { owner, root: program.root, spawn }))
 }
 

@@ -1291,3 +1291,14 @@ fn fact_times(facts: &[crate::Fact]) -> Box<[Time]> {
     }
     times.into_boxed()
 }
+
+#[test]
+fn file_calls_on_the_directory_itself_answer_without_io() {
+    for spelling in [&b"."[..], &b""[..], &b"/work/temper"[..], &b"vendor/lib"[..], &b"/work/docs"[..]] {
+        let mut h = Harness::new(LIMITS);
+        let kit = h.open(1, authority(ALL));
+        for call in [read(spelling), write(spelling, 3), edit(spelling)] {
+            assert_eq!(h.call(kit, call), Outcome::NotFile);
+        }
+    }
+}

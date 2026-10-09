@@ -237,3 +237,23 @@ fn successive_harness_runs_preserve_the_absolute_deadline_clock() {
     assert_eq!(world.now(), before, "an expired absolute deadline does not restart its duration");
     world.settle();
 }
+
+#[test]
+fn listing_and_searching_the_directory_itself_reach_io_as_dot() {
+    let mut world = World::new(11, &[Item::file(b"a", b"x")]);
+    let root = world.root();
+    let listed = world.request(FromDomain::Op {
+        owner: Token::new(50),
+        op: tools::Op::Scan { at: place(root, b""), max: 16, max_bytes: 2048 },
+        deadline: far(),
+    });
+    assert!(matches!(listed, ToDomain::Done { done: tools::Done::Scanned { ref entries, more: 0 }, .. }
+        if entries.len() == 1 && entries[0].name.as_bytes() == b"a"));
+    let searched = world.request(FromDomain::Op {
+        owner: Token::new(51),
+        op: tools::Op::Search { at: place(root, b""), pattern: Box::from(&b"x"[..]), glob: None, hits: 8, bytes: 128 },
+        deadline: far(),
+    });
+    assert!(matches!(searched, ToDomain::Done { done: tools::Done::Found { .. }, .. }), "{searched:?}");
+    world.settle();
+}

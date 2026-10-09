@@ -191,6 +191,7 @@ fn admit(kit: &Kit, call: Call, deadline: Time, env: &Env<Limits>) -> Result<Wor
     let work = match call {
         Call::Read { path, skip, lines } => {
             let located = authority::locate(&kit.checkout, &path, limits.path_bytes)?;
+            file(&located.place)?;
             Work::Read { place: located.place, span: Span { skip, lines } }
         }
         Call::List { path } => {
@@ -257,6 +258,7 @@ fn admit(kit: &Kit, call: Call, deadline: Time, env: &Env<Limits>) -> Result<Wor
 /// not in its `.git`.
 fn writable(checkout: &Checkout, path: &Path, limits: &Limits) -> Result<Located, Outcome> {
     let located = authority::locate(checkout, path, limits.path_bytes)?;
+    file(&located.place)?;
     if !located.writable {
         return Err(Outcome::ReadOnly);
     }
@@ -283,4 +285,9 @@ fn fits(content: &[u8], limits: &Limits) -> Result<(), Outcome> {
         return Err(Outcome::TooLarge { size });
     }
     Ok(())
+}
+
+/// File-only calls cannot name the directory itself (domain/tools.md, section 2).
+fn file(place: &path::Place) -> Result<(), Outcome> {
+    if place.path.is_empty() { Err(Outcome::NotFile) } else { Ok(()) }
 }
