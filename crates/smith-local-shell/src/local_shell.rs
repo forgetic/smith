@@ -9,7 +9,6 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use skein_io::kernel::Fd;
-use skein_lib::Duration;
 use skein_shell::{Clock, Config as KernelConfig, Kernel, Now, Wait};
 use skein_world::Host;
 use smith_host_domain as host;
@@ -65,7 +64,7 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
     let executable = std::env::current_exe().map_err(|error| format!("agent program path: {error}"))?;
     let largest_turn =
         smith_domain::max_turn_bytes(&agent_config.service.limits.domain).ok_or("agent turn bound overflows")?;
-    let host_limits = host_limits(largest_turn);
+    let host_limits = service::profile::host_limits(largest_turn);
     let queue = local::max_out(&prepared.limits).max(host::max_out(&host_limits)).max(256);
     let process_limits = service::ProcessLimits {
         io: agent_config.service.limits.io,
@@ -173,51 +172,4 @@ fn token_directory(configured: Option<&str>) -> Result<std::path::PathBuf, Strin
             .join(".config"),
     };
     Ok(base.join("smith/tokens"))
-}
-
-fn host_limits(largest_turn: u64) -> host::Limits {
-    host::Limits {
-        agents: 1,
-        directories: 2,
-        conflicts: 64,
-        path_bytes: 4096,
-        name_bytes: 256,
-        accounts: 4,
-        charter_bytes: 262_144,
-        transcript_bytes: 33_554_432,
-        answered_bytes: 65_536,
-        message_bytes: 4096,
-        messages: 8,
-        calls: 16,
-        call_bytes: 65_536,
-        answer_bytes: host::Delivered::worst_case().max(65_536),
-        turns: 64,
-        turn_bytes: largest_turn.max(262_144),
-        unacknowledged_bytes: largest_turn.max(33_554_432),
-        fact_bytes: 4096,
-        outcome_bytes: 4096,
-        detail_bytes: 4096,
-        spawn_timeout: Duration::from_secs(20),
-        no_progress: Duration::from_secs(300),
-        long_span: Duration::from_secs(3600),
-        wall_time: Duration::from_secs(3600),
-        grace: Duration::from_secs(5),
-        kill_after: Duration::from_secs(2),
-        facts: 1024,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn the_local_start_window_admits_the_standard_agents_largest_turn() {
-        let configuration = smith_agent_shell::config::parse(
-            br#"{"profile":"standard","memory_bytes":1099511627776,"grace_ms":10,"endpoints":[],"environment":[]}"#,
-        )
-        .expect("standard agent");
-        let largest = smith_domain::max_turn_bytes(&configuration.service.limits.domain).expect("bounded turn");
-        let host = super::host_limits(largest);
-        assert!(host.unacknowledged_bytes >= largest, "agent accepts only a window holding its largest turn");
-        assert!(host.turn_bytes >= largest, "host can receive the turn it grants");
-    }
 }

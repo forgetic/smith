@@ -15,6 +15,8 @@ extern crate alloc;
 mod process;
 mod service;
 
+pub mod profile;
+
 #[cfg(test)]
 mod tests;
 

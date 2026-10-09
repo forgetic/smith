@@ -4,10 +4,8 @@
 //! Contract: shell.md, section 2.2; protocol/agent.md, sections 4–6.
 
 mod agent_shell;
-mod limits;
 
 pub mod config;
 pub mod trace;
 
 pub use agent_shell::{Agent, Resources, run};
-pub use limits::LIMITS;

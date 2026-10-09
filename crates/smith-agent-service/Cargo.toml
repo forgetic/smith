@@ -6,6 +6,12 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+skein-http.workspace = true
+skein-llm-connection.workspace = true
+skein-tls.workspace = true
+smith-channel.workspace = true
+smith-charter.workspace = true
+smith-transcript.workspace = true
 skein-lib.workspace = true
 skein-io.workspace = true
 skein-channel.workspace = true
@@ -17,12 +23,7 @@ smith-protocol-machine.workspace = true
 
 [dev-dependencies]
 smith-agent-world.workspace = true
-smith-channel.workspace = true
-smith-charter.workspace = true
-smith-transcript.workspace = true
 skein-llm-world.workspace = true
-skein-llm-connection.workspace = true
-skein-tls.workspace = true
 
 [lints]
 workspace = true

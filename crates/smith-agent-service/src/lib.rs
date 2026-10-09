@@ -13,6 +13,11 @@ extern crate alloc;
 
 mod service;
 
+pub mod profile;
+
+#[cfg(test)]
+mod tests;
+
 pub use service::{
     Config, ConfigError, Effects, Failure, Limits, Service, done, effects_worst_case, failure, iterate, next_deadline,
     work_pending, worst_case,
