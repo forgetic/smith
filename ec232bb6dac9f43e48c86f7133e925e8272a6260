@@ -1,0 +1,9 @@
+Final rebased-tip gates at ec232bb6dac9f43e48c86f7133e925e8272a6260 on
+1ee3a91b2e2bd2c85e215f7edc1f62ed70a4c003:
+format passed; heavy task545 workspace all-target Clippy 9.72 s;
+task546 focused 1532/1532 in 3.269 s, zero skips;
+task547 fuzzy 21/21 in 3.745 s, zero skips.
+Idle serial task548 affected worlds 160/160 in 3.828 s, zero skips.
+Follow-up and runtime smoke evidence pending product carried lines at05.13,
+then session00 back-fill, as authorized by the plan. No credentials used.
+Merged locally ff-only under the shared lock; own worktree left main clean.
