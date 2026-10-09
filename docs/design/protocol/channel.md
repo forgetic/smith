@@ -167,7 +167,7 @@ of domain/host.md, section 2.
 | withdraw | a call's name | once per call, at most |
 | turn | its number in this activation; the spend so far; the last message read, if any; `opens_window`; its body, as bytes (transcript.md) | numbered from one in each activation, each once |
 | waiting | the last message read, if any | when the run waits for a message, or awaits its first |
-| long | how long, at most, as a duration | when the checks, an LLM completion or a command start |
+| long | what it is (`check`, `completion` or `command`) and how long, at most, as a duration | when the checks, an LLM completion or a command start |
 | long done | nothing | when one ends |
 | rejected | an account and a generation | when a provider refused that credential |
 | exhausted | an account, and how long until it may be used again | when its account ran out |

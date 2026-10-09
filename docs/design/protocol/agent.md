@@ -70,10 +70,15 @@ are limits.md's, and its event vocabulary events.md's.
   else.
 - **Output** is captured as the domain asks: how much of the head and of
   the tail, and the count of bytes dropped between them.
-- **Deadlines** are the domain's. When one passes, the machine signals
-  the command's process group in three steps, each step's grace from the
-  configuration, and answers once the group's leader is reaped and its
-  pipes are closed.
+- **Deadlines** are the domain's. When one passes, the machine stops the
+  command's process group in three steps, each given `group_stop` before
+  the next:
+  1. terminate: the termination signal to the group;
+  2. kill: the kill signal to the group;
+  3. close: io's close of the child, which kills what is left of its
+     group and reaps it (skein's io.md, 6).
+
+  It answers once the group's leader is reaped and its pipes are closed.
 - **Its limits are derived from the tools'** (limits.md, section 3.5),
   so a tool's limit never meets a smaller one here.
 
