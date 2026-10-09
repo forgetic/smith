@@ -1,0 +1,10 @@
+SMITH03.2 final exact-tip gates passed through heavy791, /tmp/smith-03-2-final-gates2.log.
+Tip254cf7c2c0e857950b28d4017d85efe6597fd854; parent/main4cb0c56bdacac999ac1bef8929983c409a4ee340.
+cargo fmt --check PASS; cargo clippy --workspace --all-targets -- -D warnings PASS.
+Focused1573/1573,0 skipped,3.466s, ID8f4d6ee8-9621-40ed-b07b-e5b8903c22cf.
+Fuzzy21/21,0 skipped,3.890s, IDc734bafd-2c99-4269-9327-0639d6289f85.
+Affected serial254/254 focused4.304s,0 skipped (heavy777,/tmp/smith-03-2-measure-final.log); five affected world fuzzy tests5.086s,0 skipped (heavy769,/tmp/smith-03-2-development21.log).
+Bounded typed charter/history/turn/result/delivery values cross the parent face; spawned codecs translate before domain ingress. Equal Start charter/history, concrete turn/result, delivery fields, malformed payload RULES and maximum ownership ACK assertions pass. Local replay/store and existing goldens pass. Preserves channel/charter/transcriptv2, carried messages, Answer.read and explicit parent-selected resumed flag.
+Smoke03.2 evidence pending session00 runner/backfill; plan has no probes and deterministic tests cover it. No live credential use.
+Memory Verify on ownworktree projecthome-free-src-rust-smith-rel-03 generation13:38:38Z; task queries paginated, encode_start/decode_ask snippets and both-direction traces checked against source. Common-name graph callee resolution is ambiguous; material relationships verified in own source. All material paths metadata_match/no_recorded_issue, without completeness claims.
+No design/coordinator/STATUS edits; ownworktree local ff-only merge under brief common lock; no primary BENCH edits or push.
