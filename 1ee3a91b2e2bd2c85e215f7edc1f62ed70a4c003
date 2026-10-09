@@ -1,0 +1,18 @@
+SMITH03 03.1 final rebased-tip evidence
+
+Tested tip: 1ee3a91b2e2bd2c85e215f7edc1f62ed70a4c003.
+Parent/main at rebase: 1a0dade195afd299a9f91ea0e194e8079a4b2dfc.
+Serialized heavy gate: /tmp/smith-03-1-gate2.log.
+Formatting PASS; workspace all-target Clippy PASS (0.38 seconds).
+Focused PASS: 1530 tests, zero skipped, 3.200 seconds;
+nextest run 813bf756-fa5b-4be3-b438-eb20fd7c556c.
+Fuzzy PASS: 20 tests, zero skipped, 4.072 seconds;
+nextest run 8a609f95-66b9-490d-8517-6c90e7560449.
+Build jobs 1, debug information disabled, assertions retained, nextest 8
+workers. Existing budgets 15 seconds / 60 seconds unchanged.
+
+The existing delivery trace expectation now includes Parent(Called...),
+with scope/name/deadline/fields assertions retained. No new behavior
+probe is required by plan 03.1. Evidence pending: smoke 03.1, until the
+benchmark runner is available for session 00 back-fill. No credentials
+were used. Primary BENCH checkout and smith-rel-01 remain untouched.
