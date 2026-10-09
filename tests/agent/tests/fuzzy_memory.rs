@@ -69,7 +69,8 @@ const LIMITS: Limits = Limits {
         failure_bytes: 512,
         delegated_result_bytes: 131_072,
         parallel_tools: 2,
-        facts: 32,
+        // A whole completion may report one content-free drop per block.
+        facts: 34,
         tools: smith_domain::tools::Limits {
             kits: 4,
             calls: 2,
