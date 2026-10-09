@@ -523,6 +523,13 @@ refusals without reading a login. The live tier shares the guard and its
 small-model choices; no live provider runs at the gate. Both harness shares
 and the workspace suite budgets remain unchanged.
 
+Benchmark increment 00.6 adds frozen commit builds after the shared guard.
+Its idle serial `heavy` measurement on 2026-10-09 passed 56 focused unit/offline
+tests in 0.788 seconds and one fuzzy parser sweep in 0.157 seconds. The build
+of `30259d8` and its repeated archive verification run separately through
+`heavy`; unit tests build no binary and use only a synthetic git source. The
+one-second focused and five-second fuzzy harness shares remain unchanged.
+
 ## 5. Opt-in live suite
 
 The `live` profile runs the shipped binary against real backends, serially,

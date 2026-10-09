@@ -1,4 +1,4 @@
-//! Offline manifest checking; no attempt starts from this command yet.
+//! Offline checks, summaries and frozen arm builds; no agent starts yet.
 
 #![forbid(unsafe_code)]
 
@@ -8,6 +8,10 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.as_slice() {
+        [command, commit] if command == "build" => build_command(commit, None),
+        [command, commit, flag, repository] if command == "build" && flag == "--repository" => {
+            build_command(commit, Some(Path::new(repository)))
+        }
         [command] if command == "check" => check_all(),
         [command, directory] if command == "check" => check(Path::new(directory)),
         [command, results, suite, tier, design, seed, reference @ ..]
@@ -26,11 +30,19 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: smith-bench check [TASKS_DIRECTORY]\n       smith-bench guards --suite SUITE [--tasks TASKS_DIRECTORY] SECTION...\n       smith-bench summarise RESULTS SUITE TIER DESIGN SEED [BASELINE]\n       smith-bench baseline SUMMARY NAME"
+                "usage: smith-bench check [TASKS_DIRECTORY]\n       smith-bench guards --suite SUITE [--tasks TASKS_DIRECTORY] SECTION...\n       smith-bench summarise RESULTS SUITE TIER DESIGN SEED [BASELINE]\n       smith-bench baseline SUMMARY NAME\n       smith-bench build COMMIT [--repository REPOSITORY]"
             );
             ExitCode::from(2)
         }
     }
+}
+
+fn build_command(commit: &str, repository: Option<&Path>) -> ExitCode {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("benchmark workspace");
+    report_output(smith_bench::arm::build(repository.unwrap_or(source), commit).map(|built| {
+        println!("built {} sha256 {}", built.arm.commit, built.arm.sha256);
+        built.directory
+    }))
 }
 
 fn committed_output(directory: &str, name: &str) -> Result<PathBuf, String> {

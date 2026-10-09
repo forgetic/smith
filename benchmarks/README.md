@@ -16,6 +16,7 @@ contract.
 Commands available so far:
 
 ```sh
+cargo run -p smith-bench -- build COMMIT [--repository REPOSITORY]
 cargo run -p smith-bench -- check [TASKS_DIRECTORY]
 cargo run -p smith-bench -- guards --suite benchmarks/tests/recorded/suites/sample.toml --tasks benchmarks/tests/recorded/tasks/valid 'benchmarks.md, section 5.2'
 cargo run -p smith-bench -- summarise RESULTS_DIRECTORY SUITE TIER single 123
@@ -105,3 +106,17 @@ the same guard and reads its default models from `agents/models.toml`.
 Credential conversion refuses refresh-token fields; a pre-borrow binary can
 receive only the guard's explicit unusable sentinel, alongside the access token
 and account id. The guard reads no login and never reports credential values.
+
+`build` resolves a clean local source (the harness workspace by default),
+fetches the commit into its private `clone/` and uses `cargo build --release
+--locked --package smith --bins`. It captures Cargo's executable artifacts and
+archives them under `arms/<full-commit>-<smith-sha256>/`. `arm.json` records each
+binary's digest and the verbose rustc version. Rebuilding an identical arm
+verifies its manifest and hashes instead of overwriting it. The clone has an
+ownership marker; a dirty clone or changed arm refuses the build. Sources are
+read-only, Git hooks and global configuration are disabled, and no developer
+worktree is created. Build caches are private under the same state root.
+
+Run each build as its own `heavy` command, separately from an attempt, with
+the plan README's scoped local skein URL rewrite exported. Runtime data must
+be outside repositories and every destination passes the shared guard.

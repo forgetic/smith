@@ -17,6 +17,8 @@ mod tokens;
 
 pub mod agent;
 
+pub mod arm;
+
 pub mod guard;
 
 pub use agent::{Agent, Configuration, PinnedConfiguration, Provider, read_configuration};
