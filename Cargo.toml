@@ -164,6 +164,10 @@ autoexamples = false
 name = "smith"
 path = "src/main.rs"
 
+[[bin]]
+name = "smith-agent"
+path = "src/bin/smith-agent.rs"
+
 [[test]]
 name = "end_to_end"
 path = "tests/end-to-end/end_to_end.rs"

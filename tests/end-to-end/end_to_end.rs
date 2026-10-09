@@ -91,3 +91,15 @@ fn the_live_outcome_referee_runs_on_the_shared_fake_binary_harness() {
     let change = Scratch::new();
     support::live_run::run_fake(&change, World::changed(36, &change, Placement::Spawned).scenario);
 }
+
+#[test]
+fn smith_agent_refuses_a_malformed_configuration_before_its_channel_opens() {
+    let scratch = Scratch::new();
+    let path = scratch.path().join("malformed-agent.json");
+    std::fs::write(&path, br#"{"profile":"standard"}"#).expect("malformed configuration fixture");
+    let errors =
+        support::refusal_program(std::path::Path::new(env!("CARGO_BIN_EXE_smith-agent")), &scratch, vec![path.into()]);
+    let line = std::str::from_utf8(&errors).expect("UTF-8 refusal");
+    assert!(line.starts_with("smith: configuration JSON:"));
+    assert_eq!(line.lines().count(), 1, "startup writes one refusal");
+}

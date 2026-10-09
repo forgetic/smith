@@ -195,13 +195,12 @@ fn observations(procs: &[Process], saved: bool) -> Seen {
 }
 
 pub fn start(arguments: Vec<std::ffi::OsString>, directory: &Path, mode: Mode) -> Binary {
+    start_program(Path::new(env!("CARGO_BIN_EXE_smith")), arguments, directory, mode)
+}
+
+fn start_program(program: &Path, arguments: Vec<std::ffi::OsString>, directory: &Path, mode: Mode) -> Binary {
     Binary::start(
-        Command {
-            program: env!("CARGO_BIN_EXE_smith").into(),
-            arguments,
-            environment: vec![],
-            directory: directory.into(),
-        },
+        Command { program: program.into(), arguments, environment: vec![], directory: directory.into() },
         mode,
         65_536,
     )
@@ -344,10 +343,14 @@ impl Referee<Process> for Refusal {
 }
 
 pub fn refusal(scratch: &Scratch, arguments: Vec<std::ffi::OsString>) -> Vec<u8> {
+    refusal_program(Path::new(env!("CARGO_BIN_EXE_smith")), scratch, arguments)
+}
+
+pub fn refusal_program(program: &Path, scratch: &Scratch, arguments: Vec<std::ffi::OsString>) -> Vec<u8> {
     assert_no_children();
     let clock = Clock::new();
     let now = clock.now().now;
-    let mut binary = start(arguments, scratch.path(), Mode::Terminal);
+    let mut binary = start_program(program, arguments, scratch.path(), Mode::Terminal);
     let streams = binary.take_streams().expect("startup terminal");
     let descriptors = streams.descriptors();
     let Streams::Terminal { stream } = streams else { unreachable!("startup on terminal") };
