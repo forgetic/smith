@@ -145,7 +145,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     // A winding run holds the outcome it accepted.
     let run = limits
         .run_bytes
-        .checked_add(Queue::<crate::run::Message>::worst_case(limits.messages)?)?
+        .checked_add(Queue::<crate::inbox::Queued>::worst_case(limits.messages)?)?
         .checked_add(Queue::<skein_lib::Token>::worst_case(limits.messages)?)?
         .checked_add(u64::from(limits.offer_bytes))?
         .checked_add(u64::from(limits.messages).checked_mul(u64::from(limits.message_bytes))?)?

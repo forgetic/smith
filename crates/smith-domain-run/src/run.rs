@@ -88,6 +88,7 @@ use crate::delivery::{CallName, Delivery};
 use crate::domain::Domain;
 use crate::facts::{Asked, FactKind, Facts};
 use crate::host::{Relay as HostRelay, Stage as HostStage};
+use crate::inbox::{self, Entrance, Inbox};
 use crate::land::{self, Settled};
 use crate::limits::Limits;
 use crate::outcome::{self, Change, Declared};
@@ -126,25 +127,14 @@ pub(crate) struct Run {
     /// Opaque restored history binding consumed when main opens.
     transcript: Option<Token>,
     resumed: bool,
-    /// Bounded host messages accepted but not yet given to main.
-    inbox: Queue<Message>,
-    /// Ordered names offered to main and awaiting its next told turn.
-    offered: Queue<Token>,
-    /// Latest host message acknowledged by a told turn.
-    read: Option<Token>,
+    /// Admitted messages and the outstanding offered/read fence.
+    inbox: Inbox,
     /// A Wait call has returned; the next main yield must park if the inbox is empty.
     wait_requested: bool,
     /// Activation-local number of main turns told to the host.
     turns: u32,
     /// Last historical session turn sequence, including a restored prefix.
     sequence: Option<u32>,
-}
-
-/// Retained FIFO payload; parent names remain opaque. Payload moves into Say.
-#[derive(Debug)]
-pub(crate) struct Message {
-    name: Token,
-    text: Box<[u8]>,
 }
 
 #[derive(Debug)]
@@ -277,7 +267,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(invalid)), read: None });
         return;
     }
-    if !messages_valid(&messages, &env.limits) {
+    if !inbox::messages_valid(&messages, &env.limits) {
         out.push(Request::Answer {
             to: reply_to,
             answer: Answer::Refused(Refusal::Invalid(Invalid::Messages)),
@@ -310,9 +300,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         state: State::Closed,
         transcript,
         resumed,
-        inbox: Queue::with_capacity(env.limits.messages),
-        offered: Queue::with_capacity(env.limits.messages),
-        read: None,
+        inbox: Inbox::new(&env.limits),
         wait_requested: false,
         turns: 0,
         sequence: None,
@@ -334,59 +322,12 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
     let main = conversations.insert(conversation).expect("checked for room above");
     out.push(Request::Admitted { host_run, run: id.token() });
     let run = runs.get_mut(id).expect("inserted above");
-    carry(run, facts, id.token(), messages);
+    run.inbox.carry(facts, id.token(), messages);
     run.state = match prepare::next(run.workspace.as_ref(), None) {
         Some(step) => look(run, id, reply_to, main, step, env, out),
         None => ready(run, conversations, reply_to, main, env, facts, out),
     };
     follow(runs, alarms, facts, id);
-}
-
-/// Move the admitted Start batch ahead of every later relayed message.
-fn carry(run: &mut Run, facts: &mut Facts, token: Token, messages: Box<[crate::Message]>) {
-    for message in messages {
-        let bytes = message
-            .label
-            .len()
-            .checked_add(2)
-            .expect("validated label")
-            .checked_add(message.text.len())
-            .expect("validated rendered message");
-        let mut writer = skein_lib::Writer::new(bytes);
-        writer.put(&message.label).expect("measured label");
-        writer.put(b": ").expect("measured separator");
-        writer.put(&message.text).expect("measured text");
-        run.inbox.push(Message { name: message.name, text: writer.finish() });
-        facts.push(FactKind::MessageReceived {
-            run: token,
-            name: message.name,
-            bytes: u64::try_from(bytes).expect("bounded message"),
-        });
-    }
-}
-
-fn messages_valid(messages: &[crate::Message], limits: &Limits) -> bool {
-    if messages.len() > usize::try_from(limits.messages).expect("u32 fits") {
-        return false;
-    }
-    for (at, message) in messages.iter().enumerate() {
-        let length = match message.label.len().checked_add(2) {
-            Some(bytes) => match bytes.checked_add(message.text.len()) {
-                Some(bytes) => bytes,
-                None => return false,
-            },
-            None => return false,
-        };
-        if length > usize::try_from(limits.message_bytes).expect("u32 fits") {
-            return false;
-        }
-        for earlier in messages.get(..at).expect("enumerated prefix") {
-            if earlier.name == message.name {
-                return false;
-            }
-        }
-    }
-    true
 }
 
 /// Admit a named, labelled host message or emit its typed refusal.
@@ -404,59 +345,24 @@ pub(crate) fn message(
     let Some(run) = domain.runs.get(id) else {
         return;
     };
-    let ending = match run.state {
-        State::Stopping { .. } | State::Over { .. } | State::Winding { .. } | State::Closed => true,
-        State::Awaiting { .. } | State::Preparing { .. } | State::Working { .. } | State::Waiting { .. } => false,
-    };
-    let rendered = match label.len().checked_add(2) {
-        Some(bytes) => bytes.checked_add(text.len()),
-        None => None,
-    };
-    let bytes = match rendered {
-        Some(bytes) => u64::try_from(bytes).expect("owned lengths fit"),
-        None => u64::MAX,
-    };
-    let too_large = match rendered {
-        Some(bytes) => u64::try_from(bytes).expect("owned lengths fit") > u64::from(env.limits.message_bytes),
-        None => true,
-    };
-    let mut named = run.read == Some(name);
-    for offered in &run.offered {
-        if *offered == name {
-            named = true;
+    let entrance = match run.state {
+        State::Stopping { .. } | State::Over { .. } | State::Winding { .. } | State::Closed => Entrance::Ending,
+        State::Awaiting { .. } | State::Preparing { .. } | State::Working { .. } | State::Waiting { .. } => {
+            Entrance::Open
         }
-    }
-    for queued in &run.inbox {
-        if queued.name == name {
-            named = true;
-        }
-    }
-    let held = run.inbox.len().saturating_add(run.offered.len());
-    let reason = if ending {
-        Some(crate::MessageRefusal::Ending)
-    } else if too_large {
-        Some(crate::MessageRefusal::TooLarge)
-    } else if named {
-        Some(crate::MessageRefusal::NameInUse)
-    } else if held >= env.limits.messages {
-        Some(crate::MessageRefusal::Full)
-    } else {
-        None
     };
-    domain.facts.about(token);
-    if let Some(reason) = reason {
-        domain.facts.push(FactKind::MessageRefused { run: token, name, bytes, reason });
-        out.push(Request::MessageRefused { host_run: run.host_name, name, reason });
-        return;
-    }
-    let mut writer = skein_lib::Writer::new(rendered.expect("checked rendered size"));
-    writer.put(&label).expect("checked rendered size");
-    writer.put(b": ").expect("checked rendered size");
-    writer.put(&text).expect("checked rendered size");
-    let text = writer.finish();
-    domain.facts.push(FactKind::MessageReceived { run: token, name, bytes });
+    let host_run = run.host_name;
+    let bytes = inbox::rendered_bytes(&label, &text).unwrap_or(u64::MAX);
     let run = domain.runs.get_mut(id).expect("checked live run above");
-    run.inbox.push(Message { name, text });
+    domain.facts.about(token);
+    match run.inbox.admit(name, label, text, entrance, &env.limits) {
+        Ok(bytes) => domain.facts.push(FactKind::MessageReceived { run: token, name, bytes }),
+        Err(reason) => {
+            domain.facts.push(FactKind::MessageRefused { run: token, name, bytes, reason });
+            out.push(Request::MessageRefused { host_run, name, reason });
+            return;
+        }
+    }
     let state = mem::replace(&mut run.state, State::Closed);
     run.state = match state {
         State::Awaiting { reply_to, main, until: _ } => open(run, &mut domain.conversations, reply_to, main, env, out),
@@ -478,44 +384,6 @@ pub(crate) fn message(
     follow(&mut domain.runs, &mut domain.alarms, &mut domain.facts, id);
 }
 
-/// Build one ordered offer and retain each name until an actual told turn.
-fn offer(run: &mut Run, limits: &Limits) -> Option<Box<[u8]>> {
-    assert!(run.offered.is_empty(), "a previous offer ends at its told turn");
-    let mut length = 0_usize;
-    let mut count = 0_u32;
-    for message in &run.inbox {
-        if count >= limits.offer_messages {
-            break;
-        }
-        let separator = if count == 0 { 0 } else { 2 };
-        let next = match length.checked_add(separator) {
-            Some(bytes) => match bytes.checked_add(message.text.len()) {
-                Some(bytes) => bytes,
-                None => break,
-            },
-            None => break,
-        };
-        if next > usize::try_from(limits.offer_bytes).expect("receiving cap fits") {
-            break;
-        }
-        length = next;
-        count = count.checked_add(1).expect("bounded inbox count");
-    }
-    if count == 0 {
-        return None;
-    }
-    let mut writer = skein_lib::Writer::new(length);
-    for at in 0..count {
-        let message = run.inbox.pop().expect("measured ordered prefix");
-        if at > 0 {
-            writer.put(b"\n\n").expect("measured separators");
-        }
-        writer.put(&message.text).expect("measured payload");
-        run.offered.push(message.name);
-    }
-    Some(writer.finish())
-}
-
 fn continue_messages(
     run: &mut Run,
     reply_to: ReplyTo,
@@ -524,7 +392,7 @@ fn continue_messages(
     limits: &Limits,
     out: &mut Queue<Request>,
 ) -> State {
-    let text = offer(run, limits).expect("an admitted message fits an offer");
+    let text = run.inbox.offer(limits).expect("an admitted message fits an offer");
     run.wait_requested = false;
     say(reply_to, main, peer, text, out)
 }
@@ -542,19 +410,13 @@ pub(crate) fn turn(domain: &mut Domain, conversation: Token, record: Token, sequ
     run.sequence = Some(sequence);
     run.turns = run.turns.checked_add(1).expect("activation count is bounded by historical sequence");
     domain.facts.about(conversation.run.token());
-    let offered = run.offered.len();
-    for _ in 0..offered {
-        let name = run.offered.pop().expect("bounded offered prefix");
-        run.read = Some(name);
-        domain.facts.push(FactKind::MessageRead { run: conversation.run.token(), name, turn: run.turns });
-    }
-    domain.facts.push(FactKind::MessageFence { run: conversation.run.token(), turn: run.turns, read: run.read });
+    run.inbox.told(conversation.run.token(), run.turns, &mut domain.facts);
     out.push(Request::Turn {
         host_run: run.host_name,
         record,
         number: run.turns,
         position: sequence,
-        read: run.read,
+        read: run.inbox.fence(),
         spent: run.spent,
     });
 }
@@ -583,7 +445,7 @@ pub(crate) fn park(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request>) {
             out,
         ),
         State::Waiting { reply_to, main, until: _ } => {
-            assert!(run.inbox.is_empty(), "an admitted wake cancels idle expiry");
+            assert!(!run.inbox.has_queued(), "an admitted wake cancels idle expiry");
             wind_down(&mut domain.conversations, reply_to, main, Ending::Parked, out)
         }
         State::Preparing { .. }
@@ -726,11 +588,11 @@ pub(crate) fn yielded(
         State::Working { reply_to, main } => {
             assert!(main == id, "a conversation with no asker is main");
             assert!(conversation.calls == 0, "a main yield follows every actual call terminal");
-            match run.inbox.is_empty() {
+            match !run.inbox.has_queued() {
                 false => continue_messages(run, reply_to, main, peer, &env.limits, out),
                 true if run.wait_requested => {
                     run.wait_requested = false;
-                    out.push(Request::Waiting { host_run: run.host_name, read: run.read });
+                    out.push(Request::Waiting { host_run: run.host_name, read: run.inbox.fence() });
                     if run.charter.waiting == Duration::ZERO {
                         wind_down(conversations, reply_to, main, Ending::Parked, out)
                     } else {
@@ -1227,14 +1089,14 @@ pub(crate) fn ended(domain: &mut Domain, conversation: Token, end: End, spend: S
         | State::Waiting { reply_to, main, until: _ }
         | State::Over { reply_to, main, exhausted: _ } => {
             assert!(main == id, "a conversation with no asker is main");
-            answer(reply_to, ending(end, run.spent, run.turns), run.read, out)
+            answer(reply_to, ending(end, run.spent, run.turns), run.inbox.fence(), out)
         }
         State::Winding { reply_to, ending } => {
             let ending = match failure {
                 Some(failure) => Ending::Failed(failure),
                 None => ending,
             };
-            answer(reply_to, finished(ending, run.spent, run.turns), run.read, out)
+            answer(reply_to, finished(ending, run.spent, run.turns), run.inbox.fence(), out)
         }
         State::Awaiting { .. } | State::Preparing { .. } | State::Stopping { .. } | State::Closed => {
             unreachable!("a run's conversation ends only once the run has opened it")
@@ -1297,16 +1159,7 @@ fn follow(runs: &mut Slab<Run>, alarms: &mut Deadlines<Alarm>, facts: &mut Facts
         State::Closed => (None, true),
     };
     if closed {
-        let offered = run.offered.len();
-        for _ in 0..offered {
-            let name = run.offered.pop().expect("retained offered prefix");
-            facts.push(FactKind::MessageUnread { run: id.token(), name });
-        }
-        let queued = run.inbox.len();
-        for _ in 0..queued {
-            let message = run.inbox.pop().expect("retained inbox prefix");
-            facts.push(FactKind::MessageUnread { run: id.token(), name: message.name });
-        }
+        run.inbox.unread(id.token(), facts);
     }
     let alarm = Alarm::Deadline { run: id };
     if let Some(at) = deadline {
@@ -1471,7 +1324,7 @@ fn ready(
 ) -> State {
     let id = conversations.get(main).expect("pending main retains its run").run;
     facts.push(FactKind::Prepared { run: id.token(), guides: run.found.guides.len(), checks: run.found.checks.len() });
-    if prompt::has_brief(&run.charter) || !run.inbox.is_empty() || !run.charter.grants.wait {
+    if prompt::has_brief(&run.charter) || run.inbox.has_queued() || !run.charter.grants.wait {
         return open(run, conversations, reply_to, main, env, out);
     }
     out.push(Request::Waiting { host_run: run.host_name, read: None });
@@ -1506,7 +1359,7 @@ fn open(
         run.spent,
         run.deadline.saturating_since(env.now),
     );
-    let offered = offer(run, &env.limits);
+    let offered = run.inbox.offer(&env.limits);
     opening.prompt = prompt::opening(prompt::has_brief(&run.charter), offered);
     opening.transcript = run.transcript.take();
     out.push(Request::Open { conversation: main.token(), opening });
@@ -1544,7 +1397,7 @@ fn unopened(
         }
     }
     conversations.retire(main);
-    answer(reply_to, terminal, run.read, out)
+    answer(reply_to, terminal, run.inbox.fence(), out)
 }
 
 /// Working, or over the budget's `over` part: main called `finish` as

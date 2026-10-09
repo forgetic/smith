@@ -45,6 +45,7 @@ mod delivery;
 mod domain;
 pub mod facts;
 mod host;
+mod inbox;
 mod land;
 mod limits;
 pub mod outcome;
@@ -64,6 +65,7 @@ pub use charter::{Brief, Charter, Conventions, Section};
 pub use domain::{
     Domain, MAX_OUT, completion_overflow, completion_permit, fire, owner, reserve, settle_reservation, step,
 };
+pub use inbox::rendered_bytes;
 pub use limits::{Derivation, Limits, derive, worst_case};
 pub use workspace::{Directory, Workspace};
 
