@@ -326,7 +326,7 @@ fn standard_limits(memory: u64) -> Result<service::Limits, String> {
         http: http::client::Limits { request: 4096, head: 4096, headers: 64, read: 256, send: 31 },
         sse: http::sse::Limits { line: 524_288, event: 524_288, field: 128, chunk: 128 },
         dialect: openai::Limits {
-            request_bytes: 262_144,
+            request_bytes: 1_048_576,
             document_bytes: 524_288,
             string_bytes: 65_536,
             depth: 32,

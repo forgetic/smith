@@ -646,3 +646,20 @@ world; no real waiting is used. Their serial measure profile passed in
 0.048 seconds. The full workspace passed 1,478 focused tests in 2.916 seconds
 and 17 fuzzy tests in 3.493 seconds. The change leaves the existing suite
 budgets, byte limits, outer time budgets and retry count unchanged.
+
+
+### Repository request envelope validation, 2026-10-09
+
+The standard outgoing request cap is 1 MiB. A repository-history fixture feeds
+eighty standard 4 KiB read windows through the actual adapter and codec: the
+former 256 KiB allowance refuses it before sending, and the new allowance
+admits it. An encoded-boundary fixture admits and replays exactly 1 MiB,
+refuses one additional encoded byte, and checks the shared client's heap
+accounting. Receiving, replay and block-count limits remain unchanged.
+
+Eight affected receiving and completion-window focused tests passed serially
+in 1.538 seconds. The service eagerly reserved 4,233,560 bytes against its
+checked bound of 359,734,783,998 bytes; the exact request-boundary fixture
+peaked at 2,126,475 bytes against the shared client's 102,358,592-byte bound.
+Existing suite budgets remain unchanged; complete workspace gates apply
+before a main merge.

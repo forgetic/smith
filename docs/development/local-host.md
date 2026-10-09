@@ -220,13 +220,15 @@ write and sync boundary. Serial measurements are in the
 
 Process containment uses Skein's plain children until its contained-tree
 mechanism is available. The inherited standard agent profile has a conservative
-checked memory bound of roughly 359 GB, so its configured ceiling must exceed
+checked memory bound of roughly 360 GB, so its configured ceiling must exceed
 that bound. The profile admits raw tool arguments up to 32 KiB and complete
 provider answers up to 64 KiB; JSON strings allow 64 KiB and provider documents
 and SSE lines/events allow 512 KiB, including escaped argument strings and
 response metadata. Tool declarations and decoded call ownership retain their
 separate bounds. These are receiving caps, independent of the model's token
-budget. The checked bound is conservative: startup eagerly reserves about
-4 MiB rather than that bound's full byte count. Reducing the retained limits
+budget. Outgoing requests allow 1 MiB, including repeated tool output, replay
+metadata and JSON escaping; the bound applies to each session independently.
+Exceeding it refuses the completion before sending. The checked bound is
+conservative: startup eagerly reserves about 4 MiB rather than that bound's full byte count. Reducing the retained limits
 or tightening that calculation remains later work. The ceiling is checked accounting, not an eager allocation of that
 number of bytes.
