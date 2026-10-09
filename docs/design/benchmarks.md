@@ -272,7 +272,8 @@ new schedule is a new file.
 
 `enum Agent { Smith, Codex, ClaudeCode }` is matched exhaustively, one
 module per variant, in five steps. **Prepare** the attempt's private
-directories and the agent's dedicated home, touching no one else's.
+directories and the agent's pinned configuration, writing nothing in the
+user's tool directories.
 **Command:** an exact environment from an allow-list, nothing inherited,
 and the prompt on standard input. **Observe** the output as it arrives,
 as neutral observations: a response and its usage, a tool call, a child,

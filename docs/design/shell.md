@@ -677,8 +677,9 @@ What the person sees:
 - **Never shown:** credential values appear in no setting, event, trace,
   terminal line or `smith check` output.
 - **Refresh tokens are never copied.** An issuer rotates them, and a
-  copied one logs the other tool out. Live tests and benchmarks sign in
-  with dedicated accounts (testing.md, section 2.3).
+  copied one logs the other tool out. Live tests and benchmarks use the
+  user's existing logins, borrowed read-only (testing.md, section 2.3;
+  benchmarks.md, section 10).
 
 ## 8. The build environment
 
