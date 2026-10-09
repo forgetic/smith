@@ -299,6 +299,12 @@ impl Domain {
         self.facts.pop()
     }
 
+    /// Whether an emitted observation still waits for the parent's drain.
+    #[must_use]
+    pub fn has_facts(&self) -> bool {
+        !self.facts.is_empty()
+    }
+
     /// Channel facts with content; capture policy remains the engine's.
     pub fn pop_content(&mut self) -> Option<crate::Content> {
         self.content.pop()

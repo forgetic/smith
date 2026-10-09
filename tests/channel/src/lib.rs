@@ -732,7 +732,7 @@ impl World {
         false
     }
 
-    /// Facts dropped by the agent half because output room was reserved.
+    /// Projectable facts omitted by phase or reserved output room.
     #[must_use]
     pub fn lost_facts(&self) -> u64 {
         if let Half::Agent(agent) = &self.agent.half {

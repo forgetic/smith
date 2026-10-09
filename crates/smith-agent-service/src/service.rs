@@ -1345,31 +1345,32 @@ fn domain_down(service: &mut Service) {
         }
         Some(_) | None => {}
     }
-    if service.admitted.is_some() && !service.answer_sent && !service.channel_ended {
-        for _ in 0..service.limits.queue {
-            if service.channel_events.room() < channel_max.to_domain || service.channel_below.room() < channel_max.below
-            {
-                break;
-            }
-            let fact = match service.domain.as_mut().expect("framed agent owns its domain").pop_fact() {
+    drain_facts(service);
+}
+
+/// A single take offers each observation to the independent sinks. The trace
+/// continues through answer and settlement; channel projection owns its phase.
+fn drain_facts(service: &mut Service) {
+    for _ in 0..service.limits.queue {
+        let fact = match &mut service.domain {
+            Some(domain) => match domain.pop_fact() {
                 Some(fact) => fact,
                 None => break,
-            };
-            if service.trace_facts.room() > 0 {
-                service.trace_facts.push(fact.clone());
-            } else {
-                service.lost_trace_facts = service.lost_trace_facts.saturating_add(1);
-            }
-            let token = service.next_send();
-            if service
-                .channel
-                .as_mut()
-                .expect("framed agent owns its channel")
+            },
+            None => break,
+        };
+        let token = service.next_send();
+        if let Some(channel) = &mut service.channel
+            && channel
                 .send_fact(&fact, service.run_started, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
-            {
-                service.mark_failed(Failure::Send);
-            }
+        {
+            service.mark_failed(Failure::Send);
+        }
+        if service.trace_facts.room() > 0 {
+            service.trace_facts.push(fact);
+        } else {
+            service.lost_trace_facts = service.lost_trace_facts.saturating_add(1);
         }
     }
 }
@@ -1845,7 +1846,7 @@ pub fn work_pending(service: &Service, now: Time) -> bool {
     due || service.io.is_ready()
         || service.llm.has_work()
         || match &service.domain {
-            Some(domain) => domain.is_ready(),
+            Some(domain) => domain.is_ready() || domain.has_facts(),
             None => false,
         }
         || !service.completions.is_empty()
@@ -1884,6 +1885,10 @@ pub fn done(service: &Service) -> Option<bool> {
         && service.machine_below.is_empty()
         && service.domain_events.is_empty()
         && service.domain_requests.is_empty()
+        && match &service.domain {
+            Some(domain) => !domain.has_facts(),
+            None => true,
+        }
         && service.io_events.is_empty()
         && service.io_requests.is_empty()
         && service.file_events.is_empty()

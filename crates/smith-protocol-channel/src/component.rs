@@ -406,7 +406,7 @@ impl Component {
         self.offer_fact(smith_channel::FactKind::TextArrived, elapsed, count, token, to_service, below)
     }
 
-    /// Number of projected facts the output reserve has dropped.
+    /// Projectable observations omitted outside admission or for lack of output room.
     #[must_use]
     pub fn lost_facts(&self) -> u64 {
         self.lost_facts
@@ -482,8 +482,13 @@ impl Component {
         to_service: &mut Queue<OpenEvent>,
         below: &mut Queue<Lower>,
     ) -> Result<bool, Error> {
-        if self.phase != Phase::Admitted {
-            return Err(Error::Order);
+        if self.phase != Phase::Admitted
+            || self.ended
+            || to_service.room() < crate::limits::MAX_OUT.to_domain
+            || below.room() < crate::limits::MAX_OUT.below
+        {
+            self.lost_facts = self.lost_facts.saturating_add(1);
+            return Ok(false);
         }
         let record = smith_channel::Fact::new(&self.bodies, smith_channel::FactParts { kind, elapsed, count })?;
         let Ok(length) = usize::try_from(record.measure()) else {

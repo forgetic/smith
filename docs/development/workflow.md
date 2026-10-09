@@ -691,6 +691,15 @@ overrides use deterministic fixtures; the checked render-to-machine property
 retains 256 deterministic cases. All six shipped-binary stories passed.
 The workspace focused and fuzzy budgets remain unchanged.
 
+Reliability events increment 2.3 was measured through the serial heavy queue
+on 2026-10-09 with `measure -j 1`: its three new native service and channel
+stories passed in 0.085 seconds; the 32-seed output and acknowledgement
+window sweep passed in 0.434 seconds. The channel-pressure and phase stories
+both fail against the parent implementation and pass with the independent
+fact drain. Accepted, failed, parked and cancelled answers retain their
+native terminal once. An entrance refusal has one actual channel answer and
+no native run or admission; its stream completion is introduced in 2.5.
+
 Reliability limits increment 4.3 was measured through the serial heavy queue
 on 2026-10-09 with `measure -j 1`: the affected agent, protocol-LLM, codec,
 root, run, session, local-domain and local-settings packages passed 432

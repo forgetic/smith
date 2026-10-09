@@ -32,10 +32,10 @@ struct Parent {
 }
 
 impl Parent {
-    fn new(root: Fd, charter: &[u8], hang_up: bool) -> Self {
+    fn new(root: Fd, charter: &[u8], hang_up: bool, tracing: Option<(TraceCase, u32)>, window: u32) -> Self {
         let mut peer = crate::host();
         if !hang_up {
-            peer.play(crate::start(charter));
+            peer.play(crate::start_window(charter, window));
         }
         let mut parent = Self {
             peer,
@@ -60,7 +60,15 @@ impl Parent {
         parent.submit(Op::Spawn {
             spawn: Box::new(Spawn {
                 program: b"smith".as_slice().into(),
-                args: Box::new([]),
+                args: tracing.map_or_else(
+                    || Box::new([]) as Box<[Box<[u8]>]>,
+                    |(case, frames)| {
+                        Box::new([
+                            Box::new([b'0' + case.number()]) as Box<[u8]>,
+                            frames.to_string().into_bytes().into_boxed_slice(),
+                        ])
+                    },
+                ),
                 env: Box::new([]),
                 root,
                 dir: Box::new([]),
@@ -261,6 +269,7 @@ enum Proc {
     Parent(Box<Parent>),
     Agent(Box<skein_world::PipeHost<smith_agent_shell::Agent>>, crate::AgentErrors),
     Peer(Box<skein_fake_peers::llm::Peer>),
+    Tracing(Box<crate::tracing::Tracing>),
 }
 impl Proc {
     fn host(&self) -> &dyn Host {
@@ -268,6 +277,7 @@ impl Proc {
             Self::Parent(p) => p.as_ref(),
             Self::Agent(p, _) => p.as_ref(),
             Self::Peer(p) => p.as_ref(),
+            Self::Tracing(p) => p.as_ref(),
         }
     }
     fn host_mut(&mut self) -> &mut dyn Host {
@@ -275,6 +285,7 @@ impl Proc {
             Self::Parent(p) => p.as_mut(),
             Self::Agent(p, _) => p.as_mut(),
             Self::Peer(p) => p.as_mut(),
+            Self::Tracing(p) => p.as_mut(),
         }
     }
 }
@@ -320,6 +331,13 @@ fn make(_spawn: &Spawn, inherited: &Inherited) -> Proc {
     let (errors, capture) = crate::AgentErrors::pipe(fd);
     let agent = crate::configured(crate::configuration(), 7, inherited, errors.clone());
     Proc::Agent(Box::new(capture.host(agent)), errors)
+}
+
+fn make_tracing(spawn: &Spawn, inherited: &Inherited) -> Proc {
+    let mut configuration = crate::configuration();
+    configuration.limits.channel.channel.output_frames =
+        std::str::from_utf8(&spawn.args[1]).expect("frame argument").parse().expect("frame allowance");
+    Proc::Tracing(Box::new(crate::tracing::Tracing::new(configuration, inherited)))
 }
 
 fn unused_roots(_spawn: &Spawn) -> Vec<skein_world::StartupRoot> {
@@ -373,6 +391,7 @@ struct Referee {
     admitted_facts: usize,
     answer_facts: usize,
     full_completion: bool,
+    tracing: Option<(TraceCase, u32)>,
     expected: skein_world::Expectations<Proc, Terminal>,
 }
 impl skein_world::Referee<Proc> for Referee {
@@ -391,7 +410,7 @@ impl skein_world::Referee<Proc> for Referee {
                         peer.shutdown();
                     }
                 }
-                Proc::Agent(_, _) => {}
+                Proc::Agent(_, _) | Proc::Tracing(_) => {}
             }
         }
     }
@@ -404,11 +423,18 @@ impl skein_world::Referee<Proc> for Referee {
             "one admission for one Start"
         );
         let peer = procs.iter().find_map(|p| if let Proc::Peer(p) = p { Some(p) } else { None }).expect("peer");
-        assert!(fake::queries(peer).count() <= 1, "one completion request for the one-turn budget");
+        assert!(
+            fake::queries(peer).count() <= if self.tracing.is_some() { 2 } else { 1 },
+            "bounded completion scenario"
+        );
         if !self.hang_up && parent.status.is_some() {
-            assert!(parent.admitted(), "the host observed admission");
+            if matches!(self.tracing, Some((TraceCase::Refused, _))) {
+                assert!(!parent.admitted(), "an entrance refusal has no admission");
+            } else {
+                assert!(parent.admitted(), "the host observed admission");
+            }
             let peer = procs.iter().find_map(|p| if let Proc::Peer(p) = p { Some(p) } else { None }).expect("peer");
-            if !self.cancel {
+            if !self.cancel && !matches!(self.tracing, Some((TraceCase::Refused, _))) {
                 assert!(fake::replied(peer), "provider answered before agent exit");
             }
         }
@@ -449,7 +475,7 @@ impl skein_world::Referee<Proc> for Referee {
         }
         self.reviewed = parent.peer.observed().len();
         assert!(self.admitted_facts <= 1 && self.answer_facts <= 1, "one fact terminal per activation");
-        if !self.hang_up && parent.status.is_some() {
+        if !self.hang_up && parent.status.is_some() && self.tracing.is_none() {
             assert_eq!(self.admitted_facts, 1, "the observed admission agrees with the host");
         }
         self.expected.observe(now, procs);
@@ -466,6 +492,68 @@ impl skein_world::Referee<Proc> for Referee {
 }
 
 /// Scenario configuration and a settled shared-harness outcome.
+/// The actual run terminal selected by the process scenario's inputs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TraceCase {
+    /// The independent provider calls the granted finish tool.
+    Accepted,
+    /// The one-turn budget ends after a plaintext response.
+    Failed,
+    /// A charter model absent from configured declarations is refused before admission.
+    Refused,
+    /// A settled wait parks immediately under its admitted idle policy.
+    Parked,
+    /// The parent signals after observing admission.
+    Cancelled,
+}
+
+impl TraceCase {
+    fn number(self) -> u8 {
+        match self {
+            Self::Accepted => 0,
+            Self::Failed => 1,
+            Self::Refused => 2,
+            Self::Parked => 3,
+            Self::Cancelled => 4,
+        }
+    }
+
+    fn peer(self) -> skein_fake_peers::llm::Peer {
+        use skein_fake_llm_domain::api;
+        let turns = match self {
+            Self::Accepted => vec![api::Turn {
+                lines: Box::new([api::Line::Call {
+                    name: b"finish".as_slice().into(),
+                    arguments: br#"{"form":"report","text":"done","fields":{}}"#.as_slice().into(),
+                }]),
+                finish: api::Finish::ToolCalls,
+                tokens: 1,
+            }],
+            Self::Parked => vec![
+                api::Turn {
+                    lines: Box::new([api::Line::Call {
+                        name: b"wait".as_slice().into(),
+                        arguments: b"{}".as_slice().into(),
+                    }]),
+                    finish: api::Finish::ToolCalls,
+                    tokens: 1,
+                },
+                api::Turn {
+                    lines: Box::new([api::Line::Text { text: b"Waiting".as_slice().into() }]),
+                    finish: api::Finish::Stop,
+                    tokens: 1,
+                },
+            ],
+            Self::Failed | Self::Refused | Self::Cancelled => return fake::peer(),
+        };
+        fake::configured(
+            Box::new([api::Script { cue: Box::new([]), turns: turns.into() }]),
+            skein_llm::Credential { access_token: b"token".as_slice().into(), account_id: b"acc".as_slice().into() },
+            Duration::ZERO,
+        )
+    }
+}
+
 pub struct World {
     seed: u64,
     charter: Box<[u8]>,
@@ -474,6 +562,8 @@ pub struct World {
     memory: Memory,
     full_completion: bool,
     outcome: Option<Outcome<Proc, Machine>>,
+    window: u32,
+    tracing: Option<(TraceCase, u32)>,
 }
 impl World {
     /// Prepare one Start; the harness owns startup and settlement.
@@ -487,8 +577,71 @@ impl World {
             memory: Memory::Unchecked,
             full_completion: false,
             outcome: None,
+            window: 8,
+            tracing: None,
         }
     }
+    /// Bound outstanding turns while the independent host withholds acknowledgements.
+    pub fn acknowledgement_window(&mut self, turns: u32) {
+        self.window = turns;
+    }
+
+    /// Observe every native trace fact while constraining channel output slots.
+    pub fn observe_facts(&mut self, case: TraceCase, frames: u32) {
+        self.tracing = Some((case, frames));
+        self.cancel = case == TraceCase::Cancelled;
+        if case == TraceCase::Parked || case == TraceCase::Refused {
+            let mut parts =
+                smith_charter::Charter::decode(&smith_charter::CEILINGS, &mut skein_lib::Reader::new(&self.charter))
+                    .expect("charter")
+                    .into_parts();
+            if case == TraceCase::Refused {
+                let mut main = parts.main.into_parts();
+                main.model = b"undeclared-model".as_slice().into();
+                parts.main = smith_charter::Llm::new(&smith_charter::CEILINGS, main).expect("undeclared model");
+            }
+            let mut budget = parts.budget.into_parts();
+            budget.turns = if case == TraceCase::Parked { 4 } else { 1 };
+            parts.budget = smith_charter::Budget::new(&smith_charter::CEILINGS, budget).expect("park budget");
+            let mut tools = parts.tools.into_parts();
+            tools.wait = case == TraceCase::Parked;
+            parts.tools = smith_charter::Tools::new(&smith_charter::CEILINGS, tools).expect("wait authority");
+            parts.waiting = Duration::ZERO;
+            let record = smith_charter::Charter::new(&smith_charter::CEILINGS, parts).expect("park charter");
+            let mut writer = skein_lib::Writer::new(usize::try_from(record.measure()).expect("wire size"));
+            record.encode(&mut writer).expect("wire");
+            self.charter = writer.finish();
+        }
+    }
+
+    fn observations(&self) -> &crate::tracing::Tracing {
+        self.outcome
+            .as_ref()
+            .expect("settled world")
+            .procs
+            .iter()
+            .find_map(|proc| if let Proc::Tracing(trace) = proc { Some(trace.as_ref()) } else { None })
+            .expect("native trace observer")
+    }
+
+    /// Facts taken from the service's local trace output, including settlement.
+    #[must_use]
+    pub fn facts(&self) -> &[smith_domain::Fact] {
+        &self.observations().facts
+    }
+
+    /// Facts refused by the channel projection, as counted by that component.
+    #[must_use]
+    pub fn channel_loss(&self) -> u64 {
+        self.observations().channel_loss
+    }
+
+    /// Native trace queue overflow, independently counted by the service.
+    #[must_use]
+    pub fn trace_loss(&self) -> u64 {
+        self.observations().trace_loss
+    }
+
     /// Request an actual pidfd termination signal after observed admission.
     pub fn signal(&mut self) {
         self.cancel = true;
@@ -520,20 +673,21 @@ impl World {
             admitted_facts: 0,
             answer_facts: 0,
             full_completion: self.full_completion,
+            tracing: self.tracing,
             expected: skein_world::Expectations::new(self.seed, vec![Terminal { hang_up: self.hang_up }]),
         };
         let mut world = skein_world::World::new(self.seed, config, referee, self.memory).with_machine(Machine(machine));
         world.host_roots(
             HostedProgram {
                 program: b"smith".as_slice().into(),
-                make,
+                make: if self.tracing.is_some() { make_tracing } else { make },
                 instances: 1,
                 operations: crate::limits().routes.checked_add(4).expect("routes, inherited closes and stderr write"),
             },
             unused_roots,
         );
         world.spawn_root(skein_sim::Handle::new(root.raw()), |root| {
-            Proc::Parent(Box::new(Parent::new(root, &self.charter, self.hang_up)))
+            Proc::Parent(Box::new(Parent::new(root, &self.charter, self.hang_up, self.tracing, self.window)))
         });
         world.spawn(|| {
             Proc::Peer(Box::new(if self.full_completion {
@@ -568,6 +722,8 @@ impl World {
                     },
                     Duration::ZERO,
                 )
+            } else if let Some((case, _)) = self.tracing {
+                case.peer()
             } else {
                 fake::peer()
             }))

@@ -12,6 +12,8 @@ use smith_protocol_llm as llm;
 
 pub mod fake;
 
+mod tracing;
+
 /// The bounded diagnostic writer observed outside each hosted agent.
 #[derive(Clone, Default)]
 pub struct AgentErrors {
@@ -199,8 +201,12 @@ pub fn host() -> ScriptedPeer {
 /// One activation Start sent by the scripted host, ending with an Answer.
 #[must_use]
 pub fn start(charter: &[u8]) -> skein_channel::Frame {
+    start_window(charter, 8)
+}
+
+pub(crate) fn start_window(charter: &[u8], turns: u32) -> skein_channel::Frame {
     let limits = smith_channel::CEILINGS;
-    let window = smith_channel::Window::new(&limits, smith_channel::WindowParts { turns: 8, bytes: 1_000_000_000 })
+    let window = smith_channel::Window::new(&limits, smith_channel::WindowParts { turns, bytes: 1_000_000_000 })
         .expect("window");
     let mut grants = List::with_capacity(1);
     grants
@@ -287,7 +293,7 @@ pub fn charter() -> Box<[u8]> {
     writer.finish()
 }
 
-pub use world::World;
+pub use world::{TraceCase, World};
 
 mod world;
 

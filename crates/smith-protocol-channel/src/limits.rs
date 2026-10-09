@@ -103,9 +103,12 @@ pub struct MaxOut {
 }
 
 /// Opening emits at most one owner event and six lower operations per step.
+pub(crate) const MAX_OUT: MaxOut = MaxOut { to_domain: 1, below: 6 };
+
+/// Opening emits at most one owner event and six lower operations per step.
 #[must_use]
 pub const fn max_out(_limits: &Limits) -> MaxOut {
-    MaxOut { to_domain: 1, below: 6 }
+    MAX_OUT
 }
 
 /// Price the machine, the opening event queue and caller output queues.

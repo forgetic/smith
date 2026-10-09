@@ -1024,3 +1024,41 @@ mod charter_round_trip {
         assert_eq!(smith_protocol_channel::decode_charter(&encoded, &smith_charter::CEILINGS, &endpoints), Ok(policy));
     }
 }
+
+#[test]
+fn facts_outside_actual_admission_are_counted_without_failing_the_channel() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    let fact = smith_domain::Fact::Run {
+        fact: smith_domain::run::facts::Fact {
+            at: skein_lib::Time::ZERO,
+            kind: smith_domain::run::facts::FactKind::CheckFinished {
+                run: skein_lib::Token::new(1),
+                exit: smith_domain::run::Exit::Code { code: 0 },
+            },
+        },
+    };
+    assert!(!world.agent_sends_fact(&fact, skein_lib::Time::ZERO));
+    assert_eq!(world.lost_facts(), 1);
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v2/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    assert!(!world.agent_sends_fact(&fact, skein_lib::Time::ZERO));
+    assert_eq!(world.lost_facts(), 2);
+    world.agent_admits();
+    world.settle();
+    assert!(world.agent_sends_fact(&fact, skein_lib::Time::ZERO));
+    world.settle();
+    assert_eq!(world.lost_facts(), 2);
+    world.agent_answers(smith_domain::run::Answer::Failed {
+        failure: smith_domain::run::Failure::Cancelled,
+        spent: smith_domain::run::Spend::ZERO,
+        turns: 0,
+    });
+    assert!(!world.agent_sends_fact(&fact, skein_lib::Time::ZERO));
+    assert_eq!(world.lost_facts(), 3);
+    world.settle();
+    assert!(!world.agent_sends_fact(&fact, skein_lib::Time::ZERO));
+    assert_eq!(world.lost_facts(), 4);
+}
