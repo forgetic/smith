@@ -1,0 +1,11 @@
+Final rebased-tip merge gate for smith02.1:
+commit85fe8d1d4b2c989df86247f8ecf374fbd4507b02
+parent8cb891641d771620fc1a71f1272a664da9fb5a6a
+heavy task386, /tmp/smith-02-gate1.log.
+Formatting and workspace all-target Clippy passed.
+Focused1514/1514 in3.456s, runf63fb518-7ddb-4876-af45-a00b2f98806c.
+Fuzzy20/20 in3.353s, run94619958-d494-4fcc-a9fc-d1c393ee6078.
+Probe:none; deterministic codec tests cover this increment. No runtime
+behavior changed; smoke is not required by smith02.1.
+Affected serial measurement21/21 in0.598s; new fuzzy1/1 in0.467s.
+Local merge only; no push or credentials access.
