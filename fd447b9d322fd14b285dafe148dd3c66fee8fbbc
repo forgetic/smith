@@ -1,0 +1,13 @@
+Stamp facts at their emitting step and retain the bounded metadata that version-one event records require. Tools and sessions retain provider call identity, source, effect, deadline and input byte count through terminals; runs retain resumed admission and child parentage; completions retain conversation-local numbering and accepted host-unit charge. The existing typed command exit code remains available.
+
+Design: domain/run.md section 11; domain/session.md section 4; protocol/events.md sections 3 and 5; protocol/channel.md section 8; programming-model.md section 3. Provider source is copied from the actual decoded run/host request, independently of the execution ticket.
+
+Channel version 2 retains its shape and projects elapsed emission time from activation. Legacy Trace emits the existing outer/kind Debug shape with emission at_ns, without formatting owned provider metadata. The neutral benchmark reader accepts baseline and extended Admitted/Opened shapes with strict boolean and optional-token checks; actual hook and parser controls cover compatibility. Existing message-fact validation on parent is preserved. Bounded identity copies are included in domain and service worst cases.
+
+Final rebased-tip gate: commit fd447b9d322fd14b285dafe148dd3c66fee8fbbc, parent ef21912ec2d947ba9e26b600c7ad51b9bf1d0063; heavy task 615, /tmp/smith-02-gate2c.log. Formatting and workspace all-target Clippy passed.
+default: 1549/1549 passed in 3.446s; run c311aaa3-08b7-45ac-8c82-73c3d1fc7630.
+fuzzy: 21/21 passed in 3.929s; run fda0f931-3723-44a6-8f05-46834d71fbd8.
+
+Affected pre-rebase focused validation: 556/556; eight new serial emission metadata stories 8/8 in 0.091s, run 7967e68b-e9c4-4284-8687-767ada21415b. Legacy parser development validation 7/7 in 0.016s, run ad61d7bc-26aa-4324-9345-ce1a61419a41. Final focused gate also covers the actual Trace hook test and merged message parser controls.
+
+Probes: none, deterministic tests cover this increment. Smoke evidence pending: smoke-tools; session 00 confirms the runner/adapter integration is still unmerged (00.8), so no live smoke has run. Back-fill should run this increment after integration. Local ff-only merge only; no push or credential access.
