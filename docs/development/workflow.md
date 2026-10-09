@@ -731,3 +731,13 @@ and Skein's native fake provider, and share the spawned kind's parent
 referee. Full start-message and grant inventories, exact turn ACK rights,
 park/resume, cancellation and native-drain ownership are covered. Workspace
 focused and fuzzy budgets remain unchanged.
+
+Reliability limits increment 4.10 was measured through the serialized heavy
+queue with `measure -j 1` on 2026-10-09: the affected protocol-LLM, session,
+credential, agent-configuration and codec packages passed 197 focused tests
+in 5.731 seconds, with no skips. Independent native HTTP/SSE controls cover
+oversized calls beside ordinary calls, cut calls replayed with canonical
+input, and reasoning limits with each policy. Typed session worlds retain
+one drop fact per item and accept bounded writes after an oversized call.
+These controls use synthetic peers; calibrated live probe evidence remains
+separate. Workspace focused and fuzzy budgets are unchanged.

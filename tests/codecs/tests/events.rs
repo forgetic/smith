@@ -194,5 +194,8 @@ fn a_reasoning_drop_notice_keeps_its_size_under_every_capture() {
     for capture in [Capture::None, Capture::Calls, Capture::Everything] {
         assert_eq!(write(&record, &capture, &limits()).expect("write").expect("notice").as_ref(), frozen);
     }
-    assert_eq!(read(br#"{"v":1,"type":"notice","t_ms":0,"level":"warning","kind":"reasoning_dropped"}"#, &limits()), Err(Error::Shape));
+    assert_eq!(
+        read(br#"{"v":1,"type":"notice","t_ms":0,"level":"warning","kind":"reasoning_dropped"}"#, &limits()),
+        Err(Error::Shape)
+    );
 }

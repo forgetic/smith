@@ -130,10 +130,7 @@ fn hex(value: u8) -> u8 {
 
 fn call_size_problem(bytes: u64, bound: Option<u32>, maximum: u32) -> Result<Box<[u8]>, Error> {
     let size = Decimal::of(bytes);
-    let bound = match bound {
-        Some(bound) => Some(Decimal::of(u64::from(bound))),
-        None => None,
-    };
+    let bound = bound.map(u64::from).map(Decimal::of);
     let (prefix, suffix): (&[u8], &[u8]) = match bound {
         Some(_) => (b"input too large: ", b" bytes; make a smaller write or an edit"),
         None => (b"input cut off after ", b" bytes; make a smaller call and try again"),

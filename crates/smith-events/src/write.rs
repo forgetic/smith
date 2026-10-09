@@ -1122,7 +1122,10 @@ fn validate_notice(value: &Notice, limits: &Limits) -> Result<(), Error> {
     match value.kind {
         NoticeKind::ReasoningDropped if value.bytes.is_none() => Err(Error::Shape),
         NoticeKind::CredentialRejected | NoticeKind::AccountExhausted if value.account.is_none() => Err(Error::Shape),
-        NoticeKind::ReasoningDropped | NoticeKind::CredentialRejected | NoticeKind::AccountExhausted | NoticeKind::Unknown(_) => Ok(()),
+        NoticeKind::ReasoningDropped
+        | NoticeKind::CredentialRejected
+        | NoticeKind::AccountExhausted
+        | NoticeKind::Unknown(_) => Ok(()),
     }
 }
 

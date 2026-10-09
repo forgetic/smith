@@ -1088,8 +1088,14 @@ fn read_notice(tokens: &[Token], limits: &Limits) -> Result<Notice, Error> {
             Some(item) => Some(unsigned(item)?),
             None => None,
         },
-        account: match field(tokens, b"account")? { Some(item) => Some(unsigned(item)?), None => None },
-        bytes: match field(tokens, b"bytes")? { Some(item) => Some(unsigned(item)?), None => None },
+        account: match field(tokens, b"account")? {
+            Some(item) => Some(unsigned(item)?),
+            None => None,
+        },
+        bytes: match field(tokens, b"bytes")? {
+            Some(item) => Some(unsigned(item)?),
+            None => None,
+        },
         wait_ms: match field(tokens, b"wait_ms")? {
             Some(item) => Some(unsigned(item)?),
             None => None,
@@ -1098,7 +1104,10 @@ fn read_notice(tokens: &[Token], limits: &Limits) -> Result<Notice, Error> {
     match notice.kind {
         NoticeKind::ReasoningDropped if notice.bytes.is_none() => Err(Error::Shape),
         NoticeKind::CredentialRejected | NoticeKind::AccountExhausted if notice.account.is_none() => Err(Error::Shape),
-        NoticeKind::ReasoningDropped | NoticeKind::CredentialRejected | NoticeKind::AccountExhausted | NoticeKind::Unknown(_) => Ok(notice),
+        NoticeKind::ReasoningDropped
+        | NoticeKind::CredentialRejected
+        | NoticeKind::AccountExhausted
+        | NoticeKind::Unknown(_) => Ok(notice),
     }
 }
 

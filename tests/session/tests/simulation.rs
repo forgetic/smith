@@ -434,7 +434,6 @@ fn the_token_budgets_end_a_session_after_the_turn_that_uses_them_up() {
     let calm = Settings::calm(16);
     let settings = Settings { nudges: Count { min: 100, max: 100 }, ..calm };
     let budgets = [
-        (Budget { input: 30, ..BUDGET }, Dimension::Input),
         (Budget { cache_read: 100, ..BUDGET }, Dimension::CacheRead),
         (Budget { cache_write: 30, ..BUDGET }, Dimension::CacheWrite),
     ];
@@ -445,6 +444,31 @@ fn the_token_budgets_end_a_session_after_the_turn_that_uses_them_up() {
         assert_eq!(end(&world, opener), out_of(spent), "{budget:?}");
         assert!(turns(&world, opener) > 1, "{budget:?} pays for some turns");
     }
+    // The shared fake caches its fresh input; this typed peer explicitly reports
+    // ordinary input so the separate Input ceiling is still observed outside.
+    use smith_session_world::recorded;
+    let mut world = recorded::World::new(16, 256);
+    let mut opening = recorded::opening(None, 100);
+    opening.spec.budget.input = 30;
+    opening.prices = smith_domain_session::record::Prices { input: 0, cached: 0, output: 0, unit: 1 };
+    world.open(opening);
+    for _ in 0..3 {
+        world.complete(
+            Box::new([smith_domain_session::llm::Block::Text {
+                text: b"input-priced answer".as_slice().into(),
+                replay: None,
+            }]),
+            smith_domain_session::llm::Stop::EndTurn,
+            smith_domain_session::llm::Usage { input_tokens: Some(11), ..smith_domain_session::llm::Usage::ZERO },
+        );
+        world.step(smith_domain_session::Event::Continue {
+            session: world.session.expect("yielded"),
+            content: b"go on".as_slice().into(),
+        });
+    }
+    assert_eq!(world.end, Some(out_of(Dimension::Input)));
+    assert_eq!(world.used.len(), 3);
+    world.close();
 }
 
 #[test]

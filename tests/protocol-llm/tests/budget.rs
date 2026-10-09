@@ -619,11 +619,7 @@ fn parking_story(index: usize) {
     assert_eq!(saved(&first), immutable, "old Turn.spent and concrete history remain unchanged");
     assert!(immutable.turns.iter().all(|turn| turn.spent > 0));
     assert!(first_total.cache_read > 0 && new_total.cache_read > 0);
-    if index == 0 {
-        assert_eq!((first_total.cache_write, new_total.cache_write), (0, 0));
-    } else {
-        assert!(first_total.cache_write > 0 && new_total.cache_write > 0);
-    }
+    assert!(first_total.cache_write > 0 && new_total.cache_write > 0);
 }
 
 #[test]

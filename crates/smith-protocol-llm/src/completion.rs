@@ -302,7 +302,7 @@ fn decoded_cells(content: &[shared::Block]) -> Result<u64, Error> {
     for block in content {
         match block {
             shared::Block::ToolCall { .. } | shared::Block::Oversize { .. } | shared::Block::Cut { .. } => {
-                calls = calls.checked_add(1).ok_or(Error::Limit)?
+                calls = calls.checked_add(1).ok_or(Error::Limit)?;
             }
             shared::Block::Text { .. }
             | shared::Block::Refusal { .. }
