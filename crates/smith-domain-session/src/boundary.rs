@@ -162,7 +162,7 @@ pub enum Request {
     /// included.
     Used { opener: Token, usage: Usage },
     /// The session for `opener` has ended, after `turns` completions that used
-    /// `usage`, their exact sum: exactly one
+    /// `usage`, preserving unavailable cumulative counts: exactly one
     /// per `Open`, once nothing the session asked for is in flight.
     Ended {
         opener: Token,
@@ -172,6 +172,9 @@ pub enum Request {
         turns: u32,
         /// Exact cumulative raw usage of charged completions.
         usage: Usage,
+        /// Numeric sums of supplied counts for the parent's budget bookkeeping;
+        /// every field is present. This is never a raw provider observation.
+        reported: Usage,
     },
     /// Ask an LLM for the next assistant message, giving up after `timeout`.
     Complete {

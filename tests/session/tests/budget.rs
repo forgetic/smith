@@ -48,7 +48,7 @@ fn price_overflow_rejects_the_completion_before_its_turn() {
     let mut spec = opening(None, u64::MAX);
     spec.prices = record::Prices { input: u64::MAX, cached: 0, output: 0, unit: 1 };
     world.open(spec);
-    world.complete(text(), llm::Stop::EndTurn, llm::Usage { input_tokens: 2, ..llm::Usage::ZERO });
+    world.complete(text(), llm::Stop::EndTurn, llm::Usage { input_tokens: Some(2), ..llm::Usage::ZERO });
     assert_eq!(world.end, Some(End::PriceOverflow));
     assert!(world.spend.is_empty() && world.used.is_empty() && world.turns.is_empty());
     assert_eq!(world.terminal_usage, Some((0, llm::Usage::ZERO)));
@@ -63,13 +63,13 @@ fn raw_overflow_keeps_only_the_charged_completion() {
     spec.spec.budget.input = u64::MAX;
     world.env.limits.budget = spec.spec.budget;
     world.open(spec);
-    let first = llm::Usage { input_tokens: u64::MAX - 1, ..llm::Usage::ZERO };
+    let first = llm::Usage { input_tokens: Some(u64::MAX - 1), ..llm::Usage::ZERO };
     world.complete(text(), llm::Stop::EndTurn, first);
     world.step(session::Event::Continue {
         session: world.session.expect("session"),
         content: b"continue".as_slice().into(),
     });
-    world.complete(text(), llm::Stop::EndTurn, llm::Usage { input_tokens: 2, ..llm::Usage::ZERO });
+    world.complete(text(), llm::Stop::EndTurn, llm::Usage { input_tokens: Some(2), ..llm::Usage::ZERO });
     assert_eq!(world.end, Some(End::UsageOverflow));
     assert_eq!(world.used, [first]);
     assert_eq!(world.turns.len(), 1);
@@ -118,7 +118,7 @@ fn maximum(world: &World) -> u64 {
 
 #[test]
 fn a_completion_that_costs_less_than_its_maximum_returns_the_rest() {
-    let usage = llm::Usage { output_tokens: 1, ..llm::Usage::ZERO };
+    let usage = llm::Usage { output_tokens: Some(1), ..llm::Usage::ZERO };
     let mut probe = World::new(47, 256);
     probe.open(opening(None, u64::MAX));
     let first_maximum = maximum(&probe);
@@ -141,5 +141,81 @@ fn a_completion_that_costs_less_than_its_maximum_returns_the_rest() {
     world.step(session::Event::Answered { owner, text: b"child".as_slice().into(), error: false, spent: 0 });
     assert_eq!(maximum(&world), second_maximum, "unused maximum is available for the next completion");
     assert_eq!(world.prompts.len(), 2);
+    world.close();
+}
+
+#[test]
+fn missing_input_or_output_charges_the_full_reservation_and_preserves_raw_reports() {
+    for mask in 1..4 {
+        let mut world = World::new(70 + mask, 256);
+        world.open(opening(None, 100));
+        let owner = world.completing.expect("admitted call");
+        assert_eq!(session::reserve_completion(&mut world.domain, owner, 9, 3, 4), Some(13));
+        let raw = llm::Usage {
+            input_tokens: if mask & 1 == 0 { Some(1) } else { None },
+            output_tokens: if mask & 2 == 0 { Some(1) } else { None },
+            cache_read_tokens: Some(0),
+            cache_write_tokens: None,
+            reasoning_tokens: None,
+        };
+        assert_eq!(session::preview_completion(&world.domain, owner, raw), Ok(13));
+        world.complete(text(), llm::Stop::EndTurn, raw);
+        assert_eq!(world.used, [raw]);
+        assert_eq!(world.spend, [13]);
+        assert_eq!(world.own_spend, [13]);
+        assert_eq!((world.turns[0].usage, world.turns[0].spent), (raw, 13));
+        let fact =
+            world.facts.iter().find(|fact| matches!(fact.kind, session::FactKind::Used { .. })).expect("used fact");
+        assert_eq!(fact.kind, session::FactKind::Used { opener: Token::new(31), usage: raw });
+        assert_eq!(fact.response.as_ref().map(|info| (info.number, info.spent)), Some((1, Some(13))));
+        world.close();
+        assert_eq!(world.terminal_usage, Some((1, raw)));
+    }
+}
+
+#[test]
+fn reported_zero_and_reasoning_do_not_charge_the_reserved_maximum_again() {
+    let mut world = World::new(74, 256);
+    world.open(opening(None, 100));
+    let owner = world.completing.expect("admitted call");
+    assert_eq!(session::reserve_completion(&mut world.domain, owner, 9, 3, 4), Some(13));
+    let raw =
+        llm::Usage { input_tokens: Some(0), output_tokens: Some(0), reasoning_tokens: Some(0), ..llm::Usage::NONE };
+    world.complete(text(), llm::Stop::EndTurn, raw);
+    assert_eq!(world.spend, [0]);
+    assert_eq!(world.used, [raw]);
+    world.close();
+    let mut world = World::new(75, 256);
+    world.open(opening(None, 100));
+    let raw =
+        llm::Usage { input_tokens: Some(0), output_tokens: Some(2), reasoning_tokens: Some(2), ..llm::Usage::NONE };
+    world.complete(text(), llm::Stop::EndTurn, raw);
+    assert_eq!(world.spend, [3]);
+    assert_eq!(world.used, [raw]);
+    world.close();
+}
+
+#[test]
+fn reported_counts_after_an_unreported_turn_still_exhaust_the_token_budget() {
+    let mut world = World::new(76, 256);
+    let mut spec = opening(None, 100);
+    spec.spec.budget.input = 2;
+    world.open(spec);
+    let owner = world.completing.expect("first call");
+    assert_eq!(session::reserve_completion(&mut world.domain, owner, 9, 3, 4), Some(13));
+    world.complete(text(), llm::Stop::EndTurn, llm::Usage::NONE);
+    world.step(session::Event::Continue {
+        session: world.session.expect("admitted"),
+        content: b"continue".as_slice().into(),
+    });
+    world.complete(text(), llm::Stop::EndTurn, llm::Usage { input_tokens: Some(2), ..llm::Usage::ZERO });
+    world.step(session::Event::Continue {
+        session: world.session.expect("admitted"),
+        content: b"continue".as_slice().into(),
+    });
+    assert_eq!(world.end, Some(End::Budget { spent: Dimension::Input }));
+    assert!(world.completing.is_none());
+    assert_eq!(world.spend, [13, 15]);
+    assert_eq!(world.terminal_usage, Some((2, llm::Usage::NONE)));
     world.close();
 }

@@ -59,4 +59,4 @@ pub use boundary::{Budget, BudgetDenial, Dimension, End, Event, Request, Spec, Y
 pub use domain::{Domain, fire, max_out, max_to_opener, resume, step};
 pub use facts::{Fact, FactKind, ResponseInfo, ToolCall, ToolSource};
 pub use limits::{Derivation, Limits, MAX_PARALLEL, completion_reserve, derive, worst_case};
-pub use session::{preview_completion, preview_reservation};
+pub use session::{preview_completion, preview_reservation, reserve_completion};

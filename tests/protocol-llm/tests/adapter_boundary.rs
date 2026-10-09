@@ -182,7 +182,7 @@ fn completed_owner_is_preserved_and_a_different_owner_is_refused() {
                 };
                 assert_eq!(owner, OWNER);
                 assert_eq!(completion.stop, llm::Stop::EndTurn);
-                assert_eq!(completion.usage.output_tokens, 7);
+                assert_eq!(completion.usage.output_tokens, Some(7));
                 let [llm::Said::Text { text, .. }] = completion.content.as_ref() else {
                     panic!("literal actual text completion");
                 };
@@ -432,7 +432,7 @@ fn call_attestation_checks_position_name_literal_input_kind_uniqueness_and_consu
                     };
                     assert_eq!(owner, OWNER);
                     assert_eq!(completion.stop, llm::Stop::ToolUse);
-                    assert_eq!(completion.usage.output_tokens, 7);
+                    assert_eq!(completion.usage.output_tokens, Some(7));
                     let [
                         llm::Said::Text { text: first, .. },
                         llm::Said::ToolCall { id, name, input, call, .. },

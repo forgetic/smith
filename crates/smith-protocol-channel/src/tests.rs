@@ -81,8 +81,17 @@ fn saved_turn(place: u32, dialect: &[u8]) -> Box<[u8]> {
             endpoint: Box::default(),
             dialect: Box::from(dialect),
             place,
-            usage: wire::Usage::new(&limits, wire::UsageParts { input: 2, output: 3, cache_read: 4, cache_write: 5 })
-                .expect("bounded usage"),
+            usage: wire::Usage::new(
+                &limits,
+                wire::UsageParts {
+                    input: Some(2),
+                    output: Some(3),
+                    cache_read: Some(4),
+                    cache_write: Some(5),
+                    reasoning: None,
+                },
+            )
+            .expect("bounded usage"),
             spent: 7,
             messages,
         },
@@ -108,7 +117,7 @@ fn transcript_decodes_history_with_one_invalid_call_problem() {
     assert_eq!(transcript.endpoint, llm::Endpoint(3));
     assert_eq!(transcript.turns[0].sequence, 1);
     assert_eq!(transcript.turns[0].spent, 7);
-    assert_eq!(transcript.turns[0].usage.cache_read_tokens, 4);
+    assert_eq!(transcript.turns[0].usage.cache_read_tokens, Some(4));
     match &transcript.turns[0].messages[0].content[0] {
         llm::Block::ToolCall { call: llm::Decoded::Historical, .. } => {}
         other => panic!("expected historical call: {other:?}"),
@@ -146,4 +155,30 @@ fn a_live_turn_decodes_at_its_number_without_the_saved_prefix() {
     assert_eq!(turn.sequence, 4);
     assert_eq!(turn.spent, 7);
     assert_eq!(crate::decode_turn(&bytes, 3, &smith_transcript::CEILINGS, &endpoints), Err(record::Refusal::Malformed));
+}
+
+#[test]
+fn optional_usage_round_trips_without_turning_absence_into_zero() {
+    use smith_domain_session::llm;
+    let mut configured = skein_lib::List::with_capacity(1);
+    configured.push(crate::Endpoint { name: Box::default(), number: 3, dialect: 0, account: 5 }).expect("endpoint");
+    let endpoints = crate::Endpoints::new(configured);
+    let bytes = saved_turn(1, b"00000000");
+    let mut turn = crate::decode_turn(&bytes, 1, &smith_transcript::CEILINGS, &endpoints).expect("saved turn");
+    for usage in [
+        llm::Usage::NONE,
+        llm::Usage::ZERO,
+        llm::Usage {
+            input_tokens: None,
+            output_tokens: Some(0),
+            cache_read_tokens: Some(9),
+            cache_write_tokens: None,
+            reasoning_tokens: Some(7),
+        },
+    ] {
+        turn.usage = usage;
+        let encoded = crate::encode_turn(&turn, &smith_transcript::CEILINGS, &endpoints).expect("turn encodes");
+        let decoded = crate::decode_turn(&encoded, 1, &smith_transcript::CEILINGS, &endpoints).expect("turn decodes");
+        assert_eq!(decoded.usage, usage);
+    }
 }

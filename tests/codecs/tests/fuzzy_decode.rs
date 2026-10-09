@@ -54,7 +54,7 @@ fn arbitrary_and_mutated_wires_never_panic_and_round_trip_when_valid() {
     for (family, version, record) in [
         ("smith-charter", "v2", "charter"),
         ("smith-charter", "v2", "run_result"),
-        ("smith-transcript", "v2", "turn"),
+        ("smith-transcript", "v3", "turn"),
         ("smith-channel", "v2", "start"),
         ("smith-channel", "v2", "message"),
         ("smith-channel", "v2", "message_refused"),

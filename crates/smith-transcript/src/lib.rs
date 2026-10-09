@@ -9,10 +9,10 @@
 extern crate alloc;
 
 #[rustfmt::skip]
-#[path = "generated/v2.rs"]
-pub mod v2;
+#[path = "generated/v3.rs"]
+pub mod v3;
 
-pub use v2::{
+pub use v3::{
     Ambiguous, AmbiguousParts, Block, CEILINGS, Call, CallParts, CallProblem, CommandEnd, CommandEndParts, Edited,
     EditedParts, Entry, EntryParts, Exit, ExitCode, ExitCodeParts, ExitSignal, ExitSignalParts, Failed, FailedParts,
     Fault, FieldProblem, FieldProblemParts, Found, FoundParts, Hit, HitParts, Invalid, InvalidParts, Kind, LineNumber,

@@ -426,7 +426,7 @@ fn the_output_budget_cuts_the_last_answer_short_and_ends_the_session() {
 
     assert_eq!(end(&world, opener), out_of(Dimension::Output));
     assert_eq!(yields(&world, opener).last(), Some(&(Yield::Truncated, &b"do"[..])));
-    assert_eq!(world.session(opener).usage.output_tokens, 20, "no more than the budget");
+    assert_eq!(world.session(opener).usage.output_tokens, Some(20), "no more than the budget");
 }
 
 #[test]

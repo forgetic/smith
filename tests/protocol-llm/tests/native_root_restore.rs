@@ -337,10 +337,10 @@ fn accounting(world: &World, fixture: &Fixture, expected_prompts: &[Vec<Message>
         assert!(exact_prefix(query, expected_prompt), "actual query {index}: {query:?}");
         let wanted = expected_usage(query.system.len(), expected_prompt, outputs[index], fixture);
         let actual = [
-            turn.usage.input_tokens,
-            turn.usage.output_tokens,
-            turn.usage.cache_read_tokens,
-            turn.usage.cache_write_tokens,
+            turn.usage.input_tokens.expect("SDK fixture reports usage"),
+            turn.usage.output_tokens.expect("SDK fixture reports usage"),
+            turn.usage.cache_read_tokens.expect("SDK fixture reports usage"),
+            turn.usage.cache_write_tokens.expect("SDK fixture reports usage"),
         ];
         assert_eq!(actual, wanted, "all four actual SDK usage fields at completion {index}");
         for field in 0..4 {
@@ -354,7 +354,7 @@ fn accounting(world: &World, fixture: &Fixture, expected_prompts: &[Vec<Message>
         total.cache_read += wanted[2];
         total.cache_write += wanted[3];
         assert_eq!(world.turn_metadata()[index], (total.turns, None, total));
-        assert_eq!(turn.version, 2);
+        assert_eq!(turn.version, smith_domain::session::record::VERSION);
         assert_eq!(turn.endpoint, llm::Endpoint(0));
         assert_eq!(turn.dialect, 1);
         assert_eq!(turn.sequence, sequence + total.turns);

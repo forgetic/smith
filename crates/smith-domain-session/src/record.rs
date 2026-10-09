@@ -8,7 +8,7 @@ use crate::{
 use alloc::boxed::Box;
 
 /// Concrete session transcript version emitted and accepted at the domain boundary.
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 
 /// Session-issued position of an opener call in its concrete logical transcript.
 /// This fixed name survives ticket translation; provider ids and callback tokens
@@ -38,16 +38,17 @@ pub struct Prices {
 }
 
 impl Prices {
-    /// Checked integer charge for provider usage, rounded upward; returns `None` for overflow or a zero unit.
+    /// Charge reported usage once; missing input/output requires the caller's
+    /// recorded reservation instead. Missing cache counts add no reported charge.
     #[must_use]
     pub fn price(self, usage: Usage) -> Option<u64> {
         if self.unit == 0 {
             return None;
         }
-        let input = u128::from(usage.input_tokens).checked_add(u128::from(usage.cache_write_tokens))?;
+        let input = u128::from(usage.input_tokens?).checked_add(u128::from(usage.cache_write_tokens.unwrap_or(0)))?;
         let input = input.checked_mul(u128::from(self.input))?;
-        let cached = u128::from(usage.cache_read_tokens).checked_mul(u128::from(self.cached))?;
-        let output = u128::from(usage.output_tokens).checked_mul(u128::from(self.output))?;
+        let cached = u128::from(usage.cache_read_tokens.unwrap_or(0)).checked_mul(u128::from(self.cached))?;
+        let output = u128::from(usage.output_tokens?).checked_mul(u128::from(self.output))?;
         let sum = input.checked_add(cached)?.checked_add(output)?;
         let unit = u128::from(self.unit);
         let rounded = sum.checked_div(unit)?.checked_add(u128::from(sum.checked_rem(unit)? != 0))?;

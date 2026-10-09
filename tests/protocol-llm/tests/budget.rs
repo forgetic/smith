@@ -304,10 +304,11 @@ fn own_units(calls: &[&CompletionObservation], rate: Rate) -> u64 {
 
 fn turn_usage(actual: skein_llm::Usage) -> llm::Usage {
     llm::Usage {
-        input_tokens: actual.input_tokens,
-        output_tokens: actual.output_tokens,
-        cache_read_tokens: actual.cache_read_tokens,
-        cache_write_tokens: actual.cache_write_tokens,
+        input_tokens: Some(actual.input_tokens),
+        output_tokens: Some(actual.output_tokens),
+        cache_read_tokens: Some(actual.cache_read_tokens),
+        cache_write_tokens: Some(actual.cache_write_tokens),
+        reasoning_tokens: None,
     }
 }
 
@@ -529,7 +530,12 @@ fn positive_history_controls(query: &Query, expected: &[Message]) {
 }
 
 fn saved(world: &World) -> Transcript {
-    Transcript { version: 2, endpoint: llm::Endpoint(0), dialect: 1, turns: world.turns().to_vec().into() }
+    Transcript {
+        version: smith_domain::session::record::VERSION,
+        endpoint: llm::Endpoint(0),
+        dialect: 1,
+        turns: world.turns().to_vec().into(),
+    }
 }
 
 fn parked_accounting(world: &World, rates: &[Rate], prior_sequence: u32) -> run::Spend {

@@ -341,7 +341,13 @@ fn saved_turn(place: u32, dialect: &[u8]) -> Box<[u8]> {
             place,
             usage: smith_transcript::Usage::new(
                 &limits,
-                smith_transcript::UsageParts { input: 1, output: 2, cache_read: 0, cache_write: 0 },
+                smith_transcript::UsageParts {
+                    input: Some(1),
+                    output: Some(2),
+                    cache_read: Some(0),
+                    cache_write: Some(0),
+                    reasoning: None,
+                },
             )
             .expect("usage"),
             spent: 3,
@@ -411,7 +417,13 @@ fn a_run_parked_resumed_and_parked_again_numbers_turns_per_activation() {
         endpoint: llm::Endpoint(0),
         dialect: 0,
         sequence: 1,
-        usage: llm::Usage { input_tokens: 1, output_tokens: 2, cache_read_tokens: 0, cache_write_tokens: 0 },
+        usage: llm::Usage {
+            input_tokens: Some(1),
+            output_tokens: Some(2),
+            cache_read_tokens: Some(0),
+            cache_write_tokens: Some(0),
+            reasoning_tokens: None,
+        },
         spent: 3,
         messages: Box::default(),
     };
@@ -541,7 +553,13 @@ fn a_concrete_turn_reaches_the_host_and_its_acknowledgement_returns() {
         endpoint: llm::Endpoint(0),
         dialect: 0,
         sequence: 1,
-        usage: llm::Usage { input_tokens: 3, output_tokens: 5, cache_read_tokens: 1, cache_write_tokens: 2 },
+        usage: llm::Usage {
+            input_tokens: None,
+            output_tokens: Some(5),
+            cache_read_tokens: Some(0),
+            cache_write_tokens: None,
+            reasoning_tokens: Some(2),
+        },
         spent: 11,
         messages: Box::from([llm::Message {
             role: llm::Role::Assistant,

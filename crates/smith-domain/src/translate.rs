@@ -162,15 +162,16 @@ pub(crate) const fn stop(stop: Yield) -> run::Stop {
     }
 }
 
-/// What `turns` completions that used `usage` spent.
-pub(crate) const fn spend(turns: u32, usage: llm::Usage) -> Spend {
-    let llm::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens } = usage;
+/// Numeric run-budget bookkeeping counts reported tokens only; raw facts keep
+/// absence unchanged, and reasoning is already included in output.
+pub(crate) fn spend(turns: u32, usage: llm::Usage) -> Spend {
+    let llm::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens: _ } = usage;
     Spend {
         turns,
-        input: input_tokens,
-        output: output_tokens,
-        cache_read: cache_read_tokens,
-        cache_write: cache_write_tokens,
+        input: input_tokens.unwrap_or(0),
+        output: output_tokens.unwrap_or(0),
+        cache_read: cache_read_tokens.unwrap_or(0),
+        cache_write: cache_write_tokens.unwrap_or(0),
         units: 0,
     }
 }

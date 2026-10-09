@@ -144,7 +144,7 @@ fn parked_transcript_resumes_without_recharging_history_or_reusing_activation_nu
     assert_eq!(next.prompts().len(), 2, "shared fake continues after restored assistant prefix");
     assert!(text_seen(&next, b"Ready for a person."));
     assert_eq!(
-        next.turns()[0].usage.input_tokens,
+        next.turns()[0].usage.input_tokens.expect("peer supplies input count"),
         next.turn_metadata()[0].2.input,
         "token budget charges only this activation's actual completion"
     );

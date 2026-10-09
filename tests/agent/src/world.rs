@@ -1614,10 +1614,10 @@ impl World {
                     spent: run::Spend {
                         units,
                         turns: 1,
-                        input: completion.usage.input_tokens,
-                        output: completion.usage.output_tokens,
-                        cache_read: completion.usage.cache_read_tokens,
-                        cache_write: completion.usage.cache_write_tokens,
+                        input: completion.usage.input_tokens.expect("scripted peer supplies count"),
+                        output: completion.usage.output_tokens.expect("scripted peer supplies count"),
+                        cache_read: completion.usage.cache_read_tokens.expect("scripted peer supplies count"),
+                        cache_write: completion.usage.cache_write_tokens.expect("scripted peer supplies count"),
                     },
                 });
             }
@@ -1726,10 +1726,10 @@ impl World {
                         .accumulate(run::Spend {
                             units: 0,
                             turns: 1,
-                            input: usage.input_tokens,
-                            output: usage.output_tokens,
-                            cache_read: usage.cache_read_tokens,
-                            cache_write: usage.cache_write_tokens,
+                            input: usage.input_tokens.expect("scripted peer supplies count"),
+                            output: usage.output_tokens.expect("scripted peer supplies count"),
+                            cache_read: usage.cache_read_tokens.expect("scripted peer supplies count"),
+                            cache_write: usage.cache_write_tokens.expect("scripted peer supplies count"),
                         })
                         .expect("bounded observed usage");
                 }
@@ -2049,11 +2049,18 @@ impl World {
 // Independent outside scalar oracle from caller data and actual provider counts.
 fn observed_price(prices: run::Prices, usage: llm::Usage) -> Option<u64> {
     let denominator = u128::from(prices.unit);
-    let fresh = u128::from(usage.input_tokens).checked_add(u128::from(usage.cache_write_tokens))?;
+    let fresh = u128::from(usage.input_tokens.expect("scripted peer supplies count"))
+        .checked_add(u128::from(usage.cache_write_tokens.expect("scripted peer supplies count")))?;
     let numerator = fresh
         .checked_mul(u128::from(prices.input))?
-        .checked_add(u128::from(usage.cache_read_tokens).checked_mul(u128::from(prices.cached))?)?
-        .checked_add(u128::from(usage.output_tokens).checked_mul(u128::from(prices.output))?)?;
+        .checked_add(
+            u128::from(usage.cache_read_tokens.expect("scripted peer supplies count"))
+                .checked_mul(u128::from(prices.cached))?,
+        )?
+        .checked_add(
+            u128::from(usage.output_tokens.expect("scripted peer supplies count"))
+                .checked_mul(u128::from(prices.output))?,
+        )?;
     let rounded = (numerator / denominator).checked_add(u128::from(numerator % denominator != 0))?;
     u64::try_from(rounded).ok()
 }

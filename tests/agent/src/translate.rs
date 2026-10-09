@@ -116,10 +116,11 @@ pub fn completion(answer: provider::Answer, grants: tools::Grants, served: &[age
         provider::Finish::ContentFilter => agent::Stop::Refusal,
     };
     let usage = agent::Usage {
-        input_tokens: answer.usage.prompt_tokens,
-        output_tokens: answer.usage.completion_tokens,
-        cache_read_tokens: answer.usage.cached_tokens,
-        cache_write_tokens: answer.usage.cache_creation_tokens,
+        input_tokens: Some(answer.usage.prompt_tokens),
+        output_tokens: Some(answer.usage.completion_tokens),
+        cache_read_tokens: Some(answer.usage.cached_tokens),
+        cache_write_tokens: Some(answer.usage.cache_creation_tokens),
+        reasoning_tokens: None,
     };
     let content = answer
         .parts

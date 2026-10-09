@@ -262,23 +262,35 @@ pub enum Stop {
     Refusal,
 }
 
-/// The tokens calls consumed, as the provider counts them: what it read
-/// afresh, what it wrote, and what it read from and wrote to its prompt cache.
+/// Raw provider counts (domain/session.md, section 6); absence stays distinct
+/// from reported zero in facts and concrete history. Reasoning is within output.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Usage {
-    /// Fresh input tokens reported by the provider.
-    pub input_tokens: u64,
-    /// Output tokens reported by the provider.
-    pub output_tokens: u64,
-    /// Input tokens served from the provider's prompt cache.
-    pub cache_read_tokens: u64,
-    /// Input tokens written to the provider's prompt cache.
-    pub cache_write_tokens: u64,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub cache_read_tokens: Option<u64>,
+    pub cache_write_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
 }
 
 impl Usage {
-    /// No accepted completions or token usage yet.
-    pub const ZERO: Usage = Usage { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0 };
+    /// Exact empty prefix before any completion has been accepted.
+    pub const ZERO: Usage = Usage {
+        input_tokens: Some(0),
+        output_tokens: Some(0),
+        cache_read_tokens: Some(0),
+        cache_write_tokens: Some(0),
+        reasoning_tokens: Some(0),
+    };
+
+    /// No counts were reported by the provider.
+    pub const NONE: Usage = Usage {
+        input_tokens: None,
+        output_tokens: None,
+        cache_read_tokens: None,
+        cache_write_tokens: None,
+        reasoning_tokens: None,
+    };
 }
 
 /// What the transport terminal proves about a provider operation.

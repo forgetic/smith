@@ -14,14 +14,17 @@ fn randomized_priced_turns_and_terminal_races() {
         let mut world = World::new(seed, if seed % 2 == 0 { 0 } else { 256 });
         world.open(opening(None, 20));
         let usage = llm::Usage {
-            input_tokens: rng.below(30),
-            output_tokens: rng.below(10),
-            cache_read_tokens: rng.below(12),
-            cache_write_tokens: rng.below(9),
+            input_tokens: Some(rng.below(30)),
+            output_tokens: Some(rng.below(10)),
+            cache_read_tokens: Some(rng.below(12)),
+            cache_write_tokens: Some(rng.below(9)),
+            reasoning_tokens: None,
         };
-        let subtotal = (usage.input_tokens + usage.cache_write_tokens) * 7
-            + usage.cache_read_tokens * 3
-            + usage.output_tokens * 11;
+        let subtotal = (usage.input_tokens.expect("script reports count")
+            + usage.cache_write_tokens.expect("script reports count"))
+            * 7
+            + usage.cache_read_tokens.expect("script reports count") * 3
+            + usage.output_tokens.expect("script reports count") * 11;
         let parent = subtotal.div_ceil(10);
         world.complete(recorded::called(), llm::Stop::ToolUse, usage);
         let owner = world.delegated[0];

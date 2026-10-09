@@ -17,7 +17,13 @@ fn every_session_yield_and_usage_counter_maps_to_the_run() {
     ] {
         assert_eq!(translate::stop(yielded), stop);
     }
-    let usage = llm::Usage { input_tokens: 2, output_tokens: 3, cache_read_tokens: 5, cache_write_tokens: 7 };
+    let usage = llm::Usage {
+        input_tokens: Some(2),
+        output_tokens: Some(3),
+        cache_read_tokens: Some(5),
+        cache_write_tokens: Some(7),
+        reasoning_tokens: None,
+    };
     assert_eq!(
         translate::spend(11, usage),
         run::Spend { turns: 11, input: 2, output: 3, cache_read: 5, cache_write: 7, units: 0 }

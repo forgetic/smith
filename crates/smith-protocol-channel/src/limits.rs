@@ -12,7 +12,7 @@ pub struct Limits {
     /// This agent's bounded charter decoder allowances.
     pub charter: smith_charter::v2::Limits,
     /// This agent's bounded saved-turn decoder allowances.
-    pub transcript: smith_transcript::v2::Limits,
+    pub transcript: smith_transcript::v3::Limits,
     pub channel: skein_channel::Limits,
     /// Maximum configured endpoint names kept by this component.
     pub endpoints: u32,
@@ -48,7 +48,7 @@ pub enum Error {
     /// A concrete turn cannot be written to the durable transcript format.
     Transcript(smith_domain_session::record::Refusal),
     /// A concrete turn exceeds the transcript codec bounds.
-    TranscriptBody(smith_transcript::v2::Problem),
+    TranscriptBody(smith_transcript::v3::Problem),
     /// The service sent admission or an answer out of order.
     Order,
     /// A live host operation name is repeated, unknown, or beyond capacity.
@@ -71,8 +71,8 @@ impl From<smith_channel::v2::Problem> for Error {
     }
 }
 
-impl From<smith_transcript::v2::Problem> for Error {
-    fn from(problem: smith_transcript::v2::Problem) -> Error {
+impl From<smith_transcript::v3::Problem> for Error {
+    fn from(problem: smith_transcript::v3::Problem) -> Error {
         Error::TranscriptBody(problem)
     }
 }

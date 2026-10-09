@@ -5,7 +5,7 @@ use skein_heap::{Counting, Meter};
 use skein_lib::{List, Reader, Writer};
 
 use smith_charter::v2 as charter;
-use smith_transcript::v2 as transcript;
+use smith_transcript::v3 as transcript;
 
 #[global_allocator]
 static HEAP: Counting = Counting;
@@ -120,9 +120,17 @@ fn turn_at_its_largest_text_payload_stays_within_the_configured_heap_bound() {
             .expect("one message");
     let mut messages = List::with_capacity(1);
     messages.push(message).expect("one message slot");
-    let usage =
-        transcript::Usage::new(&limits, transcript::UsageParts { input: 0, output: 0, cache_read: 0, cache_write: 0 })
-            .expect("usage");
+    let usage = transcript::Usage::new(
+        &limits,
+        transcript::UsageParts {
+            input: Some(0),
+            output: Some(0),
+            cache_read: Some(0),
+            cache_write: Some(0),
+            reasoning: Some(0),
+        },
+    )
+    .expect("usage");
     let value = transcript::Turn::new(
         &limits,
         transcript::TurnParts {

@@ -101,7 +101,7 @@ pub fn save_turn(
     place: u32,
     read: Option<Token>,
     turn: &smith_domain::Turn,
-    limits: &transcript::v2::Limits,
+    limits: &transcript::v3::Limits,
     endpoints: &Endpoints,
 ) -> Result<File, StoreError> {
     if place == 0 || place != turn.sequence {
@@ -127,7 +127,7 @@ pub fn save_turn(
 /// Decode ordered numbered files as one concrete history before returning Loaded.
 pub fn decode_turns(
     files: &[Box<[u8]>],
-    limits: &transcript::v2::Limits,
+    limits: &transcript::v3::Limits,
     endpoints: &Endpoints,
 ) -> Result<(Option<Transcript>, Option<Token>), StoreError> {
     let Ok(count) = u32::try_from(files.len()) else { return Err(StoreError::TooLarge) };

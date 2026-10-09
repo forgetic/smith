@@ -137,15 +137,15 @@ fn pricing_rounds_the_combined_completion_and_rejects_overflow() {
     assert_eq!(recorded::PRICES.price(recorded::USAGE), Some(16));
     assert_eq!(
         record::Prices { input: 1, cached: 1, output: 1, unit: 3 }.price(llm::Usage {
-            input_tokens: 1,
-            output_tokens: 1,
+            input_tokens: Some(1),
+            output_tokens: Some(1),
             ..llm::Usage::ZERO
         }),
         Some(1)
     );
     assert_eq!(
         record::Prices { input: u64::MAX, cached: 0, output: 0, unit: 1 }
-            .price(llm::Usage { input_tokens: 2, ..llm::Usage::ZERO }),
+            .price(llm::Usage { input_tokens: Some(2), ..llm::Usage::ZERO }),
         None
     );
     let mut world = World::new(5, 256);
@@ -155,7 +155,7 @@ fn pricing_rounds_the_combined_completion_and_rejects_overflow() {
     world.complete(
         Box::new([llm::Block::Text { text: b"done".as_slice().into(), replay: None }]),
         llm::Stop::EndTurn,
-        llm::Usage { input_tokens: 2, ..llm::Usage::ZERO },
+        llm::Usage { input_tokens: Some(2), ..llm::Usage::ZERO },
     );
     assert_eq!(world.spend, []);
     assert_eq!(world.own_spend, []);

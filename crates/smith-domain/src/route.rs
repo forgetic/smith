@@ -432,12 +432,16 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
         session::Request::Used { opener, usage } => {
             run::Event::Used { conversation: opener, spend: translate::spend(1, usage) }
         }
-        session::Request::Ended { opener, end, turns, usage } => {
+        session::Request::Ended { opener, end, turns, usage: _, reported } => {
             let run = run::owner(&domain.run, opener).expect("run outlives its conversation");
             domain.pending.remove(&run);
             let id = peer(domain, opener);
             free(domain, id);
-            run::Event::Ended { conversation: opener, end: translate::end(end), spend: translate::spend(turns, usage) }
+            run::Event::Ended {
+                conversation: opener,
+                end: translate::end(end),
+                spend: translate::spend(turns, reported),
+            }
         }
         session::Request::Delegate { owner, opener, call, deadline, origin } => {
             delegated(domain, owner, opener, call, deadline, origin)
@@ -608,8 +612,8 @@ fn complete(domain: &mut Domain, env: &Env<Limits>, pending: PendingCompletion, 
     };
     let prompt = peer.prompt(prompt);
     let reservation = match input_bytes {
-        Some(bytes) => session::preview_reservation(
-            &domain.session,
+        Some(bytes) => session::reserve_completion(
+            &mut domain.session,
             owner,
             bytes,
             env.limits.session.protocol_allowance,

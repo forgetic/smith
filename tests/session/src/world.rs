@@ -1093,7 +1093,7 @@ impl World {
             agent::Request::Used { opener, usage } => {
                 self.used(opener.raw(), usage);
             }
-            agent::Request::Ended { opener, end, turns, usage } => {
+            agent::Request::Ended { opener, end, turns, usage, .. } => {
                 self.ended(opener.raw(), Ended { end, turns, usage });
             }
             agent::Request::Complete { owner, prompt, timeout, .. } => {
@@ -1324,14 +1324,20 @@ impl World {
         let session = &self.sessions[opener];
         let (budget, usage) = (&session.budget, &session.usage);
         assert!(session.turns < budget.turns, "session {opener} starts no turn past its budget");
-        assert!(usage.input_tokens < budget.input, "session {opener} has input tokens left");
-        assert!(usage.output_tokens < budget.output, "session {opener} has output tokens left");
-        assert!(usage.cache_read_tokens <= budget.cache_read, "session {opener} is within its cache reads");
-        assert!(usage.cache_write_tokens <= budget.cache_write, "session {opener} is within its cache writes");
+        assert!(usage.input_tokens.unwrap_or(0) < budget.input, "session {opener} has input tokens left");
+        assert!(usage.output_tokens.unwrap_or(0) < budget.output, "session {opener} has output tokens left");
+        assert!(
+            usage.cache_read_tokens.unwrap_or(0) <= budget.cache_read,
+            "session {opener} is within its cache reads"
+        );
+        assert!(
+            usage.cache_write_tokens.unwrap_or(0) <= budget.cache_write,
+            "session {opener} is within its cache writes"
+        );
         assert!(Some(self.now) < session.expires, "session {opener} has time left");
         let messages = u32::try_from(prompt.messages.len()).expect("a small transcript");
         assert!(messages < self.settings.agent.messages, "session {opener}'s transcript has room for the answer");
-        let left = budget.output - usage.output_tokens;
+        let left = budget.output - usage.output_tokens.unwrap_or(0);
         let most = u32::try_from(left).unwrap_or(u32::MAX).min(session.max_tokens);
         assert_eq!(prompt.max_tokens, most, "session {opener}'s answer takes no more than the output budget left");
     }
@@ -1377,10 +1383,10 @@ impl World {
                 unreachable!("bounded scheduled peers neither restore nor overflow; zero prices cannot spend the unit")
             }
             agent::Dimension::Turns => session.turns >= budget.turns,
-            agent::Dimension::Input => usage.input_tokens >= budget.input,
-            agent::Dimension::Output => usage.output_tokens >= budget.output,
-            agent::Dimension::CacheRead => usage.cache_read_tokens > budget.cache_read,
-            agent::Dimension::CacheWrite => usage.cache_write_tokens > budget.cache_write,
+            agent::Dimension::Input => usage.input_tokens.unwrap_or(0) >= budget.input,
+            agent::Dimension::Output => usage.output_tokens.unwrap_or(0) >= budget.output,
+            agent::Dimension::CacheRead => usage.cache_read_tokens.unwrap_or(0) > budget.cache_read,
+            agent::Dimension::CacheWrite => usage.cache_write_tokens.unwrap_or(0) > budget.cache_write,
             agent::Dimension::Time => Some(self.now) >= session.expires,
         }
     }
@@ -2073,15 +2079,30 @@ fn recorded_result<'a>(messages: &'a [agent::llm::Message], id: &[u8]) -> Option
 /// Checked raw-prefix addition: the scripted peer cannot overflow these bounded counters.
 fn add_usage(left: Usage, right: Usage) -> Usage {
     Usage {
-        input_tokens: left.input_tokens.checked_add(right.input_tokens).expect("bounded scheduled input"),
-        output_tokens: left.output_tokens.checked_add(right.output_tokens).expect("bounded scheduled output"),
-        cache_read_tokens: left
-            .cache_read_tokens
-            .checked_add(right.cache_read_tokens)
-            .expect("bounded scheduled cache reads"),
-        cache_write_tokens: left
-            .cache_write_tokens
-            .checked_add(right.cache_write_tokens)
-            .expect("bounded scheduled cache writes"),
+        input_tokens: Some(
+            left.input_tokens
+                .unwrap_or(0)
+                .checked_add(right.input_tokens.unwrap_or(0))
+                .expect("bounded scheduled input"),
+        ),
+        output_tokens: Some(
+            left.output_tokens
+                .unwrap_or(0)
+                .checked_add(right.output_tokens.unwrap_or(0))
+                .expect("bounded scheduled output"),
+        ),
+        cache_read_tokens: Some(
+            left.cache_read_tokens
+                .unwrap_or(0)
+                .checked_add(right.cache_read_tokens.unwrap_or(0))
+                .expect("bounded scheduled cache reads"),
+        ),
+        cache_write_tokens: Some(
+            left.cache_write_tokens
+                .unwrap_or(0)
+                .checked_add(right.cache_write_tokens.unwrap_or(0))
+                .expect("bounded scheduled cache writes"),
+        ),
+        reasoning_tokens: None,
     }
 }

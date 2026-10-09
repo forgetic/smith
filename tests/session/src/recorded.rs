@@ -1,4 +1,4 @@
-//! A scripted parent/provider world for concrete version-two sessions. The
+//! A scripted parent/provider world for concrete version-three sessions. The
 //! referee observes only requests: provider bytes, turns and spend, never
 //! session state. The harness separately checks boundary and settle contracts.
 
@@ -14,15 +14,20 @@ pub const PRICES: record::Prices = record::Prices { input: 7, cached: 3, output:
 /// Fixed provider usage supplied by concrete transcript scenarios.
 ///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
-pub const USAGE: llm::Usage =
-    llm::Usage { input_tokens: 11, output_tokens: 4, cache_read_tokens: 5, cache_write_tokens: 3 };
+pub const USAGE: llm::Usage = llm::Usage {
+    input_tokens: Some(11),
+    output_tokens: Some(4),
+    cache_read_tokens: Some(5),
+    cache_write_tokens: Some(3),
+    reasoning_tokens: None,
+};
 
 /// Fixed opaque provider bytes whose exact replay preservation is asserted.
 ///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 pub const OPAQUE: &[u8] = b"\0provider reasoning\xffsignature";
 
-/// Builds the concrete version-two opening with the supplied transcript and integer spend cap.
+/// Builds the concrete version-three opening with the supplied transcript and integer spend cap.
 ///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[must_use]
@@ -230,7 +235,7 @@ impl World {
                 self.spend.push(spent);
                 self.own_spend.push(own_spent);
             }
-            session::Request::Ended { opener, end, turns, usage } => {
+            session::Request::Ended { opener, end, turns, usage, .. } => {
                 assert_eq!(opener, Token::new(31));
                 assert!(self.end.replace(end).is_none());
                 assert!(self.terminal_usage.replace((turns, usage)).is_none());
@@ -336,7 +341,7 @@ pub fn scenario(seed: u64, facts: u32) -> World {
     world.complete(
         Box::new([llm::Block::Text { text: b"done".as_slice().into(), replay: None }]),
         llm::Stop::EndTurn,
-        llm::Usage { output_tokens: 1, ..llm::Usage::ZERO },
+        llm::Usage { output_tokens: Some(1), ..llm::Usage::ZERO },
     );
     assert_eq!(world.own_spend, [16, 16, 18]);
     assert_eq!(world.turns[1].spent, 27); // ceil(11/10)=2, per completion.
@@ -344,7 +349,7 @@ pub fn scenario(seed: u64, facts: u32) -> World {
     world
 }
 
-/// Copies the settled concrete turns into a replayable version-two transcript.
+/// Copies the settled concrete turns into a replayable version-three transcript.
 ///
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 #[must_use]

@@ -138,10 +138,11 @@ fn completion(
     };
     let provider::Usage { prompt_tokens, cached_tokens, cache_creation_tokens, completion_tokens } = answer.usage;
     let usage = agent::Usage {
-        input_tokens: prompt_tokens,
-        output_tokens: completion_tokens,
-        cache_read_tokens: cached_tokens,
-        cache_write_tokens: cache_creation_tokens,
+        input_tokens: Some(prompt_tokens),
+        output_tokens: Some(completion_tokens),
+        cache_read_tokens: Some(cached_tokens),
+        cache_write_tokens: Some(cache_creation_tokens),
+        reasoning_tokens: None,
     };
     let content = answer.parts.into_iter().map(|part| block(part, tickets, opener, served)).collect();
     agent::Completion { content, stop, usage }

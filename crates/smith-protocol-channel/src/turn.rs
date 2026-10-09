@@ -16,7 +16,7 @@ use crate::{Endpoints, Error};
 /// Encode one domain turn under its configured endpoint and replay dialect.
 pub fn encode_turn(
     source: &record::Turn,
-    limits: &wire::v2::Limits,
+    limits: &wire::v3::Limits,
     endpoints: &Endpoints,
 ) -> Result<Box<[u8]>, Error> {
     if source.version != record::VERSION || source.sequence == 0 {
@@ -40,6 +40,7 @@ pub fn encode_turn(
             output: source.usage.output_tokens,
             cache_read: source.usage.cache_read_tokens,
             cache_write: source.usage.cache_write_tokens,
+            reasoning: source.usage.reasoning_tokens,
         },
     )?;
     let turn = wire::Turn::new(
@@ -54,7 +55,7 @@ pub fn encode_turn(
     Ok(writer.finish())
 }
 
-fn encode_message(source: &llm::Message, dialect: u32, limits: &wire::v2::Limits) -> Result<wire::Message, Error> {
+fn encode_message(source: &llm::Message, dialect: u32, limits: &wire::v3::Limits) -> Result<wire::Message, Error> {
     let role = match source.role {
         llm::Role::User => wire::Role::User,
         llm::Role::Assistant => wire::Role::Assistant,
@@ -68,7 +69,7 @@ fn encode_message(source: &llm::Message, dialect: u32, limits: &wire::v2::Limits
     Ok(wire::Message::new(limits, wire::MessageParts { role, blocks })?)
 }
 
-fn encode_block(source: &llm::Block, dialect: u32, limits: &wire::v2::Limits) -> Result<wire::Block, Error> {
+fn encode_block(source: &llm::Block, dialect: u32, limits: &wire::v3::Limits) -> Result<wire::Block, Error> {
     let block = match source {
         llm::Block::Text { text, replay } => wire::Block::Text(wire::Text::new(
             limits,
@@ -102,7 +103,7 @@ fn encode_block(source: &llm::Block, dialect: u32, limits: &wire::v2::Limits) ->
 fn encode_replay(
     source: Option<&llm::Replay>,
     dialect: u32,
-    limits: &wire::v2::Limits,
+    limits: &wire::v3::Limits,
 ) -> Result<Option<wire::Replay>, Error> {
     match source {
         Some(replay) => Ok(Some(wire::Replay::new(
@@ -113,7 +114,7 @@ fn encode_replay(
     }
 }
 
-fn encode_returned(source: &llm::Returned, limits: &wire::v2::Limits) -> Result<wire::Returned, Error> {
+fn encode_returned(source: &llm::Returned, limits: &wire::v3::Limits) -> Result<wire::Returned, Error> {
     let returned = match source {
         llm::Returned::Owned { outcome } => wire::Returned::Outcome(wire::OwnedOutcome::new(
             limits,
@@ -135,7 +136,7 @@ fn encode_returned(source: &llm::Returned, limits: &wire::v2::Limits) -> Result<
     Ok(returned)
 }
 
-fn encode_problem(source: &llm::Problem, limits: &wire::v2::Limits) -> Result<wire::CallProblem, Error> {
+fn encode_problem(source: &llm::Problem, limits: &wire::v3::Limits) -> Result<wire::CallProblem, Error> {
     let problem = match source {
         llm::Problem::UnknownTool => wire::CallProblem::UnknownTool,
         llm::Problem::NotAnObject => wire::CallProblem::NotAnObject,
@@ -157,7 +158,7 @@ fn encode_problem(source: &llm::Problem, limits: &wire::v2::Limits) -> Result<wi
 }
 
 #[expect(clippy::too_many_lines, reason = "every typed tool outcome has an explicit durable representation")]
-fn encode_outcome(source: &tools::Outcome, limits: &wire::v2::Limits) -> Result<wire::Outcome, Error> {
+fn encode_outcome(source: &tools::Outcome, limits: &wire::v3::Limits) -> Result<wire::Outcome, Error> {
     let outcome = match source {
         tools::Outcome::Read { content, skipped, lines, total, cut } => wire::Outcome::Read(wire::Read::new(
             limits,

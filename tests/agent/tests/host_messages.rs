@@ -170,7 +170,10 @@ fn child_completions_and_raw_usage_cross_the_host_final_answer_once() {
     assert!(spent.turns > turns, "actual child completions exceed transmitted main Turns");
     assert_raw_terminals(&agent, spent);
     let main = agent.turns().last().expect("actual settled main Turn");
-    assert!(spent.input > main.usage.input_tokens && spent.output > main.usage.output_tokens);
+    assert!(
+        spent.input > main.usage.input_tokens.expect("peer supplies count")
+            && spent.output > main.usage.output_tokens.expect("peer supplies count")
+    );
 
     let mut host = Host::new(
         942,
@@ -237,10 +240,10 @@ fn assert_raw_terminals(agent: &Agent, spent: run::Spend) {
         match completion.terminal.expect("every actual provider right settled").1 {
             CompletionTerminal::Completed(usage) => {
                 completions += 1;
-                input += usage.input_tokens;
-                output += usage.output_tokens;
-                cache_read += usage.cache_read_tokens;
-                cache_write += usage.cache_write_tokens;
+                input += usage.input_tokens.expect("peer supplies count");
+                output += usage.output_tokens.expect("peer supplies count");
+                cache_read += usage.cache_read_tokens.expect("peer supplies count");
+                cache_write += usage.cache_write_tokens.expect("peer supplies count");
             }
             CompletionTerminal::Failed | CompletionTerminal::Cancelled => {}
         }

@@ -403,7 +403,7 @@ fn native_accounting(
                 turn.usage.cache_read_tokens,
                 turn.usage.cache_write_tokens
             ],
-            [input, outputs[index], read, write],
+            [Some(input), Some(outputs[index]), Some(read), Some(write)],
             "all four usage fields independently priced from literal system and native query"
         );
         spent.turns += 1;
@@ -413,7 +413,7 @@ fn native_accounting(
         spent.cache_write += write;
         assert_eq!(world.turn_metadata()[index], (spent.turns, None, spent));
         assert_eq!(turn.sequence, prior + spent.turns);
-        assert_eq!(turn.version, 2);
+        assert_eq!(turn.version, smith_domain::session::record::VERSION);
         assert_eq!(turn.endpoint, llm::Endpoint(0));
         assert_eq!(turn.dialect, 1);
         assert_eq!(turn.spent, 0);

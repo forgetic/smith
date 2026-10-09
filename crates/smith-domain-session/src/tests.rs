@@ -440,10 +440,15 @@ fn initial_bytes() -> u64 {
 
 fn usage_sum(previous: Usage, usage: Usage) -> Option<Usage> {
     Some(Usage {
-        input_tokens: previous.input_tokens.checked_add(usage.input_tokens)?,
-        output_tokens: previous.output_tokens.checked_add(usage.output_tokens)?,
-        cache_read_tokens: previous.cache_read_tokens.checked_add(usage.cache_read_tokens)?,
-        cache_write_tokens: previous.cache_write_tokens.checked_add(usage.cache_write_tokens)?,
+        input_tokens: Some(previous.input_tokens.unwrap_or(0).checked_add(usage.input_tokens.unwrap_or(0))?),
+        output_tokens: Some(previous.output_tokens.unwrap_or(0).checked_add(usage.output_tokens.unwrap_or(0))?),
+        cache_read_tokens: Some(
+            previous.cache_read_tokens.unwrap_or(0).checked_add(usage.cache_read_tokens.unwrap_or(0))?,
+        ),
+        cache_write_tokens: Some(
+            previous.cache_write_tokens.unwrap_or(0).checked_add(usage.cache_write_tokens.unwrap_or(0))?,
+        ),
+        reasoning_tokens: Some(0),
     })
 }
 
@@ -472,7 +477,13 @@ fn result(id: &[u8], outcome: Outcome) -> Block {
 }
 
 /// What every completion uses, unless a test says otherwise.
-const USAGE: Usage = Usage { input_tokens: 10, output_tokens: 5, cache_read_tokens: 3, cache_write_tokens: 2 };
+const USAGE: Usage = Usage {
+    input_tokens: Some(10),
+    output_tokens: Some(5),
+    cache_read_tokens: Some(3),
+    cache_write_tokens: Some(2),
+    reasoning_tokens: Some(0),
+};
 
 fn completion(content: Box<[Block]>, stop: Stop) -> Completion {
     Completion { content, stop, usage: USAGE }
@@ -517,7 +528,7 @@ fn ended(end: End, turns: u32) -> Request {
     for _ in 0..turns {
         usage = usage_sum(usage, USAGE).expect("bounded fixture usage");
     }
-    Request::Ended { opener: Token::new(1), end, turns, usage }
+    Request::Ended { opener: Token::new(1), end, turns, usage, reported: usage }
 }
 
 #[test]
@@ -1043,7 +1054,16 @@ fn opens_beyond_the_session_slots_are_refused_as_busy() {
     let mut h = Harness::new(Limits { sessions: 1, ..LIMITS });
     drop(h.open(1));
     let refused = h.step(Event::Open { opener: Token::new(2), opening: opening(spec()) });
-    assert_eq!(refused, Some(Request::Ended { opener: Token::new(2), end: End::Busy, turns: 0, usage: Usage::ZERO }));
+    assert_eq!(
+        refused,
+        Some(Request::Ended {
+            opener: Token::new(2),
+            end: End::Busy,
+            turns: 0,
+            usage: Usage::ZERO,
+            reported: Usage::ZERO
+        })
+    );
 }
 
 #[test]
@@ -1380,7 +1400,8 @@ fn the_turn_that_takes_tokens_past_their_budget_runs_its_tools_and_ends_the_sess
 
     // Without the cache, a zero cache budget stops nothing.
     let mut h = Harness::new(LIMITS);
-    let uncached = Completion { usage: Usage { cache_read_tokens: 0, cache_write_tokens: 0, ..USAGE }, ..done() };
+    let uncached =
+        Completion { usage: Usage { cache_read_tokens: Some(0), cache_write_tokens: Some(0), ..USAGE }, ..done() };
     let session = h.yielded_with(budget(Budget { cache_read: 0, cache_write: 0, ..BUDGET }), uncached);
     drop(calling(h.step(Event::Continue { session, content: bytes(b"go on") })));
 }
@@ -1404,14 +1425,14 @@ fn each_answer_may_take_no_more_than_the_output_budget_left() {
     let (run, _) = running(h.step(Event::Completed { owner, completion: reading() }));
     let (_, prompt) = calling(h.step(ran(run, b"main.rs")));
     assert_eq!(prompt.max_tokens, 7);
-    let usage = Usage { output_tokens: 7, ..USAGE };
+    let usage = Usage { output_tokens: Some(7), ..USAGE };
     let cut = Completion { usage, ..completion(Box::new([text(b"I was")]), Stop::MaxTokens) };
     let request = h.step(Event::Completed { owner, completion: cut });
     assert_eq!(yielded(request), (1, Yield::Truncated, bytes(b"I was")));
     let end = h.step(Event::Continue { session: owner, content: bytes(b"go on") });
     let spent = End::Budget { spent: Dimension::Output };
     let usage = usage_sum(USAGE, usage).expect("bounded fixture usage");
-    assert_eq!(end, Some(Request::Ended { opener: Token::new(1), end: spent, turns: 2, usage }));
+    assert_eq!(end, Some(Request::Ended { opener: Token::new(1), end: spent, turns: 2, usage, reported: usage }));
 
     // A spec's own output stays the cap while more is left.
     let mut h = Harness::new(LIMITS);
@@ -1782,16 +1803,34 @@ fn raw_overflow_ends_before_the_completion_is_charged_or_told() {
     let budget = Budget { input: u64::MAX, output: u64::MAX, cache_read: u64::MAX, cache_write: u64::MAX, ..BUDGET };
     let mut harness = Harness::new(Limits { budget, ..LIMITS });
     let (owner, _) = harness.open_with(1, Spec { budget, ..spec() });
-    let first = Usage { input_tokens: u64::MAX - 1, output_tokens: 1, cache_read_tokens: 3, cache_write_tokens: 4 };
+    let first = Usage {
+        input_tokens: Some(u64::MAX - 1),
+        output_tokens: Some(1),
+        cache_read_tokens: Some(3),
+        cache_write_tokens: Some(4),
+        reasoning_tokens: Some(0),
+    };
     drop(yielded(harness.step(Event::Completed { owner, completion: Completion { usage: first, ..done() } })));
     drop(calling(harness.step(Event::Continue { session: owner, content: bytes(b"go on") })));
-    let second = Usage { input_tokens: 2, output_tokens: 2, cache_read_tokens: 5, cache_write_tokens: 6 };
+    let second = Usage {
+        input_tokens: Some(2),
+        output_tokens: Some(2),
+        cache_read_tokens: Some(5),
+        cache_write_tokens: Some(6),
+        reasoning_tokens: Some(0),
+    };
     let terminal = harness.step(Event::Completed { owner, completion: Completion { usage: second, ..done() } });
     assert_eq!(harness.usage, first);
     assert_eq!(harness.turn_records.len(), 1);
     assert_eq!(
         terminal,
-        Some(Request::Ended { opener: Token::new(1), end: End::UsageOverflow, turns: 1, usage: first })
+        Some(Request::Ended {
+            opener: Token::new(1),
+            end: End::UsageOverflow,
+            turns: 1,
+            usage: first,
+            reported: first
+        })
     );
     while let Some(fact) = harness.domain.pop_fact() {
         if let Fact::Used { usage, .. } = fact.kind {

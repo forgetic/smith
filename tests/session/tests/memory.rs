@@ -181,7 +181,7 @@ fn observe_fill(
                     asked = Some(Asked::Other);
                 }
             }
-            Request::Ended { opener, end, turns, usage } => {
+            Request::Ended { opener, end, turns, usage, .. } => {
                 assert!(full_service, "admissible original payload must enter backoff");
                 assert_eq!((end, turns, usage), (smith_domain_session::End::TranscriptFull, 2, Usage::ZERO));
                 let row = &mut observed[usize::try_from(opener.raw()).expect("bounded opener")];
@@ -675,6 +675,7 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
             end: smith_domain_session::End::TranscriptRefused { reason: record::Refusal::TooLarge },
             turns: 0,
             usage: Usage::ZERO,
+            reported: Usage::ZERO,
         })
     );
     assert!(out.is_empty());

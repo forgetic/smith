@@ -138,7 +138,13 @@ const LIMITS: Limits = Limits {
     },
 };
 
-const USAGE: Usage = Usage { input_tokens: 100, output_tokens: 10, cache_read_tokens: 0, cache_write_tokens: 0 };
+const USAGE: Usage = Usage {
+    input_tokens: Some(100),
+    output_tokens: Some(10),
+    cache_read_tokens: Some(0),
+    cache_write_tokens: Some(0),
+    reasoning_tokens: None,
+};
 
 #[test]
 fn decoded_batch_reserves_refusal_cells_before_any_payload() {
@@ -989,7 +995,7 @@ fn an_accepted_finish_closes_main_and_the_run_answers_the_worker() {
         panic!("expected the run accepted, got {emitted:?}");
     };
     assert_eq!(to, &ReplyTo::new(Token::new(7)));
-    assert_eq!((spent.turns, spent.input), (1, USAGE.input_tokens));
+    assert_eq!((spent.turns, spent.input), (1, USAGE.input_tokens.expect("fixture reports input")));
     h.domain.reclaim();
     assert_eq!((h.domain.peers(), h.domain.tickets(), h.domain.flights()), (0, 0, 0), "main's tickets went with it");
 }
@@ -1849,7 +1855,7 @@ fn a_provider_charge_above_its_reserved_maximum_fails_without_recording_it() {
     let completion = Completion {
         content: Box::new([Said::Text { text: bytes(b"overbound"), replay: None }]),
         stop: Stop::EndTurn,
-        usage: Usage { output_tokens: 100_000, ..Usage::ZERO },
+        usage: Usage { output_tokens: Some(100_000), ..Usage::ZERO },
     };
     let emitted = harness.step(Event::Completed { owner: main, completion });
     let emitted = if emitted.is_empty() { harness.next() } else { emitted };
@@ -2030,4 +2036,64 @@ fn first_message_after_awaiting_restores_history_and_absent_host_answers_once() 
     assert!(text.ends_with(b"person: new coding task"));
     assert_eq!(harness.domain.starts.len(), 1);
     assert_eq!(harness.turns.len(), 0, "restored history is not retold as an activation turn");
+}
+
+#[test]
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    clippy::single_match,
+    reason = "the charge story selects its Used observation"
+)]
+fn missing_provider_usage_settles_the_root_reservation_and_keeps_the_raw_fact() {
+    for raw in [
+        Usage { output_tokens: Some(2), ..Usage::NONE },
+        Usage { input_tokens: Some(0), reasoning_tokens: Some(0), ..Usage::NONE },
+    ] {
+        let mut harness = Harness::with(&scalar_limits());
+        let selected = scalar_charter();
+        let selected = Charter {
+            budget: run::Budget { spend: 100_000, ..selected.budget },
+            llm: Llm { output: 10, prices: run::Prices { input: 0, cached: 0, output: 3, unit: 1 }, ..selected.llm },
+            ..selected
+        };
+        let (_, main, _) = harness.admit(1, selected);
+        assert!(
+            harness
+                .step(Event::Completed {
+                    owner: main,
+                    completion: Completion {
+                        content: Box::new([served(b"finish", verdict(b"approve"))]),
+                        stop: Stop::ToolUse,
+                        usage: raw,
+                    },
+                })
+                .is_empty()
+        );
+        let emitted = harness.next();
+        let [Request::Answer { answer: run::Answer::Accepted { spent, turns, .. }, .. }] = emitted.as_ref() else {
+            panic!("missing usage still settles the reserved finish: {emitted:?}");
+        };
+        assert_eq!(
+            (spent.units, spent.turns, spent.input, spent.output, *turns),
+            (30, 1, 0, raw.output_tokens.unwrap_or(0), 1)
+        );
+        let turn = harness.turns.iter().next().expect("one saved turn");
+        assert_eq!((turn.usage, turn.spent), (raw, 30));
+        let mut observed = false;
+        for _ in 0..harness.env.limits.session.facts {
+            match harness.domain.pop_fact() {
+                Some(Fact::Session { fact }) => match fact.kind {
+                    session::FactKind::Used { usage, .. } => {
+                        assert_eq!(usage, raw);
+                        let info = fact.response.expect("Used carries its accepted charge");
+                        assert_eq!((info.number, info.spent), (1, Some(30)));
+                        observed = true;
+                    }
+                    _ => {}
+                },
+                Some(Fact::Run { .. }) | None => {}
+            }
+        }
+        assert!(observed);
+    }
 }

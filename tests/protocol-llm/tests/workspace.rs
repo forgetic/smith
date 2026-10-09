@@ -96,7 +96,7 @@ fn accounting(world: &World, prefixes: &[Vec<Message>], outputs: &[u64], prior: 
                 turn.usage.cache_read_tokens,
                 turn.usage.cache_write_tokens
             ],
-            [input, outputs[index], read, write],
+            [Some(input), Some(outputs[index]), Some(read), Some(write)],
             "all four independently calculated SDK usage fields"
         );
         spent.turns += 1;
@@ -106,7 +106,7 @@ fn accounting(world: &World, prefixes: &[Vec<Message>], outputs: &[u64], prior: 
         spent.cache_write += write;
         assert_eq!(world.turn_metadata()[index], (spent.turns, None, spent));
         assert_eq!(turn.sequence, prior + spent.turns);
-        assert_eq!(turn.version, 2);
+        assert_eq!(turn.version, smith_domain::session::record::VERSION);
         assert_eq!(turn.spent, 0);
         assert!(
             turn.messages.iter().flat_map(|message| &message.content).all(|block| {

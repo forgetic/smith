@@ -575,10 +575,39 @@ fn validate_usage(usage: &Value) -> Result<(), ParseError> {
     if usage.name() != Some("Usage") {
         return Err(bad("usage", "expected Usage"));
     }
-    let fields = ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"];
-    usage.fields(&fields)?;
-    for field in fields {
-        usage.field(field)?.number(field)?;
+    let baseline = ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"];
+    let optional = ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens"];
+    let has_reasoning = match usage {
+        Value::Struct { fields, .. } => fields.contains_key("reasoning_tokens"),
+        Value::Name(_)
+        | Value::Number(_)
+        | Value::String(_)
+        | Value::Bytes(_)
+        | Value::Sequence(_)
+        | Value::Tuple { .. } => false,
+    };
+    if has_reasoning {
+        usage.fields(&optional)?;
+        for field in optional {
+            match usage.field(field)? {
+                Value::Name(name) if name == "None" => {}
+                Value::Tuple { name, values } if name == "Some" && values.len() == 1 => {
+                    values[0].number(field)?;
+                }
+                Value::Name(_)
+                | Value::Number(_)
+                | Value::String(_)
+                | Value::Bytes(_)
+                | Value::Sequence(_)
+                | Value::Tuple { .. }
+                | Value::Struct { .. } => return Err(bad(field, "expected optional unsigned integer")),
+            }
+        }
+    } else {
+        usage.fields(&baseline)?;
+        for field in baseline {
+            usage.field(field)?.number(field)?;
+        }
     }
     Ok(())
 }

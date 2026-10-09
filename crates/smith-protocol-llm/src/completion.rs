@@ -66,7 +66,13 @@ pub fn completion(
         shared::Stop::Refusal => llm::Stop::Refusal,
     };
     let shared::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens } = usage;
-    let usage = llm::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens };
+    let usage = llm::Usage {
+        input_tokens: Some(input_tokens),
+        output_tokens: Some(output_tokens),
+        cache_read_tokens: Some(cache_read_tokens),
+        cache_write_tokens: Some(cache_write_tokens),
+        reasoning_tokens: None,
+    };
     Ok(Event::Completed {
         owner: context.owner,
         completion: llm::Completion { content: translated.into_boxed(), stop, usage },

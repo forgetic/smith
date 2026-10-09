@@ -221,3 +221,44 @@ fn malformed_message_facts_poison_the_legacy_observer() {
         assert!(matches!(observer.classify(Exit::Code(0), Forced::No).end, End::HarnessError { .. }));
     }
 }
+
+#[test]
+fn optional_usage_preserves_absence_and_zero_alongside_numeric_baseline_records() {
+    // Synthetic renderings of both supported binary faces; frozen recordings
+    // remain the evidence for the baseline face.
+    for usage in [
+        "Usage { input_tokens: 11, output_tokens: 4, cache_read_tokens: 5, cache_write_tokens: 3 }",
+        "Usage { input_tokens: Some(11), output_tokens: Some(4), cache_read_tokens: Some(5), cache_write_tokens: Some(3), reasoning_tokens: None }",
+        "Usage { input_tokens: None, output_tokens: Some(0), cache_read_tokens: None, cache_write_tokens: Some(0), reasoning_tokens: Some(0) }",
+    ] {
+        let expected = parse_debug(usage).expect("exact usage");
+        let line = serde_json::json!({"type":"usage", "at_ns":17, "owner":1, "usage":usage}).to_string();
+        assert!(
+            matches!(parse_line(&line).expect("usage record"), Some(Observation::Usage { value, .. }) if value == expected)
+        );
+        let line = fact(&format!("Session {{ fact: Used {{ opener: Token(1), usage: {usage} }} }}"));
+        assert!(
+            matches!(parse_line(&line).expect("usage fact"), Some(Observation::Fact { event: Event::SessionUsed { usage: value, .. }, .. }) if value == expected)
+        );
+    }
+}
+
+#[test]
+fn optional_usage_rejects_mixed_partial_and_malformed_shapes() {
+    for usage in [
+        "Usage { input_tokens: Some(1), output_tokens: Some(2), cache_read_tokens: None, cache_write_tokens: None }",
+        "Usage { input_tokens: 1, output_tokens: Some(2), cache_read_tokens: None, cache_write_tokens: None, reasoning_tokens: None }",
+        "Usage { input_tokens: Some(true), output_tokens: None, cache_read_tokens: None, cache_write_tokens: None, reasoning_tokens: None }",
+        "Usage { input_tokens: Some(1, 2), output_tokens: None, cache_read_tokens: None, cache_write_tokens: None, reasoning_tokens: None }",
+        "Usage { input_tokens: None, output_tokens: None, cache_read_tokens: None, cache_write_tokens: None, reasoning_tokens: Token(0) }",
+        "Usage { input_tokens: None, output_tokens: None, cache_read_tokens: None, reasoning_tokens: None }",
+        "Usage { input_tokens: None, output_tokens: None, cache_read_tokens: None, cache_write_tokens: None, reasoning_tokens: None, extra: 0 }",
+    ] {
+        let line = serde_json::json!({"type":"usage", "at_ns":17, "owner":1, "usage":usage}).to_string();
+        assert!(parse_line(&line).is_err(), "{usage}");
+        let mut observer = observed(COMPLETED).0;
+        let line = fact(&format!("Session {{ fact: Used {{ opener: Token(1), usage: {usage} }} }}"));
+        assert!(observer.observe_line(&line).is_err(), "{usage}");
+        assert!(matches!(observer.classify(Exit::Code(0), Forced::No).end, End::HarnessError { .. }));
+    }
+}

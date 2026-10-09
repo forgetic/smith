@@ -200,11 +200,12 @@ fn envelope(bytes: &[u8], header: [u8; 7], payload: &[u8]) -> bool {
 }
 
 fn usage(actual: llm::Usage, expected: [u64; 4]) {
+    let expected = expected.map(Some);
     let observed = [actual.input_tokens, actual.output_tokens, actual.cache_read_tokens, actual.cache_write_tokens];
     assert_eq!(observed, expected, "all four actual translated usage fields");
     for index in 0..4 {
         let mut changed = observed;
-        changed[index] += 1;
+        changed[index] = Some(changed[index].expect("provider reports every fixture count") + 1);
         assert_ne!(changed, expected, "usage field {index} participates in the outside oracle");
     }
 }

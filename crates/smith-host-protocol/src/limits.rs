@@ -10,7 +10,7 @@ use crate::{Component, OpenEvent};
 pub struct Limits {
     pub bodies: smith_channel::Limits,
     pub charter: smith_charter::v2::Limits,
-    pub transcript: smith_transcript::v2::Limits,
+    pub transcript: smith_transcript::v3::Limits,
     /// Maximum configured endpoint names retained by this component.
     pub endpoints: u32,
     pub channel: skein_channel::Limits,

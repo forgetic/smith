@@ -502,7 +502,13 @@ impl Driver {
     /// ownership; history capacity cannot enlarge the advertised receiving cap.
     fn completion(&mut self, limits: &Limits, finish: bool, agents: bool, receiving: Receiving) -> Completion {
         let completion_cell_bytes = completion_cell();
-        let usage = Usage { input_tokens: 100, output_tokens: 20, cache_read_tokens: 50, cache_write_tokens: 50 };
+        let usage = Usage {
+            input_tokens: Some(100),
+            output_tokens: Some(20),
+            cache_read_tokens: Some(50),
+            cache_write_tokens: Some(50),
+            reasoning_tokens: None,
+        };
         if self.rng.chance(150) {
             let available =
                 receiving.bytes.checked_sub(completion_cell_bytes).expect("admitted receiving cap holds one block");

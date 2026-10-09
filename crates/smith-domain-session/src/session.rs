@@ -175,6 +175,9 @@ struct Conversation {
     budget: Budget,
     turns: u32,
     usage: Usage,
+    /// Checked sums of reported counts only; every field is present, even when
+    /// the raw cumulative report is unavailable. Token budgets use these sums.
+    reported: Usage,
     /// When the time budget runs out.
     expires: Time,
     /// Its kit in the tools it owns, as the tools name it. A session is
@@ -194,6 +197,10 @@ struct Recording {
     sequence: u32,
     told: u32,
     pending: Option<Usage>,
+    /// Maximum spend accepted by the parent before sending this attempt.
+    reservation: Option<u64>,
+    /// Actual charge of the most recently accepted completion, for its fact.
+    last_charge: u64,
 }
 
 #[derive(Debug)]
@@ -387,7 +394,7 @@ fn open_admitted(
                 tools::Refusal::Busy => End::Busy,
                 tools::Refusal::Invalid => End::Invalid,
             };
-            out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO });
+            out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO, reported: Usage::ZERO });
         }
         Some(News::Closed { .. }) | None => unreachable!("the tools answer an open with its kit, opened or refused"),
     }
@@ -483,16 +490,16 @@ pub(crate) fn completed(
 pub fn preview_completion(domain: &Domain, owner: Token, usage: Usage) -> Result<u64, End> {
     let session = domain.sessions.get(Id::from_token(owner)).expect("completion retains its session");
     let conversation = &session.conversation;
-    let price = conversation.recording.prices.price(usage).ok_or(End::PriceOverflow)?;
+    let price = completion_price(&conversation.recording, usage).ok_or(End::PriceOverflow)?;
     conversation.recording.own_spent.checked_add(price).ok_or(End::PriceOverflow)?;
     conversation.recording.spent.checked_add(price).ok_or(End::PriceOverflow)?;
-    checked_usage(conversation.usage, usage).ok_or(End::UsageOverflow)?;
+    checked_usage(conversation.usage, usage)?;
+    checked_reported(conversation.reported, usage).ok_or(End::UsageOverflow)?;
     conversation.turns.checked_add(1).ok_or(End::UsageOverflow)?;
     Ok(price)
 }
 
-/// Price the input byte bound and the requested maximum output with no cache
-/// discount, rounding the two parts together as one possible completion.
+/// Check the maximum completion charge against this session's spend allowance.
 #[must_use]
 pub fn preview_reservation(
     domain: &Domain,
@@ -502,18 +509,43 @@ pub fn preview_reservation(
     max_tokens: u32,
 ) -> Option<u64> {
     let session = domain.sessions.get(Id::from_token(owner)).expect("completion retains its session");
+    reservation(&session.conversation, input_bytes, allowance, max_tokens)
+}
+
+/// Record the parent's accepted maximum before provider work. Missing input or
+/// output later charges this entire reservation (domain/session.md, section 6).
+pub fn reserve_completion(
+    domain: &mut Domain,
+    owner: Token,
+    input_bytes: u64,
+    allowance: u64,
+    max_tokens: u32,
+) -> Option<u64> {
+    let session = domain.sessions.get_mut(Id::from_token(owner)).expect("completion retains its session");
+    let most = reservation(&session.conversation, input_bytes, allowance, max_tokens)?;
+    session.conversation.recording.reservation = Some(most);
+    Some(most)
+}
+
+fn reservation(conversation: &Conversation, input_bytes: u64, allowance: u64, max_tokens: u32) -> Option<u64> {
     let input_tokens = input_bytes.checked_add(allowance)?;
-    let most = session.conversation.recording.prices.price(Usage {
-        input_tokens,
-        output_tokens: u64::from(max_tokens),
-        cache_read_tokens: 0,
-        cache_write_tokens: 0,
+    let most = conversation.recording.prices.price(Usage {
+        input_tokens: Some(input_tokens),
+        output_tokens: Some(u64::from(max_tokens)),
+        ..Usage::ZERO
     })?;
-    let total = session.conversation.recording.spent.checked_add(most)?;
-    if total > session.conversation.recording.budget {
+    let total = conversation.recording.spent.checked_add(most)?;
+    if total > conversation.recording.budget {
         return None;
     }
     Some(most)
+}
+
+fn completion_price(recording: &Recording, usage: Usage) -> Option<u64> {
+    if usage.input_tokens.is_none() || usage.output_tokens.is_none() {
+        return recording.reservation;
+    }
+    recording.prices.price(usage)
 }
 
 /// Settle a provider completion rejected by the parent's run-wide arithmetic
@@ -999,8 +1031,8 @@ fn settle(domain: &mut Domain, env: &Env<Limits>, id: Id<Session>, out: &mut Que
     let waiting = Waiting { kit, ..waiting };
     let session = domain.sessions.get_mut(id).expect("looked up above");
     if waiting == SETTLED {
-        let Conversation { opener, turns, usage, .. } = session.conversation;
-        out.push(Request::Ended { opener, end, turns, usage });
+        let Conversation { opener, turns, usage, reported, .. } = session.conversation;
+        out.push(Request::Ended { opener, end, turns, usage, reported });
         session.state = State::Closed;
     } else {
         session.state = State::Closing { end, waiting };
@@ -1017,7 +1049,7 @@ fn tell(facts: &mut Facts, runs: &Slab<Run>, session: &Session, out: &Queue<Requ
             Request::Opened { opener, session: _ } => FactKind::Opened { opener: *opener },
             Request::Yielded { opener, stop, text: _ } => FactKind::Yielded { opener: *opener, stop: *stop },
             Request::Used { opener, usage } => FactKind::Used { opener: *opener, usage: *usage },
-            Request::Ended { opener, end, turns, usage } => {
+            Request::Ended { opener, end, turns, usage, .. } => {
                 FactKind::Ended { opener: *opener, end: *end, turns: *turns, usage: *usage }
             }
             Request::Complete {
@@ -1050,13 +1082,8 @@ fn tell(facts: &mut Facts, runs: &Slab<Run>, session: &Session, out: &Queue<Requ
                 facts.push_call(facts.now(), fact, &run.metadata);
             }
             Request::Complete { .. } => facts.push_response(fact, next_response(&session.conversation), None),
-            Request::Used { usage, .. } => {
-                let spent = session
-                    .conversation
-                    .recording
-                    .prices
-                    .price(*usage)
-                    .expect("accepted usage was priced before emission");
+            Request::Used { .. } => {
+                let spent = session.conversation.recording.last_charge;
                 facts.push_response(fact, u64::from(session.conversation.turns), Some(spent));
             }
             Request::Opened { .. } | Request::Yielded { .. } | Request::Ended { .. } => facts.push(fact),
@@ -1592,13 +1619,17 @@ fn abandon(
 
 /// Counts a completion that came back, and tells the opener.
 fn used(conversation: &mut Conversation, usage: Usage, out: &mut Queue<Request>) -> Result<(), End> {
-    let price = conversation.recording.prices.price(usage).ok_or(End::PriceOverflow)?;
+    let price = completion_price(&conversation.recording, usage).ok_or(End::PriceOverflow)?;
     let own = conversation.recording.own_spent.checked_add(price).ok_or(End::PriceOverflow)?;
     let inclusive = conversation.recording.spent.checked_add(price).ok_or(End::PriceOverflow)?;
-    let cumulative = checked_usage(conversation.usage, usage).ok_or(End::UsageOverflow)?;
+    let cumulative = checked_usage(conversation.usage, usage)?;
+    let reported = checked_reported(conversation.reported, usage).ok_or(End::UsageOverflow)?;
     let next_turn = conversation.turns.checked_add(1).ok_or(End::UsageOverflow)?;
     conversation.turns = next_turn;
     conversation.usage = cumulative;
+    conversation.reported = reported;
+    conversation.recording.reservation = None;
+    conversation.recording.last_charge = price;
     conversation.recording.own_spent = own;
     conversation.recording.spent = inclusive;
     conversation.recording.pending = Some(usage);
@@ -1607,13 +1638,35 @@ fn used(conversation: &mut Conversation, usage: Usage, out: &mut Queue<Request>)
     Ok(())
 }
 
-/// All four raw counters commit together, or preserve the previous exact prefix.
-fn checked_usage(previous: Usage, received: Usage) -> Option<Usage> {
+/// A cumulative raw count is known only if every accepted count was reported.
+fn checked_usage(previous: Usage, received: Usage) -> Result<Usage, End> {
+    Ok(Usage {
+        input_tokens: sum_count(previous.input_tokens, received.input_tokens)?,
+        output_tokens: sum_count(previous.output_tokens, received.output_tokens)?,
+        cache_read_tokens: sum_count(previous.cache_read_tokens, received.cache_read_tokens)?,
+        cache_write_tokens: sum_count(previous.cache_write_tokens, received.cache_write_tokens)?,
+        reasoning_tokens: sum_count(previous.reasoning_tokens, received.reasoning_tokens)?,
+    })
+}
+
+fn sum_count(previous: Option<u64>, received: Option<u64>) -> Result<Option<u64>, End> {
+    match previous {
+        Some(previous) => match received {
+            Some(received) => Ok(Some(previous.checked_add(received).ok_or(End::UsageOverflow)?)),
+            None => Ok(None),
+        },
+        None => Ok(None),
+    }
+}
+
+/// Numeric budget bookkeeping adds only supplied counts, including after gaps.
+fn checked_reported(previous: Usage, received: Usage) -> Option<Usage> {
     Some(Usage {
-        input_tokens: previous.input_tokens.checked_add(received.input_tokens)?,
-        output_tokens: previous.output_tokens.checked_add(received.output_tokens)?,
-        cache_read_tokens: previous.cache_read_tokens.checked_add(received.cache_read_tokens)?,
-        cache_write_tokens: previous.cache_write_tokens.checked_add(received.cache_write_tokens)?,
+        input_tokens: Some(previous.input_tokens?.checked_add(received.input_tokens.unwrap_or(0))?),
+        output_tokens: Some(previous.output_tokens?.checked_add(received.output_tokens.unwrap_or(0))?),
+        cache_read_tokens: Some(previous.cache_read_tokens?.checked_add(received.cache_read_tokens.unwrap_or(0))?),
+        cache_write_tokens: Some(previous.cache_write_tokens?.checked_add(received.cache_write_tokens.unwrap_or(0))?),
+        reasoning_tokens: Some(previous.reasoning_tokens?.checked_add(received.reasoning_tokens.unwrap_or(0))?),
     })
 }
 
@@ -1631,7 +1684,7 @@ const OUT_OF_TIME: End = End::Budget { spent: Dimension::Time };
 /// Refuses an open at the entrance: the session ends without having opened.
 fn refuse(facts: &mut Facts, opener: Token, end: End, out: &mut Queue<Request>) {
     facts.push(FactKind::Ended { opener, end, turns: 0, usage: Usage::ZERO });
-    out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO });
+    out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO, reported: Usage::ZERO });
 }
 
 /// The conversation for `spec`, and the authority its kit opens with; or
@@ -1668,6 +1721,7 @@ fn admit(
         budget: spec.budget,
         turns: 0,
         usage: Usage::ZERO,
+        reported: Usage::ZERO,
         expires: now.saturating_add(spec.budget.time),
         // Named as the kit opens: until then, the session is Closed, which
         // holds nothing.
@@ -1700,20 +1754,20 @@ fn spent(conversation: &Conversation, now: Time) -> Option<Dimension> {
             return Some(Dimension::Unit);
         }
     }
-    let Conversation { budget, turns, usage, expires, .. } = conversation;
+    let Conversation { budget, turns, reported: usage, expires, .. } = conversation;
     if *turns >= budget.turns {
         return Some(Dimension::Turns);
     }
-    if usage.input_tokens >= budget.input {
+    if usage.input_tokens.expect("reported total is present") >= budget.input {
         return Some(Dimension::Input);
     }
-    if usage.output_tokens >= budget.output {
+    if usage.output_tokens.expect("reported total is present") >= budget.output {
         return Some(Dimension::Output);
     }
-    if usage.cache_read_tokens > budget.cache_read {
+    if usage.cache_read_tokens.expect("reported total is present") > budget.cache_read {
         return Some(Dimension::CacheRead);
     }
-    if usage.cache_write_tokens > budget.cache_write {
+    if usage.cache_write_tokens.expect("reported total is present") > budget.cache_write {
         return Some(Dimension::CacheWrite);
     }
     if now >= *expires {
@@ -1726,7 +1780,10 @@ fn spent(conversation: &Conversation, now: Time) -> Option<Dimension> {
 /// budget left. The conversation is copied: the session keeps it, and the
 /// protocol layer holds the copy (copy at emission).
 fn complete(id: Id<Session>, conversation: &Conversation, limits: &Limits) -> Request {
-    let left = conversation.budget.output.saturating_sub(conversation.usage.output_tokens);
+    let left = conversation
+        .budget
+        .output
+        .saturating_sub(conversation.reported.output_tokens.expect("reported total is present"));
     let max_tokens = u32::try_from(left).unwrap_or(u32::MAX).min(conversation.output);
     let prompt = Prompt {
         endpoint: conversation.endpoint,
@@ -2162,7 +2219,18 @@ pub(crate) fn open(
         refuse(&mut domain.facts, opener, End::Invalid, out);
         return;
     }
-    let recording = Recording { dialect, prices, budget, spent: 0, own_spent: 0, sequence: 0, told: 0, pending: None };
+    let recording = Recording {
+        dialect,
+        prices,
+        budget,
+        spent: 0,
+        own_spent: 0,
+        sequence: 0,
+        told: 0,
+        pending: None,
+        reservation: None,
+        last_charge: 0,
+    };
     let Some((mut conversation, authority)) = admit(opener, spec, recording, &env.limits, env.now) else {
         refuse(&mut domain.facts, opener, End::Invalid, out);
         return;

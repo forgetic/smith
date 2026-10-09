@@ -17,7 +17,7 @@ use crate::Endpoints;
 /// Decode the host's ordered saved turn bodies into the domain's concrete history.
 pub fn decode_transcript(
     bytes: &[Box<[u8]>],
-    limits: &wire::v2::Limits,
+    limits: &wire::v3::Limits,
     endpoints: &Endpoints,
 ) -> Result<Option<record::Transcript>, record::Refusal> {
     if bytes.is_empty() {
@@ -30,7 +30,7 @@ pub fn decode_transcript(
     let mut first_endpoint: Option<llm::Endpoint> = None;
     let mut first_dialect: Option<u32> = None;
     for body in bytes {
-        if body.get(..2) != Some(&[0, 2][..]) {
+        if body.get(..2) != Some(&[0, 3][..]) {
             return Err(record::Refusal::Version);
         }
         let place = turns.len().checked_add(1).ok_or(record::Refusal::TooLarge)?;
@@ -61,10 +61,10 @@ pub fn decode_transcript(
 pub fn decode_turn(
     bytes: &[u8],
     number: u32,
-    limits: &wire::v2::Limits,
+    limits: &wire::v3::Limits,
     endpoints: &Endpoints,
 ) -> Result<record::Turn, record::Refusal> {
-    if bytes.get(..2) != Some(&[0, 2][..]) {
+    if bytes.get(..2) != Some(&[0, 3][..]) {
         return Err(record::Refusal::Version);
     }
     let Ok(source) = wire::Turn::decode(limits, &mut Reader::new(bytes)) else {
@@ -104,10 +104,11 @@ fn translate_turn(source: wire::Turn, endpoint: u32, dialect: u32) -> Result<rec
         dialect,
         sequence: source.place(),
         usage: llm::Usage {
-            input_tokens: source.usage().input(),
-            output_tokens: source.usage().output(),
-            cache_read_tokens: source.usage().cache_read(),
-            cache_write_tokens: source.usage().cache_write(),
+            input_tokens: *source.usage().input(),
+            output_tokens: *source.usage().output(),
+            cache_read_tokens: *source.usage().cache_read(),
+            cache_write_tokens: *source.usage().cache_write(),
+            reasoning_tokens: *source.usage().reasoning(),
         },
         spent: source.spent(),
         messages: messages.into_boxed(),

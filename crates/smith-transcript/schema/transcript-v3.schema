@@ -1,9 +1,9 @@
-family smith-transcript 2
+family smith-transcript 3
 
 # The aggregate turn is limited again by the receiving session's
 # Limits.session_bytes. These member ceilings cover its default fixtures and
 # the tools' configurable read, list, search and command response limits.
-record Usage { input: u64 output: u64 cache_read: u64 cache_write: u64 }
+record Usage { input: option u64 output: option u64 cache_read: option u64 cache_write: option u64 reasoning: option u64 }
 record Replay { dialect: text 32 bytes: bytes 1048576 }
 record Text { text: text 1048576 replay: option Replay }
 record Opaque { dialect: text 32 bytes: bytes 1048576 }
