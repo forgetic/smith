@@ -813,3 +813,71 @@ fn a_delegated_result_can_yield_after_its_actual_turn_before_the_next_provider_r
         [llm::Block::Text { text, .. }] if text.as_ref() == b"person: late work"));
     world.close();
 }
+
+#[test]
+fn dropped_reasoning_has_one_fact_per_item_and_never_enters_history() {
+    let mut world = World::new(61, 256);
+    world.open(opening(None, 100));
+    let sizes: Box<[u64]> = (0..world.env.limits.completion_blocks - 1).map(|index| u64::from(index) + 512).collect();
+    world.step(session::Event::Completed {
+        owner: world.completing.expect("pending completion"),
+        completion: llm::Completion {
+            reasoning_dropped: sizes.clone(),
+            content: Box::new([llm::Block::Text { text: b"answer".as_slice().into(), replay: None }]),
+            stop: llm::Stop::EndTurn,
+            usage: llm::Usage::ZERO,
+        },
+    });
+    let observed: Vec<u64> = world.facts.iter().filter_map(|fact| match fact.kind {
+        session::FactKind::ReasoningDropped { opener, bytes } => {
+            assert_eq!(opener, Token::new(31));
+            assert!(fact.response.is_some());
+            Some(bytes)
+        }
+        _ => None,
+    }).collect();
+    assert_eq!(observed, sizes.as_ref());
+    assert_eq!(world.turns[0].messages[1].content.as_ref(), &[llm::Block::Text { text: b"answer".as_slice().into(), replay: None }]);
+    world.close();
+}
+
+#[test]
+fn a_write_refused_as_too_large_is_made_in_pieces_and_accepted() {
+    use smith_domain_tools::{Authority, Call, Done, Grants, Name, Op, Outcome, Part, Path, Repo, Version};
+    let mut world = World::new(62, 256);
+    let mut spec = opening(None, 100);
+    let name = || Name::new(b"repo".as_slice().into()).expect("repository mount");
+    spec.spec.authority = Authority {
+        cwd: Box::new([name()]),
+        repos: Box::new([Repo { mount: Box::new([name()]), root: Token::new(7), writable: true }]),
+        grants: Grants { inspect: true, modify: true, shell: false },
+        env: Box::new([]),
+    };
+    world.open(spec);
+    world.complete(Box::new([llm::Block::ToolCall {
+        id: b"large".as_slice().into(), name: b"write".as_slice().into(), input: b"{}".as_slice().into(),
+        call: llm::Decoded::Invalid { problem: llm::Problem::Oversize { bytes: 1024, bound: 512 } }, replay: None,
+    }]), llm::Stop::ToolUse, llm::Usage::ZERO);
+    assert!(world.operations.is_empty(), "the invalid call makes no write");
+    let answer = &world.prompts.last().expect("corrective prompt").messages[2].content[0];
+    assert!(matches!(answer, llm::Block::ToolResult { result: llm::Returned::Invalid { problem: llm::Problem::Oversize { bytes: 1024, bound: 512 } }, .. }));
+    for (index, content) in [b"abcd".as_slice(), b"abcdefgh".as_slice()].into_iter().enumerate() {
+        let input = if index == 0 { br#"{"path":"data","content":"abcd"}"#.as_slice() } else { br#"{"path":"data","content":"abcdefgh"}"#.as_slice() };
+        world.complete(Box::new([llm::Block::ToolCall {
+            id: format!("piece-{index}").into_bytes().into(), name: b"write".as_slice().into(), input: input.into(),
+            call: llm::Decoded::Owned { call: Call::Write {
+                path: Path { absolute: false, parts: Box::new([Part::Name { name: Name::new(b"data".as_slice().into()).expect("file name") }]) },
+                content: content.into(),
+            } }, replay: None,
+        }]), llm::Stop::ToolUse, llm::Usage::ZERO);
+        assert_eq!(world.operations.len(), 1);
+        let (owner, op) = &world.operations[0];
+        let owner = *owner;
+        let Op::Store { content: actual, .. } = op else { panic!("bounded write reaches IO") };
+        assert_eq!(actual.as_ref(), content);
+        world.step(session::Event::Done { owner, done: Done::Stored { version: Version::new([u64::try_from(index).expect("index") + 1,0,0,0]) } });
+        assert!(matches!(world.turns.last().expect("accepted piece").messages[1].content[0], llm::Block::ToolResult { result: llm::Returned::Owned { outcome: Outcome::Written { .. } }, .. }));
+    }
+    assert_eq!(world.turns.len(), 3);
+    world.close();
+}

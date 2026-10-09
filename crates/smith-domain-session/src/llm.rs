@@ -67,7 +67,7 @@ pub enum Block {
     ToolCall {
         id: Box<[u8]>,
         name: Box<[u8]>,
-        /// Exact provider-written argument bytes, retained for concrete replay and
+        /// Provider arguments, or canonical `{}` for an oversized or cut call;
         /// counted with their enclosing message against session ownership limits.
         input: Box<[u8]>,
         /// Full decoded classification: owned tool call, opener-served ticket,

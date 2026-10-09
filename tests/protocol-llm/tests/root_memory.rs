@@ -72,6 +72,8 @@ fn configuration_bytes(configuration: &Configuration) -> u64 {
 
 fn observation_limits(limits: &adapter::Limits) -> ObservationLimits {
     ObservationLimits {
+        heads: 1,
+        head_bytes: 4096,
         events: skein_llm::client::MAX_OUT.above,
         event_bytes: 32768,
         queries: 1,

@@ -73,7 +73,7 @@ impl World {
                 client_id: b"client".as_slice().into(),
                 client_secret: None,
                 redirect_uri: b"http://127.0.0.1:2345/callback".as_slice().into(),
-                refresh_token: Some(b"refresh-old".as_slice().into()),
+                refresh_token: b"refresh-old".as_slice().into(),
             },
             issuer_limits(),
             skein_http::server::Limits {
@@ -278,7 +278,7 @@ fn a_refresh_uses_the_plaintext_endpoint_and_rotates_the_saved_record() {
     };
     assert_eq!(grant.name.generation, 2);
     assert_eq!(smith_local_process_world::oauth::posts(&world.peer), 1);
-    assert_eq!(world.saved.as_ref().expect("candidate").refresh_token.as_ref(), b"refresh-new");
+    assert_eq!(world.saved.as_ref().expect("candidate").refresh_token.as_deref(), Some(b"refresh-new".as_slice()));
 }
 
 #[test]

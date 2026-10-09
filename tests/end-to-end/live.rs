@@ -70,7 +70,7 @@ fn change(backend: &live::Backend, scratch: &Scratch, prompt: &str, extra: Optio
     let trace = std::fs::read(scratch.path().join("agent-trace.jsonl")).expect("outside trace");
     for secret in [Some(tokens.access_token.as_ref()), tokens.refresh_token.as_deref()].into_iter().flatten() {
         assert!(
-            !secret.is_empty() && !trace.windows(secret.len()).any(|bytes| bytes == secret.as_ref()),
+            !secret.is_empty() && !trace.windows(secret.len()).any(|bytes| bytes == secret),
             "trace contains no credential value"
         );
     }

@@ -258,7 +258,7 @@ fn run(dialect: Provider, calls: bool) {
         if let Some(event) = peer_up.pop() {
             match event {
                 provider::Event::Domain(input) => fake::step(&mut domain, &fake_env, input, &mut replies),
-                provider::Event::Close | provider::Event::Closed => {}
+                provider::Event::Head { .. } | provider::Event::Close | provider::Event::Closed => {}
             }
         }
         if let Some(reply) = replies.pop() {

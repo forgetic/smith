@@ -40,6 +40,7 @@ pub const fn max_to_opener(limits: &Limits) -> u32 {
 #[must_use]
 pub const fn max_facts(limits: &Limits) -> u32 {
     8_u32
+        .saturating_add(limits.completion_blocks)
         .saturating_add(limits.parallel_tools)
         .saturating_add(tools::max_facts(&limits.tools).saturating_mul(limits.parallel_tools.saturating_add(2)))
 }
