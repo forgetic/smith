@@ -1,0 +1,7 @@
+Final workspace gate on the rebased increment (heavy 183): cargo fmt --check
+passed; cargo clippy --workspace --all-targets -- -D warnings passed in 3.99s;
+focused 1491 tests passed in 12.100s (842b92d2-0c19-49ee-94b5-4bf6fbc74e2e);
+fuzzy 18 tests passed in 7.371s (c3a80199-32c1-4ca2-a8d4-c09f775eafed).
+The shared merge lock confirmed main still matched the rebased parent
+557f5ba57ca1f7c9e7ecfc4717a29faee474e037, and merge was --ff-only.
+No live probe is required for this offline increment. No agent or login was used.
