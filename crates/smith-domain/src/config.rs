@@ -14,7 +14,7 @@ use smith_domain_run::{
 use crate::Limits;
 
 /// One configured model, supplied at startup and retained until root teardown.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ConfiguredModel {
     pub endpoint: Endpoint,
     pub model: Box<[u8]>,
@@ -33,7 +33,7 @@ impl ConfiguredModel {
 }
 
 /// Endpoint names and served models, supplied at startup separately from limits.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     /// Unique endpoint names, at most `Limits::endpoints`.
     pub endpoints: Box<[Endpoint]>,
@@ -43,8 +43,9 @@ pub struct Config {
 
 impl Config {
     /// Whether declarations fit their capacities and names are unique.
+    #[must_use]
     #[expect(clippy::manual_let_else, reason = "strict subset keeps checked construction exhaustive")]
-    pub(crate) fn valid(&self, limits: &Limits) -> bool {
+    pub fn valid(&self, limits: &Limits) -> bool {
         let count = match u32::try_from(self.endpoints.len()) {
             Ok(count) => count,
             Err(_) => return false,

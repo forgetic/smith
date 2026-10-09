@@ -2,6 +2,8 @@
 //! skein's Stage, Schedule, Ledger and Trace (testing-strategy.md, sections 2.2,
 //! 6 and 7; domain/host.md, section 10). Observations, never domain cells, prove
 //! exact terminals, parent-owned turns and no Gone before tree/EOF/rights.
+pub mod inline;
+
 use skein_lib::{Duration, Time, Token};
 use skein_world::domain::{Ledger, Schedule, Stage, Trace};
 use smith_host_domain::{self as host, Answer, Down, End, Fault, Grant, Input, Limits, Output, Start, Up};
@@ -351,46 +353,11 @@ impl World {
                     self.seen.owner = Some(owner);
                     self.lower.open(Lower::Spawn, owner);
                 }
-                Output::Parent(parent::Request::Started { agent, .. }) => {
-                    assert!(self.seen.agent.replace(agent).is_none());
-                }
-                Output::Parent(parent::Request::Admitted { .. }) => {
-                    assert!(!self.seen.admitted);
-                    self.seen.admitted = true;
-                }
-                Output::Parent(parent::Request::Called { call, .. }) => {
-                    assert!(self.seen.calls.insert(call));
-                }
-                Output::Parent(parent::Request::Withdrawn { call, .. }) => {
-                    assert!(self.seen.calls.contains(&call));
-                    assert!(self.seen.withdrawals.insert(call));
-                }
-                Output::Parent(parent::Request::Turn { turn, .. }) => {
-                    self.seen.read = turn.read;
-                    self.seen.turn_metadata.push((turn.number, turn.spent));
-                    assert!(self.seen.turns.insert(turn.number, turn.body).is_none());
-                }
-                Output::Parent(parent::Request::Answered { answer, .. }) => {
-                    assert!(self.seen.fault.is_none());
-                    assert!(self.seen.answer.replace(answer).is_none());
-                }
-                Output::Parent(parent::Request::Faulted { fault, .. }) => {
-                    assert!(self.seen.answer.is_none());
-                    assert!(self.seen.fault.replace(fault).is_none());
-                }
-                Output::Parent(parent::Request::Gone { end, detail, .. }) => {
-                    if end == End::Stopped {
-                        assert!(
-                            self.seen.exited && self.seen.empty && self.seen.eof,
-                            "Gone needs all three lower proofs"
-                        );
-                        self.lower.assert_settled();
-                        assert!(self.seen.calls.is_empty());
-                        assert!(self.seen.turns.is_empty());
-                    }
-                    assert!(self.seen.gone.replace(end).is_none());
-                    assert!(self.seen.gone_detail.replace(detail).is_none());
-                }
+                Output::Parent(request) => self.seen.observe_parent(
+                    request,
+                    self.seen.exited && self.seen.empty && self.seen.eof,
+                    self.lower.is_empty(),
+                ),
                 Output::Process(process::Request::Send { owner, message, .. }) => {
                     self.lower.open(Lower::Send, owner);
                     self.seen.down.push(message);
@@ -406,15 +373,6 @@ impl World {
                     };
                     self.lower.open(key, owner);
                 }
-                Output::Parent(parent::Request::MessageRefused { reason, .. }) => self.seen.bounces.push(reason),
-                Output::Parent(parent::Request::Rejected { account, generation, .. }) => {
-                    self.seen.rejected.push((account, generation));
-                }
-                Output::Parent(parent::Request::Told { .. }) => self.seen.told += 1,
-                Output::Parent(parent::Request::Waiting { read, .. }) => self.seen.read = read,
-                Output::Parent(
-                    parent::Request::Long { .. } | parent::Request::LongDone { .. } | parent::Request::Exhausted { .. },
-                ) => {}
             }
         }
     }
@@ -530,4 +488,56 @@ pub fn declared_value(bytes: u64) -> host::Declared {
         bytes,
     )
     .expect("bounded outcome fixture")
+}
+
+impl Seen {
+    /// Common parent referee; the kind supplies actual lower containment proof.
+    pub fn observe_parent(&mut self, request: parent::Request, contained: bool, lower_settled: bool) {
+        match request {
+            parent::Request::Started { agent, .. } => {
+                assert!(self.agent.replace(agent).is_none());
+            }
+            parent::Request::Admitted { .. } => {
+                assert!(!self.admitted);
+                self.admitted = true;
+            }
+            parent::Request::Called { call, .. } => {
+                assert!(self.calls.insert(call));
+            }
+            parent::Request::Withdrawn { call, .. } => {
+                assert!(self.calls.contains(&call));
+                assert!(self.withdrawals.insert(call));
+            }
+            parent::Request::Turn { turn, .. } => {
+                self.read = turn.read;
+                self.turn_metadata.push((turn.number, turn.spent));
+                assert!(self.turns.insert(turn.number, turn.body).is_none());
+            }
+            parent::Request::Answered { answer, .. } => {
+                assert!(self.fault.is_none());
+                assert!(self.answer.replace(answer).is_none());
+            }
+            parent::Request::Faulted { fault, .. } => {
+                assert!(self.answer.is_none());
+                assert!(self.fault.replace(fault).is_none());
+            }
+            parent::Request::Gone { end, detail, .. } => {
+                if end == End::Stopped {
+                    assert!(contained, "Gone needs the kind's actual containment proof");
+                    assert!(lower_settled, "Gone retains every lower terminal");
+                    assert!(self.calls.is_empty());
+                    assert!(self.turns.is_empty());
+                }
+                assert!(self.gone.replace(end).is_none());
+                assert!(self.gone_detail.replace(detail).is_none());
+            }
+            parent::Request::MessageRefused { reason, .. } => self.bounces.push(reason),
+            parent::Request::Rejected { account, generation, .. } => {
+                self.rejected.push((account, generation));
+            }
+            parent::Request::Told { .. } => self.told += 1,
+            parent::Request::Waiting { read, .. } => self.read = read,
+            parent::Request::Long { .. } | parent::Request::LongDone { .. } | parent::Request::Exhausted { .. } => {}
+        }
+    }
 }

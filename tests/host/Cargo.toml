@@ -11,6 +11,9 @@ skein-lib.workspace = true
 skein-world.workspace = true
 smith-host-domain.workspace = true
 smith-domain.workspace = true
+smith-inline-agent.workspace = true
+smith-agent-world.workspace = true
+skein-fake-llm-domain.workspace = true
 
 # Ordinary Rust (programming-model.md, section 10.2), so not the step crates' lints.
 # tests/clippy.toml bans what would make a run unrepeatable.

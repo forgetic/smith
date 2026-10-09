@@ -859,10 +859,13 @@ dependencies = [
 name = "smith-host-world"
 version = "0.0.0"
 dependencies = [
+ "skein-fake-llm-domain",
  "skein-lib",
  "skein-world",
+ "smith-agent-world",
  "smith-domain",
  "smith-host-domain",
+ "smith-inline-agent",
 ]
 
 [[package]]
@@ -887,6 +890,16 @@ dependencies = [
  "smith-host-world",
  "smith-local-service",
  "smith-protocol-channel",
+]
+
+[[package]]
+name = "smith-inline-agent"
+version = "0.0.0"
+dependencies = [
+ "skein-lib",
+ "smith-agent-world",
+ "smith-domain",
+ "smith-host-domain",
 ]
 
 [[package]]

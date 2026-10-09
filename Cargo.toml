@@ -1,7 +1,7 @@
 # Profiles and lints follow programming-model.md, section 10.
 
 [workspace]
-default-members = ["benchmarks", ".", "crates/smith-events", "crates/smith-agent-service", "crates/smith-agent-shell", "crates/smith-channel", "crates/smith-charter", "crates/smith-domain", "crates/smith-domain-run", "crates/smith-domain-session", "crates/smith-domain-tools", "crates/smith-host-domain", "crates/smith-host-protocol", "crates/smith-local-domain", "crates/smith-local-protocol", "crates/smith-local-service", "crates/smith-local-shell", "crates/smith-protocol-channel", "crates/smith-protocol-llm", "crates/smith-protocol-machine", "crates/smith-transcript", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine", "tests/channel", "tests/agent-process", "tests/hosts", "tests/local-process", "tests/real"]
+default-members = ["benchmarks", ".", "crates/smith-events", "crates/smith-agent-service", "crates/smith-agent-shell", "crates/smith-channel", "crates/smith-charter", "crates/smith-domain", "crates/smith-domain-run", "crates/smith-domain-session", "crates/smith-domain-tools", "crates/smith-host-domain", "crates/smith-host-protocol", "crates/smith-inline-agent", "crates/smith-local-domain", "crates/smith-local-protocol", "crates/smith-local-service", "crates/smith-local-shell", "crates/smith-protocol-channel", "crates/smith-protocol-llm", "crates/smith-protocol-machine", "crates/smith-transcript", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine", "tests/channel", "tests/agent-process", "tests/hosts", "tests/local-process", "tests/real"]
 resolver = "3"
 members = ["benchmarks", "crates/*", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine", "tests/channel", "tests/agent-process", "tests/hosts", "tests/local-process", "tests/real"]
 
@@ -37,6 +37,7 @@ skein-oauth = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-fake-peers = { git = "https://git.ekanayaka.io/ai/skein.git" }
 skein-fake-oauth = { git = "https://git.ekanayaka.io/ai/skein.git" }
 smith-host-domain = { path = "crates/smith-host-domain" }
+smith-inline-agent = { path = "crates/smith-inline-agent" }
 smith-local-domain = { path = "crates/smith-local-domain" }
 smith-host-world = { path = "tests/host" }
 smith-local-world = { path = "tests/local" }
