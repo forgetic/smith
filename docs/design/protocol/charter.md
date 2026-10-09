@@ -1,6 +1,6 @@
 # The charter and the result
 
-Provisional, 2026-10-07. Two records:
+Provisional, 2026-10-07, revised 2026-10-09. Two records:
 
 - **the charter:** how a run is set up (domain/run.md, 3.1);
 - **the result:** what a run declares to finish (domain/run.md, section 7).
@@ -8,8 +8,8 @@ Provisional, 2026-10-07. Two records:
 They are a family of their own, `smith-charter`, versioned apart from the
 channel. The party that decides runs writes the charter and reads the
 result, and may not be the host: temper's engine writes charters that its
-workers carry unread, possibly with another release of smith than its
-agents run (README.md, section 8).
+workers carry unread, and its version must be the one its agents read
+(README.md, section 8).
 
 ## 1. In one page
 
@@ -21,8 +21,8 @@ agents run (README.md, section 8).
   - tool families and host tools;
   - the result contract;
   - conventions;
-  - a budget with prices;
-  - the LLMs;
+  - a budget with a reserve to finish with;
+  - the LLMs, each with its window, its output and its prices;
   - the waiting time;
   - whether to resume.
 
@@ -34,8 +34,11 @@ agents run (README.md, section 8).
 - **Checked twice, in two places:**
   - **the codec** checks what a schema can check: bounds, tags, text;
   - **the domain** checks the rest at the entrance: an endpoint not
-    configured, a host tool named like one of smith's or named twice, a
-    contract that cannot be met (domain/run.md, section 4).
+    configured, a model its configuration does not declare or a window
+    or output beyond what it declares or too small for the agent's
+    limits, text too large for a window's host part, a host tool named
+    like one of smith's or named twice, a contract that cannot be met, a
+    reserve its budget cannot hold (domain/run.md, section 4).
 - **A writer needs only this crate.** It depends on no domain, no channel
   and no transport.
 
@@ -46,7 +49,11 @@ A versioned record (skein's `codec.md`, section 3):
 - **instructions:** text;
 - **the brief:** a list of sections, each a title and its text, in order;
 - **tools:**
-  - the families granted: inspect, modify, shell, sub-agents;
+  - the families granted: inspect, modify, shell, sub-agents. A
+    sub-agent's share is not the charter's: the `sub_agent` call asks for
+    `max_turns` and `max_seconds`, each clamped to what is left above the
+    reserve, and its spend share is derived from them, never asked for
+    (domain/run.md, 5.3; llm.md, section 3);
   - whether `wait` is granted;
   - whether `deliver` is granted mid-run, with a change's contract (2.1);
   - the host tools, each declared with:
@@ -58,20 +65,38 @@ A versioned record (skein's `codec.md`, section 3):
 - **the result contract** (2.1);
 - **conventions,** if any: the relative paths of the guide and the checks;
   without them, smith's defaults apply (domain/run.md, 8.1);
-- **the budget:**
-  - turns;
+- **the budget** (domain/run.md, section 9):
+  - turns, a generous loop guard;
   - spend, in the host's unit;
   - wall time, as a duration;
+  - **the reserve,** `reserve { turns, time }`: what main keeps to finish
+    with. Children and ordinary work draw only on what is left above it,
+    and when that is spent the run winds down on the reserve. Its spend
+    is derived from its turns at the main model's most costly completion,
+    and is not a field. A writer that has no reason to choose gives the
+    documented default, which is the product's presets'
+    (`docs/design/shell.md`);
 - **the LLMs:**
   - the main session's;
   - those sub-agents may use, each named by its model, once.
 
   Each LLM has:
   - an endpoint's name;
-  - a model;
-  - the most output tokens a completion may have;
-  - its prices: integer amounts for input, cached input and output, per a
-    positive number of tokens (domain/run.md, section 9);
+  - a model, one the agent's configuration declares for that endpoint;
+  - **`window`:** its usable input tokens, the most one prompt may hold.
+    The session compacts its conversation before a prompt would pass it
+    (domain/session.md, section 8);
+  - **`output`:** the most output tokens a completion may have, thinking
+    included. It is sent where the dialect takes it, and reserved before
+    each completion;
+  - its prices: integer amounts per a positive number of tokens, for
+    input, cached input, output and, optionally, cache writes. Without a
+    cache-write rate, cache writes are priced at the input rate
+    (domain/session.md, section 6).
+
+  `window` and `output` are the effective values the host chose, at most
+  what the agent's configuration declares for the model (limits.md,
+  section 2.1), so the domain enforces the host's choice;
 - **waiting:** how long the run may wait for a message before it parks, as a
   duration;
 - **resume:** whether the main session opens from the transcript in the
@@ -118,28 +143,43 @@ already has from the delivery's own answer (channel.md, section 3).
 
 ## 5. Versions
 
-- **The charter's first field is its version.** The agent reads the
-  versions in its range, translates an older charter into its current
-  domain's terms, and refuses any other version as an invalid start
-  (domain/run.md, section 4).
-- **A charter that does not decode** in a version the agent reads is an
+The charter is pre-release, like every format (README.md, section 8): one
+version at a time, and any change a reader would notice is a new one.
+
+- **The charter's first field is its version.** The agent reads its one
+  version and refuses any other as an invalid start (domain/run.md,
+  section 4). Nothing is translated.
+- **A charter that does not decode** in the version the agent reads is an
   invalid start too, with a reason of its own: its writer has a bug to
-  fix, where another version only needs an agent that reads it.
+  fix, where another version needs a writer and an agent of the same
+  release.
 - **The result is written in the charter's version,** so the charter's
-  writer reads what it asked for, whatever release its agents run.
-- **A writer writes its current version.** How long agents keep reading old
-  versions, and how a writer learns which versions its agents read, is
-  README.md's open question.
+  writer reads what it asked for.
+- **A writer writes the version of its release.** `smith check` prints the
+  version an agent reads (`docs/design/shell.md`), so a writer and its
+  agents that differ find out before a run.
+- **Version 2 is current.** It adds each LLM's `window` and `output`, in
+  place of the most output tokens, the cache-write price, and the
+  budget's reserve. The result keeps its shape.
 
 ## 6. Limits
 
-The schema's bounds are the vocabulary's ceilings. The agent's
-configuration sets its own limits, at most those ceilings, and the domain's
-`Limits` check the charter as a whole at the entrance:
+The schema's bounds are the vocabulary's ceilings. The agent's limits are
+derived from its configuration's declared quantities and policy values,
+at most those ceilings, which startup checks (limits.md, section 4). The
+domain's `Limits` check the charter as a whole at the entrance:
 
 - the bytes it owns;
 - its sections, host tools, verdicts, items and fields;
-- its budget and its waiting time.
+- its budget and its waiting time, against the agent's ceilings;
+- its reserve, within its budget: fewer turns and less time than the
+  budget's, and a derived spend within its spend;
+- each LLM's `window` and `output`, at most what the configuration
+  declares for its model, and leaving at least the room the agent's
+  limits were derived for (limits.md, 3.9);
+- its instructions, brief and host tools, with a guide at its bound for
+  each of the start's directories, within a window's host part
+  (limits.md, 3.9).
 
 A writer that keeps within the ceilings writes a charter every agent can
 decode. Whether a given agent admits it is the agent's limits' decision,
@@ -157,12 +197,14 @@ and a refusal names what was too large.
 
 - **The codec:**
   - golden bytes for every record and variant;
-  - each decoder fuzzed;
-  - an older version's golden charter translated and admitted by the
-    current agent.
+  - each decoder fuzzed.
 - **The domain's entrance,** from encoded charters:
   - each refusal of domain/run.md, section 4;
   - an endpoint name the configuration lacks;
+  - a model the configuration does not declare, and a window or an output
+    above its declaration, or leaving less room than the limits assume;
+  - text past a window's host part;
+  - a reserve its budget cannot hold;
   - a charter in a version the agent does not read.
 - **For a host:** a writer's own tests encode every charter it writes and
   check that smith's codec and entrance admit it, as temper's agent.md,
@@ -177,7 +219,8 @@ and a refusal names what was too large.
   - verdict lists fixed in code;
   - a change's title and body as fields of their own, now names the host
     requires;
-  - a token split for the budget, now spend in the host's unit with prices;
+  - a token split for the budget, now spend in the host's unit with prices,
+    and a reserve to finish with;
   - endpoints described in the start, now names the agent's configuration
     resolves.
 

@@ -509,7 +509,9 @@ and only the basic OAuth betas used by Skein's live reference.
 
 `SMITH_TEST_LIVE_CODEX_MODEL` defaults to `gpt-5.5` and
 `SMITH_TEST_LIVE_ANTHROPIC_MODEL` to `claude-haiku-4-5`, matching Skein's live
-reference. `SMITH_TEST_LIVE_GIT_REMOTE` is optional. It authorizes the configured
+reference. The design moves these defaults to the benchmarks' small tier
+(`docs/design/benchmarks.md`, section 7) once it is implemented.
+`SMITH_TEST_LIVE_GIT_REMOTE` is optional. It authorizes the configured
 push story to that caller-selected test remote, including removal of the run's
 branch. Use a disposable test repository with already configured authentication;
 no remote is invented by the suite. Model prices are zero in this outcome-only
@@ -571,3 +573,15 @@ cargo nextest run -p smith --test live --profile live -E 'test(=a_run_refreshes_
 cargo nextest run -p smith --test live --profile live -E 'test(=a_chat_ends_with_a_commit_in_place)'
 cargo nextest run -p smith --test live --profile live -E 'test(=a_second_run_resumes_the_chat_from_its_files)'
 ```
+
+## 6. Benchmarks
+
+Benchmarks run real agents against real providers, and are designed in
+`docs/design/benchmarks.md`. They are never part of the merge gate: no check
+in section 1 runs an agent, and no benchmark result blocks or permits a merge.
+
+- **A change to the runtime, limits, providers or host** records a smoke run in
+  its commit body, with the binary it ran.
+- **Every fix names the probe that guards it,** and its commit body records that
+  probe failing on the fix's parent and passing on the fix. A fix without a
+  probe adds one in the same change (`docs/design/benchmarks.md`, section 4.2).
