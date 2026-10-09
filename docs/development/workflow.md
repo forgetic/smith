@@ -619,3 +619,22 @@ idle keep deadline and replays the outside trace. Protocol controls retain
 single cancellation terminals and close both providers' TLS text and tool
 completions without a second terminal. Existing workspace budgets remain
 unchanged; the complete workspace gates still apply before a main merge.
+
+### Coding argument receiving validation, 2026-10-09
+
+A provider tool call above the former 2 KiB input cap reproduced the actual
+`Limit` failure with response evidence. The standard preset now receives raw
+arguments up to 32 KiB and complete answers up to 64 KiB; 512 KiB document
+and SSE caps cover escaped strings and the provider envelope. Opaque replay
+limits remain unchanged. The shipped TLS binary regression executes a large
+write, subsequent reads and edits, checks and the final commit against the
+existing independent referee. Exact-boundary receiving, one-byte refusal,
+faithful replay, the former-limit control and worst-case escaping are retained.
+
+Affected binary, local-service, agent-process and local-process focused checks
+passed 81 tests serially in 4.001 seconds, and two fuzzy sweeps in 2.787 seconds.
+Formatting and affected all-target Clippy passed. The standard service eagerly
+reserved 4,233,560 bytes against its checked bound of 358,993,965,054 bytes;
+the escaped boundary response, including fixture buffers, peaked at 2,475,045
+bytes against the shared client's 60,677,696-byte bound. Existing workspace
+budgets remain unchanged; complete workspace gates apply before a main merge.

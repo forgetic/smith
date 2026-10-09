@@ -91,3 +91,61 @@ fn the_live_outcome_referee_runs_on_the_shared_fake_binary_harness() {
     let change = Scratch::new();
     support::live_run::run_fake(&change, World::changed(36, &change, Placement::Spawned).scenario);
 }
+
+#[test]
+fn standard_profile_runs_a_large_coding_write_and_the_following_checks() {
+    use skein_fake_llm_domain::api;
+    use smith_local_process_world::referee::CheckoutRead;
+
+    let scratch = Scratch::new();
+    let scenario = World::changed(37, &scratch, Placement::Spawned).scenario;
+    let large = serde_json::to_vec(&serde_json::json!({
+        "path": "result.txt", "content": "// coding regression\n".repeat(160)
+    }))
+    .expect("large coding tool arguments");
+    assert!(large.len() > 2048, "coding write exceeds the former input limit");
+    let mut turns = vec![(b"write".as_slice(), large)];
+    for (name, arguments) in [
+        ("read", r#"{"path":"result.txt"}"#),
+        ("read", r#"{"path":"original.txt"}"#),
+        ("edit", r#"{"path":"original.txt","old":"original","new":"edited"}"#),
+        ("write", r#"{"path":"result.txt","content":"new\n"}"#),
+        ("shell", r#"{"command":"printf 'ran\n' > command.txt"}"#),
+        (
+            "finish",
+            r#"{"form":"change","text":"","fields":{"title":"Updated result","body":"Created the result file"}}"#,
+        ),
+    ] {
+        turns.push((name.as_bytes(), arguments.as_bytes().to_vec()));
+    }
+    let peer = smith_agent_process_world::fake::configured_transport(
+        Box::new([api::Script {
+            cue: b"@local-shell".as_slice().into(),
+            turns: turns
+                .into_iter()
+                .map(|(name, arguments)| api::Turn {
+                    lines: Box::new([api::Line::Call { name: name.into(), arguments: arguments.into() }]),
+                    finish: api::Finish::ToolCalls,
+                    tokens: 1,
+                })
+                .collect(),
+        }]),
+        skein_llm::Credential { access_token: b"token".as_slice().into(), account_id: b"acc".as_slice().into() },
+        skein_lib::Duration::ZERO,
+        skein_fake_peers::Transport::Tls,
+    );
+    let seen = support::run_with_provider(&scratch, scenario, Some(peer));
+    assert_eq!(seen.queries.len(), 7, "large write and every subsequent call completed");
+    assert!(
+        seen.queries.iter().skip(1).any(|query| query
+            .messages
+            .iter()
+            .any(|message| { message.parts.iter().any(|part| matches!(part, api::Part::ToolOutput { .. })) })),
+        "follow-up provider prompts contain actual workspace answers"
+    );
+    let checkout = scratch.checkout();
+    let files = checkout.files(&checkout.head().expect("committed head"));
+    assert_eq!(files[b"result.txt".as_slice()], b"new\n");
+    assert_eq!(files[b"original.txt".as_slice()], b"edited\n");
+    assert_eq!(files[b"checks-ran.txt".as_slice()], b"checked\n");
+}

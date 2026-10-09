@@ -319,19 +319,22 @@ pub(crate) fn trust(der: Option<&str>) -> Result<tls::Config, String> {
 }
 
 fn standard_limits(memory: u64) -> Result<service::Limits, String> {
+    // Coding calls receive up to 32 KiB of raw JSON arguments, independently
+    // from the tool-declaration budget. A completed 64 KiB answer can expand
+    // sixfold inside a provider JSON document; SSE also carries its envelope.
     let client = shared::client::Limits {
         http: http::client::Limits { request: 4096, head: 4096, headers: 64, read: 256, send: 31 },
-        sse: http::sse::Limits { line: 65_536, event: 65_536, field: 128, chunk: 128 },
+        sse: http::sse::Limits { line: 524_288, event: 524_288, field: 128, chunk: 128 },
         dialect: openai::Limits {
             request_bytes: 262_144,
-            document_bytes: 65_536,
-            string_bytes: 32_768,
+            document_bytes: 524_288,
+            string_bytes: 65_536,
             depth: 32,
             tokens: 4096,
             parts: 256,
-            input_bytes: 2048,
+            input_bytes: 32_768,
             opaque_bytes: 8192,
-            answer_bytes: 8192,
+            answer_bytes: 65_536,
             detail_bytes: 256,
         },
         error_bytes: 4096,

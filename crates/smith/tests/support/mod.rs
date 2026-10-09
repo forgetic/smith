@@ -255,7 +255,15 @@ pub fn settings(scratch: &Scratch, scenario: &Scenario) {
         .expect("settings fixture");
 }
 
-pub fn run(scratch: &Scratch, mut scenario: Scenario) -> Seen {
+pub fn run(scratch: &Scratch, scenario: Scenario) -> Seen {
+    run_with_provider(scratch, scenario, None)
+}
+
+pub fn run_with_provider(
+    scratch: &Scratch,
+    mut scenario: Scenario,
+    provider: Option<smith_local_process_world::llm::Peer>,
+) -> Seen {
     assert_no_children();
     scenario.launch.tls = true;
     settings(scratch, &scenario);
@@ -285,7 +293,7 @@ pub fn run(scratch: &Scratch, mut scenario: Scenario) -> Seen {
     world.spawn_with_fds(descriptors, || {
         Process::Script(Proc::Terminal(Box::new(Terminal::attached(stream, scenario.commands.clone()))))
     });
-    world.spawn(|| Process::Script(Proc::Peer(Box::new(scenario.provider()))));
+    world.spawn(|| Process::Script(Proc::Peer(Box::new(provider.unwrap_or_else(|| scenario.provider())))));
     if scenario.launch.authenticated {
         world.spawn(|| {
             Process::Script(Proc::Issuer(Box::new(process::IssuerProcess::configured(
