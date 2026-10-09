@@ -205,6 +205,12 @@ paths are resolved, and a surviving marker refuses the delivery.
 
 ## Verification and later work
 
+The standard profile allows at most 300 seconds for each model completion,
+including its streaming time. HTTP response-head and stream inactivity waits
+use the same window; connection and TLS handshake waits stay at 10 seconds.
+An earlier session or run time budget still cancels the call. This permits
+long reasoning responses while retaining a finite completion deadline.
+
 The [local-process world](../../tests/local-process/README.md) exercises the
 same shell library with both agent placements, OAuth peers and a fake checkout.
 It covers resume, commits, cancellation, credential renewal, observation-only

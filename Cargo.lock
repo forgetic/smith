@@ -520,6 +520,7 @@ dependencies = [
  "smith-protocol-llm",
  "smith-protocol-machine",
  "smith-real-world",
+ "smith-session-world",
  "smith-transcript",
 ]
 

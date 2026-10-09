@@ -638,3 +638,11 @@ reserved 4,233,560 bytes against its checked bound of 358,993,965,054 bytes;
 the escaped boundary response, including fixture buffers, peaked at 2,475,045
 bytes against the shared client's 60,677,696-byte bound. Existing workspace
 budgets remain unchanged; complete workspace gates apply before a main merge.
+
+The standard completion-window regression was measured on 2026-10-09 from
+`ad8a793` plus the isolated timeout-profile change. Its three focused stories
+use injected clocks and the shared HTTP/SSE client, stream intake and session
+world; no real waiting is used. Their serial measure profile passed in
+0.048 seconds. The full workspace passed 1,478 focused tests in 2.916 seconds
+and 17 fuzzy tests in 3.493 seconds. The change leaves the existing suite
+budgets, byte limits, outer time budgets and retry count unchanged.

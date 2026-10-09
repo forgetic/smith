@@ -413,8 +413,8 @@ fn standard_limits(memory: u64) -> Result<service::Limits, String> {
             grant_value_bytes: 2048,
             connect: Some(Duration::from_secs(10)),
             handshake: Some(Duration::from_secs(10)),
-            head: Some(Duration::from_secs(60)),
-            idle: Some(Duration::from_secs(30)),
+            head: Some(domain.session.call_timeout),
+            idle: Some(domain.session.call_timeout),
         },
         machine: machine::Limits {
             operations: 16,

@@ -82,6 +82,12 @@ What is still open is listed in section 11.
   after a jittered exponential backoff, and gives up when its retries run
   out. The protocol layer runs the attempt and its connect and idle
   deadlines.
+- **The standard completion window** is at most 300 seconds per attempt,
+  including active streaming. The protocol's response-head and inactivity
+  waits also allow 300 seconds; connecting and TLS handshaking each allow
+  10 seconds. A session or enclosing run whose budget expires sooner still
+  cancels its outstanding completion. Longer reasoning does not enlarge
+  token, byte, retry or outer time budgets.
 - **Credentials** are the protocol layer's. A rejected credential or an
   exhausted account is a notice the session raises, which the agent sends
   to its host (host.md, section 7); an unauthorised failure is transient,

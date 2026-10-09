@@ -73,7 +73,10 @@ pub const LIMITS: Limits = Limits {
         retries: 3,
         backoff_base: Duration::from_millis(200),
         backoff_max: Duration::from_secs(5),
-        call_timeout: Duration::from_secs(60),
+        // Advanced reasoning can exceed a minute before its final tool call.
+        // The protocol's head and idle waits share this finite ceiling; the
+        // session's earlier expiry still cancels the call independently.
+        call_timeout: Duration::from_secs(300),
         tool_timeout: Duration::from_secs(60),
         facts: 1024,
         parallel_tools: 4,

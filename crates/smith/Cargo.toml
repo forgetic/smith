@@ -46,6 +46,7 @@ skein-fake-machine.workspace = true
 skein-tls-world.workspace = true
 smith-agent-process-world.workspace = true
 smith-host-world.workspace = true
+smith-session-world.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"
