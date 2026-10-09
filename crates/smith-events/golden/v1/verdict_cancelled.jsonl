@@ -1,0 +1,1 @@
+{"v":1,"type":"tool.completed","t_ms":18446744073709551615,"run":18446744073709551615,"conversation":18446744073709551615,"call":"sample\n\"🌍","tool":"sample\n\"🌍","verdict":"cancelled","exit":{"code":-9223372036854775808},"bytes":18446744073709551615,"duration_ms":18446744073709551615,"delivery":"delivered","result":"sample\n\"🌍"}

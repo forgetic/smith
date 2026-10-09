@@ -786,6 +786,7 @@ dependencies = [
  "skein-lib",
  "smith-channel",
  "smith-charter",
+ "smith-events",
  "smith-transcript",
 ]
 
@@ -818,6 +819,14 @@ dependencies = [
 name = "smith-domain-tools"
 version = "0.0.0"
 dependencies = [
+ "skein-lib",
+]
+
+[[package]]
+name = "smith-events"
+version = "0.0.0"
+dependencies = [
+ "skein-json",
  "skein-lib",
 ]
 

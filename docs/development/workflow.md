@@ -658,3 +658,15 @@ in 2.279 seconds. The new cut-result byte-peer story took 0.017 seconds;
 random rendering-cap properties took 0.662 seconds. The result is cut and
 marked without a larger allocation, and both provider dialects accept its
 request. Workspace budgets are unchanged.
+
+### Event codec validation, 2026-10-09
+
+The version-one event codec was measured through the serial heavy queue on
+2026-10-09, with the canonical Skein lock at `e8bc018`. The affected codec
+world and crate passed 21 focused tests in 0.598 seconds; its new corruption
+and truncation sweep passed in 0.467 seconds. Every event kind has an owned
+record, committed deterministic goldens cover listed values and capture
+policies, and the shared counting allocator checks each kind at its largest
+configured payload. Line and chunked readers refuse unsupported versions,
+retain unknown listed values, and skip unknown records and fields. Existing
+workspace budgets are unchanged.

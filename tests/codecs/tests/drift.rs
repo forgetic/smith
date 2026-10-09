@@ -45,3 +45,23 @@ fn channel_schema_matches_generated_code_and_all_goldens() {
         assert_eq!(committed, golden.bytes, "golden {} drifted", golden.name);
     }
 }
+
+#[path = "support/events.rs"]
+mod events;
+
+#[test]
+fn event_records_and_every_listed_value_match_frozen_version_one_goldens() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/smith-events/golden/v1");
+    let limits = smith_events::Limits { string: 64, content: 1024, items: 8 };
+    let samples = events::samples();
+    assert_eq!(fs::read_dir(&root).expect("event goldens").count(), samples.len(), "every golden is covered");
+    for (name, record, capture) in samples {
+        let frozen = fs::read(root.join(format!("{name}.jsonl"))).expect("frozen event golden");
+        let encoded = smith_events::write(&record, &capture, &limits).expect("bounded fixture").expect("event");
+        assert_eq!(encoded.as_ref(), frozen, "event {name} drifted");
+        let decoded = smith_events::read(&frozen, &limits).expect("valid golden").expect("known record");
+        let rewritten =
+            smith_events::write(&decoded, &capture, &limits).expect("bounded decoded fixture").expect("event");
+        assert_eq!(rewritten.as_ref(), frozen, "golden {name} reads back");
+    }
+}
