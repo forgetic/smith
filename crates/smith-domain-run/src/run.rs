@@ -233,6 +233,7 @@ pub(crate) struct Start {
     /// Host-supplied positive activation number.
     pub(crate) activation: u64,
     pub(crate) window: Window,
+    pub(crate) messages: Box<[crate::Message]>,
 
     /// Immutable requested contract and budget.
     pub(crate) charter: Charter,
@@ -245,7 +246,7 @@ pub(crate) struct Start {
 }
 
 pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &mut Queue<Request>) {
-    let Start { reply_to, host_run, activation, window, charter, workspace, transcript } = start;
+    let Start { reply_to, host_run, activation, window, messages, charter, workspace, transcript } = start;
     let Domain { runs, conversations, calls: _, alarms, facts } = domain;
     // A charter that can never fit is invalid, room or not: busy invites a
     // retry.
@@ -267,6 +268,14 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
     }
     if let Err(invalid) = charter::check(&charter, workspace.as_ref(), &env.limits) {
         out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(invalid)), read: None });
+        return;
+    }
+    if !messages_valid(&messages, &env.limits) {
+        out.push(Request::Answer {
+            to: reply_to,
+            answer: Answer::Refused(Refusal::Invalid(Invalid::Messages)),
+            read: None,
+        });
         return;
     }
     if runs.is_full() || conversations.is_full() {
@@ -318,11 +327,59 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
     let main = conversations.insert(conversation).expect("checked for room above");
     out.push(Request::Admitted { host_run, run: id.token() });
     let run = runs.get_mut(id).expect("inserted above");
+    carry(run, facts, id.token(), messages);
     run.state = match prepare::next(run.workspace.as_ref(), None) {
         Some(step) => look(run, id, reply_to, main, step, env, out),
-        None => open(run, conversations, reply_to, main, env.now, out),
+        None => open(run, conversations, reply_to, main, env, out),
     };
     follow(runs, alarms, facts, id);
+}
+
+/// Move the admitted Start batch ahead of every later relayed message.
+fn carry(run: &mut Run, facts: &mut Facts, token: Token, messages: Box<[crate::Message]>) {
+    for message in messages {
+        let bytes = message
+            .label
+            .len()
+            .checked_add(2)
+            .expect("validated label")
+            .checked_add(message.text.len())
+            .expect("validated rendered message");
+        let mut writer = skein_lib::Writer::new(bytes);
+        writer.put(&message.label).expect("measured label");
+        writer.put(b": ").expect("measured separator");
+        writer.put(&message.text).expect("measured text");
+        run.inbox.push(Message { name: message.name, text: writer.finish() });
+        facts.push(FactKind::MessageReceived {
+            run: token,
+            name: message.name,
+            bytes: u64::try_from(bytes).expect("bounded message"),
+        });
+    }
+}
+
+fn messages_valid(messages: &[crate::Message], limits: &Limits) -> bool {
+    if messages.len() > usize::try_from(limits.messages).expect("u32 fits") {
+        return false;
+    }
+    for (at, message) in messages.iter().enumerate() {
+        let length = match message.label.len().checked_add(2) {
+            Some(bytes) => match bytes.checked_add(message.text.len()) {
+                Some(bytes) => bytes,
+                None => return false,
+            },
+            None => return false,
+        };
+        if length > usize::try_from(limits.message_bytes).expect("u32 fits") {
+            return false;
+        }
+        for earlier in messages.get(..at).expect("enumerated prefix") {
+            if earlier.name == message.name {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// Admit a named, labelled host message or emit its typed refusal.
@@ -1359,7 +1416,7 @@ fn prepared(
 ) -> State {
     match prepare::next(run.workspace.as_ref(), Some(step)) {
         Some(next) => look(run, id, reply_to, main, next, env, out),
-        None => open(run, conversations, reply_to, main, env.now, out),
+        None => open(run, conversations, reply_to, main, env, out),
     }
 }
 
@@ -1369,7 +1426,7 @@ fn open(
     conversations: &mut Slab<Conversation>,
     reply_to: ReplyTo,
     main: Id<Conversation>,
-    now: Time,
+    env: &Env<Limits>,
     out: &mut Queue<Request>,
 ) -> State {
     let conversation = conversations.get_mut(main).expect("main lives while its run prepares");
@@ -1386,8 +1443,10 @@ fn open(
         run.workspace.as_ref(),
         &run.found,
         run.spent,
-        run.deadline.saturating_since(now),
+        run.deadline.saturating_since(env.now),
     );
+    let offered = offer(run, &env.limits);
+    opening.prompt = prompt::opening(prompt::has_brief(&run.charter), offered);
     opening.transcript = run.transcript.take();
     out.push(Request::Open { conversation: main.token(), opening });
     State::Working { reply_to, main }

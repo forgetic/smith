@@ -448,6 +448,7 @@ impl World {
     /// Send a Start carrying saved turn bytes, if present.
     pub fn send_start_with_turns(&mut self, charter: Box<[u8]>, transcript: Option<Box<[Box<[u8]>]>>) {
         let start = smith_host_domain::channel::Start {
+            messages: Box::default(),
             logical_run: skein_lib::Token::new(1),
             activation: 1,
             workspace: None,
@@ -499,6 +500,7 @@ impl World {
     ) {
         self.observed.push(Observation::HostStarted);
         let start = smith_host_domain::channel::Start {
+            messages: Box::default(),
             logical_run: skein_lib::Token::new(1),
             activation: 7,
             workspace: Some(skein_lib::Token::new(2)),

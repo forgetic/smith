@@ -243,6 +243,9 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Input, out: &mut Queu
             agent.wall = env.now.saturating_add(env.limits.wall_time);
             out.push(Output::Parent(parent::Request::Started { client: agent.client, agent: token }));
             let start = agent.start.take().expect("spawn retains first message");
+            for message in &start.messages {
+                agent.unread.push(message.name);
+            }
             for grant in &start.grants {
                 agent.accounts.get_mut(&grant.account).expect("validated start grant").emitted = grant.generation;
             }
@@ -494,6 +497,26 @@ fn spawn(domain: &mut Domain, env: &Env<Limits>, event: Input, out: &mut Queue<O
 }
 
 fn valid_start(start: &Start, limits: &Limits) -> Option<Invalid> {
+    if start.messages.len() > usize::try_from(limits.messages).expect("u32 fits") {
+        return Some(Invalid::Messages);
+    }
+    for (at, message) in start.messages.iter().enumerate() {
+        let length = match message.label.len().checked_add(2) {
+            Some(bytes) => match bytes.checked_add(message.text.len()) {
+                Some(bytes) => bytes,
+                None => return Some(Invalid::Messages),
+            },
+            None => return Some(Invalid::Messages),
+        };
+        if u64::try_from(length).expect("owned lengths fit") > limits.message_bytes {
+            return Some(Invalid::Messages);
+        }
+        for earlier in start.messages.get(..at).expect("enumerated prefix") {
+            if earlier.name == message.name {
+                return Some(Invalid::Messages);
+            }
+        }
+    }
     if start.activation == 0 {
         return Some(Invalid::Activation);
     }

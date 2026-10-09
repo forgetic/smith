@@ -98,6 +98,10 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     )?;
     let start = limits
         .charter_bytes
+        .checked_add(
+            u64::from(limits.messages)
+                .checked_mul(u64::try_from(size_of::<crate::Message>()).ok()?.checked_add(limits.message_bytes)?)?,
+        )?
         .checked_add(limits.transcript_bytes)?
         .checked_add(64_u64.checked_mul(u64::try_from(size_of::<Box<[u8]>>()).ok()?)?)?
         .checked_add(limits.answered_bytes)?

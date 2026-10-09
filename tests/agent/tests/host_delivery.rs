@@ -93,6 +93,7 @@ fn forward(agent: &Agent, host: &mut Host, next: &mut usize) {
                 }
             }
             Seen::Answer { .. }
+            | Seen::Started { .. }
             | Seen::Input { .. }
             | Seen::Waiting { .. }
             | Seen::Prompt { .. }

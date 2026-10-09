@@ -55,3 +55,50 @@ fn every_accepted_message_has_one_terminal_and_the_answer_retains_its_told_fence
         assert!(judge(&bad).iter().any(|verdict| matches!(verdict, Verdict::Failed(_))), "mutation {change}");
     }
 }
+
+#[test]
+fn a_start_carrying_messages_opens_on_the_briefs_instruction_then_the_messages_in_order() {
+    let mut settings = Settings::calm(918);
+    settings.host.jobs = 1;
+    settings.host.turns_min = 8;
+    settings.host.turns_max = 8;
+    settings.partner.yields = 1000;
+    let mut world = World::new(settings);
+    world.carry_messages(Box::new([
+        smith_domain_run::Message {
+            name: Token::new(99),
+            label: b"person".as_slice().into(),
+            text: b"first".as_slice().into(),
+        },
+        smith_domain_run::Message {
+            name: Token::new(0),
+            label: b"person".as_slice().into(),
+            text: b"second".as_slice().into(),
+        },
+    ]));
+    world.run(100_000);
+    assert_eq!(
+        world.opening_prompts()[0].as_ref(),
+        b"Begin the work your brief describes.\n\nperson: first\n\nperson: second"
+    );
+    let read: Vec<_> = world
+        .message_seen()
+        .iter()
+        .filter_map(|(_, _, seen)| if let Seen::Read { name } = seen { Some(*name) } else { None })
+        .collect();
+    assert_eq!(read, [Token::new(99), Token::new(0)]);
+    assert!(judge(world.message_seen()).iter().all(|verdict| *verdict == Verdict::Passed));
+}
+
+#[test]
+fn an_empty_brief_without_wait_opens_on_its_instructions() {
+    let mut settings = Settings::calm(919);
+    settings.host.jobs = 1;
+    settings.host.turns_min = 8;
+    settings.host.turns_max = 8;
+    settings.partner.yields = 1000;
+    let mut world = World::new(settings);
+    world.empty_brief(false);
+    world.run(100_000);
+    assert_eq!(world.opening_prompts()[0].as_ref(), b"Begin the work your instructions describe.");
+}

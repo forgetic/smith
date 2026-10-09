@@ -424,6 +424,7 @@ impl Host {
                     })
                     .collect();
                 out.push(Event::Start {
+                    messages: Box::default(),
                     reply_to: ReplyTo::new(job),
                     host_run: job,
                     activation: 1,

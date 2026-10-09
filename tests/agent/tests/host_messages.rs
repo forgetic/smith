@@ -59,7 +59,11 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
             assert!(*parked, "this actual agent finishes by idle parking");
             host.up(Up::Answer { answer: final_accounting(*turns, *spent, RunResult::Parked, *read) });
         }
-        Seen::Input { .. } | Seen::Prompt { .. } | Seen::Completed { .. } | Seen::CompletionEnded => {}
+        Seen::Started { .. }
+        | Seen::Input { .. }
+        | Seen::Prompt { .. }
+        | Seen::Completed { .. }
+        | Seen::CompletionEnded => {}
     }
     assert!(host.seen.fault.is_none(), "actual composed metadata satisfies the host boundary");
 }
@@ -208,7 +212,11 @@ fn child_completions_and_raw_usage_cross_the_host_final_answer_once() {
                 host.up(Up::Answer { answer: final_accounting(turns, spent, result, host.seen.read) });
             }
             Seen::Waiting { read } => host.up(Up::Waiting { read: *read }),
-            Seen::Input { .. } | Seen::Prompt { .. } | Seen::Completed { .. } | Seen::CompletionEnded => {}
+            Seen::Started { .. }
+            | Seen::Input { .. }
+            | Seen::Prompt { .. }
+            | Seen::Completed { .. }
+            | Seen::CompletionEnded => {}
         }
     }
     assert_accounting(host.seen.answer.as_ref().expect("actual global final reaches host parent"), turns, spent);

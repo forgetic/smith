@@ -319,3 +319,85 @@ fn ordered_sections_and_instructions_reach_main_but_child_receives_only_its_own_
     assert!(world.checked().is_empty() && world.pushes().is_empty() && world.host_submissions().is_empty());
     assert!(world.judged().0 > 0 && world.judged().1 > 0);
 }
+
+#[test]
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "the golden collects literal request text rather than every provider part"
+)]
+fn the_first_provider_request_contains_the_carried_messages_with_the_briefs_instruction() {
+    use skein_lib::ReplyTo;
+    let settings = Settings { job: Job::Reporting, network: Span::millis(1, 1), ..Settings::calm(1191) };
+    for has_brief in [true, false] {
+        let mut charter = charter(&settings, "@carried-opening");
+        if !has_brief {
+            charter.brief.sections = Box::new([]);
+        }
+        let (disk, mounted) = workspace();
+        let start = smith_domain::Event::Start {
+            messages: Box::new([
+                run::Message {
+                    name: Token::new(99),
+                    label: b"person".as_slice().into(),
+                    text: b"first".as_slice().into(),
+                },
+                run::Message {
+                    name: Token::new(0),
+                    label: b"person".as_slice().into(),
+                    text: b"second".as_slice().into(),
+                },
+            ]),
+            reply_to: ReplyTo::new(Token::new(1)),
+            host_run: Token::new(1),
+            activation: 1,
+            window: smith_domain::Window { turns: 100, bytes: u64::MAX },
+            charter,
+            workspace: Some(mounted),
+            transcript: None,
+            answered: Box::default(),
+            grants: Box::new([smith_domain::Grant {
+                name: smith_domain::GrantName { account: 0, generation: 1 },
+                valid: skein_lib::Duration::from_secs(7200),
+            }]),
+        };
+        let scripts = Box::new([Script {
+            cue: b"@carried-opening".as_slice().into(),
+            turns: Box::new([calls(vec![call(b"finish", FINISH_INPUT)], 1)]),
+        }]);
+        let mut world = World::with_workspace_scripts_start(settings, disk, scripts, start);
+        world.run(10_000);
+        assert_eq!(
+            world.prompts().len(),
+            1,
+            "an immediate finish takes one actual request; answer={:?}",
+            world.answer()
+        );
+        let expected: &[u8] = if has_brief {
+            b"Begin the work your brief describes.\n\nperson: first\n\nperson: second"
+        } else {
+            b"person: first\n\nperson: second"
+        };
+        let messages: Vec<_> = world.prompts()[0]
+            .messages
+            .iter()
+            .flat_map(|message| &message.parts)
+            .filter_map(|part| match part {
+                Part::Text { text } => Some(text.as_ref()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(messages, [expected]);
+        let mut referee =
+            skein_world::domain::Referee::new(smith_agent_world::messages_referee::Meeting::new(0, settings.waiting));
+        for (at, seen) in world.messages_seen() {
+            referee.observe(*at, seen.clone(), &mut Vec::new());
+        }
+        assert_eq!(
+            referee.verdict(),
+            skein_world::domain::Verdict::Passed,
+            "actual carried opening and finish satisfy the message oracle"
+        );
+        assert_eq!(world.turns().len(), 1);
+        assert!(world.messages_seen().iter().any(|(_, seen)| matches!(seen, smith_agent_world::messages_referee::Seen::Turn { read: Some(name), .. } if *name == Token::new(0))));
+    }
+}

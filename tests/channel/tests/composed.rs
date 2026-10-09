@@ -15,44 +15,7 @@ use smith_host_domain::{self as host, Down, Up};
 )]
 #[expect(clippy::wildcard_enum_match_arm, reason = "the story rejects every request outside its scripted path")]
 fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_domain() {
-    let smallest = include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin");
-    let source =
-        smith_charter::Charter::decode(&smith_charter::CEILINGS, &mut Reader::new(smallest)).expect("golden charter");
-    let mut parts = source.into_parts();
-    parts.budget = smith_charter::Budget::new(
-        &smith_charter::CEILINGS,
-        smith_charter::BudgetParts { turns: 1, spend: 1, time: Duration::from_secs(60) },
-    )
-    .expect("workable budget");
-    parts.contract = smith_charter::Contract::new(
-        &smith_charter::CEILINGS,
-        smith_charter::ContractParts {
-            report: Some(
-                smith_charter::TextRule::new(
-                    &smith_charter::CEILINGS,
-                    smith_charter::TextRuleParts { max: 128, fields: skein_lib::List::with_capacity(0) },
-                )
-                .expect("report rule"),
-            ),
-            verdicts: skein_lib::List::with_capacity(0),
-            change: None,
-            failure: None,
-        },
-    )
-    .expect("outcome contract");
-    let mut llm = parts.main.into_parts();
-    llm.model = Box::from(*b"fake");
-    llm.max_tokens = 1024;
-    llm.prices = smith_charter::Prices::new(
-        &smith_charter::CEILINGS,
-        smith_charter::PricesParts { input: 0, cached: 0, output: 0, unit: 1 },
-    )
-    .expect("prices");
-    parts.main = smith_charter::Llm::new(&smith_charter::CEILINGS, llm).expect("model");
-    let record = smith_charter::Charter::new(&smith_charter::CEILINGS, parts).expect("valid charter record");
-    let mut writer = Writer::new(usize::try_from(record.measure()).expect("small charter"));
-    record.encode(&mut writer).expect("measured charter");
-    let charter = writer.finish();
+    let charter = composed_charter();
     let mut limits = smith_agent_world::LIMITS;
     limits.run.message_bytes = 12;
     limits.run.messages = 1;
@@ -90,6 +53,7 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
         &mut domain,
         &env,
         AgentEvent::Start {
+            messages: decoded.messages,
             reply_to: ReplyTo::new(Token::new(1)),
             host_run: Token::new(7),
             activation: decoded.activation,
@@ -203,4 +167,139 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
         Some(host::RunResult::Failed { failure: host::RunFailure::Cancelled })
     ));
     assert_eq!(host_world.seen.gone, Some(host::End::Stopped));
+}
+
+fn composed_charter() -> Box<[u8]> {
+    let smallest = include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin");
+    let source =
+        smith_charter::Charter::decode(&smith_charter::CEILINGS, &mut Reader::new(smallest)).expect("golden charter");
+    let mut parts = source.into_parts();
+    parts.budget = smith_charter::Budget::new(
+        &smith_charter::CEILINGS,
+        smith_charter::BudgetParts { turns: 1, spend: 1, time: Duration::from_secs(60) },
+    )
+    .expect("workable budget");
+    parts.contract = smith_charter::Contract::new(
+        &smith_charter::CEILINGS,
+        smith_charter::ContractParts {
+            report: Some(
+                smith_charter::TextRule::new(
+                    &smith_charter::CEILINGS,
+                    smith_charter::TextRuleParts { max: 128, fields: skein_lib::List::with_capacity(0) },
+                )
+                .expect("report rule"),
+            ),
+            verdicts: skein_lib::List::with_capacity(0),
+            change: None,
+            failure: None,
+        },
+    )
+    .expect("outcome contract");
+    let mut llm = parts.main.into_parts();
+    llm.model = Box::from(*b"fake");
+    llm.max_tokens = 1024;
+    llm.prices = smith_charter::Prices::new(
+        &smith_charter::CEILINGS,
+        smith_charter::PricesParts { input: 0, cached: 0, output: 0, unit: 1 },
+    )
+    .expect("prices");
+    parts.main = smith_charter::Llm::new(&smith_charter::CEILINGS, llm).expect("model");
+    let record = smith_charter::Charter::new(&smith_charter::CEILINGS, parts).expect("valid charter record");
+    let mut writer = Writer::new(usize::try_from(record.measure()).expect("small charter"));
+    record.encode(&mut writer).expect("measured charter");
+    writer.finish()
+}
+
+#[test]
+#[expect(clippy::wildcard_enum_match_arm, reason = "the composed story selects its one provider boundary request")]
+fn carried_start_messages_cross_the_wire_in_order_and_an_overfull_start_is_refused_atomically() {
+    for count in [2_u64, 3] {
+        let mut start = smith_host_world::start();
+        start.charter = composed_charter();
+        start.transcript = None;
+        start.answered = Box::default();
+        start.grants = Box::new([host::Grant { account: 0, generation: 1, valid: Duration::from_secs(7200) }]);
+        start.messages = (0..count)
+            .map(|name| host::Message {
+                name: Token::new(99 - name),
+                label: b"person".as_slice().into(),
+                text: if name == 0 { b"first".as_slice().into() } else { b"second".as_slice().into() },
+            })
+            .collect();
+        let mut wire = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+        wire.settle();
+        wire.send_domain_start(
+            start,
+            host::channel::Window { turns: 100, bytes: 1_000_000_000 },
+            smith_host_protocol::Values {
+                paths: Box::default(),
+                credentials: Box::new([b"synthetic".as_slice().into()]),
+            },
+        );
+        wire.settle();
+        let decoded = wire.take_agent_start().expect("carried Start decoded");
+        assert_eq!(decoded.messages.len(), usize::try_from(count).expect("two or three messages"));
+        assert_eq!(decoded.messages[0].name, Token::new(99));
+        assert_eq!(decoded.messages[1].name, Token::new(98));
+        let mut limits = smith_agent_world::LIMITS;
+        limits.run.messages = 2;
+        let mut domain =
+            agent::Domain::new(&limits, agent::Config { endpoints: Box::new([agent::run::charter::Endpoint(0)]) }, 7);
+        let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+        let mut out = Queue::with_capacity(agent::max_out(&limits));
+        agent::step(
+            &mut domain,
+            &env,
+            AgentEvent::Start {
+                messages: decoded.messages,
+                reply_to: ReplyTo::new(Token::new(1)),
+                host_run: Token::new(7),
+                activation: decoded.activation,
+                window: decoded.window,
+                charter: decoded.charter,
+                workspace: None,
+                transcript: decoded.transcript,
+                answered: decoded.answered,
+                grants: decoded
+                    .grants
+                    .iter()
+                    .map(|grant| agent::Grant { name: grant.name, valid: grant.valid })
+                    .collect(),
+            },
+            &mut out,
+        );
+        let requests: Vec<_> = core::iter::from_fn(|| out.pop()).collect();
+        if count == 2 {
+            assert!(requests.iter().any(|request| matches!(request, AgentRequest::Admitted { .. })));
+            let prompt = requests
+                .iter()
+                .find_map(|request| match request {
+                    AgentRequest::Complete { prompt, .. } => Some(prompt),
+                    _ => None,
+                })
+                .expect("one real provider request");
+            let texts: Vec<_> = prompt
+                .messages
+                .iter()
+                .flat_map(|message| &message.content)
+                .filter_map(|block| match block {
+                    agent::llm::Block::Text { text, .. } => Some(text.as_ref()),
+                    agent::llm::Block::Opaque { .. }
+                    | agent::llm::Block::Refusal { .. }
+                    | agent::llm::Block::ToolCall { .. }
+                    | agent::llm::Block::ToolResult { .. } => None,
+                })
+                .collect();
+            assert_eq!(texts, [b"person: first\n\nperson: second".as_slice()]);
+        } else {
+            assert!(matches!(
+                requests.as_slice(),
+                [AgentRequest::Answer {
+                    answer: agent::run::Answer::Refused(agent::run::Refusal::Invalid(agent::run::Invalid::Messages)),
+                    read: None,
+                    ..
+                }]
+            ));
+        }
+    }
 }

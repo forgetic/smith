@@ -663,6 +663,7 @@ impl Service {
         }
         self.run_started = self.domain_env.now;
         self.domain_events.push(domain::Event::Start {
+            messages: start.messages,
             reply_to: ReplyTo::new(Token::new(1)),
             host_run: Token::new(1),
             activation: start.activation,

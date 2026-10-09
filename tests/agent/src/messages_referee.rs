@@ -14,6 +14,9 @@ use smith_domain::{Turn, llm, session};
 /// Contract: domain/run.md, sections 6 and 13; testing-strategy.md, section 7.
 #[derive(Clone, Debug)]
 pub enum Seen {
+    /// Literal Start work observed before admission, for the first opening only.
+    Started { brief: bool },
+
     /// Actual root admission, separately from physical Started. Contract: domain/host.md, section 3.
     Admitted,
 
@@ -73,6 +76,7 @@ pub enum Seen {
 /// Contract: domain/run.md, sections 6 and 13; testing-strategy.md, section 7.
 #[derive(Debug)]
 pub struct Meeting {
+    opening_brief: Option<bool>,
     queued: VecDeque<(Token, Box<[u8]>)>,
     offered: Option<(Vec<Token>, Box<[u8]>)>,
     read: Option<Token>,
@@ -94,6 +98,7 @@ impl Meeting {
     #[must_use]
     pub fn new(sequence: u32, idle: Duration) -> Self {
         Self {
+            opening_brief: None,
             queued: VecDeque::new(),
             offered: None,
             read: None,
@@ -122,6 +127,12 @@ impl Meeting {
                 [] | [Part::Opaque { .. } | Part::ToolCall { .. } | Part::ToolOutput { .. }] | [_, _, ..] => None,
             }
         });
+        let recorded = last;
+        let last = if self.opening_brief.take() == Some(true) {
+            last.map(|text| text.strip_prefix(b"Begin the work your brief describes.\n\n").unwrap_or(text))
+        } else {
+            last
+        };
         if !self.queued.is_empty() {
             let mut joined = Vec::new();
             let mut count = 0;
@@ -138,7 +149,7 @@ impl Meeting {
             if count > 0 {
                 judge.check(self.offered.is_none(), "only one person offer precedes its actual turn");
                 let names = self.queued.drain(..count).map(|(name, _)| name).collect::<Vec<_>>();
-                self.offered = Some((names, joined.into_boxed_slice()));
+                self.offered = Some((names, Box::from(recorded.expect("matching offer has one literal user message"))));
                 self.waiting = None;
                 judge.withdraw(&"idle park");
                 self.wait_result = false;
@@ -228,6 +239,7 @@ impl Expectations for Meeting {
         judge.check(!self.answered, "no chat output or input follows its final answer");
         match seen {
             Seen::Admitted => {}
+            Seen::Started { brief } => self.opening_brief = Some(brief),
             Seen::Input { name, text } => self.queued.push_back((name, text)),
             Seen::Prompt { query } => self.prompt(&query, judge),
             Seen::Completed { parts } => {

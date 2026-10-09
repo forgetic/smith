@@ -489,6 +489,7 @@ impl World {
             model_prices.insert(model.model.clone(), model.prices);
         }
         stage.push(Event::Start {
+            messages: Box::default(),
             window: smith_domain::Window { turns: u32::MAX, bytes: u64::MAX },
             answered,
             reply_to: ReplyTo::new(Token::new(1)),

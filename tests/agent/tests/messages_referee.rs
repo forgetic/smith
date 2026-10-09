@@ -105,7 +105,7 @@ fn premature_waiting_wrong_wake_text_and_wrong_final_count_or_park_time_are_reje
             1 => {
                 let prompt = bad.iter_mut().find_map(|(_, seen)| match seen {
                     Seen::Prompt { query } if query.messages.last().is_some_and(|message| matches!(message.parts.as_ref(), [Part::Text { text }] if text.as_ref() == b"person: first")) => Some(query),
-                    Seen::Admitted | Seen::Input { .. } | Seen::Prompt { .. } | Seen::Completed { .. }
+                    Seen::Started { .. } | Seen::Admitted | Seen::Input { .. } | Seen::Prompt { .. } | Seen::Completed { .. }
                     | Seen::CompletionEnded | Seen::Turn { .. } | Seen::Waiting { .. } | Seen::Answer { .. } => None,
                 }).expect("actual first wake request");
                 prompt.messages.last_mut().expect("wake").parts[0] =
@@ -113,7 +113,8 @@ fn premature_waiting_wrong_wake_text_and_wrong_final_count_or_park_time_are_reje
             }
             2 => match &mut bad.last_mut().expect("actual final word").1 {
                 Seen::Answer { turns, .. } => *turns -= 1,
-                Seen::Admitted
+                Seen::Started { .. }
+                | Seen::Admitted
                 | Seen::Input { .. }
                 | Seen::Prompt { .. }
                 | Seen::Completed { .. }
@@ -152,7 +153,8 @@ fn premature_waiting_wrong_wake_text_and_wrong_final_count_or_park_time_are_reje
             }
             5 => match &mut bad.last_mut().expect("actual final word").1 {
                 Seen::Answer { read, .. } => *read = Some(Token::new(0)),
-                Seen::Admitted
+                Seen::Started { .. }
+                | Seen::Admitted
                 | Seen::Input { .. }
                 | Seen::Prompt { .. }
                 | Seen::Completed { .. }
@@ -169,7 +171,8 @@ fn premature_waiting_wrong_wake_text_and_wrong_final_count_or_park_time_are_reje
 fn turn_fields(seen: &mut Seen) -> (&mut u32, &mut Option<Token>, &mut smith_domain::session::record::Turn) {
     match seen {
         Seen::Turn { number, read, turn, .. } => (number, read, turn),
-        Seen::Admitted
+        Seen::Started { .. }
+        | Seen::Admitted
         | Seen::Input { .. }
         | Seen::Prompt { .. }
         | Seen::Completed { .. }

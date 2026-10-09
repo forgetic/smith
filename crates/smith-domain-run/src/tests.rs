@@ -161,6 +161,7 @@ impl Harness {
     fn start_workspace(&mut self, call: u64, charter: Charter, workspace: Option<Workspace>) -> Box<[Request]> {
         let reply_to = ReplyTo::new(Token::new(call));
         self.step(Event::Start {
+            messages: Box::default(),
             window: crate::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
             reply_to,
             host_run: Token::new(call),
@@ -607,6 +608,7 @@ fn a_main_conversation_refused_at_its_entrance_refuses_the_run() {
 fn zero_activation_has_its_own_refusal_before_admission() {
     let mut harness = Harness::new(LIMITS);
     let emitted = harness.step(Event::Start {
+        messages: Box::default(),
         window: crate::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
         reply_to: ReplyTo::new(Token::new(81)),
         host_run: Token::new(81),
@@ -3067,10 +3069,13 @@ fn preparation_refuses_bad_messages_without_disrupting_the_admitted_opening() {
     );
     let emitted = harness.step(Event::Read { owner: run, read: Read::Missing });
     let [Request::Open { conversation, opening }] = &*emitted else { panic!("prepared run opens main") };
-    assert_eq!(opening.prompt.as_ref(), b"Begin the work your brief describes.");
+    assert_eq!(opening.prompt.as_ref(), b"Begin the work your brief describes.\n\npeer: 123456");
     let main = *conversation;
     harness.step(Event::Started { conversation: main, peer: Token::new(9) });
-    assert_eq!(&*harness.step(end_turn(main)), &[Request::Say { peer: Token::new(9), text: bytes(b"peer: 123456") }]);
+    let emitted = harness.step(Event::Turn { conversation: main, record: Token::new(40), sequence: 1 });
+    let [Request::Turn { read, .. }] = emitted.as_ref() else { panic!("one told turn") };
+    assert_eq!(*read, Some(Token::new(2)));
+    harness.step(end_turn(main));
 }
 
 #[test]
@@ -3207,6 +3212,7 @@ fn delayed_facts_keep_activation_history_and_child_parentage() {
         let mut h = Harness::new(LIMITS);
         h.env.now = Time::from_nanos(7);
         let started = h.step(Event::Start {
+            messages: Box::default(),
             reply_to: ReplyTo::new(Token::new(1)),
             host_run: Token::new(1),
             activation: 1,
@@ -3247,4 +3253,103 @@ fn observed_facts(harness: &mut Harness) -> Box<[crate::facts::Fact]> {
         }
     }
     facts.into_boxed()
+}
+
+fn carried_start(charter: Charter, messages: Box<[crate::Message]>, workspace: Option<Workspace>) -> Event {
+    Event::Start {
+        messages,
+        window: crate::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
+        reply_to: ReplyTo::new(Token::new(1)),
+        host_run: Token::new(1),
+        activation: 1,
+        charter,
+        workspace,
+        transcript: None,
+    }
+}
+
+fn carried(name: u64, text: &[u8]) -> crate::Message {
+    crate::Message { name: Token::new(name), label: bytes(b"person"), text: bytes(text) }
+}
+
+#[test]
+fn carried_messages_open_after_the_briefs_instruction_and_before_later_messages() {
+    let mut harness = Harness::new(LIMITS);
+    let emitted = harness.step(carried_start(
+        charter(),
+        Box::new([carried(99, b"first"), carried(0, b"second")]),
+        Some(workspace()),
+    ));
+    let [Request::Admitted { run, .. }, Request::Read { .. }] = &*emitted else { panic!("admitted preparation") };
+    let run = *run;
+    assert!(
+        harness
+            .step(Event::Message { run, name: Token::new(8), label: bytes(b"peer"), text: bytes(b"third") })
+            .is_empty()
+    );
+    let emitted = harness.step(Event::Read { owner: run, read: Read::Missing });
+    let [Request::Open { conversation, opening }] = &*emitted else { panic!("one opening") };
+    let main = *conversation;
+    assert_eq!(
+        &*opening.prompt,
+        b"Begin the work your brief describes.\n\nperson: first\n\nperson: second\n\npeer: third"
+    );
+    harness.step(Event::Started { conversation: main, peer: Token::new(9) });
+    let emitted = harness.step(Event::Turn { conversation: main, record: Token::new(40), sequence: 1 });
+    let [Request::Turn { read, .. }] = &*emitted else { panic!("one told turn") };
+    assert_eq!(*read, Some(Token::new(8)));
+    let mut reads = List::with_capacity(LIMITS.messages);
+    for _ in 0..LIMITS.facts {
+        if let Some(fact) = harness.domain.pop_fact()
+            && let Fact::MessageRead { name, .. } = fact.kind
+        {
+            reads.push(name).expect("bounded read count");
+        }
+    }
+    assert_eq!(reads.as_slice(), [Token::new(99), Token::new(0), Token::new(8)]);
+}
+
+#[test]
+fn an_empty_brief_opens_on_carried_messages_or_on_its_instructions_without_wait() {
+    let batches: [Box<[crate::Message]>; 2] = [Box::new([]), Box::new([carried(0, b"work")])];
+    for messages in batches {
+        let mut charter = charter();
+        charter.brief.sections = Box::new([]);
+        charter.grants.wait = false;
+        charter.instructions = bytes(b"Follow these instructions.");
+        let expected: &[u8] =
+            if messages.is_empty() { b"Begin the work your instructions describe." } else { b"person: work" };
+        let mut harness = Harness::new(LIMITS);
+        let emitted = harness.step(carried_start(charter, messages, None));
+        let [Request::Admitted { .. }, Request::Open { opening, .. }] = &*emitted else {
+            panic!("one immediate opening")
+        };
+        assert_eq!(&*opening.prompt, expected);
+        let mut instructions_found = false;
+        for chunk in opening.system.windows(b"Follow these instructions.".len()) {
+            instructions_found |= chunk == b"Follow these instructions.";
+        }
+        assert!(instructions_found);
+    }
+}
+
+#[test]
+fn a_start_refuses_all_carried_messages_atomically_at_its_count_byte_and_name_bounds() {
+    let limits = Limits { messages: 2, message_bytes: 9, ..LIMITS };
+    let batches: [Box<[crate::Message]>; 3] = [
+        Box::new([carried(1, b"a"), carried(2, b"a"), carried(3, b"a")]),
+        Box::new([carried(1, b"aa")]),
+        Box::new([carried(0, b"a"), carried(0, b"a")]),
+    ];
+    for messages in batches {
+        let mut harness = Harness::new(limits);
+        let emitted = harness.step(carried_start(charter(), messages, None));
+        assert_eq!(answered(emitted), (1, Answer::Refused(Refusal::Invalid(Invalid::Messages))));
+        assert!(harness.domain.pop_fact().is_none(), "no partial message admission");
+        let emitted = harness.step(carried_start(charter(), Box::new([carried(0, b"a")]), None));
+        let [Request::Admitted { .. }, Request::Open { opening, .. }] = &*emitted else {
+            panic!("exact bound admitted after refusal")
+        };
+        assert!(opening.prompt.ends_with(b"person: a"));
+    }
 }

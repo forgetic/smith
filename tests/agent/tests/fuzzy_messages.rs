@@ -214,7 +214,7 @@ fn observations(world: &World, seed: u64, idle: Duration) -> [u64; 16] {
                     read = *actual;
                 }
             }
-            Seen::Admitted | Seen::Answer { .. } => {}
+            Seen::Started { .. } | Seen::Admitted | Seen::Answer { .. } => {}
         }
         referee.assert_holding(seed);
     }
@@ -244,7 +244,8 @@ fn run(seed: u64, fixture: Fixture) -> (Vec<String>, Outcome) {
         .iter()
         .filter_map(|(at, seen)| match seen {
             Seen::Input { name, text } => Some((*at, *name, text.clone())),
-            Seen::Admitted
+            Seen::Started { .. }
+            | Seen::Admitted
             | Seen::Prompt { .. }
             | Seen::Completed { .. }
             | Seen::CompletionEnded

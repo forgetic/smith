@@ -19,13 +19,14 @@ pub struct Limits {
     pub delivery_failure_diagnostic: u32,
     pub host_reply_text: u32,
     pub answered_call_tool: u32,
+    pub message_label: u32,
+    pub message_text: u32,
     pub start_charter: u32,
     pub start_transcript: u32,
     pub start_transcript_item: u32,
     pub start_answered: u32,
     pub start_grants: u32,
-    pub message_label: u32,
-    pub message_text: u32,
+    pub start_messages: u32,
     pub host_ask_tool: u32,
     pub host_ask_input: u32,
     pub field_name: u32,
@@ -50,13 +51,14 @@ pub const CEILINGS: Limits = Limits {
     delivery_failure_diagnostic: 512,
     host_reply_text: 1_048_576,
     answered_call_tool: 64,
+    message_label: 1_024,
+    message_text: 1_048_576,
     start_charter: 67_108_864,
     start_transcript: 64,
     start_transcript_item: 8_388_608,
     start_answered: 128,
     start_grants: 64,
-    message_label: 1_024,
-    message_text: 1_048_576,
+    start_messages: 128,
     host_ask_tool: 64,
     host_ask_input: 1_048_576,
     field_name: 64,
@@ -171,6 +173,14 @@ pub enum Path {
     AnsweredCallReply,
     /// Bytes after `AnsweredCall`.
     AnsweredCallTail,
+    /// The `name` field of `Message`.
+    MessageName,
+    /// The `label` field of `Message`.
+    MessageLabel,
+    /// The `text` field of `Message`.
+    MessageText,
+    /// Bytes after `Message`.
+    MessageTail,
     /// The `activation` field of `Start`.
     StartActivation,
     /// The `charter` field of `Start`.
@@ -185,16 +195,10 @@ pub enum Path {
     StartGrants,
     /// The `window` field of `Start`.
     StartWindow,
+    /// The `messages` field of `Start`.
+    StartMessages,
     /// Bytes after `Start`.
     StartTail,
-    /// The `name` field of `Message`.
-    MessageName,
-    /// The `label` field of `Message`.
-    MessageLabel,
-    /// The `text` field of `Message`.
-    MessageText,
-    /// Bytes after `Message`.
-    MessageTail,
     /// The `name` field of `HostAnswer`.
     HostAnswerName,
     /// The `reply` field of `HostAnswer`.
@@ -447,13 +451,14 @@ impl CallName {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -517,13 +522,14 @@ impl Window {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -607,13 +613,14 @@ impl Directory {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -678,13 +685,14 @@ impl Workspace {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -744,13 +752,14 @@ impl GrantValue {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -828,13 +837,14 @@ impl Grant {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -898,13 +908,14 @@ impl Receipt {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -961,13 +972,14 @@ impl Delivered {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1034,13 +1046,14 @@ impl Marker {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1105,13 +1118,14 @@ impl DeliveryRefusal {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1177,13 +1191,14 @@ impl DeliveryReason {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1260,13 +1275,14 @@ impl DeliveryFailure {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1322,13 +1338,14 @@ impl Delivery {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1391,13 +1408,14 @@ impl HostReply {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1455,13 +1473,14 @@ impl DeliveryReply {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1517,13 +1536,14 @@ impl Reply {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1572,13 +1592,14 @@ impl SavedReply {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1648,13 +1669,14 @@ impl AnsweredCall {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1666,127 +1688,6 @@ impl AnsweredCall {
         if self.tool.len() > usize::try_from(limits.answered_call_tool.min(CEILINGS.answered_call_tool)).expect("u32 fits usize") { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
         if !skein_codec::text_is_valid(self.tool.as_ref()) { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Utf8 }); }
         self.reply.check(limits)?;
-        Ok(())
-    }
-}
-
-/// Movable fields of `Start`.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct StartParts {
-    /// The `activation` field.
-    pub activation: u64,
-    /// The `charter` field.
-    pub charter: Box<[u8]>,
-    /// The `workspace` field.
-    pub workspace: Option<Workspace>,
-    /// The `transcript` field.
-    pub transcript: List<Box<[u8]>>,
-    /// The `answered` field.
-    pub answered: List<AnsweredCall>,
-    /// The `grants` field.
-    pub grants: List<Grant>,
-    /// The `window` field.
-    pub window: Window,
-}
-
-/// `Start` in this codec family.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Start {
-    activation: u64,
-    charter: Box<[u8]>,
-    workspace: Option<Workspace>,
-    transcript: List<Box<[u8]>>,
-    answered: List<AnsweredCall>,
-    grants: List<Grant>,
-    window: Window,
-}
-
-impl Start {
-    /// Makes a value within the given limits.
-    pub fn new(limits: &Limits, parts: StartParts) -> Result<Self, Problem> {
-        let StartParts { activation, charter, workspace, transcript, answered, grants, window } = parts;
-        let value = Self { activation, charter, workspace, transcript, answered, grants, window };
-        value.check(limits)?;
-        Ok(value)
-    }
-
-    /// Reads the `activation` field.
-    #[must_use]
-    pub fn activation(&self) -> u64 { self.activation }
-
-    /// Reads the `charter` field.
-    #[must_use]
-    pub fn charter(&self) -> &[u8] { &self.charter }
-
-    /// Reads the `workspace` field.
-    #[must_use]
-    pub fn workspace(&self) -> &Option<Workspace> { &self.workspace }
-
-    /// Reads the `transcript` field.
-    #[must_use]
-    pub fn transcript(&self) -> &List<Box<[u8]>> { &self.transcript }
-
-    /// Reads the `answered` field.
-    #[must_use]
-    pub fn answered(&self) -> &List<AnsweredCall> { &self.answered }
-
-    /// Reads the `grants` field.
-    #[must_use]
-    pub fn grants(&self) -> &List<Grant> { &self.grants }
-
-    /// Reads the `window` field.
-    #[must_use]
-    pub fn window(&self) -> &Window { &self.window }
-
-    /// Moves the fields out without copying.
-    #[must_use]
-    pub fn into_parts(self) -> StartParts { StartParts { activation: self.activation, charter: self.charter, workspace: self.workspace, transcript: self.transcript, answered: self.answered, grants: self.grants, window: self.window } }
-
-    fn check(&self, limits: &Limits) -> Result<(), Problem> {
-        if limits.directory_name > CEILINGS.directory_name { return Err(Problem { path: Path::DirectoryName, reason: skein_codec::Reason::Bound }); }
-        if limits.directory_path > CEILINGS.directory_path { return Err(Problem { path: Path::DirectoryPath, reason: skein_codec::Reason::Bound }); }
-        if limits.directory_conflicts > CEILINGS.directory_conflicts { return Err(Problem { path: Path::DirectoryConflicts, reason: skein_codec::Reason::Bound }); }
-        if limits.directory_conflicts_item > CEILINGS.directory_conflicts_item { return Err(Problem { path: Path::DirectoryConflicts, reason: skein_codec::Reason::Bound }); }
-        if limits.workspace_directories > CEILINGS.workspace_directories { return Err(Problem { path: Path::WorkspaceDirectories, reason: skein_codec::Reason::Bound }); }
-        if limits.grant_value_credential > CEILINGS.grant_value_credential { return Err(Problem { path: Path::GrantValueCredential, reason: skein_codec::Reason::Bound }); }
-        if limits.receipt_text > CEILINGS.receipt_text { return Err(Problem { path: Path::ReceiptText, reason: skein_codec::Reason::Bound }); }
-        if limits.delivered_receipts > CEILINGS.delivered_receipts { return Err(Problem { path: Path::DeliveredReceipts, reason: skein_codec::Reason::Bound }); }
-        if limits.marker_path > CEILINGS.marker_path { return Err(Problem { path: Path::MarkerPath, reason: skein_codec::Reason::Bound }); }
-        if limits.delivery_refusal_explanation > CEILINGS.delivery_refusal_explanation { return Err(Problem { path: Path::DeliveryRefusalExplanation, reason: skein_codec::Reason::Bound }); }
-        if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
-        if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
-        if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
-        if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
-        if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
-        if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
-        if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
-        if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
-        if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
-        if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
-        if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
-        if limits.field_text > CEILINGS.field_text { return Err(Problem { path: Path::FieldText, reason: skein_codec::Reason::Bound }); }
-        if limits.deliver_ask_fields > CEILINGS.deliver_ask_fields { return Err(Problem { path: Path::DeliverAskFields, reason: skein_codec::Reason::Bound }); }
-        if limits.turn_body > CEILINGS.turn_body { return Err(Problem { path: Path::TurnBody, reason: skein_codec::Reason::Bound }); }
-        if limits.accepted_result > CEILINGS.accepted_result { return Err(Problem { path: Path::AcceptedResult, reason: skein_codec::Reason::Bound }); }
-        if self.charter.len() > usize::try_from(limits.start_charter.min(CEILINGS.start_charter)).expect("u32 fits usize") { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
-        if let Some(some_0) = self.workspace.as_ref() {
-        some_0.check(limits)?;
-        }
-        if self.transcript.capacity() > limits.start_transcript.min(CEILINGS.start_transcript) { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
-        for item_0 in self.transcript.as_slice() {
-        if item_0.len() > usize::try_from(limits.start_transcript_item.min(CEILINGS.start_transcript_item)).expect("u32 fits usize") { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
-        }
-        if self.answered.capacity() > limits.start_answered.min(CEILINGS.start_answered) { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
-        for item_0 in self.answered.as_slice() {
-        item_0.check(limits)?;
-        }
-        if self.grants.capacity() > limits.start_grants.min(CEILINGS.start_grants) { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        for item_0 in self.grants.as_slice() {
-        item_0.check(limits)?;
-        }
-        self.window.check(limits)?;
         Ok(())
     }
 }
@@ -1849,13 +1750,14 @@ impl Message {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1867,6 +1769,139 @@ impl Message {
         if !skein_codec::text_is_valid(self.label.as_ref()) { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Utf8 }); }
         if self.text.len() > usize::try_from(limits.message_text.min(CEILINGS.message_text)).expect("u32 fits usize") { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if !skein_codec::text_is_valid(self.text.as_ref()) { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Utf8 }); }
+        Ok(())
+    }
+}
+
+/// Movable fields of `Start`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct StartParts {
+    /// The `activation` field.
+    pub activation: u64,
+    /// The `charter` field.
+    pub charter: Box<[u8]>,
+    /// The `workspace` field.
+    pub workspace: Option<Workspace>,
+    /// The `transcript` field.
+    pub transcript: List<Box<[u8]>>,
+    /// The `answered` field.
+    pub answered: List<AnsweredCall>,
+    /// The `grants` field.
+    pub grants: List<Grant>,
+    /// The `window` field.
+    pub window: Window,
+    /// The `messages` field.
+    pub messages: List<Message>,
+}
+
+/// `Start` in this codec family.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Start {
+    activation: u64,
+    charter: Box<[u8]>,
+    workspace: Option<Workspace>,
+    transcript: List<Box<[u8]>>,
+    answered: List<AnsweredCall>,
+    grants: List<Grant>,
+    window: Window,
+    messages: List<Message>,
+}
+
+impl Start {
+    /// Makes a value within the given limits.
+    pub fn new(limits: &Limits, parts: StartParts) -> Result<Self, Problem> {
+        let StartParts { activation, charter, workspace, transcript, answered, grants, window, messages } = parts;
+        let value = Self { activation, charter, workspace, transcript, answered, grants, window, messages };
+        value.check(limits)?;
+        Ok(value)
+    }
+
+    /// Reads the `activation` field.
+    #[must_use]
+    pub fn activation(&self) -> u64 { self.activation }
+
+    /// Reads the `charter` field.
+    #[must_use]
+    pub fn charter(&self) -> &[u8] { &self.charter }
+
+    /// Reads the `workspace` field.
+    #[must_use]
+    pub fn workspace(&self) -> &Option<Workspace> { &self.workspace }
+
+    /// Reads the `transcript` field.
+    #[must_use]
+    pub fn transcript(&self) -> &List<Box<[u8]>> { &self.transcript }
+
+    /// Reads the `answered` field.
+    #[must_use]
+    pub fn answered(&self) -> &List<AnsweredCall> { &self.answered }
+
+    /// Reads the `grants` field.
+    #[must_use]
+    pub fn grants(&self) -> &List<Grant> { &self.grants }
+
+    /// Reads the `window` field.
+    #[must_use]
+    pub fn window(&self) -> &Window { &self.window }
+
+    /// Reads the `messages` field.
+    #[must_use]
+    pub fn messages(&self) -> &List<Message> { &self.messages }
+
+    /// Moves the fields out without copying.
+    #[must_use]
+    pub fn into_parts(self) -> StartParts { StartParts { activation: self.activation, charter: self.charter, workspace: self.workspace, transcript: self.transcript, answered: self.answered, grants: self.grants, window: self.window, messages: self.messages } }
+
+    fn check(&self, limits: &Limits) -> Result<(), Problem> {
+        if limits.directory_name > CEILINGS.directory_name { return Err(Problem { path: Path::DirectoryName, reason: skein_codec::Reason::Bound }); }
+        if limits.directory_path > CEILINGS.directory_path { return Err(Problem { path: Path::DirectoryPath, reason: skein_codec::Reason::Bound }); }
+        if limits.directory_conflicts > CEILINGS.directory_conflicts { return Err(Problem { path: Path::DirectoryConflicts, reason: skein_codec::Reason::Bound }); }
+        if limits.directory_conflicts_item > CEILINGS.directory_conflicts_item { return Err(Problem { path: Path::DirectoryConflicts, reason: skein_codec::Reason::Bound }); }
+        if limits.workspace_directories > CEILINGS.workspace_directories { return Err(Problem { path: Path::WorkspaceDirectories, reason: skein_codec::Reason::Bound }); }
+        if limits.grant_value_credential > CEILINGS.grant_value_credential { return Err(Problem { path: Path::GrantValueCredential, reason: skein_codec::Reason::Bound }); }
+        if limits.receipt_text > CEILINGS.receipt_text { return Err(Problem { path: Path::ReceiptText, reason: skein_codec::Reason::Bound }); }
+        if limits.delivered_receipts > CEILINGS.delivered_receipts { return Err(Problem { path: Path::DeliveredReceipts, reason: skein_codec::Reason::Bound }); }
+        if limits.marker_path > CEILINGS.marker_path { return Err(Problem { path: Path::MarkerPath, reason: skein_codec::Reason::Bound }); }
+        if limits.delivery_refusal_explanation > CEILINGS.delivery_refusal_explanation { return Err(Problem { path: Path::DeliveryRefusalExplanation, reason: skein_codec::Reason::Bound }); }
+        if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
+        if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
+        if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
+        if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
+        if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
+        if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
+        if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
+        if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
+        if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
+        if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
+        if limits.field_text > CEILINGS.field_text { return Err(Problem { path: Path::FieldText, reason: skein_codec::Reason::Bound }); }
+        if limits.deliver_ask_fields > CEILINGS.deliver_ask_fields { return Err(Problem { path: Path::DeliverAskFields, reason: skein_codec::Reason::Bound }); }
+        if limits.turn_body > CEILINGS.turn_body { return Err(Problem { path: Path::TurnBody, reason: skein_codec::Reason::Bound }); }
+        if limits.accepted_result > CEILINGS.accepted_result { return Err(Problem { path: Path::AcceptedResult, reason: skein_codec::Reason::Bound }); }
+        if self.charter.len() > usize::try_from(limits.start_charter.min(CEILINGS.start_charter)).expect("u32 fits usize") { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
+        if let Some(some_0) = self.workspace.as_ref() {
+        some_0.check(limits)?;
+        }
+        if self.transcript.capacity() > limits.start_transcript.min(CEILINGS.start_transcript) { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
+        for item_0 in self.transcript.as_slice() {
+        if item_0.len() > usize::try_from(limits.start_transcript_item.min(CEILINGS.start_transcript_item)).expect("u32 fits usize") { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
+        }
+        if self.answered.capacity() > limits.start_answered.min(CEILINGS.start_answered) { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
+        for item_0 in self.answered.as_slice() {
+        item_0.check(limits)?;
+        }
+        if self.grants.capacity() > limits.start_grants.min(CEILINGS.start_grants) { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
+        for item_0 in self.grants.as_slice() {
+        item_0.check(limits)?;
+        }
+        self.window.check(limits)?;
+        if self.messages.capacity() > limits.start_messages.min(CEILINGS.start_messages) { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
+        for item_0 in self.messages.as_slice() {
+        item_0.check(limits)?;
+        }
         Ok(())
     }
 }
@@ -1922,13 +1957,14 @@ impl HostAnswer {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -1987,13 +2023,14 @@ impl Acknowledge {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2049,13 +2086,14 @@ impl GrantRefresh {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2106,13 +2144,14 @@ impl Cancel {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2162,13 +2201,14 @@ impl Admitted {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2217,13 +2257,14 @@ impl MessageRefusal {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2286,13 +2327,14 @@ impl MessageRefused {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2338,13 +2380,14 @@ impl Effect {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2407,13 +2450,14 @@ impl HostAsk {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2479,13 +2523,14 @@ impl Field {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2545,13 +2590,14 @@ impl DeliverAsk {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2601,13 +2647,14 @@ impl Ask {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2684,13 +2731,14 @@ impl Call {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2749,13 +2797,14 @@ impl Withdraw {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2833,13 +2882,14 @@ impl Turn {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2897,13 +2947,14 @@ impl Waiting {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -2960,13 +3011,14 @@ impl Long {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3016,13 +3068,14 @@ impl LongDone {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3086,13 +3139,14 @@ impl Rejected {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3156,13 +3210,14 @@ impl Exhausted {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3223,13 +3278,14 @@ impl FactKind {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3299,13 +3355,14 @@ impl Fact {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3355,13 +3412,14 @@ impl ReceivingLimit {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3406,13 +3464,14 @@ impl Overflow {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3468,13 +3527,14 @@ impl ReceivingLimitValue {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3531,13 +3591,14 @@ impl OverflowValue {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3591,13 +3652,14 @@ impl BudgetFailure {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3660,13 +3722,14 @@ impl CompletionFailure {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3713,13 +3776,14 @@ impl CompletionEvidence {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3789,13 +3853,14 @@ impl CompletionFault {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3853,13 +3918,14 @@ impl ModelFault {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3912,13 +3978,14 @@ impl TranscriptRefusal {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -3974,13 +4041,14 @@ impl TranscriptRefusalValue {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4037,13 +4105,14 @@ impl ModelFaultValue {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4100,13 +4169,14 @@ impl BudgetFailureValue {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4171,13 +4241,14 @@ impl PolicyFailure {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4234,13 +4305,14 @@ impl RunFailure {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4281,6 +4353,8 @@ pub enum InvalidStart {
     Conversation,
     /// `endpoint` without a payload.
     Endpoint,
+    /// `messages` without a payload.
+    Messages,
 }
 
 impl InvalidStart {
@@ -4292,7 +4366,7 @@ impl InvalidStart {
 
     fn check(&self, limits: &Limits) -> Result<(), Problem> {
         match self {
-            Self::CharterVersion | Self::MalformedCharter | Self::Activation | Self::Window | Self::Conventions | Self::TooLarge | Self::Workspace | Self::Grants | Self::Outcome | Self::Budget | Self::Llm | Self::Conversation | Self::Endpoint => Ok(()),
+            Self::CharterVersion | Self::MalformedCharter | Self::Activation | Self::Window | Self::Conventions | Self::TooLarge | Self::Workspace | Self::Grants | Self::Outcome | Self::Budget | Self::Llm | Self::Conversation | Self::Endpoint | Self::Messages => Ok(()),
         }?;
         if limits.directory_name > CEILINGS.directory_name { return Err(Problem { path: Path::DirectoryName, reason: skein_codec::Reason::Bound }); }
         if limits.directory_path > CEILINGS.directory_path { return Err(Problem { path: Path::DirectoryPath, reason: skein_codec::Reason::Bound }); }
@@ -4307,13 +4381,14 @@ impl InvalidStart {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4369,13 +4444,14 @@ impl InvalidStartValue {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4422,13 +4498,14 @@ impl StartRefusal {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4484,13 +4561,14 @@ impl Accepted {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4547,13 +4625,14 @@ impl Failed {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4610,13 +4689,14 @@ impl Refused {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4669,13 +4749,14 @@ impl RunResult {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -4752,13 +4833,14 @@ impl Answer {
         if limits.delivery_failure_diagnostic > CEILINGS.delivery_failure_diagnostic { return Err(Problem { path: Path::DeliveryFailureDiagnostic, reason: skein_codec::Reason::Bound }); }
         if limits.host_reply_text > CEILINGS.host_reply_text { return Err(Problem { path: Path::HostReplyText, reason: skein_codec::Reason::Bound }); }
         if limits.answered_call_tool > CEILINGS.answered_call_tool { return Err(Problem { path: Path::AnsweredCallTool, reason: skein_codec::Reason::Bound }); }
+        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
+        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
         if limits.start_charter > CEILINGS.start_charter { return Err(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript > CEILINGS.start_transcript { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_transcript_item > CEILINGS.start_transcript_item { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Bound }); }
         if limits.start_answered > CEILINGS.start_answered { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Bound }); }
         if limits.start_grants > CEILINGS.start_grants { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Bound }); }
-        if limits.message_label > CEILINGS.message_label { return Err(Problem { path: Path::MessageLabel, reason: skein_codec::Reason::Bound }); }
-        if limits.message_text > CEILINGS.message_text { return Err(Problem { path: Path::MessageText, reason: skein_codec::Reason::Bound }); }
+        if limits.start_messages > CEILINGS.start_messages { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_tool > CEILINGS.host_ask_tool { return Err(Problem { path: Path::HostAskTool, reason: skein_codec::Reason::Bound }); }
         if limits.host_ask_input > CEILINGS.host_ask_input { return Err(Problem { path: Path::HostAskInput, reason: skein_codec::Reason::Bound }); }
         if limits.field_name > CEILINGS.field_name { return Err(Problem { path: Path::FieldName, reason: skein_codec::Reason::Bound }); }
@@ -5501,96 +5583,6 @@ impl AnsweredCall {
     }
 }
 
-impl Start {
-    /// Measures this record's wire encoding.
-    #[must_use]
-    pub fn measure(&self) -> u32 {
-        let mut size = 0_u32;
-        size = size.checked_add(8).expect("schema ceilings fit u32");
-        let field_charter = &self.charter;
-        size = size.checked_add(4).expect("schema ceilings fit u32");
-        size = size.checked_add(u32::try_from(field_charter.len()).expect("field ceiling fits u32")).expect("schema ceilings fit u32");
-        let field_workspace = &self.workspace;
-        size = size.checked_add(1).expect("schema ceilings fit u32");
-        if let Some(some_0) = field_workspace {
-        size = size.checked_add(some_0.measure()).expect("schema ceilings fit u32");
-        }
-        let field_transcript = &self.transcript;
-        size = size.checked_add(4).expect("schema ceilings fit u32");
-        for item_0 in field_transcript.as_slice() {
-        size = size.checked_add(4).expect("schema ceilings fit u32");
-        size = size.checked_add(u32::try_from(item_0.len()).expect("field ceiling fits u32")).expect("schema ceilings fit u32");
-        }
-        let field_answered = &self.answered;
-        size = size.checked_add(4).expect("schema ceilings fit u32");
-        for item_0 in field_answered.as_slice() {
-        size = size.checked_add(item_0.measure()).expect("schema ceilings fit u32");
-        }
-        let field_grants = &self.grants;
-        size = size.checked_add(4).expect("schema ceilings fit u32");
-        for item_0 in field_grants.as_slice() {
-        size = size.checked_add(item_0.measure()).expect("schema ceilings fit u32");
-        }
-        let field_window = &self.window;
-        size = size.checked_add(field_window.measure()).expect("schema ceilings fit u32");
-        size
-    }
-
-    /// Writes into a writer with room for the measured bytes.
-    pub fn encode(&self, writer: &mut skein_lib::Writer) -> Result<(), skein_lib::Overflow> {
-        let field_activation = &self.activation;
-        writer.put(&field_activation.to_be_bytes())?;
-        let field_charter = &self.charter;
-        writer.put(&u32::try_from(field_charter.len()).expect("field ceiling fits u32").to_be_bytes())?;
-        writer.put(field_charter.as_ref())?;
-        let field_workspace = &self.workspace;
-        match field_workspace {
-            Some(some_0) => {
-                writer.put(&[1_u8])?;
-        some_0.encode(writer)?;
-            }
-            None => writer.put(&[0_u8])?,
-        }
-        let field_transcript = &self.transcript;
-        writer.put(&field_transcript.len().to_be_bytes())?;
-        for item_0 in field_transcript.as_slice() {
-        writer.put(&u32::try_from(item_0.len()).expect("field ceiling fits u32").to_be_bytes())?;
-        writer.put(item_0.as_ref())?;
-        }
-        let field_answered = &self.answered;
-        writer.put(&field_answered.len().to_be_bytes())?;
-        for item_0 in field_answered.as_slice() {
-        item_0.encode(writer)?;
-        }
-        let field_grants = &self.grants;
-        writer.put(&field_grants.len().to_be_bytes())?;
-        for item_0 in field_grants.as_slice() {
-        item_0.encode(writer)?;
-        }
-        let field_window = &self.window;
-        field_window.encode(writer)?;
-        Ok(())
-    }
-
-    /// Reads a whole record and refuses trailing bytes.
-    pub fn decode(limits: &Limits, reader: &mut skein_lib::Reader<'_>) -> Result<Self, Problem> {
-        let value = Self::decode_from(limits, reader)?;
-        if !reader.is_empty() { return Err(Problem { path: Path::StartTail, reason: skein_codec::Reason::Trailing }); }
-        Ok(value)
-    }
-
-    fn decode_from(limits: &Limits, reader: &mut skein_lib::Reader<'_>) -> Result<Self, Problem> {
-        let decoded_activation = reader.u64().ok_or(Problem { path: Path::StartActivation, reason: skein_codec::Reason::Short })?;
-        let decoded_charter = { let length = match skein_codec::read_len(reader, limits.start_charter.min(CEILINGS.start_charter)) { Ok(length) => length, Err(reason) => return Err(Problem { path: Path::StartCharter, reason }), }; Box::from(reader.bytes(length).ok_or(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Short })?) };
-        let decoded_workspace = match reader.u8().ok_or(Problem { path: Path::StartWorkspace, reason: skein_codec::Reason::Short })? { 0 => None, 1 => Some(Workspace::decode_from(limits, reader)?), _ => return Err(Problem { path: Path::StartWorkspace, reason: skein_codec::Reason::Tag }) };
-        let decoded_transcript = { let count = match skein_codec::read_count(reader, limits.start_transcript.min(CEILINGS.start_transcript)) { Ok(count) => count, Err(reason) => return Err(Problem { path: Path::StartTranscript, reason }), }; if count > reader.remaining() / 4 { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Short }); } let mut items_0 = List::with_capacity(count); for _index in 0_u32..count { let item = { let length = match skein_codec::read_len(reader, limits.start_transcript_item.min(CEILINGS.start_transcript_item)) { Ok(length) => length, Err(reason) => return Err(Problem { path: Path::StartTranscript, reason }), }; Box::from(reader.bytes(length).ok_or(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Short })?) }; items_0.push(item).expect("count within capacity"); } items_0 };
-        let decoded_answered = { let count = match skein_codec::read_count(reader, limits.start_answered.min(CEILINGS.start_answered)) { Ok(count) => count, Err(reason) => return Err(Problem { path: Path::StartAnswered, reason }), }; if count > reader.remaining() / 21 { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Short }); } let mut items_0 = List::with_capacity(count); for _index in 0_u32..count { let item = AnsweredCall::decode_from(limits, reader)?; items_0.push(item).expect("count within capacity"); } items_0 };
-        let decoded_grants = { let count = match skein_codec::read_count(reader, limits.start_grants.min(CEILINGS.start_grants)) { Ok(count) => count, Err(reason) => return Err(Problem { path: Path::StartGrants, reason }), }; if count > reader.remaining() / 24 { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Short }); } let mut items_0 = List::with_capacity(count); for _index in 0_u32..count { let item = Grant::decode_from(limits, reader)?; items_0.push(item).expect("count within capacity"); } items_0 };
-        let decoded_window = Window::decode_from(limits, reader)?;
-        Self::new(limits, StartParts { activation: decoded_activation, charter: decoded_charter, workspace: decoded_workspace, transcript: decoded_transcript, answered: decoded_answered, grants: decoded_grants, window: decoded_window })
-    }
-}
-
 impl Message {
     /// Measures this record's wire encoding.
     #[must_use]
@@ -5631,6 +5623,107 @@ impl Message {
         let decoded_label = match skein_codec::read_text(reader, limits.message_label.min(CEILINGS.message_label)) { Ok(text) => text, Err(reason) => return Err(Problem { path: Path::MessageLabel, reason }), };
         let decoded_text = match skein_codec::read_text(reader, limits.message_text.min(CEILINGS.message_text)) { Ok(text) => text, Err(reason) => return Err(Problem { path: Path::MessageText, reason }), };
         Self::new(limits, MessageParts { name: decoded_name, label: decoded_label, text: decoded_text })
+    }
+}
+
+impl Start {
+    /// Measures this record's wire encoding.
+    #[must_use]
+    pub fn measure(&self) -> u32 {
+        let mut size = 0_u32;
+        size = size.checked_add(8).expect("schema ceilings fit u32");
+        let field_charter = &self.charter;
+        size = size.checked_add(4).expect("schema ceilings fit u32");
+        size = size.checked_add(u32::try_from(field_charter.len()).expect("field ceiling fits u32")).expect("schema ceilings fit u32");
+        let field_workspace = &self.workspace;
+        size = size.checked_add(1).expect("schema ceilings fit u32");
+        if let Some(some_0) = field_workspace {
+        size = size.checked_add(some_0.measure()).expect("schema ceilings fit u32");
+        }
+        let field_transcript = &self.transcript;
+        size = size.checked_add(4).expect("schema ceilings fit u32");
+        for item_0 in field_transcript.as_slice() {
+        size = size.checked_add(4).expect("schema ceilings fit u32");
+        size = size.checked_add(u32::try_from(item_0.len()).expect("field ceiling fits u32")).expect("schema ceilings fit u32");
+        }
+        let field_answered = &self.answered;
+        size = size.checked_add(4).expect("schema ceilings fit u32");
+        for item_0 in field_answered.as_slice() {
+        size = size.checked_add(item_0.measure()).expect("schema ceilings fit u32");
+        }
+        let field_grants = &self.grants;
+        size = size.checked_add(4).expect("schema ceilings fit u32");
+        for item_0 in field_grants.as_slice() {
+        size = size.checked_add(item_0.measure()).expect("schema ceilings fit u32");
+        }
+        let field_window = &self.window;
+        size = size.checked_add(field_window.measure()).expect("schema ceilings fit u32");
+        let field_messages = &self.messages;
+        size = size.checked_add(4).expect("schema ceilings fit u32");
+        for item_0 in field_messages.as_slice() {
+        size = size.checked_add(item_0.measure()).expect("schema ceilings fit u32");
+        }
+        size
+    }
+
+    /// Writes into a writer with room for the measured bytes.
+    pub fn encode(&self, writer: &mut skein_lib::Writer) -> Result<(), skein_lib::Overflow> {
+        let field_activation = &self.activation;
+        writer.put(&field_activation.to_be_bytes())?;
+        let field_charter = &self.charter;
+        writer.put(&u32::try_from(field_charter.len()).expect("field ceiling fits u32").to_be_bytes())?;
+        writer.put(field_charter.as_ref())?;
+        let field_workspace = &self.workspace;
+        match field_workspace {
+            Some(some_0) => {
+                writer.put(&[1_u8])?;
+        some_0.encode(writer)?;
+            }
+            None => writer.put(&[0_u8])?,
+        }
+        let field_transcript = &self.transcript;
+        writer.put(&field_transcript.len().to_be_bytes())?;
+        for item_0 in field_transcript.as_slice() {
+        writer.put(&u32::try_from(item_0.len()).expect("field ceiling fits u32").to_be_bytes())?;
+        writer.put(item_0.as_ref())?;
+        }
+        let field_answered = &self.answered;
+        writer.put(&field_answered.len().to_be_bytes())?;
+        for item_0 in field_answered.as_slice() {
+        item_0.encode(writer)?;
+        }
+        let field_grants = &self.grants;
+        writer.put(&field_grants.len().to_be_bytes())?;
+        for item_0 in field_grants.as_slice() {
+        item_0.encode(writer)?;
+        }
+        let field_window = &self.window;
+        field_window.encode(writer)?;
+        let field_messages = &self.messages;
+        writer.put(&field_messages.len().to_be_bytes())?;
+        for item_0 in field_messages.as_slice() {
+        item_0.encode(writer)?;
+        }
+        Ok(())
+    }
+
+    /// Reads a whole record and refuses trailing bytes.
+    pub fn decode(limits: &Limits, reader: &mut skein_lib::Reader<'_>) -> Result<Self, Problem> {
+        let value = Self::decode_from(limits, reader)?;
+        if !reader.is_empty() { return Err(Problem { path: Path::StartTail, reason: skein_codec::Reason::Trailing }); }
+        Ok(value)
+    }
+
+    fn decode_from(limits: &Limits, reader: &mut skein_lib::Reader<'_>) -> Result<Self, Problem> {
+        let decoded_activation = reader.u64().ok_or(Problem { path: Path::StartActivation, reason: skein_codec::Reason::Short })?;
+        let decoded_charter = { let length = match skein_codec::read_len(reader, limits.start_charter.min(CEILINGS.start_charter)) { Ok(length) => length, Err(reason) => return Err(Problem { path: Path::StartCharter, reason }), }; Box::from(reader.bytes(length).ok_or(Problem { path: Path::StartCharter, reason: skein_codec::Reason::Short })?) };
+        let decoded_workspace = match reader.u8().ok_or(Problem { path: Path::StartWorkspace, reason: skein_codec::Reason::Short })? { 0 => None, 1 => Some(Workspace::decode_from(limits, reader)?), _ => return Err(Problem { path: Path::StartWorkspace, reason: skein_codec::Reason::Tag }) };
+        let decoded_transcript = { let count = match skein_codec::read_count(reader, limits.start_transcript.min(CEILINGS.start_transcript)) { Ok(count) => count, Err(reason) => return Err(Problem { path: Path::StartTranscript, reason }), }; if count > reader.remaining() / 4 { return Err(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Short }); } let mut items_0 = List::with_capacity(count); for _index in 0_u32..count { let item = { let length = match skein_codec::read_len(reader, limits.start_transcript_item.min(CEILINGS.start_transcript_item)) { Ok(length) => length, Err(reason) => return Err(Problem { path: Path::StartTranscript, reason }), }; Box::from(reader.bytes(length).ok_or(Problem { path: Path::StartTranscript, reason: skein_codec::Reason::Short })?) }; items_0.push(item).expect("count within capacity"); } items_0 };
+        let decoded_answered = { let count = match skein_codec::read_count(reader, limits.start_answered.min(CEILINGS.start_answered)) { Ok(count) => count, Err(reason) => return Err(Problem { path: Path::StartAnswered, reason }), }; if count > reader.remaining() / 21 { return Err(Problem { path: Path::StartAnswered, reason: skein_codec::Reason::Short }); } let mut items_0 = List::with_capacity(count); for _index in 0_u32..count { let item = AnsweredCall::decode_from(limits, reader)?; items_0.push(item).expect("count within capacity"); } items_0 };
+        let decoded_grants = { let count = match skein_codec::read_count(reader, limits.start_grants.min(CEILINGS.start_grants)) { Ok(count) => count, Err(reason) => return Err(Problem { path: Path::StartGrants, reason }), }; if count > reader.remaining() / 24 { return Err(Problem { path: Path::StartGrants, reason: skein_codec::Reason::Short }); } let mut items_0 = List::with_capacity(count); for _index in 0_u32..count { let item = Grant::decode_from(limits, reader)?; items_0.push(item).expect("count within capacity"); } items_0 };
+        let decoded_window = Window::decode_from(limits, reader)?;
+        let decoded_messages = { let count = match skein_codec::read_count(reader, limits.start_messages.min(CEILINGS.start_messages)) { Ok(count) => count, Err(reason) => return Err(Problem { path: Path::StartMessages, reason }), }; if count > reader.remaining() / 16 { return Err(Problem { path: Path::StartMessages, reason: skein_codec::Reason::Short }); } let mut items_0 = List::with_capacity(count); for _index in 0_u32..count { let item = Message::decode_from(limits, reader)?; items_0.push(item).expect("count within capacity"); } items_0 };
+        Self::new(limits, StartParts { activation: decoded_activation, charter: decoded_charter, workspace: decoded_workspace, transcript: decoded_transcript, answered: decoded_answered, grants: decoded_grants, window: decoded_window, messages: decoded_messages })
     }
 }
 
@@ -6995,7 +7088,7 @@ impl InvalidStart {
     #[must_use]
     pub fn measure(&self) -> u32 {
         match self {
-            Self::CharterVersion | Self::MalformedCharter | Self::Activation | Self::Window | Self::Conventions | Self::TooLarge | Self::Workspace | Self::Grants | Self::Outcome | Self::Budget | Self::Llm | Self::Conversation | Self::Endpoint => 1,
+            Self::CharterVersion | Self::MalformedCharter | Self::Activation | Self::Window | Self::Conventions | Self::TooLarge | Self::Workspace | Self::Grants | Self::Outcome | Self::Budget | Self::Llm | Self::Conversation | Self::Endpoint | Self::Messages => 1,
         }
     }
 
@@ -7015,6 +7108,7 @@ impl InvalidStart {
             Self::Llm => writer.put(&[10_u8])?,
             Self::Conversation => writer.put(&[11_u8])?,
             Self::Endpoint => writer.put(&[12_u8])?,
+            Self::Messages => writer.put(&[13_u8])?,
         }
         Ok(())
     }
@@ -7042,6 +7136,7 @@ impl InvalidStart {
             10 => Self::Llm,
             11 => Self::Conversation,
             12 => Self::Endpoint,
+            13 => Self::Messages,
             _ => return Err(Problem { path: Path::InvalidStartTag, reason: skein_codec::Reason::Tag }),
         };
         Self::new(limits, value)
@@ -7303,7 +7398,7 @@ impl Answer {
 }
 
 fn limits_valid(limits: &Limits) -> bool {
-    limits.directory_name <= CEILINGS.directory_name && limits.directory_path <= CEILINGS.directory_path && limits.directory_conflicts <= CEILINGS.directory_conflicts && limits.directory_conflicts_item <= CEILINGS.directory_conflicts_item && limits.workspace_directories <= CEILINGS.workspace_directories && limits.grant_value_credential <= CEILINGS.grant_value_credential && limits.receipt_text <= CEILINGS.receipt_text && limits.delivered_receipts <= CEILINGS.delivered_receipts && limits.marker_path <= CEILINGS.marker_path && limits.delivery_refusal_explanation <= CEILINGS.delivery_refusal_explanation && limits.delivery_failure_diagnostic <= CEILINGS.delivery_failure_diagnostic && limits.host_reply_text <= CEILINGS.host_reply_text && limits.answered_call_tool <= CEILINGS.answered_call_tool && limits.start_charter <= CEILINGS.start_charter && limits.start_transcript <= CEILINGS.start_transcript && limits.start_transcript_item <= CEILINGS.start_transcript_item && limits.start_answered <= CEILINGS.start_answered && limits.start_grants <= CEILINGS.start_grants && limits.message_label <= CEILINGS.message_label && limits.message_text <= CEILINGS.message_text && limits.host_ask_tool <= CEILINGS.host_ask_tool && limits.host_ask_input <= CEILINGS.host_ask_input && limits.field_name <= CEILINGS.field_name && limits.field_text <= CEILINGS.field_text && limits.deliver_ask_fields <= CEILINGS.deliver_ask_fields && limits.turn_body <= CEILINGS.turn_body && limits.accepted_result <= CEILINGS.accepted_result
+    limits.directory_name <= CEILINGS.directory_name && limits.directory_path <= CEILINGS.directory_path && limits.directory_conflicts <= CEILINGS.directory_conflicts && limits.directory_conflicts_item <= CEILINGS.directory_conflicts_item && limits.workspace_directories <= CEILINGS.workspace_directories && limits.grant_value_credential <= CEILINGS.grant_value_credential && limits.receipt_text <= CEILINGS.receipt_text && limits.delivered_receipts <= CEILINGS.delivered_receipts && limits.marker_path <= CEILINGS.marker_path && limits.delivery_refusal_explanation <= CEILINGS.delivery_refusal_explanation && limits.delivery_failure_diagnostic <= CEILINGS.delivery_failure_diagnostic && limits.host_reply_text <= CEILINGS.host_reply_text && limits.answered_call_tool <= CEILINGS.answered_call_tool && limits.message_label <= CEILINGS.message_label && limits.message_text <= CEILINGS.message_text && limits.start_charter <= CEILINGS.start_charter && limits.start_transcript <= CEILINGS.start_transcript && limits.start_transcript_item <= CEILINGS.start_transcript_item && limits.start_answered <= CEILINGS.start_answered && limits.start_grants <= CEILINGS.start_grants && limits.start_messages <= CEILINGS.start_messages && limits.host_ask_tool <= CEILINGS.host_ask_tool && limits.host_ask_input <= CEILINGS.host_ask_input && limits.field_name <= CEILINGS.field_name && limits.field_text <= CEILINGS.field_text && limits.deliver_ask_fields <= CEILINGS.deliver_ask_fields && limits.turn_body <= CEILINGS.turn_body && limits.accepted_result <= CEILINGS.accepted_result
 }
 
 impl CallName {
@@ -7710,38 +7805,6 @@ impl AnsweredCall {
     }
 }
 
-impl Start {
-    /// Maximum encoded bytes under these limits.
-    #[must_use]
-    pub fn worst_case_bytes(limits: &Limits) -> Option<u64> {
-        if !limits_valid(limits) { return None; }
-        let mut size = 0_u64;
-        size = size.checked_add(8_u64)?;
-        size = size.checked_add(4_u64.checked_add(u64::from(limits.start_charter))?)?;
-        size = size.checked_add(1_u64.checked_add(Workspace::worst_case_bytes(limits)?)?)?;
-        size = size.checked_add(4_u64.checked_add(u64::from(limits.start_transcript).checked_mul(4_u64.checked_add(u64::from(limits.start_transcript_item))?)?)?)?;
-        size = size.checked_add(4_u64.checked_add(u64::from(limits.start_answered).checked_mul(AnsweredCall::worst_case_bytes(limits)?)?)?)?;
-        size = size.checked_add(4_u64.checked_add(u64::from(limits.start_grants).checked_mul(Grant::worst_case_bytes(limits)?)?)?)?;
-        size = size.checked_add(Window::worst_case_bytes(limits)?)?;
-        Some(size)
-    }
-
-    /// Maximum heap held by one decoded value under these limits.
-    #[must_use]
-    pub fn worst_case_heap(limits: &Limits) -> Option<u64> {
-        if !limits_valid(limits) { return None; }
-        let mut heap = 0_u64;
-        heap = heap.checked_add(0_u64)?;
-        heap = heap.checked_add(u64::from(limits.start_charter))?;
-        heap = heap.checked_add(Workspace::worst_case_heap(limits)?)?;
-        heap = heap.checked_add(List::<Box<[u8]>>::worst_case(limits.start_transcript)?.checked_add(u64::from(limits.start_transcript).checked_mul(u64::from(limits.start_transcript_item))?)?)?;
-        heap = heap.checked_add(List::<AnsweredCall>::worst_case(limits.start_answered)?.checked_add(u64::from(limits.start_answered).checked_mul(AnsweredCall::worst_case_heap(limits)?)?)?)?;
-        heap = heap.checked_add(List::<Grant>::worst_case(limits.start_grants)?.checked_add(u64::from(limits.start_grants).checked_mul(Grant::worst_case_heap(limits)?)?)?)?;
-        heap = heap.checked_add(Window::worst_case_heap(limits)?)?;
-        Some(heap)
-    }
-}
-
 impl Message {
     /// Maximum encoded bytes under these limits.
     #[must_use]
@@ -7762,6 +7825,40 @@ impl Message {
         heap = heap.checked_add(0_u64)?;
         heap = heap.checked_add(u64::from(limits.message_label))?;
         heap = heap.checked_add(u64::from(limits.message_text))?;
+        Some(heap)
+    }
+}
+
+impl Start {
+    /// Maximum encoded bytes under these limits.
+    #[must_use]
+    pub fn worst_case_bytes(limits: &Limits) -> Option<u64> {
+        if !limits_valid(limits) { return None; }
+        let mut size = 0_u64;
+        size = size.checked_add(8_u64)?;
+        size = size.checked_add(4_u64.checked_add(u64::from(limits.start_charter))?)?;
+        size = size.checked_add(1_u64.checked_add(Workspace::worst_case_bytes(limits)?)?)?;
+        size = size.checked_add(4_u64.checked_add(u64::from(limits.start_transcript).checked_mul(4_u64.checked_add(u64::from(limits.start_transcript_item))?)?)?)?;
+        size = size.checked_add(4_u64.checked_add(u64::from(limits.start_answered).checked_mul(AnsweredCall::worst_case_bytes(limits)?)?)?)?;
+        size = size.checked_add(4_u64.checked_add(u64::from(limits.start_grants).checked_mul(Grant::worst_case_bytes(limits)?)?)?)?;
+        size = size.checked_add(Window::worst_case_bytes(limits)?)?;
+        size = size.checked_add(4_u64.checked_add(u64::from(limits.start_messages).checked_mul(Message::worst_case_bytes(limits)?)?)?)?;
+        Some(size)
+    }
+
+    /// Maximum heap held by one decoded value under these limits.
+    #[must_use]
+    pub fn worst_case_heap(limits: &Limits) -> Option<u64> {
+        if !limits_valid(limits) { return None; }
+        let mut heap = 0_u64;
+        heap = heap.checked_add(0_u64)?;
+        heap = heap.checked_add(u64::from(limits.start_charter))?;
+        heap = heap.checked_add(Workspace::worst_case_heap(limits)?)?;
+        heap = heap.checked_add(List::<Box<[u8]>>::worst_case(limits.start_transcript)?.checked_add(u64::from(limits.start_transcript).checked_mul(u64::from(limits.start_transcript_item))?)?)?;
+        heap = heap.checked_add(List::<AnsweredCall>::worst_case(limits.start_answered)?.checked_add(u64::from(limits.start_answered).checked_mul(AnsweredCall::worst_case_heap(limits)?)?)?)?;
+        heap = heap.checked_add(List::<Grant>::worst_case(limits.start_grants)?.checked_add(u64::from(limits.start_grants).checked_mul(Grant::worst_case_heap(limits)?)?)?)?;
+        heap = heap.checked_add(Window::worst_case_heap(limits)?)?;
+        heap = heap.checked_add(List::<Message>::worst_case(limits.start_messages)?.checked_add(u64::from(limits.start_messages).checked_mul(Message::worst_case_heap(limits)?)?)?)?;
         Some(heap)
     }
 }
@@ -8719,8 +8816,8 @@ pub fn worst_case_bytes(limits: &Limits) -> Option<u64> {
     biggest = biggest.max(Reply::worst_case_bytes(limits)?);
     biggest = biggest.max(SavedReply::worst_case_bytes(limits)?);
     biggest = biggest.max(AnsweredCall::worst_case_bytes(limits)?);
-    biggest = biggest.max(Start::worst_case_bytes(limits)?);
     biggest = biggest.max(Message::worst_case_bytes(limits)?);
+    biggest = biggest.max(Start::worst_case_bytes(limits)?);
     biggest = biggest.max(HostAnswer::worst_case_bytes(limits)?);
     biggest = biggest.max(Acknowledge::worst_case_bytes(limits)?);
     biggest = biggest.max(GrantRefresh::worst_case_bytes(limits)?);
@@ -8792,8 +8889,8 @@ pub fn worst_case_heap(limits: &Limits) -> Option<u64> {
     biggest = biggest.max(Reply::worst_case_heap(limits)?);
     biggest = biggest.max(SavedReply::worst_case_heap(limits)?);
     biggest = biggest.max(AnsweredCall::worst_case_heap(limits)?);
-    biggest = biggest.max(Start::worst_case_heap(limits)?);
     biggest = biggest.max(Message::worst_case_heap(limits)?);
+    biggest = biggest.max(Start::worst_case_heap(limits)?);
     biggest = biggest.max(HostAnswer::worst_case_heap(limits)?);
     biggest = biggest.max(Acknowledge::worst_case_heap(limits)?);
     biggest = biggest.max(GrantRefresh::worst_case_heap(limits)?);
@@ -8844,7 +8941,7 @@ pub fn worst_case_heap(limits: &Limits) -> Option<u64> {
 
 #[cfg(test)]
 mod golden_tests {
-    use super::{CEILINGS, Path, CallName, CallNameParts, Window, WindowParts, Directory, DirectoryParts, Workspace, WorkspaceParts, GrantValue, GrantValueParts, Grant, GrantParts, Receipt, ReceiptParts, Delivered, DeliveredParts, Marker, MarkerParts, DeliveryRefusal, DeliveryRefusalParts, DeliveryReason, DeliveryFailure, DeliveryFailureParts, Delivery, HostReply, HostReplyParts, DeliveryReply, DeliveryReplyParts, Reply, SavedReply, AnsweredCall, AnsweredCallParts, Start, StartParts, Message, MessageParts, HostAnswer, HostAnswerParts, Acknowledge, AcknowledgeParts, GrantRefresh, GrantRefreshParts, Cancel, CancelParts, Admitted, AdmittedParts, MessageRefusal, MessageRefused, MessageRefusedParts, Effect, HostAsk, HostAskParts, Field, FieldParts, DeliverAsk, DeliverAskParts, Ask, Call, CallParts, Withdraw, WithdrawParts, Turn, TurnParts, Waiting, WaitingParts, Long, LongParts, LongDone, LongDoneParts, Rejected, RejectedParts, Exhausted, ExhaustedParts, FactKind, Fact, FactParts, ReceivingLimit, Overflow, ReceivingLimitValue, ReceivingLimitValueParts, OverflowValue, OverflowValueParts, BudgetFailure, CompletionFailure, CompletionEvidence, CompletionFault, CompletionFaultParts, ModelFault, TranscriptRefusal, TranscriptRefusalValue, TranscriptRefusalValueParts, ModelFaultValue, ModelFaultValueParts, BudgetFailureValue, BudgetFailureValueParts, PolicyFailure, PolicyFailureParts, RunFailure, InvalidStart, InvalidStartValue, InvalidStartValueParts, StartRefusal, Accepted, AcceptedParts, Failed, FailedParts, Refused, RefusedParts, RunResult, Answer, AnswerParts};
+    use super::{CEILINGS, Path, CallName, CallNameParts, Window, WindowParts, Directory, DirectoryParts, Workspace, WorkspaceParts, GrantValue, GrantValueParts, Grant, GrantParts, Receipt, ReceiptParts, Delivered, DeliveredParts, Marker, MarkerParts, DeliveryRefusal, DeliveryRefusalParts, DeliveryReason, DeliveryFailure, DeliveryFailureParts, Delivery, HostReply, HostReplyParts, DeliveryReply, DeliveryReplyParts, Reply, SavedReply, AnsweredCall, AnsweredCallParts, Message, MessageParts, Start, StartParts, HostAnswer, HostAnswerParts, Acknowledge, AcknowledgeParts, GrantRefresh, GrantRefreshParts, Cancel, CancelParts, Admitted, AdmittedParts, MessageRefusal, MessageRefused, MessageRefusedParts, Effect, HostAsk, HostAskParts, Field, FieldParts, DeliverAsk, DeliverAskParts, Ask, Call, CallParts, Withdraw, WithdrawParts, Turn, TurnParts, Waiting, WaitingParts, Long, LongParts, LongDone, LongDoneParts, Rejected, RejectedParts, Exhausted, ExhaustedParts, FactKind, Fact, FactParts, ReceivingLimit, Overflow, ReceivingLimitValue, ReceivingLimitValueParts, OverflowValue, OverflowValueParts, BudgetFailure, CompletionFailure, CompletionEvidence, CompletionFault, CompletionFaultParts, ModelFault, TranscriptRefusal, TranscriptRefusalValue, TranscriptRefusalValueParts, ModelFaultValue, ModelFaultValueParts, BudgetFailureValue, BudgetFailureValueParts, PolicyFailure, PolicyFailureParts, RunFailure, InvalidStart, InvalidStartValue, InvalidStartValueParts, StartRefusal, Accepted, AcceptedParts, Failed, FailedParts, Refused, RefusedParts, RunResult, Answer, AnswerParts};
     use alloc::boxed::Box;
 
     #[test]
@@ -9608,26 +9705,6 @@ mod golden_tests {
     }
 
     #[test]
-    fn record_start_smallest() {
-        let value = Start::new(&CEILINGS, StartParts { activation: 0_u64, charter: Box::from([].as_slice()), workspace: None, transcript: skein_lib::List::with_capacity(0), answered: skein_lib::List::with_capacity(0), grants: skein_lib::List::with_capacity(0), window: Window::new(&CEILINGS, WindowParts { turns: 0_u32, bytes: 0_u64 }).expect("golden within ceilings") }).expect("golden within ceilings");
-        let golden: &[u8] = &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
-        value.encode(&mut writer).expect("measured room");
-        assert_eq!(writer.finish().as_ref(), golden);
-        assert_eq!(Start::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
-    }
-
-    #[test]
-    fn record_start_full() {
-        let value = Start::new(&CEILINGS, StartParts { activation: u64::MAX, charter: Box::from([0_u8, 127_u8, 255_u8].as_slice()), workspace: Some(Workspace::new(&CEILINGS, WorkspaceParts { directories: { let mut items = skein_lib::List::with_capacity(1); items.push(Directory::new(&CEILINGS, DirectoryParts { name: Box::from([97_u8, 98_u8, 99_u8].as_slice()), path: Box::from([97_u8, 98_u8, 99_u8].as_slice()), writable: true, git: true, conflicts: { let mut items = skein_lib::List::with_capacity(1); items.push(Box::from([97_u8, 98_u8, 99_u8].as_slice())).expect("one slot"); items } }).expect("golden within ceilings")).expect("one slot"); items } }).expect("golden within ceilings")), transcript: { let mut items = skein_lib::List::with_capacity(1); items.push(Box::from([0_u8, 127_u8, 255_u8].as_slice())).expect("one slot"); items }, answered: { let mut items = skein_lib::List::with_capacity(1); items.push(AnsweredCall::new(&CEILINGS, AnsweredCallParts { name: CallName::new(&CEILINGS, CallNameParts { activation: u64::MAX, completion: u32::MAX, position: u32::MAX }).expect("golden within ceilings"), tool: Box::from([97_u8, 98_u8, 99_u8].as_slice()), reply: SavedReply::Host(HostReply::new(&CEILINGS, HostReplyParts { error: true, text: Box::from([97_u8, 98_u8, 99_u8].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings")).expect("one slot"); items }, grants: { let mut items = skein_lib::List::with_capacity(1); items.push(Grant::new(&CEILINGS, GrantParts { account: u32::MAX, generation: u64::MAX, valid: skein_lib::Duration::from_nanos(u64::MAX), value: GrantValue::new(&CEILINGS, GrantValueParts { credential: Box::from([0_u8, 127_u8, 255_u8].as_slice()) }).expect("golden within ceilings") }).expect("golden within ceilings")).expect("one slot"); items }, window: Window::new(&CEILINGS, WindowParts { turns: u32::MAX, bytes: u64::MAX }).expect("golden within ceilings") }).expect("golden within ceilings");
-        let golden: &[u8] = &[255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 0, 127, 255, 1, 0, 0, 0, 1, 0, 0, 0, 3, 97, 98, 99, 0, 0, 0, 3, 97, 98, 99, 1, 1, 0, 0, 0, 1, 0, 0, 0, 3, 97, 98, 99, 0, 0, 0, 1, 0, 0, 0, 3, 0, 127, 255, 0, 0, 0, 1, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 97, 98, 99, 0, 1, 0, 0, 0, 3, 97, 98, 99, 0, 0, 0, 1, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 0, 127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255];
-        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
-        value.encode(&mut writer).expect("measured room");
-        assert_eq!(writer.finish().as_ref(), golden);
-        assert_eq!(Start::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
-    }
-
-    #[test]
     fn record_message_smallest() {
         let value = Message::new(&CEILINGS, MessageParts { name: 0_u64, label: Box::from([].as_slice()), text: Box::from([].as_slice()) }).expect("golden within ceilings");
         let golden: &[u8] = &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -9645,6 +9722,26 @@ mod golden_tests {
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
         assert_eq!(Message::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn record_start_smallest() {
+        let value = Start::new(&CEILINGS, StartParts { activation: 0_u64, charter: Box::from([].as_slice()), workspace: None, transcript: skein_lib::List::with_capacity(0), answered: skein_lib::List::with_capacity(0), grants: skein_lib::List::with_capacity(0), window: Window::new(&CEILINGS, WindowParts { turns: 0_u32, bytes: 0_u64 }).expect("golden within ceilings"), messages: skein_lib::List::with_capacity(0) }).expect("golden within ceilings");
+        let golden: &[u8] = &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(Start::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn record_start_full() {
+        let value = Start::new(&CEILINGS, StartParts { activation: u64::MAX, charter: Box::from([0_u8, 127_u8, 255_u8].as_slice()), workspace: Some(Workspace::new(&CEILINGS, WorkspaceParts { directories: { let mut items = skein_lib::List::with_capacity(1); items.push(Directory::new(&CEILINGS, DirectoryParts { name: Box::from([97_u8, 98_u8, 99_u8].as_slice()), path: Box::from([97_u8, 98_u8, 99_u8].as_slice()), writable: true, git: true, conflicts: { let mut items = skein_lib::List::with_capacity(1); items.push(Box::from([97_u8, 98_u8, 99_u8].as_slice())).expect("one slot"); items } }).expect("golden within ceilings")).expect("one slot"); items } }).expect("golden within ceilings")), transcript: { let mut items = skein_lib::List::with_capacity(1); items.push(Box::from([0_u8, 127_u8, 255_u8].as_slice())).expect("one slot"); items }, answered: { let mut items = skein_lib::List::with_capacity(1); items.push(AnsweredCall::new(&CEILINGS, AnsweredCallParts { name: CallName::new(&CEILINGS, CallNameParts { activation: u64::MAX, completion: u32::MAX, position: u32::MAX }).expect("golden within ceilings"), tool: Box::from([97_u8, 98_u8, 99_u8].as_slice()), reply: SavedReply::Host(HostReply::new(&CEILINGS, HostReplyParts { error: true, text: Box::from([97_u8, 98_u8, 99_u8].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings")).expect("one slot"); items }, grants: { let mut items = skein_lib::List::with_capacity(1); items.push(Grant::new(&CEILINGS, GrantParts { account: u32::MAX, generation: u64::MAX, valid: skein_lib::Duration::from_nanos(u64::MAX), value: GrantValue::new(&CEILINGS, GrantValueParts { credential: Box::from([0_u8, 127_u8, 255_u8].as_slice()) }).expect("golden within ceilings") }).expect("golden within ceilings")).expect("one slot"); items }, window: Window::new(&CEILINGS, WindowParts { turns: u32::MAX, bytes: u64::MAX }).expect("golden within ceilings"), messages: { let mut items = skein_lib::List::with_capacity(1); items.push(Message::new(&CEILINGS, MessageParts { name: u64::MAX, label: Box::from([97_u8, 98_u8, 99_u8].as_slice()), text: Box::from([97_u8, 98_u8, 99_u8].as_slice()) }).expect("golden within ceilings")).expect("one slot"); items } }).expect("golden within ceilings");
+        let golden: &[u8] = &[255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 0, 127, 255, 1, 0, 0, 0, 1, 0, 0, 0, 3, 97, 98, 99, 0, 0, 0, 3, 97, 98, 99, 1, 1, 0, 0, 0, 1, 0, 0, 0, 3, 97, 98, 99, 0, 0, 0, 1, 0, 0, 0, 3, 0, 127, 255, 0, 0, 0, 1, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 97, 98, 99, 0, 1, 0, 0, 0, 3, 97, 98, 99, 0, 0, 0, 1, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 0, 127, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 1, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 3, 97, 98, 99, 0, 0, 0, 3, 97, 98, 99];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(Start::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
     }
 
     #[test]
@@ -11648,6 +11745,26 @@ mod golden_tests {
     }
 
     #[test]
+    fn enum_invalid_start_messages_smallest() {
+        let value = InvalidStart::Messages;
+        let golden: &[u8] = &[13];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(InvalidStart::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
+    fn enum_invalid_start_messages_full() {
+        let value = InvalidStart::Messages;
+        let golden: &[u8] = &[13];
+        let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
+        value.encode(&mut writer).expect("measured room");
+        assert_eq!(writer.finish().as_ref(), golden);
+        assert_eq!(InvalidStart::decode(&CEILINGS, &mut skein_lib::Reader::new(golden)), Ok(value));
+    }
+
+    #[test]
     fn record_invalid_start_value_smallest() {
         let value = InvalidStartValue::new(&CEILINGS, InvalidStartValueParts { value: InvalidStart::CharterVersion }).expect("golden within ceilings");
         let golden: &[u8] = &[0];
@@ -12108,86 +12225,6 @@ mod golden_tests {
     }
 
     #[test]
-    fn bound_start_charter() {
-        fn wire(count: u32, payload: bool) -> Box<[u8]> {
-            let body = usize::try_from(count).expect("u32 fits usize").checked_mul(1).expect("schema ceiling");
-            let header = 8_usize.checked_add(4).expect("header size");
-            let total = if payload { let with_body = header.checked_add(body).expect("body size"); with_body.checked_add(25_usize).expect("wire size") } else { header };
-            let mut writer = skein_lib::Writer::new(total);
-            writer.put(&[0, 0, 0, 0, 0, 0, 0, 0]).expect("prefix room");
-            writer.put(&count.to_be_bytes()).expect("length room");
-            if payload {
-                writer.put(&skein_lib::bytes::zeroed(body)).expect("body room");
-                writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("suffix room");
-            }
-            writer.finish()
-        }
-        Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(67_108_864, true))).expect("field at ceiling");
-        let problem = Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(67_108_865, false))).expect_err("field past ceiling");
-        assert_eq!((problem.path, problem.reason), (Path::StartCharter, skein_codec::Reason::Bound));
-    }
-
-    #[test]
-    fn bound_start_transcript() {
-        fn wire(count: u32, payload: bool) -> Box<[u8]> {
-            let body = usize::try_from(count).expect("u32 fits usize").checked_mul(4).expect("schema ceiling");
-            let header = 13_usize.checked_add(4).expect("header size");
-            let total = if payload { let with_body = header.checked_add(body).expect("body size"); with_body.checked_add(20_usize).expect("wire size") } else { header };
-            let mut writer = skein_lib::Writer::new(total);
-            writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("prefix room");
-            writer.put(&count.to_be_bytes()).expect("length room");
-            if payload {
-                for _item in 0_u32..count { writer.put(&[0, 0, 0, 0]).expect("item room"); }
-                writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("suffix room");
-            }
-            writer.finish()
-        }
-        Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(64, true))).expect("field at ceiling");
-        let problem = Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(65, false))).expect_err("field past ceiling");
-        assert_eq!((problem.path, problem.reason), (Path::StartTranscript, skein_codec::Reason::Bound));
-    }
-
-    #[test]
-    fn bound_start_answered() {
-        fn wire(count: u32, payload: bool) -> Box<[u8]> {
-            let body = usize::try_from(count).expect("u32 fits usize").checked_mul(26).expect("schema ceiling");
-            let header = 17_usize.checked_add(4).expect("header size");
-            let total = if payload { let with_body = header.checked_add(body).expect("body size"); with_body.checked_add(16_usize).expect("wire size") } else { header };
-            let mut writer = skein_lib::Writer::new(total);
-            writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("prefix room");
-            writer.put(&count.to_be_bytes()).expect("length room");
-            if payload {
-                for _item in 0_u32..count { writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("item room"); }
-                writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("suffix room");
-            }
-            writer.finish()
-        }
-        Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(128, true))).expect("field at ceiling");
-        let problem = Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(129, false))).expect_err("field past ceiling");
-        assert_eq!((problem.path, problem.reason), (Path::StartAnswered, skein_codec::Reason::Bound));
-    }
-
-    #[test]
-    fn bound_start_grants() {
-        fn wire(count: u32, payload: bool) -> Box<[u8]> {
-            let body = usize::try_from(count).expect("u32 fits usize").checked_mul(24).expect("schema ceiling");
-            let header = 21_usize.checked_add(4).expect("header size");
-            let total = if payload { let with_body = header.checked_add(body).expect("body size"); with_body.checked_add(12_usize).expect("wire size") } else { header };
-            let mut writer = skein_lib::Writer::new(total);
-            writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("prefix room");
-            writer.put(&count.to_be_bytes()).expect("length room");
-            if payload {
-                for _item in 0_u32..count { writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("item room"); }
-                writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("suffix room");
-            }
-            writer.finish()
-        }
-        Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(64, true))).expect("field at ceiling");
-        let problem = Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(65, false))).expect_err("field past ceiling");
-        assert_eq!((problem.path, problem.reason), (Path::StartGrants, skein_codec::Reason::Bound));
-    }
-
-    #[test]
     fn bound_message_label() {
         fn wire(count: u32, payload: bool) -> Box<[u8]> {
             let body = usize::try_from(count).expect("u32 fits usize").checked_mul(1).expect("schema ceiling");
@@ -12225,6 +12262,106 @@ mod golden_tests {
         Message::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(1_048_576, true))).expect("field at ceiling");
         let problem = Message::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(1_048_577, false))).expect_err("field past ceiling");
         assert_eq!((problem.path, problem.reason), (Path::MessageText, skein_codec::Reason::Bound));
+    }
+
+    #[test]
+    fn bound_start_charter() {
+        fn wire(count: u32, payload: bool) -> Box<[u8]> {
+            let body = usize::try_from(count).expect("u32 fits usize").checked_mul(1).expect("schema ceiling");
+            let header = 8_usize.checked_add(4).expect("header size");
+            let total = if payload { let with_body = header.checked_add(body).expect("body size"); with_body.checked_add(29_usize).expect("wire size") } else { header };
+            let mut writer = skein_lib::Writer::new(total);
+            writer.put(&[0, 0, 0, 0, 0, 0, 0, 0]).expect("prefix room");
+            writer.put(&count.to_be_bytes()).expect("length room");
+            if payload {
+                writer.put(&skein_lib::bytes::zeroed(body)).expect("body room");
+                writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("suffix room");
+            }
+            writer.finish()
+        }
+        Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(67_108_864, true))).expect("field at ceiling");
+        let problem = Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(67_108_865, false))).expect_err("field past ceiling");
+        assert_eq!((problem.path, problem.reason), (Path::StartCharter, skein_codec::Reason::Bound));
+    }
+
+    #[test]
+    fn bound_start_transcript() {
+        fn wire(count: u32, payload: bool) -> Box<[u8]> {
+            let body = usize::try_from(count).expect("u32 fits usize").checked_mul(4).expect("schema ceiling");
+            let header = 13_usize.checked_add(4).expect("header size");
+            let total = if payload { let with_body = header.checked_add(body).expect("body size"); with_body.checked_add(24_usize).expect("wire size") } else { header };
+            let mut writer = skein_lib::Writer::new(total);
+            writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("prefix room");
+            writer.put(&count.to_be_bytes()).expect("length room");
+            if payload {
+                for _item in 0_u32..count { writer.put(&[0, 0, 0, 0]).expect("item room"); }
+                writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("suffix room");
+            }
+            writer.finish()
+        }
+        Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(64, true))).expect("field at ceiling");
+        let problem = Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(65, false))).expect_err("field past ceiling");
+        assert_eq!((problem.path, problem.reason), (Path::StartTranscript, skein_codec::Reason::Bound));
+    }
+
+    #[test]
+    fn bound_start_answered() {
+        fn wire(count: u32, payload: bool) -> Box<[u8]> {
+            let body = usize::try_from(count).expect("u32 fits usize").checked_mul(26).expect("schema ceiling");
+            let header = 17_usize.checked_add(4).expect("header size");
+            let total = if payload { let with_body = header.checked_add(body).expect("body size"); with_body.checked_add(20_usize).expect("wire size") } else { header };
+            let mut writer = skein_lib::Writer::new(total);
+            writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("prefix room");
+            writer.put(&count.to_be_bytes()).expect("length room");
+            if payload {
+                for _item in 0_u32..count { writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("item room"); }
+                writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("suffix room");
+            }
+            writer.finish()
+        }
+        Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(128, true))).expect("field at ceiling");
+        let problem = Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(129, false))).expect_err("field past ceiling");
+        assert_eq!((problem.path, problem.reason), (Path::StartAnswered, skein_codec::Reason::Bound));
+    }
+
+    #[test]
+    fn bound_start_grants() {
+        fn wire(count: u32, payload: bool) -> Box<[u8]> {
+            let body = usize::try_from(count).expect("u32 fits usize").checked_mul(24).expect("schema ceiling");
+            let header = 21_usize.checked_add(4).expect("header size");
+            let total = if payload { let with_body = header.checked_add(body).expect("body size"); with_body.checked_add(16_usize).expect("wire size") } else { header };
+            let mut writer = skein_lib::Writer::new(total);
+            writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("prefix room");
+            writer.put(&count.to_be_bytes()).expect("length room");
+            if payload {
+                for _item in 0_u32..count { writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("item room"); }
+                writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("suffix room");
+            }
+            writer.finish()
+        }
+        Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(64, true))).expect("field at ceiling");
+        let problem = Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(65, false))).expect_err("field past ceiling");
+        assert_eq!((problem.path, problem.reason), (Path::StartGrants, skein_codec::Reason::Bound));
+    }
+
+    #[test]
+    fn bound_start_messages() {
+        fn wire(count: u32, payload: bool) -> Box<[u8]> {
+            let body = usize::try_from(count).expect("u32 fits usize").checked_mul(16).expect("schema ceiling");
+            let header = 37_usize.checked_add(4).expect("header size");
+            let total = if payload { let with_body = header.checked_add(body).expect("body size"); with_body.checked_add(0_usize).expect("wire size") } else { header };
+            let mut writer = skein_lib::Writer::new(total);
+            writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("prefix room");
+            writer.put(&count.to_be_bytes()).expect("length room");
+            if payload {
+                for _item in 0_u32..count { writer.put(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).expect("item room"); }
+                writer.put(&[]).expect("suffix room");
+            }
+            writer.finish()
+        }
+        Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(128, true))).expect("field at ceiling");
+        let problem = Start::decode(&CEILINGS, &mut skein_lib::Reader::new(&wire(129, false))).expect_err("field past ceiling");
+        assert_eq!((problem.path, problem.reason), (Path::StartMessages, skein_codec::Reason::Bound));
     }
 
     #[test]

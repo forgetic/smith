@@ -66,6 +66,8 @@ pub enum MessageRefusal {
 /// Start refused before process resources or payload copying.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Invalid {
+    /// Carried messages exceed the inbox or rendered byte bound, or repeat a name.
+    Messages,
     /// A parent Start with activation zero is refused before process work.
     Activation,
 

@@ -23,6 +23,7 @@ fn a_start_keeps_host_bytes_and_service_values_in_order() {
         },
     };
     let start = channel::Start {
+        messages: Box::default(),
         logical_run: Token::new(2),
         activation: 3,
         workspace: Some(Token::new(4)),

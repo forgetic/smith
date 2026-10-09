@@ -137,6 +137,7 @@ pub fn limits() -> Limits {
 #[must_use]
 pub fn start() -> Start {
     Start {
+        messages: Box::default(),
         logical_run: Token::new(7),
         activation: 1,
         workspace: None,

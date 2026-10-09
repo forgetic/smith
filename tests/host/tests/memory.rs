@@ -16,6 +16,7 @@ fn bytes(length: u64) -> Box<[u8]> {
 }
 fn maximum_start(limits: Limits) -> Start {
     Start {
+        messages: Box::default(),
         logical_run: Token::new(7),
         activation: 1,
         workspace: (limits.directories > 0).then_some(Token::new(8)),
@@ -372,4 +373,28 @@ fn checked_capacity_arithmetic_refuses_unrepresentable_or_incompatible_caps() {
     limits = smith_host_world::limits();
     limits.turns = 0;
     assert_eq!(host::worst_case(&limits), None);
+}
+
+#[test]
+fn maximum_carried_start_messages_are_owned_and_priced_during_spawn() {
+    let limits = smith_host_world::limits();
+    let mut measured = Measured::new(limits, 0);
+    let mut start = maximum_start(limits);
+    start.messages = (0..limits.messages)
+        .map(|name| host::Message {
+            name: Token::new(u64::from(name)),
+            label: Box::default(),
+            text: bytes(limits.message_bytes - 2),
+        })
+        .collect();
+    let owner = measured
+        .step(Input::Parent(parent::Event::Spawn { client: Token::new(1), start }), false)
+        .expect("maximum carried Start admitted");
+    assert!(
+        measured.meter.held() >= u64::from(limits.messages) * (limits.message_bytes - 2),
+        "actual message payloads remain retained until spawn settles"
+    );
+    measured.step(Input::Process(process::Event::Unspawned { owner, detail: Box::default() }), false);
+    measured.domain.reclaim();
+    assert_eq!(measured.domain.agents(), 0);
 }

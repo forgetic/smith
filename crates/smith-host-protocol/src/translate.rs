@@ -24,6 +24,16 @@ pub fn encode_start(
     values: Values,
     limits: &wire::Limits,
 ) -> Result<Frame, Error> {
+    let mut messages = List::with_capacity(limits.start_messages);
+    for message in start.messages {
+        let item = wire::Message::new(
+            limits,
+            wire::MessageParts { name: message.name.raw(), label: message.label, text: message.text },
+        )?;
+        if messages.push(item).is_err() {
+            return Err(Error::MissingValue);
+        }
+    }
     let workspace = encode_workspace(&start.directories, &values.paths, limits)?;
     let mut transcript = List::with_capacity(limits.start_transcript);
     for turn in start.transcript.unwrap_or_default() {
@@ -65,6 +75,7 @@ pub fn encode_start(
     let record = wire::Start::new(
         limits,
         wire::StartParts {
+            messages,
             activation: start.activation,
             charter: start.charter,
             workspace,

@@ -49,6 +49,7 @@ fn limits() -> crate::Limits {
 
 fn start() -> Start {
     Start {
+        messages: Box::default(),
         logical_run: Token::new(1),
         activation: 1,
         workspace: None,
@@ -298,4 +299,40 @@ fn message_admission_includes_the_label_separator_at_the_bound_and_one_byte_over
         }))
     );
     assert!(out.pop().is_none());
+}
+
+#[test]
+fn carried_messages_are_checked_before_spawn_with_the_runs_rendered_byte_arithmetic() {
+    let limits = crate::Limits { messages: 2, message_bytes: 9, ..limits() };
+    let message = |name, text: &[u8]| crate::Message {
+        name: Token::new(name),
+        label: b"person".as_slice().into(),
+        text: text.into(),
+    };
+    let batches: [Box<[crate::Message]>; 4] = [
+        Box::new([message(1, b"a"), message(2, b"a"), message(3, b"a")]),
+        Box::new([message(1, b"aa")]),
+        Box::new([message(0, b"a"), message(0, b"a")]),
+        Box::new([message(0, b"a"), message(99, b"a")]),
+    ];
+    for (at, messages) in batches.into_iter().enumerate() {
+        let mut domain = Domain::new(&limits);
+        let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+        let mut out = Queue::with_capacity(crate::max_out(&limits));
+        let start = Start { messages, ..start() };
+        crate::step(&mut domain, &env, Input::Parent(parent::Event::Spawn { client: Token::new(1), start }), &mut out);
+        let request = out.pop().expect("one start result");
+        if at == 3 {
+            let Output::Process(process::Request::Spawn { .. }) = request else {
+                panic!("exact rendered byte bound accepted")
+            };
+        } else {
+            let Output::Parent(parent::Request::Gone { end, .. }) = request else {
+                panic!("atomic typed start refusal")
+            };
+            assert_eq!(end, End::Invalid(crate::Invalid::Messages));
+            assert_eq!(domain.agents(), 0);
+        }
+        assert!(out.is_empty());
+    }
 }

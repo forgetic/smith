@@ -46,6 +46,7 @@ record AnsweredCall { name: CallName tool: text 64 reply: SavedReply }
 
 # Start has all values required to resume; the transcript consists of the
 # exact opaque versioned turn bytes told on earlier activations.
+record Message { name: u64 label: text 1024 text: text 1048576 }
 record Start {
     activation: u64
     charter: bytes 67108864
@@ -54,8 +55,8 @@ record Start {
     answered: list 128 AnsweredCall
     grants: list 64 Grant
     window: Window
+    messages: list 128 Message
 }
-record Message { name: u64 label: text 1024 text: text 1048576 }
 record HostAnswer { name: CallName reply: Reply }
 record Acknowledge { number: u32 }
 record GrantRefresh { grant: Grant }
@@ -121,7 +122,7 @@ enum RunFailure {
 }
 enum InvalidStart {
     charter_version, malformed_charter, activation, window, conventions, too_large,
-    workspace, grants, outcome, budget, llm, conversation, endpoint
+    workspace, grants, outcome, budget, llm, conversation, endpoint, messages
 }
 record InvalidStartValue { value: InvalidStart }
 enum StartRefusal { busy, invalid: InvalidStartValue }

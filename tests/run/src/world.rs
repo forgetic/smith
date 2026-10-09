@@ -577,6 +577,9 @@ pub struct World {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     facts: BTreeMap<&'static str, u32>,
+    empty_brief_wait: Option<bool>,
+    carried_messages: Box<[run::Message]>,
+    opening_prompts: Vec<Box<[u8]>>,
     message_chance: u32,
     message_name: u64,
     message_cells: BTreeMap<&'static str, u32>,
@@ -643,6 +646,9 @@ impl World {
             landing: BTreeSet::new(),
             cancel_cells: BTreeMap::new(),
             facts: BTreeMap::new(),
+            empty_brief_wait: None,
+            carried_messages: Box::default(),
+            opening_prompts: Vec::new(),
             message_chance: 0,
             message_name: 0,
             message_cells: BTreeMap::new(),
@@ -656,6 +662,23 @@ impl World {
             stats: Stats::default(),
             trace: Trace::default(),
         }
+    }
+
+    /// Give each host Start an empty brief and this explicit waiting authority.
+    pub fn empty_brief(&mut self, wait: bool) {
+        self.empty_brief_wait = Some(wait);
+    }
+
+    /// Carry this ordered batch in each host Start and observe actual told turns.
+    pub fn carry_messages(&mut self, messages: Box<[run::Message]>) {
+        self.carried_messages = messages;
+        self.partner.tell_turns();
+    }
+
+    /// Actual user opening bytes at the conversation boundary.
+    #[must_use]
+    pub fn opening_prompts(&self) -> &[Box<[u8]>] {
+        &self.opening_prompts
     }
 
     /// Inject named person messages before or after actual callbacks, in per mille.
@@ -1208,6 +1231,7 @@ impl World {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn open(&mut self, conversation: Token, opening: run::Opening, current: Option<Token>) {
+        self.opening_prompts.push(opening.prompt.clone());
         let fresh = self.opens.insert(conversation, Open::default()).is_none();
         assert!(fresh, "conversations have distinct names");
         let run = current.expect("a run opens a conversation in a step about it");
@@ -1517,9 +1541,13 @@ impl World {
         &mut self,
         reply_to: ReplyTo,
         host_run: Token,
-        charter: run::Charter,
+        mut charter: run::Charter,
         workspace: Option<run::Workspace>,
     ) {
+        if let Some(wait) = self.empty_brief_wait {
+            charter.brief.sections = Box::default();
+            charter.grants.wait = wait;
+        }
         self.checkout(workspace.as_ref().map_or(&[][..], |workspace| &workspace.directories));
         let wants = charter.outcome.change.is_some() || charter.grants.deliver.is_some();
         let mut checks = BTreeSet::new();
@@ -1531,6 +1559,7 @@ impl World {
         }
         self.starts.get_mut(&host_run).expect("a start is tracked").checks = checks;
         self.run_stage.push(run::Event::Start {
+            messages: self.carried_messages.clone(),
             reply_to,
             host_run,
             activation: 1,

@@ -425,6 +425,7 @@ fn choose_start(
             host_run,
             activation,
             window,
+            messages,
             charter,
             workspace,
             grants,
@@ -438,6 +439,7 @@ fn choose_start(
                     host_run,
                     activation,
                     window,
+                    messages,
                     charter,
                     workspace,
                     grants,
@@ -450,6 +452,7 @@ fn choose_start(
         Some(_) => panic!("the caller supplies a complete Start event"),
         None => (
             Event::Start {
+                messages: Box::default(),
                 reply_to: ReplyTo::new(Token::new(1)),
                 host_run: Token::new(1),
                 activation: if settings.resume { 2 } else { 1 },
@@ -520,6 +523,7 @@ impl World {
     #[must_use]
     pub fn with_window(settings: Settings, window: agent::Window) -> World {
         let start = Event::Start {
+            messages: Box::default(),
             reply_to: ReplyTo::new(Token::new(1)),
             host_run: Token::new(1),
             activation: 1,
@@ -575,7 +579,7 @@ impl World {
         let supplied_start = selected_start.is_some();
         let (start, reply_to) =
             choose_start(settings, transcript, answered, workspace, selected_charter, selected_start);
-        let Event::Start { host_run, charter, workspace, .. } = &start else {
+        let Event::Start { host_run, charter, workspace, messages, .. } = &start else {
             unreachable!("the selected event is Start")
         };
         let root = workspace
@@ -595,6 +599,7 @@ impl World {
         for model in &charter.models {
             model_prices.insert(model.model.clone(), model.prices);
         }
+        let messages_seen = opening_observations(charter, messages);
         let host_run = *host_run;
         stage.push(start);
         let mut schedule = Schedule::new();
@@ -654,7 +659,7 @@ impl World {
             completions: Vec::new(),
             model_prices,
             turns: Vec::new(),
-            messages_seen: Vec::new(),
+            messages_seen,
             turn_metadata: Vec::new(),
             auto_ack: false,
             waiting: Vec::new(),
@@ -2037,6 +2042,29 @@ fn observed_price(prices: run::Prices, usage: llm::Usage) -> Option<u64> {
     u64::try_from(rounded).ok()
 }
 
+/// Observe the actual Start batch before its admission and first provider query.
+fn opening_observations(
+    charter: &run::Charter,
+    messages: &[run::Message],
+) -> Vec<(Time, crate::messages_referee::Seen)> {
+    let mut messages_seen = vec![(
+        Time::ZERO,
+        crate::messages_referee::Seen::Started {
+            brief: charter.brief.sections.iter().any(|section| !section.title.is_empty() || !section.text.is_empty()),
+        },
+    )];
+    for message in messages {
+        let mut rendered = message.label.to_vec();
+        rendered.extend_from_slice(b": ");
+        rendered.extend_from_slice(&message.text);
+        messages_seen.push((
+            Time::ZERO,
+            crate::messages_referee::Seen::Input { name: message.name, text: rendered.into_boxed_slice() },
+        ));
+    }
+    messages_seen
+}
+
 #[cfg(test)]
 mod bridge_tests {
     use super::*;
@@ -2046,6 +2074,7 @@ mod bridge_tests {
     fn a_caller_start_and_host_reply_cross_the_parent_bridge() {
         let settings = Settings { job: Job::HostTools, ..Settings::calm(811) };
         let start = Event::Start {
+            messages: Box::default(),
             answered: Box::default(),
             reply_to: ReplyTo::new(Token::new(71)),
             host_run: Token::new(73),
@@ -2090,6 +2119,7 @@ mod bridge_tests {
         let mut charter = charter(&settings);
         charter.grants.host_tools[0].name = b"message".as_slice().into();
         let start = Event::Start {
+            messages: Box::default(),
             answered: Box::default(),
             reply_to: ReplyTo::new(Token::new(71)),
             host_run: Token::new(73),

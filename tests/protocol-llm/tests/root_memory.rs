@@ -953,6 +953,7 @@ impl Counted {
 
     fn start(&mut self, history: Option<root::Transcript>, restoring: bool) {
         self.step(Event::Start {
+            messages: Box::default(),
             answered: Box::default(),
             workspace: Some(workspace()),
             reply_to: ReplyTo::new(PARENT),
@@ -1525,6 +1526,7 @@ fn a_restored_run_keeps_full_brief_and_custom_paths_with_two_clients() {
     };
     counted.caller_charter = Some(caller);
     counted.step(Event::Start {
+        messages: Box::default(),
         answered: Box::default(),
         reply_to: ReplyTo::new(PARENT),
         host_run: WORKER,

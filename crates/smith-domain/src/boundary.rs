@@ -119,6 +119,8 @@ pub enum Event {
         activation: u64,
         /// Credit for turns awaiting durable host acknowledgement.
         window: Window,
+        /// Triggering messages admitted before any later live input.
+        messages: Box<[run::Message]>,
         /// Host-supplied admission policy, validated before the run starts.
         charter: run::Charter,
         /// Optional immutable host mounts and initial conflicts, moved to run admission.

@@ -506,6 +506,7 @@ fn maybe_start(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
             domain.agent.as_mut().expect("in-process agent"),
             &agent_env(env),
             agent::Event::Start {
+                messages: Box::default(),
                 answered: answered.into_boxed(),
                 reply_to: ReplyTo::new(Token::new(domain.chat.state.activation)),
                 host_run: Token::new(1),

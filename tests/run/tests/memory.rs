@@ -307,6 +307,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
     for run in 0..limits.runs {
         let host_run = Token::new(u64::from(run));
         let start = Event::Start {
+            messages: Box::default(),
             workspace: Some(workspace()),
             reply_to: ReplyTo::new(host_run),
             host_run,
@@ -380,6 +381,7 @@ fn refuse_oversized_charter(limits: Limits, env: &Env<Limits>, out: &mut Queue<R
     let mut domain = Domain::new(&Limits { runs: 1, conversations: 2, ..limits });
     let host_run = Token::new(0);
     let start = Event::Start {
+        messages: Box::default(),
         workspace: Some(workspace()),
         reply_to: ReplyTo::new(host_run),
         host_run,
@@ -529,6 +531,7 @@ fn full_receipt_delivery_settles_before_a_cancelled_answer() {
         &mut out,
         &meter,
         Event::Start {
+            messages: Box::default(),
             workspace: Some(full_delivery_workspace()),
             reply_to: ReplyTo::new(host_run),
             host_run,
@@ -733,6 +736,7 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
         &mut out,
         &meter,
         Some(Event::Start {
+            messages: Box::default(),
             workspace: mounted,
             reply_to: ReplyTo::new(Token::new(88)),
             host_run: Token::new(91),

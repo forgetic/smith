@@ -447,6 +447,7 @@ fn a_run_parked_resumed_and_parked_again_numbers_turns_per_activation() {
     two.settle();
     two.send_domain_start(
         smith_host_domain::Start {
+            messages: Box::default(),
             logical_run: skein_lib::Token::new(1),
             activation: 2,
             workspace: None,
@@ -841,6 +842,7 @@ fn a_host_tool_answered_as_the_channel_is_lost_is_asked_again_under_its_name() {
     second.settle();
     second.send_domain_start(
         smith_host_domain::Start {
+            messages: Box::default(),
             logical_run: skein_lib::Token::new(1),
             activation: 2,
             workspace: None,

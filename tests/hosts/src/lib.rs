@@ -132,6 +132,7 @@ fn io_limits() -> io::Limits {
 
 fn start() -> host::Start {
     host::Start {
+        messages: Box::default(),
         logical_run: Token::new(1),
         activation: 1,
         workspace: None,

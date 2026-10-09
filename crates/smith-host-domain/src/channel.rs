@@ -8,9 +8,19 @@ use crate::Delivery;
 use alloc::boxed::Box;
 use skein_lib::{Duration, Time, Token};
 
+/// Named labelled message carried in a parent Start, ending with its activation.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Message {
+    pub name: Token,
+    pub label: Box<[u8]>,
+    pub text: Box<[u8]>,
+}
+
 /// Parent start moved to the first channel Send; process spawn has its own deadline.
 #[derive(PartialEq, Eq, Debug)]
 pub struct Start {
+    /// At most the inbox, each fitting the rendered message bound.
+    pub messages: Box<[Message]>,
     /// Stable parent run identity across restart, uninterpreted here.
     pub logical_run: Token,
     /// Positive parent-issued number unique for every activation of `logical_run`.
@@ -376,6 +386,8 @@ pub enum Refusal {
 /// The agent's reason for rejecting a start before admission.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum RunInvalid {
+    /// A start's carried messages exceed their bounds or repeat a name.
+    Messages,
     /// The agent does not read the charter's version.
     CharterVersion,
     /// The charter does not decode in a version the agent reads.

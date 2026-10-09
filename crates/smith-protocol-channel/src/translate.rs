@@ -33,6 +33,7 @@ pub struct Grant {
 /// Start context after channel and charter decoding, before io root attachment.
 #[derive(Debug)]
 pub struct DecodedStart {
+    pub messages: Box<[run::Message]>,
     pub activation: u64,
     pub charter: run::Charter,
     pub mounts: Option<Box<[Mount]>>,
@@ -78,7 +79,15 @@ pub fn start_context(
             return Err(Error::ResultCapacity);
         }
     }
+    let mut messages = List::with_capacity(parts.messages.len());
+    for message in parts.messages.into_boxed() {
+        let parts = message.into_parts();
+        if messages.push(run::Message { name: Token::new(parts.name), label: parts.label, text: parts.text }).is_err() {
+            return Err(Error::ResultCapacity);
+        }
+    }
     Ok(DecodedStart {
+        messages: messages.into_boxed(),
         activation: parts.activation,
         charter,
         mounts,
@@ -504,6 +513,7 @@ pub(crate) fn invalid_start(invalid: run::Invalid) -> channel::InvalidStart {
         run::Invalid::CharterVersion => channel::InvalidStart::CharterVersion,
         run::Invalid::MalformedCharter => channel::InvalidStart::MalformedCharter,
         run::Invalid::Endpoint => channel::InvalidStart::Endpoint,
+        run::Invalid::Messages => channel::InvalidStart::Messages,
         run::Invalid::Activation => channel::InvalidStart::Activation,
         run::Invalid::Window => channel::InvalidStart::Window,
         run::Invalid::Conventions => channel::InvalidStart::Conventions,

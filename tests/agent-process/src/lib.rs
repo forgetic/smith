@@ -215,6 +215,7 @@ pub fn start(charter: &[u8]) -> skein_channel::Frame {
     let record = smith_channel::Start::new(
         &limits,
         smith_channel::StartParts {
+            messages: skein_lib::List::with_capacity(0),
             activation: 1,
             charter: Box::from(charter),
             workspace: None,

@@ -51,6 +51,7 @@ fn invalid_start(invalid: &wire::InvalidStart) -> host::RunInvalid {
         wire::InvalidStart::Llm => host::RunInvalid::Llm,
         wire::InvalidStart::Conversation => host::RunInvalid::Conversation,
         wire::InvalidStart::Endpoint => host::RunInvalid::Endpoint,
+        wire::InvalidStart::Messages => host::RunInvalid::Messages,
     }
 }
 

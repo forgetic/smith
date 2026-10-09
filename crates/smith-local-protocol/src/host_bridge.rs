@@ -216,6 +216,7 @@ pub fn prepare_start(
     }
     Ok(PreparedStart {
         start: host::Start {
+            messages: Box::default(),
             logical_run: skein_lib::Token::new(1),
             activation: source.activation,
             workspace,

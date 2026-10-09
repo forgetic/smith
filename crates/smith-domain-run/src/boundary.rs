@@ -59,6 +59,15 @@ pub struct Window {
     pub largest_turn: u64,
 }
 
+/// Named, labelled message carried by a host Start; it ends with that start or its run.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Message {
+    /// Opaque parent name, unique among the start's messages.
+    pub name: Token,
+    pub label: Box<[u8]>,
+    pub text: Box<[u8]>,
+}
+
 /// parent -> run
 #[derive(PartialEq, Eq, Debug)]
 pub enum Event {
@@ -83,6 +92,8 @@ pub enum Event {
         activation: u64,
         /// Bounded acknowledgement credit for this activation.
         window: Window,
+        /// Triggering messages admitted together, before later relayed messages.
+        messages: Box<[Message]>,
         /// Host-supplied admission policy, validated before the run starts.
         charter: Charter,
         /// Optional immutable host mounts and initial conflicts, admitted before effects.
@@ -822,6 +833,8 @@ pub enum Refusal {
 /// What about a charter does not fit the limits.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Invalid {
+    /// A start's messages exceed their bounds or repeat a name.
+    Messages,
     /// The agent does not read this charter version; the protocol refuses it before domain admission.
     CharterVersion,
     /// The charter does not decode in a version the agent reads; protocol refuses before domain admission.

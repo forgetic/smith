@@ -1,6 +1,7 @@
 //! Main receives literal host instructions, then ordered titled Brief sections;
 //! a child receives only its caller's raw task (domain/run.md, sections 3.1,
 //! 3.3 and 5.3). Both then receive existing selected guides and run mechanics.
+//! `opening` composes a main begin instruction and its bounded message offer.
 //! No prompt state is retained here; title/text meaning and authority are never
 //! inferred. `system` and `child` consume only admitted immutable source data;
 //! session receiving bytes still decide whether the rendered opening fits.
@@ -21,6 +22,34 @@ use crate::workspace::{self, Directory, Workspace};
 
 /// The first user message of a main conversation.
 pub(crate) const BEGIN: &[u8] = b"Begin the work your brief describes.";
+
+/// A brief has work when any literal title or text is present.
+pub(crate) fn has_brief(charter: &Charter) -> bool {
+    for section in &charter.brief.sections {
+        if !section.title.is_empty() || !section.text.is_empty() {
+            return true;
+        }
+    }
+    false
+}
+
+/// Compose the begin instruction, if needed, followed by one ordered offer.
+pub(crate) fn opening(brief: bool, messages: Option<Box<[u8]>>) -> Box<[u8]> {
+    match messages {
+        Some(messages) if !brief => messages,
+        Some(messages) => {
+            let length =
+                BEGIN.len().checked_add(2).expect("fixed prefix").checked_add(messages.len()).expect("bounded offer");
+            let mut writer = Writer::new(length);
+            writer.put(BEGIN).expect("measured instruction");
+            writer.put(b"\n\n").expect("measured separator");
+            writer.put(&messages).expect("measured offer");
+            writer.finish()
+        }
+        None if brief => Box::from(BEGIN),
+        None => Box::from(b"Begin the work your instructions describe.".as_slice()),
+    }
+}
 
 /// The system text of a run's main conversation, given what the run found in
 /// its checkout.

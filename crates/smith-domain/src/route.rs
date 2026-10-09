@@ -36,7 +36,18 @@ pub(crate) const fn session_env(env: &Env<Limits>) -> Env<session::Limits> {
 /// Hands one of the protocol's events to the child domain it is for.
 pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
     let event = match event {
-        Event::Start { reply_to, host_run, activation, window, charter, workspace, grants, transcript, answered } => {
+        Event::Start {
+            reply_to,
+            host_run,
+            activation,
+            window,
+            messages,
+            charter,
+            workspace,
+            grants,
+            transcript,
+            answered,
+        } => {
             if !endpoints_known(domain, &charter) {
                 domain.notices.push(Request::Answer {
                     read: None,
@@ -57,7 +68,7 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
                 granted(domain, env, grant);
             }
             return start(
-                domain, env, reply_to, host_run, activation, window, charter, workspace, transcript, answered,
+                domain, env, reply_to, host_run, activation, window, messages, charter, workspace, transcript, answered,
             );
         }
         Event::Acknowledge { run, turn } => return acknowledge(domain, env, run, turn),
@@ -222,6 +233,7 @@ fn start(
     host_run: Token,
     activation: u64,
     window: crate::Window,
+    messages: Box<[run::Message]>,
     charter: run::Charter,
     workspace: Option<run::Workspace>,
     transcript: Option<session::record::Transcript>,
@@ -276,6 +288,7 @@ fn start(
             reply_to: ReplyTo::new(id.token()),
             host_run,
             activation,
+            messages,
             window: run::Window { turns: window.turns, bytes: window.bytes, largest_turn },
             charter,
             workspace,
