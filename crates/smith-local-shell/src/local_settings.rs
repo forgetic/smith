@@ -158,6 +158,10 @@ pub struct Prepared {
     pub paths: Box<[Box<[u8]>]>,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "10-product replaces JSON local policy construction with resolved TOML settings"
+)]
 pub fn policy(
     settings: &Settings,
     endpoints: &channel::Endpoints,
@@ -475,7 +479,7 @@ fn read_document(path: &Path) -> Result<Value, String> {
         return Err(format!("settings {} exceed {SETTINGS_BYTES} bytes", path.display()));
     }
     let bytes = fs::read(path).map_err(|error| format!("settings read {}: {error}", path.display()))?;
-    if bytes.len() as u64 > SETTINGS_BYTES {
+    if u64::try_from(bytes.len()).expect("length fits u64") > SETTINGS_BYTES {
         return Err(format!("settings {} exceed {SETTINGS_BYTES} bytes", path.display()));
     }
     serde_json::from_slice(&bytes).map_err(|error| format!("settings JSON {}: {error}", path.display()))

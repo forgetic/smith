@@ -67,7 +67,7 @@ pub(crate) fn worst_case() -> Option<u64> {
         .checked_add(8_u64.checked_mul(32_768)?)?
         .checked_add(65_536)?
         .checked_add(smith_agent_shell::config::TRUST_BYTES)?
-        .checked_add(u64::try_from(std::mem::size_of::<Auth>()).ok()?)
+        .checked_add(u64::try_from(size_of::<Auth>()).ok()?)
 }
 
 impl Auth {
@@ -133,7 +133,7 @@ impl Auth {
                 }
                 (Some(destination), Some(address), format!("/{path}").into_bytes().into())
             }
-            None => (None, None, Box::new([]) as Box<[u8]>),
+            None => (None, None, Box::<[u8]>::default()),
         };
         let position = u64::try_from(position).map_err(|_| "account position overflow")?;
         let owner =
@@ -194,13 +194,14 @@ impl Auth {
     }
 
     fn nonce(&self, purpose: &[u8]) -> Box<[u8]> {
+        use std::fmt::Write;
+
         let mut bytes = self.entropy.to_vec();
         bytes.extend_from_slice(&self.settings.number.to_be_bytes());
         bytes.extend_from_slice(&self.next.to_be_bytes());
         bytes.extend_from_slice(purpose);
         let hash = io::digest::digest(&bytes);
         let mut hex = String::with_capacity(64);
-        use std::fmt::Write;
         for part in hash.0 {
             write!(&mut hex, "{part:016x}").expect("String write");
         }
@@ -323,7 +324,6 @@ impl Auth {
                 out.push(io::Request::Close { entity: socket });
             }
             io::Event::Closed { owner } if owner == self.callback_owner => self.callback = None,
-            io::Event::Closed { .. } => {}
             io::Event::Failed { .. }
             | io::Event::Stream { up: Up::End | Up::Failed(_), .. }
             | io::Event::Output { up: OutputUp::Settled { .. }, .. } => {
@@ -335,7 +335,13 @@ impl Auth {
                 }
                 self.close_loopback(out);
             }
-            _ => {}
+            io::Event::Closed { .. }
+            | io::Event::Connecting { .. }
+            | io::Event::Connected { .. }
+            | io::Event::Stream { .. }
+            | io::Event::Spawned { .. }
+            | io::Event::Exited { .. }
+            | io::Event::Shutdown { .. } => {}
         }
     }
 
@@ -520,20 +526,20 @@ fn percent(input: &[u8]) -> Option<Box<[u8]>> {
     let mut decoded = Vec::with_capacity(input.len());
     let mut position = 0;
     while position < input.len() {
-        match input[position] {
+        match *input.get(position)? {
             b'%' => {
-                let high = char::from(*input.get(position + 1)?).to_digit(16)?;
-                let low = char::from(*input.get(position + 2)?).to_digit(16)?;
-                decoded.push(u8::try_from(high * 16 + low).ok()?);
-                position += 3;
+                let high = char::from(*input.get(position.checked_add(1)?)?).to_digit(16)?;
+                let low = char::from(*input.get(position.checked_add(2)?)?).to_digit(16)?;
+                decoded.push(u8::try_from(high.checked_mul(16)?.checked_add(low)?).ok()?);
+                position = position.checked_add(3)?;
             }
             b'+' => {
                 decoded.push(b' ');
-                position += 1;
+                position = position.checked_add(1)?;
             }
             value => {
                 decoded.push(value);
-                position += 1;
+                position = position.checked_add(1)?;
             }
         }
     }

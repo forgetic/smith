@@ -83,8 +83,10 @@ impl Referee<Process> for Judge {
             if let Process::Script(Proc::Terminal(p)) = p {
                 let shown = p.shown();
                 shown.windows(9).position(|s| s == b"Sign in: ").and_then(|at| {
-                    let rest = &shown[at + 9..];
-                    rest.iter().position(|b| *b == b'\n').map(|end| rest[..end].trim_ascii_end().to_vec())
+                    let rest = shown.get(at.checked_add(9).expect("sign-in prefix position")..)?;
+                    rest.iter()
+                        .position(|b| *b == b'\n')
+                        .map(|end| rest.get(..end).expect("newline in sign-in suffix").trim_ascii_end().to_vec())
                 })
             } else {
                 None
@@ -112,7 +114,7 @@ impl Referee<Process> for Judge {
                         p.shutdown();
                     }
                 }
-                _ => {}
+                Process::Binary(_) | Process::Script(_) => {}
             }
         }
     }
@@ -128,19 +130,19 @@ impl Referee<Process> for Judge {
                         String::from_utf8_lossy(p.stderr())
                     ),
                     Process::Script(Proc::Terminal(p)) => {
-                        eprintln!("person empty={} shown={}", p.is_empty(), String::from_utf8_lossy(p.shown()))
+                        eprintln!("person empty={} shown={}", p.is_empty(), String::from_utf8_lossy(p.shown()));
                     }
                     Process::Script(Proc::Peer(p)) => {
-                        eprintln!("queries={:?}", smith_local_process_world::llm::queries(p).count())
+                        eprintln!("queries={:?}", smith_local_process_world::llm::queries(p).count());
                     }
-                    _ => {}
+                    Process::Script(_) => {}
                 }
             }
         }
         let authenticated = procs.iter().any(|p| matches!(p, Process::Script(Proc::Issuer(_))));
         if authenticated && !self.saved && procs.iter().any(|p| matches!(p, Process::Script(Proc::Peer(p)) if smith_local_process_world::llm::queries(p).next().is_some())) {
             let store = smith_local_shell::local_tokens::Tokens::new(&self.tokens, smith_local_shell::local_host::token_limits()).expect("private tokens");
-            assert_eq!(store.load(0).expect("token read").expect("saved before grant use").access_token.as_ref(), b"access-new");
+            assert_eq!(store.load(0).expect("token read").expect("saved before grant use").access_token.as_ref(), b"access-new", "token persists before provider query");
             self.saved = true;
         }
         for proc in procs {
@@ -194,6 +196,7 @@ fn observations(procs: &[Process], saved: bool) -> Seen {
     }
 }
 
+#[must_use]
 pub fn start(arguments: Vec<std::ffi::OsString>, directory: &Path, mode: Mode) -> Binary {
     start_program(Path::new(env!("CARGO_BIN_EXE_smith")), arguments, directory, mode)
 }
@@ -236,7 +239,7 @@ pub fn settings(scratch: &Scratch, scenario: &Scenario) {
         serde_json::json!({"number":account.number,"account_id":account.account_id,"oauth":oauth})
     }).collect();
     let mut source = serde_json::json!({
-        "agent":{"profile":"standard","memory_bytes":1099511627776_u64,"grace_ms":10,
+        "agent":{"profile":"standard","memory_bytes":1_099_511_627_776_u64,"grace_ms":10,
             "endpoints":[{"name":"fake","number":0,"dialect":0,"account":0,"provider":"codex","address":"127.0.0.1:34443","server_name":"skein.test","trust_der":trust,"identity":"plain"}],
             "environment":[],"trace":{"path":scratch.path().join("agent-trace.jsonl"),"capture":"calls"}},
         "chat":"chat","instructions":"@local-shell Assist",
@@ -246,12 +249,17 @@ pub fn settings(scratch: &Scratch, scenario: &Scenario) {
         "accounts":accounts
     });
     if scenario.launch.change {
-        source["directories"] =
-            serde_json::json!([{"name":"repo","path":scratch.path().join("repo"),"writable":true,"git":true}]);
-        source["contract"] = serde_json::json!({"form":"change","checks_must_pass":scenario.launch.tools,"fields":[{"name":"title","max":256},{"name":"body","max":1024}]});
+        source.as_object_mut().expect("settings object").insert(
+            "directories".into(),
+            serde_json::json!([{"name":"repo","path":scratch.path().join("repo"),"writable":true,"git":true}]),
+        );
+        source.as_object_mut().expect("settings object").insert("contract".into(), serde_json::json!({"form":"change","checks_must_pass":scenario.launch.tools,"fields":[{"name":"title","max":256},{"name":"body","max":1024}]}));
     }
     if scenario.launch.tools {
-        source["conventions"] = serde_json::json!({"guide":".smith-test/guide","checks":".smith-test/check"});
+        source.as_object_mut().expect("settings object").insert(
+            "conventions".into(),
+            serde_json::json!({"guide":".smith-test/guide","checks":".smith-test/check"}),
+        );
     }
     std::fs::write(scratch.path().join("settings.json"), serde_json::to_vec(&source).expect("settings"))
         .expect("settings fixture");
@@ -342,6 +350,7 @@ impl Referee<Process> for Refusal {
     }
 }
 
+#[must_use]
 pub fn refusal(scratch: &Scratch, arguments: Vec<std::ffi::OsString>) -> Vec<u8> {
     refusal_program(Path::new(env!("CARGO_BIN_EXE_smith")), scratch, arguments)
 }
@@ -363,14 +372,17 @@ pub fn refusal_program(program: &Path, scratch: &Scratch, arguments: Vec<std::ff
         ))))
     });
     let outcome = world.run(&clock, Duration::from_secs(2));
-    assert!(outcome.procs.iter().all(Host::is_empty));
-    let Process::Binary(binary) = &outcome.procs[0] else { unreachable!("binary observer") };
-    assert_eq!(binary.exit_status(), Some(Exit::Code(1)));
-    let Process::Script(Proc::Terminal(person)) = &outcome.procs[1] else { unreachable!("person") };
+    assert!(outcome.procs.iter().all(Host::is_empty), "startup refusal drains all processes");
+    let Process::Binary(binary) = outcome.procs.first().expect("binary process") else {
+        unreachable!("binary observer")
+    };
+    assert_eq!(binary.exit_status(), Some(Exit::Code(1)), "startup refusal fails the invocation");
+    let Process::Script(Proc::Terminal(person)) = outcome.procs.get(1).expect("terminal process") else {
+        unreachable!("person")
+    };
     assert!(person.shown().is_empty(), "startup refusal opens no channel or chat");
     assert_no_children();
     binary.stderr().to_vec()
 }
 
-#[allow(dead_code)]
 pub mod live_run;

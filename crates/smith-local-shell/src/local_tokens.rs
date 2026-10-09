@@ -3,7 +3,7 @@
 //! never logs token bytes, and acknowledges a replacement only after syncing
 //! its file and directory. Records are decoded by Skein before use.
 
-use std::fs::{self, DirBuilder, File, OpenOptions};
+use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -59,6 +59,10 @@ impl Tokens {
         Ok(Some(record))
     }
 
+    #[expect(
+        clippy::disallowed_types,
+        reason = "10-product replaces token file syncs with skein private records over io"
+    )]
     pub fn save(&self, account: u32, bytes: &[u8]) -> Result<(), String> {
         let record = oauth::decode_record(bytes, &self.limit).map_err(|_| "invalid token candidate")?;
         if record.key != account {
@@ -83,7 +87,7 @@ impl Tokens {
         file.sync_all().map_err(|error| format!("token record sync: {error}"))?;
         fs::rename(&temporary, self.root.join(format!("{account}.json")))
             .map_err(|error| format!("token record rename: {error}"))?;
-        File::open(&self.root)
+        fs::File::open(&self.root)
             .and_then(|directory| directory.sync_all())
             .map_err(|error| format!("token directory sync: {error}"))
     }
@@ -152,6 +156,10 @@ mod tests {
 #[cfg(test)]
 mod special_files {
     #[test]
+    #[expect(
+        clippy::disallowed_types,
+        reason = "10-product replaces the token store and its special-file refusal fixture"
+    )]
     fn a_fifo_token_record_is_refused_without_waiting_for_a_writer() {
         let root = std::env::temp_dir().join(format!("smith-fifo-token-{}", std::process::id()));
         let store = super::Tokens::new(&root, crate::local_host::token_limits()).expect("private directory");

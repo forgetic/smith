@@ -101,7 +101,7 @@ fn shared_startup_reports_configuration_refusal_without_adopting_the_streams() {
 #[test]
 fn the_shared_agent_pass_answers_the_host_and_writes_its_trace() {
     let path = std::env::temp_dir().join(format!("smith-agent-library-trace-{}.jsonl", std::process::id()));
-    let _ = std::fs::remove_file(&path);
+    drop(std::fs::remove_file(&path));
     let mut sim_config = skein_sim::Config::calm();
     sim_config.wall = skein_tls_world::pki::VALID;
     let mut sim = skein_sim::Sim::new(7, sim_config);
@@ -170,7 +170,8 @@ fn the_shared_agent_pass_answers_the_host_and_writes_its_trace() {
     sim.assert_no_open_fds(pid);
     assert!(!errors.text().contains("could not answer"), "successful invocation logs no failure");
     drop(agent);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    let clock = skein_shell::Clock::new();
+    let deadline = clock.now().now.saturating_add(skein_lib::Duration::from_secs(1));
     let records = loop {
         let text = std::fs::read_to_string(&path).expect("trace file");
         if text.lines().any(|line| line.contains("\"type\":\"prompt\""))
@@ -179,10 +180,7 @@ fn the_shared_agent_pass_answers_the_host_and_writes_its_trace() {
         {
             break text;
         }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "shared trace writer records prompts, facts and completions: {text}"
-        );
+        assert!(clock.now().now < deadline, "shared trace writer records prompts, facts and completions: {text}");
         std::thread::sleep(std::time::Duration::from_millis(1));
     };
     assert!(!records.contains("acctoken"), "trace excludes credential values");

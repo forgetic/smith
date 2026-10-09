@@ -103,7 +103,7 @@ pub fn read(path: &Path) -> Result<Configuration, String> {
         return Err(format!("configuration is larger than {CONFIG_BYTES} bytes"));
     }
     let bytes = fs::read(path).map_err(|error| format!("configuration read: {error}"))?;
-    if bytes.len() as u64 > CONFIG_BYTES {
+    if u64::try_from(bytes.len()).expect("byte length fits u64") > CONFIG_BYTES {
         return Err(format!("configuration is larger than {CONFIG_BYTES} bytes"));
     }
     parse(&bytes)
@@ -111,7 +111,7 @@ pub fn read(path: &Path) -> Result<Configuration, String> {
 
 /// Validate generated child configuration before the local host spawns it.
 pub fn parse(bytes: &[u8]) -> Result<Configuration, String> {
-    if bytes.len() as u64 > CONFIG_BYTES {
+    if u64::try_from(bytes.len()).expect("byte length fits u64") > CONFIG_BYTES {
         return Err(format!("configuration is larger than {CONFIG_BYTES} bytes"));
     }
     let document: Document = serde_json::from_slice(bytes).map_err(|error| format!("configuration JSON: {error}"))?;
@@ -122,7 +122,7 @@ fn build(document: Document) -> Result<Configuration, String> {
     if document.profile != "standard" {
         return Err("configuration profile must be standard".into());
     }
-    if document.endpoints.len() > ENDPOINTS as usize {
+    if document.endpoints.len() > usize::try_from(ENDPOINTS).expect("endpoint count fits usize") {
         return Err("too many endpoints".into());
     }
     if document.grace_ms == 0 {
@@ -145,13 +145,70 @@ fn build(document: Document) -> Result<Configuration, String> {
     };
     let mut limits = service::profile::standard_limits(document.memory_bytes).map_err(profile_refusal)?;
     limits.machine.stop_grace = Duration::from_millis(document.grace_ms);
-    let mut domain_endpoints = Vec::with_capacity(document.endpoints.len());
+    let endpoints = build_endpoints(document.endpoints)?;
+    let mut environment = Vec::with_capacity(document.environment.len());
+    let mut environment_bytes = 0_u64;
+    for variable in document.environment {
+        if variable.name.is_empty() || variable.name.contains(['=', '\0']) || variable.value.contains('\0') {
+            return Err("invalid command environment variable".into());
+        }
+        let entry_bytes = variable
+            .name
+            .len()
+            .checked_add(variable.value.len())
+            .and_then(|bytes| bytes.checked_add(1))
+            .ok_or("environment is too large")?;
+        environment_bytes = environment_bytes
+            .checked_add(u64::try_from(entry_bytes).map_err(|_| "environment is too large")?)
+            .ok_or("environment is too large")?;
+        environment
+            .push(tools::Var { name: variable.name.into_bytes().into(), value: variable.value.into_bytes().into() });
+    }
+    if environment_bytes > u64::from(limits.machine.env_bytes) {
+        return Err("command environment exceeds the profile".into());
+    }
+    let llm_endpoints =
+        llm::Endpoints::new(endpoints.llm, ENDPOINTS, ACCOUNTS).map_err(|error| format!("LLM endpoints: {error:?}"))?;
+    limits.memory = document.memory_bytes;
+    let config = service::Config {
+        limits,
+        domain: domain::Config { endpoints: endpoints.domain },
+        channel_endpoints: endpoints.channel,
+        llm_endpoints,
+        environment: environment.into_boxed_slice(),
+        stream_mode: StreamMode::Two,
+        capture_prompts: match &trace {
+            Some(trace) => trace.capture == Capture::Everything,
+            None => false,
+        },
+    };
+    let reserve = if trace.is_some() { crate::trace::MEMORY_RESERVE } else { 0 };
+    let complete = service::worst_case(&config.limits)
+        .and_then(|bytes| bytes.checked_add(reserve))
+        .ok_or("agent plus trace memory calculation overflowed")?;
+    if complete > document.memory_bytes {
+        return Err("agent plus trace exceeds memory_bytes".into());
+    }
+    Ok(Configuration { service: config, memory: document.memory_bytes, trace })
+}
+
+struct PreparedEndpoints {
+    domain: Box<[run::charter::Endpoint]>,
+    channel: channel::Endpoints,
+    llm: Box<[llm::ConfiguredEndpoint]>,
+}
+
+fn build_endpoints(endpoints: Vec<Endpoint>) -> Result<PreparedEndpoints, String> {
+    let mut domain_endpoints = Vec::with_capacity(endpoints.len());
     let mut channel_endpoints = List::with_capacity(ENDPOINTS);
-    let mut llm_endpoints = Vec::with_capacity(document.endpoints.len());
-    let mut names = std::collections::HashSet::new();
-    let mut numbers = std::collections::HashSet::new();
-    for endpoint in document.endpoints {
-        if endpoint.name.is_empty() || endpoint.name.len() > smith_charter::CEILINGS.llm_endpoint as usize {
+    let mut llm_endpoints = Vec::with_capacity(endpoints.len());
+    let mut names = std::collections::BTreeSet::new();
+    let mut numbers = std::collections::BTreeSet::new();
+    for endpoint in endpoints {
+        if endpoint.name.is_empty()
+            || endpoint.name.len()
+                > usize::try_from(smith_charter::CEILINGS.llm_endpoint).expect("endpoint name bound fits usize")
+        {
             return Err("endpoint name is empty or too long".into());
         }
         if endpoint.account >= ACCOUNTS {
@@ -229,44 +286,11 @@ fn build(document: Document) -> Result<Configuration, String> {
             identity,
         });
     }
-    let mut environment = Vec::with_capacity(document.environment.len());
-    let mut environment_bytes = 0_u64;
-    for variable in document.environment {
-        if variable.name.is_empty() || variable.name.contains(['=', '\0']) || variable.value.contains('\0') {
-            return Err("invalid command environment variable".into());
-        }
-        environment_bytes = environment_bytes
-            .checked_add((variable.name.len() + variable.value.len() + 1) as u64)
-            .ok_or("environment is too large")?;
-        environment
-            .push(tools::Var { name: variable.name.into_bytes().into(), value: variable.value.into_bytes().into() });
-    }
-    if environment_bytes > u64::from(limits.machine.env_bytes) {
-        return Err("command environment exceeds the profile".into());
-    }
-    let llm_endpoints = llm::Endpoints::new(llm_endpoints.into_boxed_slice(), ENDPOINTS, ACCOUNTS)
-        .map_err(|error| format!("LLM endpoints: {error:?}"))?;
-    limits.memory = document.memory_bytes;
-    let config = service::Config {
-        limits,
-        domain: domain::Config { endpoints: domain_endpoints.into_boxed_slice() },
-        channel_endpoints: channel::Endpoints::new(channel_endpoints),
-        llm_endpoints,
-        environment: environment.into_boxed_slice(),
-        stream_mode: StreamMode::Two,
-        capture_prompts: match &trace {
-            Some(trace) => trace.capture == Capture::Everything,
-            None => false,
-        },
-    };
-    let reserve = if trace.is_some() { crate::trace::MEMORY_RESERVE } else { 0 };
-    let complete = service::worst_case(&config.limits)
-        .and_then(|bytes| bytes.checked_add(reserve))
-        .ok_or("agent plus trace memory calculation overflowed")?;
-    if complete > document.memory_bytes {
-        return Err("agent plus trace exceeds memory_bytes".into());
-    }
-    Ok(Configuration { service: config, memory: document.memory_bytes, trace })
+    Ok(PreparedEndpoints {
+        domain: domain_endpoints.into_boxed_slice(),
+        channel: channel::Endpoints::new(channel_endpoints),
+        llm: llm_endpoints.into_boxed_slice(),
+    })
 }
 
 fn tls_transport() -> String {
@@ -285,32 +309,30 @@ pub const TRUST_BYTES: u64 = 16_777_216;
 /// Load the bounded startup trust roots used by agent and local endpoints.
 pub fn trust(der: Option<&str>) -> Result<tls::Config, String> {
     let mut roots = tls::RootCertStore::empty();
-    match der {
-        Some(path) => {
-            let file = fs::OpenOptions::new()
-                .read(true)
-                .custom_flags(libc::O_NONBLOCK)
-                .open(path)
-                .map_err(|error| format!("trust certificate {path:?}: {error}"))?;
-            let metadata = file.metadata().map_err(|error| format!("trust certificate metadata: {error}"))?;
-            if !metadata.is_file() || metadata.len() > 65_536 {
-                return Err("trust certificate must be a regular file of at most 65536 bytes".into());
-            }
-            let mut bytes = Vec::new();
-            file.take(65_537).read_to_end(&mut bytes).map_err(|error| format!("trust certificate read: {error}"))?;
-            if bytes.len() > 65_536 {
-                return Err("trust certificate exceeds 65536 bytes".into());
-            }
-            roots.add(tls::CertificateDer::from(bytes)).map_err(|error| format!("trust certificate: {error}"))?;
+    if let Some(path) = der {
+        #[expect(clippy::disallowed_types, reason = "10-product uses skein startup reads and trust roots")]
+        let file: fs::File = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+            .map_err(|error| format!("trust certificate {path:?}: {error}"))?;
+        let metadata = file.metadata().map_err(|error| format!("trust certificate metadata: {error}"))?;
+        if !metadata.is_file() || metadata.len() > 65_536 {
+            return Err("trust certificate must be a regular file of at most 65536 bytes".into());
         }
-        None => {
-            let native = rustls_native_certs::load_native_certs();
-            if native.certs.len() > 512 || native.certs.iter().any(|cert| cert.len() > 8192) {
-                return Err("native trust store exceeds its certificate bounds".into());
-            }
-            for cert in native.certs {
-                roots.add(cert).map_err(|error| format!("native trust certificate: {error}"))?;
-            }
+        let mut bytes = Vec::new();
+        file.take(65_537).read_to_end(&mut bytes).map_err(|error| format!("trust certificate read: {error}"))?;
+        if bytes.len() > 65_536 {
+            return Err("trust certificate exceeds 65536 bytes".into());
+        }
+        roots.add(tls::CertificateDer::from(bytes)).map_err(|error| format!("trust certificate: {error}"))?;
+    } else {
+        let native = rustls_native_certs::load_native_certs();
+        if native.certs.len() > 512 || native.certs.iter().any(|cert| cert.len() > 8192) {
+            return Err("native trust store exceeds its certificate bounds".into());
+        }
+        for cert in native.certs {
+            roots.add(cert).map_err(|error| format!("native trust certificate: {error}"))?;
         }
     }
     tls::Config::new(roots, &[]).map_err(|error| format!("TLS trust: {error:?}"))

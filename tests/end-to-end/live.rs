@@ -2,10 +2,8 @@
 //! The `live` nextest profile selects this binary; the merge gate excludes it.
 
 #[path = "support/live.rs"]
-#[allow(dead_code)]
-mod live;
-#[allow(dead_code)]
-mod support;
+pub mod live;
+pub mod support;
 
 #[test]
 fn bootstrap_settings() {
@@ -43,6 +41,10 @@ fn changed_files() -> Vec<(Vec<u8>, Vec<u8>)> {
         .collect()
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "10-product replaces the live command stories and their independent command checks"
+)]
 fn change(backend: &live::Backend, scratch: &Scratch, prompt: &str, extra: Option<(Vec<u8>, Vec<u8>)>) {
     let mut files = changed_files();
     if let Some(extra) = extra {
@@ -177,6 +179,7 @@ fn a_second_run_resumes_the_chat_from_its_files() {
     }
 }
 
+#[expect(clippy::disallowed_types, reason = "10-product replaces the live command stories and their remote checks")]
 fn git(path: &std::path::Path, arguments: &[&str]) -> std::process::Output {
     std::process::Command::new("/usr/bin/git").arg("-C").arg(path).args(arguments).output().expect("live git command")
 }
@@ -213,7 +216,7 @@ fn a_configured_push_lands() {
             assert!(seen.status.success(), "inspect configured remote branch; diagnostics withheld");
             let head = scratch.checkout().head().expect("delivered head");
             assert!(
-                seen.stdout.split(|byte| byte.is_ascii_whitespace()).next() == Some(head.as_slice()),
+                seen.stdout.split(u8::is_ascii_whitespace).next() == Some(head.as_slice()),
                 "configured push lands at the delivered commit"
             );
         }));

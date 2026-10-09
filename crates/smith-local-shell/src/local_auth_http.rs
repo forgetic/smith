@@ -57,7 +57,7 @@ pub(crate) fn worst_case() -> Option<u64> {
         .checked_add(Queue::<Down>::worst_case(256)?.checked_mul(2)?)?
         .checked_add(640_u64.checked_mul(32_768)?)?
         .checked_add(65_536)?
-        .checked_add(u64::try_from(std::mem::size_of::<Post>()).ok()?)
+        .checked_add(u64::try_from(size_of::<Post>()).ok()?)
 }
 
 pub(crate) fn fits(limits: &io::Limits) -> bool {
@@ -144,7 +144,14 @@ impl Post {
                 }
             }
             io::Event::Closed { .. } => self.closed = true,
-            _ => {}
+            io::Event::Listening { .. }
+            | io::Event::Accepted { .. }
+            | io::Event::Connected { .. }
+            | io::Event::Stream { .. }
+            | io::Event::Output { .. }
+            | io::Event::Spawned { .. }
+            | io::Event::Exited { .. }
+            | io::Event::Shutdown { .. } => {}
         }
         self.route(now, wall, out);
     }
@@ -197,7 +204,7 @@ impl Post {
                 }
                 match &mut self.tls {
                     Some(tls) => {
-                        tls::down(tls, &tls_env, tls::Request::Stream(down), &mut self.tls_up, &mut self.cipher_down)
+                        tls::down(tls, &tls_env, tls::Request::Stream(down), &mut self.tls_up, &mut self.cipher_down);
                     }
                     None => {
                         if let Some(socket) = self.socket {
@@ -211,7 +218,7 @@ impl Post {
                         self.begin_http(now, wall);
                     }
                     tls::Event::Stream(up) => {
-                        client::up(&mut self.http, &http_env, up, &mut self.http_up, &mut self.plain_down)
+                        client::up(&mut self.http, &http_env, up, &mut self.http_up, &mut self.plain_down);
                     }
                     tls::Event::Failed(_) => self.fail(now, wall, out),
                     tls::Event::Closed => {}
@@ -295,7 +302,6 @@ impl Post {
                 }
                 self.demand_body(&env);
             }
-            client::Event::Body(Up::End) => {}
             client::Event::Done(_) => {
                 self.terminal = Some(oauth::HttpResponse {
                     id: self.id,
@@ -309,10 +315,12 @@ impl Post {
                 self.close(out);
             }
             client::Event::Failed(_) | client::Event::Body(Up::Failed(_)) | client::Event::Upload(Up::Failed(_)) => {
-                self.fail(now, wall, out)
+                self.fail(now, wall, out);
             }
-            client::Event::Closed => {}
-            _ => unreachable!("HTTP upload and response streams have separate directions"),
+            client::Event::Body(Up::End) | client::Event::Closed => {}
+            client::Event::Upload(_) | client::Event::Body(_) => {
+                unreachable!("HTTP upload and response streams have separate directions")
+            }
         }
     }
 
@@ -422,7 +430,15 @@ mod tests {
                 }
                 io::Request::Stream { down: Down::Send(bytes), .. } => sent.extend_from_slice(&bytes),
                 io::Request::Abort { .. } => post.event(io::Event::Closed { owner }, Time::ZERO, Wall::EPOCH, &mut out),
-                _ => panic!("unexpected POST operation {request:?}"),
+                io::Request::Listen { .. }
+                | io::Request::Connect { .. }
+                | io::Request::Bind { .. }
+                | io::Request::Reject { .. }
+                | io::Request::Stream { .. }
+                | io::Request::Output { .. }
+                | io::Request::Spawn { .. }
+                | io::Request::Signal { .. }
+                | io::Request::Close { .. } => panic!("unexpected POST operation {request:?}"),
             }
         }
         assert!(sent.starts_with(b"POST /token HTTP/1.1\r\n"));

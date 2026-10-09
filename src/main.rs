@@ -15,13 +15,20 @@ const USAGE: &str = "usage: smith agent CONFIG.json | smith local SETTINGS.json 
 
 fn main() -> ExitCode {
     let args: Vec<_> = env::args_os().collect();
-    let result = if args.len() == 3 && args[1] == "agent" {
-        return match agent_shell::run(Path::new(&args[2]), Box::new(std::io::stderr())) {
+    let result = if args.len() == 3 && args.get(1).is_some_and(|command| command == "agent") {
+        return match agent_shell::run(
+            Path::new(args.get(2).expect("configuration or settings argument counted")),
+            Box::new(std::io::stderr()),
+        ) {
             Ok(()) => ExitCode::SUCCESS,
             Err(_) => ExitCode::FAILURE,
         };
-    } else if (args.len() == 4 || args.len() == 5) && args[1] == "local" {
-        local_shell::run(Path::new(&args[2]), Path::new(&args[3]), args.get(4).map(Path::new))
+    } else if (args.len() == 4 || args.len() == 5) && args.get(1).is_some_and(|command| command == "local") {
+        local_shell::run(
+            Path::new(args.get(2).expect("configuration or settings argument counted")),
+            Path::new(args.get(3).expect("state directory argument counted")),
+            args.get(4).map(Path::new),
+        )
     } else {
         eprintln!("smith: {USAGE}");
         return ExitCode::FAILURE;

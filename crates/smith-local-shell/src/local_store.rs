@@ -5,7 +5,7 @@
 //! completes removal of prior records after a cut; loading refuses oversized
 //! files, too many records, and symbolic links.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
@@ -67,13 +67,13 @@ impl Store {
             let name = entry.file_name();
             let Some(name) = name.to_str() else { return Err(local::StoreFailure::Read) };
             if turn_file(name) {
-                if turns.len() + deliveries.len() >= RECORDS {
+                if turns.len().checked_add(deliveries.len()).ok_or(local::StoreFailure::Read)? >= RECORDS {
                     return Err(local::StoreFailure::Read);
                 }
                 let bytes = read_optional(&entry.path(), STORE_BYTES, &mut total)?.ok_or(local::StoreFailure::Read)?;
                 turns.push((name.to_owned(), bytes.into_boxed_slice()));
             } else if delivery_file(name) {
-                if turns.len() + deliveries.len() >= RECORDS {
+                if turns.len().checked_add(deliveries.len()).ok_or(local::StoreFailure::Read)? >= RECORDS {
                     return Err(local::StoreFailure::Read);
                 }
                 let bytes = read_optional(&entry.path(), u64::from(self.delivery_bytes), &mut total)?
@@ -102,10 +102,10 @@ impl Store {
         if fresh {
             let mut journal = protocol::save_state(state);
             journal.name = b"fresh".as_slice().into();
-            self.replace(journal).map_err(|_| local::StoreFailure::Write)?;
+            self.replace(&journal).map_err(|_| local::StoreFailure::Write)?;
             self.recover_fresh().map_err(|_| local::StoreFailure::Write)?;
         } else {
-            self.replace(protocol::save_state(state)).map_err(|_| local::StoreFailure::Write)?;
+            self.replace(&protocol::save_state(state)).map_err(|_| local::StoreFailure::Write)?;
         }
         Ok(local::Event::StateSaved)
     }
@@ -114,21 +114,21 @@ impl Store {
         &mut self,
         number: u32,
         read: Option<Token>,
-        turn: smith_domain::Turn,
+        turn: &smith_domain::Turn,
     ) -> Result<local::Event, local::StoreFailure> {
-        let file = protocol::save_turn(turn.sequence, read, &turn, &smith_transcript::CEILINGS, &self.endpoints)
+        let file = protocol::save_turn(turn.sequence, read, turn, &smith_transcript::CEILINGS, &self.endpoints)
             .map_err(|_| local::StoreFailure::Write)?;
-        self.replace(file).map_err(|_| local::StoreFailure::Write)?;
+        self.replace(&file).map_err(|_| local::StoreFailure::Write)?;
         Ok(local::Event::TurnSaved { number })
     }
 
     pub fn save_delivery(&mut self, record: &DeliveryRecord) -> Result<local::Event, local::StoreFailure> {
         let file = protocol::save_delivery(record, self.delivery_bytes).map_err(|_| local::StoreFailure::Write)?;
-        self.replace(file).map_err(|_| local::StoreFailure::Write)?;
+        self.replace(&file).map_err(|_| local::StoreFailure::Write)?;
         Ok(local::Event::DeliverySaved { name: record.name })
     }
 
-    fn replace(&mut self, replacement: protocol::File) -> io::Result<()> {
+    fn replace(&mut self, replacement: &protocol::File) -> io::Result<()> {
         let name = std::str::from_utf8(&replacement.name)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "record filename is not UTF-8"))?;
         let mut created = None;
@@ -140,7 +140,7 @@ impl Store {
                     created = Some((candidate, file));
                     break;
                 }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(error),
             }
         }
@@ -149,9 +149,9 @@ impl Store {
         let target = self.directory.join(name);
         let result = (|| {
             let split = replacement.bytes.len() / 2;
-            file.write_all(&replacement.bytes[..split])?;
+            file.write_all(replacement.bytes.get(..split).expect("half lies within replacement"))?;
             self.boundary()?;
-            file.write_all(&replacement.bytes[split..])?;
+            file.write_all(replacement.bytes.get(split..).expect("half lies within replacement"))?;
             self.boundary()?;
             file.sync_all()?;
             self.boundary()?;
@@ -161,7 +161,7 @@ impl Store {
             self.boundary()
         })();
         if result.is_err() && self.cut != Some(0) {
-            let _ = fs::remove_file(&temp);
+            drop(fs::remove_file(&temp));
         }
         result
     }
@@ -193,7 +193,7 @@ impl Store {
         };
         let state = protocol::decode_state(&bytes).map_err(|_| io::Error::other("invalid fresh journal"))?;
         self.discard_old_records()?;
-        self.replace(protocol::save_state(state))?;
+        self.replace(&protocol::save_state(state))?;
         fs::remove_file(path)?;
         self.boundary()?;
         sync_directory(&self.directory)?;
@@ -250,22 +250,28 @@ fn read_optional(path: &Path, bound: u64, total: &mut u64) -> Result<Option<Vec<
     Ok(Some(bytes))
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "10-product replaces chat file and directory syncs with durable replace over io"
+)]
 fn sync_directory(path: &Path) -> io::Result<()> {
-    File::open(path)?.sync_all()
+    fs::File::open(path)?.sync_all()
 }
 
 fn turn_file(name: &str) -> bool {
-    name.len() == 15 && name.ends_with(".turn") && name.as_bytes()[..10].iter().all(u8::is_ascii_digit)
+    name.len() == 15
+        && name.as_bytes().ends_with(b".turn")
+        && name.as_bytes().get(..10).expect("checked turn filename length").iter().all(u8::is_ascii_digit)
 }
 
 fn delivery_file(name: &str) -> bool {
     let bytes = name.as_bytes();
     bytes.len() == 42
-        && bytes[20] == b'.'
-        && bytes[31] == b'.'
-        && bytes[..20].iter().all(u8::is_ascii_digit)
-        && bytes[21..31].iter().all(u8::is_ascii_digit)
-        && bytes[32..].iter().all(u8::is_ascii_digit)
+        && bytes.get(20) == Some(&b'.')
+        && bytes.get(31) == Some(&b'.')
+        && bytes.get(..20).expect("checked delivery filename length").iter().all(u8::is_ascii_digit)
+        && bytes.get(21..31).expect("checked delivery filename length").iter().all(u8::is_ascii_digit)
+        && bytes.get(32..).expect("checked delivery filename length").iter().all(u8::is_ascii_digit)
 }
 
 #[cfg(test)]
@@ -311,7 +317,7 @@ mod tests {
         store
             .save_state(local::ChatState { activation: 1, next_message: 2, read: None }, false)
             .expect("state durable");
-        store.save_turn(1, Some(Token::new(2)), turn()).expect("turn durable");
+        store.save_turn(1, Some(Token::new(2)), &turn()).expect("turn durable");
         drop(store);
         let reopened = Store::new(path.clone(), endpoints(), 4096).expect("store reopens");
         let local::Event::Loaded { state: Some(state), transcript: Some(transcript), deliveries } =
@@ -370,7 +376,7 @@ mod tests {
     fn baseline(path: &Path) -> Store {
         let mut store = Store::new(path.into(), endpoints(), 4096).expect("store");
         store.save_state(state(1), false).expect("metadata acknowledged");
-        store.save_turn(1, Some(Token::new(2)), turn()).expect("turn acknowledged");
+        store.save_turn(1, Some(Token::new(2)), &turn()).expect("turn acknowledged");
         store.save_delivery(&delivery()).expect("answered call acknowledged");
         store
     }
@@ -387,7 +393,7 @@ mod tests {
                     1 => {
                         let mut next = turn();
                         next.sequence = 2;
-                        store.save_turn(2, Some(Token::new(3)), next)
+                        store.save_turn(2, Some(Token::new(3)), &next)
                     }
                     2 => {
                         let mut next = delivery();
@@ -436,7 +442,7 @@ mod tests {
             if cut < 5 {
                 assert_eq!(saved.activation, 1);
                 assert_eq!(transcript.expect("original history").turns.len(), 1);
-                assert_eq!(deliveries, Box::new([delivery()]) as Box<[DeliveryRecord]>);
+                assert_eq!(deliveries, Box::<[DeliveryRecord]>::from([delivery()]));
             } else {
                 assert_eq!(saved.activation, 2);
                 assert!(transcript.is_none());
@@ -461,7 +467,11 @@ mod tests {
         use std::os::unix::fs::symlink;
         let path = directory();
         let store = Store::new(path.clone(), endpoints(), 4096).expect("store");
-        let oversized = File::create(path.join("0000000001.turn")).expect("sparse file");
+        #[expect(
+            clippy::disallowed_types,
+            reason = "10-product replaces the store and its sparse-file refusal fixture"
+        )]
+        let oversized = fs::File::create(path.join("0000000001.turn")).expect("sparse file");
         oversized.set_len(STORE_BYTES + 1).expect("bounded sparse fixture");
         assert_eq!(store.load().err(), Some(local::StoreFailure::Read));
         fs::remove_file(path.join("0000000001.turn")).expect("remove");

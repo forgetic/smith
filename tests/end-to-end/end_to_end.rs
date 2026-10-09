@@ -1,6 +1,6 @@
-mod support;
+pub mod support;
 
-use smith_local_process_world::Placement;
+use smith_local_process_world::{Placement, referee::CheckoutRead};
 use smith_real_world::{Scratch, World};
 
 #[test]
@@ -23,7 +23,6 @@ fn a_first_run_signs_in_and_ends_with_a_commit_in_place() {
     assert_eq!(oauth.posts, 1);
     assert_eq!(oauth.pages, 1);
     assert!(oauth.browser_replied && oauth.saved_before_query);
-    use smith_local_process_world::referee::CheckoutRead;
     let checkout = scratch.checkout();
     let head = checkout.head().expect("committed head");
     let files = checkout.files(&head);
@@ -87,9 +86,9 @@ fn the_startup_refusals_of_both_commands_are_observed_outside() {
 #[test]
 fn the_live_outcome_referee_runs_on_the_shared_fake_binary_harness() {
     let report = Scratch::new();
-    support::live_run::run_fake(&report, World::new(35, &report, Placement::Spawned, b"First answer").scenario);
+    support::live_run::run_fake(&report, &World::new(35, &report, Placement::Spawned, b"First answer").scenario);
     let change = Scratch::new();
-    support::live_run::run_fake(&change, World::changed(36, &change, Placement::Spawned).scenario);
+    support::live_run::run_fake(&change, &World::changed(36, &change, Placement::Spawned).scenario);
 }
 
 #[test]

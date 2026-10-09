@@ -3,7 +3,7 @@
 //! its file and never receives grants or other credential values.
 //! Contract: protocol/agent.md, section 5.
 
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ const CALL_BYTES: usize = 16_384;
 const TEXT_BYTES: usize = 65_536;
 const RECORD_BYTES: usize = 400_000;
 /// Reserved bytes for the writer's bounded line queue and one formatted line.
-pub const MEMORY_RESERVE: u64 = (RECORDS as u64 + 2) * RECORD_BYTES as u64;
+pub const MEMORY_RESERVE: u64 = 13_600_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Capture {
@@ -43,21 +43,23 @@ pub struct Trace {
 
 impl Trace {
     pub fn open(config: TraceConfig) -> Result<Trace, String> {
+        let TraceConfig { path, capture } = config;
         let file = OpenOptions::new()
             .append(true)
             .create(true)
-            .open(&config.path)
-            .map_err(|error| format!("trace file {}: {error}", config.path.display()))?;
+            .open(&path)
+            .map_err(|error| format!("trace file {}: {error}", path.display()))?;
         let (sender, receiver) = sync_channel::<String>(RECORDS);
         let pending = Arc::new(AtomicU64::new(0));
         let write_failures = Arc::new(AtomicU64::new(0));
         let writer_pending = Arc::clone(&pending);
-        let writer_failures = Arc::clone(&write_failures);
+        let background_failures = Arc::clone(&write_failures);
+        #[expect(clippy::disallowed_methods, reason = "02-events replaces the trace thread with an io append stream")]
         thread::Builder::new()
             .name("smith-trace".into())
-            .spawn(move || write_records(file, receiver, &writer_pending, &writer_failures))
+            .spawn(move || write_records(file, receiver, &writer_pending, &background_failures))
             .map_err(|error| format!("trace writer cannot start: {error}"))?;
-        Ok(Trace { sender, capture: config.capture, dropped: 0, pending, write_failures })
+        Ok(Trace { sender, capture, dropped: 0, pending, write_failures })
     }
 
     fn offer(&mut self, record: String) {
@@ -68,7 +70,7 @@ impl Trace {
         self.pending.fetch_add(1, Ordering::Relaxed);
         match self.sender.try_send(record) {
             Ok(()) => {}
-            Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
+            Err(TrySendError::Full(_) | TrySendError::Disconnected(_)) => {
                 self.pending.fetch_sub(1, Ordering::Relaxed);
                 self.dropped = self.dropped.saturating_add(1);
             }
@@ -88,7 +90,6 @@ impl Trace {
 
     pub fn content(&mut self, content: domain::Content, at_ns: u64) {
         match (self.capture, content) {
-            (Capture::None, _) => {}
             (Capture::Calls | Capture::Everything, domain::Content::Call { owner, id, name, input }) => {
                 if id.len() > CALL_BYTES || name.len() > CALL_BYTES || input.len() > CALL_BYTES {
                     self.dropped = self.dropped.saturating_add(1);
@@ -132,7 +133,7 @@ impl Trace {
                         .to_string(),
                 );
             }
-            (Capture::Calls, domain::Content::Text { .. } | domain::Content::Usage { .. }) => {}
+            (Capture::None, _) | (Capture::Calls, domain::Content::Text { .. } | domain::Content::Usage { .. }) => {}
         }
     }
 
@@ -144,8 +145,9 @@ impl Trace {
     }
 }
 
+#[expect(clippy::disallowed_types, reason = "02-events replaces the trace file and thread with an io append stream")]
 fn write_records(
-    mut file: File,
+    mut file: std::fs::File,
     receiver: std::sync::mpsc::Receiver<String>,
     pending: &AtomicU64,
     write_failures: &AtomicU64,
@@ -161,21 +163,33 @@ fn write_records(
 }
 
 fn hex(bytes: &[u8]) -> String {
-    let mut value = String::with_capacity(bytes.len().saturating_mul(2));
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut value = String::with_capacity(bytes.len().saturating_mul(2));
     for byte in bytes {
-        value.push(char::from(DIGITS[usize::from(*byte >> 4)]));
-        value.push(char::from(DIGITS[usize::from(*byte & 15)]));
+        value.push(char::from(*DIGITS.get(usize::from(*byte >> 4)).expect("high nibble indexes hex digits")));
+        value.push(char::from(*DIGITS.get(usize::from(*byte & 15)).expect("low nibble indexes hex digits")));
     }
     value
 }
 
 fn done_bytes(done: &tools::Done) -> u64 {
     match done {
-        tools::Done::Loaded { content, .. } => content.len() as u64,
-        tools::Done::Scanned { entries, .. } => entries.iter().map(|entry| entry.name.as_bytes().len() as u64).sum(),
-        tools::Done::Exited { head, tail, .. } => (head.len() + tail.len()) as u64,
-        tools::Done::Found { hits, .. } => hits.iter().map(|hit| (hit.path.len() + hit.text.len()) as u64).sum(),
+        tools::Done::Loaded { content, .. } => u64::try_from(content.len()).expect("content length fits u64"),
+        tools::Done::Scanned { entries, .. } => entries
+            .iter()
+            .map(|entry| u64::try_from(entry.name.as_bytes().len()).expect("entry length fits u64"))
+            .fold(0, u64::saturating_add),
+        tools::Done::Exited { head, tail, .. } => u64::try_from(head.len())
+            .expect("head length fits u64")
+            .saturating_add(u64::try_from(tail.len()).expect("tail length fits u64")),
+        tools::Done::Found { hits, .. } => hits
+            .iter()
+            .map(|hit| {
+                u64::try_from(hit.path.len())
+                    .expect("path length fits u64")
+                    .saturating_add(u64::try_from(hit.text.len()).expect("text length fits u64"))
+            })
+            .fold(0, u64::saturating_add),
         tools::Done::Stored { .. }
         | tools::Done::Conflict { .. }
         | tools::Done::Missing

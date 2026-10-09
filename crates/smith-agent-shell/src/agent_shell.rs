@@ -84,6 +84,7 @@ impl Agent {
     }
 
     /// The settled invocation's success or failure, already logged to error output.
+    #[must_use]
     pub fn result(&self) -> Option<Result<(), &str>> {
         self.result.as_ref().map(|result| result.as_ref().copied().map_err(String::as_str))
     }
@@ -117,8 +118,8 @@ fn prepare(configuration: config::Configuration, resources: &Resources) -> Resul
     let reserve = if configuration.trace.is_some() { trace::MEMORY_RESERVE } else { 0 };
     let worst = service::worst_case(&configuration.service.limits)
         .and_then(|bytes| bytes.checked_add(reserve))
-        .and_then(|bytes| bytes.checked_add(u64::try_from(std::mem::size_of::<Agent>()).ok()?))
-        .and_then(|bytes| bytes.checked_add(u64::try_from(root_count.checked_mul(std::mem::size_of::<Fd>())?).ok()?))
+        .and_then(|bytes| bytes.checked_add(u64::try_from(size_of::<Agent>()).ok()?))
+        .and_then(|bytes| bytes.checked_add(u64::try_from(root_count.checked_mul(size_of::<Fd>())?).ok()?))
         .ok_or("agent memory calculation overflowed")?;
     if worst > configuration.memory {
         return Err("agent shell exceeds memory_bytes".into());

@@ -61,8 +61,8 @@ pub struct Local {
     right: u64,
     events: Queue<io::Event>,
     requests: Queue<io::Request>,
-    local_completions: Queue<kernel::Complete>,
-    local_submissions: Queue<kernel::Submit>,
+    store_completions: Queue<kernel::Complete>,
+    store_submissions: Queue<kernel::Submit>,
     completions: Queue<kernel::Complete>,
     submissions: Queue<kernel::Submit>,
     exit: Option<domain::ExitStatus>,
@@ -74,6 +74,7 @@ pub struct Local {
 
 impl Local {
     /// Compose either placement with the same file and terminal shell pass.
+    #[expect(clippy::too_many_lines, reason = "03-inline-agent removes the two-placement startup composition")]
     pub fn new(config: service::Config, lower: Option<agent::Config>, resources: Resources) -> Result<Self, String> {
         let mut worst = match &lower {
             Some(lower) => service::in_process_worst_case(&config.limits, &lower.limits),
@@ -86,7 +87,13 @@ impl Local {
             return Err("local accounts exceed their configured bounds".into());
         }
         for (position, account) in resources.accounts.iter().enumerate() {
-            if resources.accounts[..position].iter().any(|prior| prior.number == account.number) {
+            if resources
+                .accounts
+                .get(..position)
+                .expect("enumerated prior accounts")
+                .iter()
+                .any(|prior| prior.number == account.number)
+            {
                 return Err("local account numbers must be unique".into());
             }
         }
@@ -132,7 +139,7 @@ impl Local {
             .and_then(|count| count.checked_add(Queue::<io::Event>::worst_case(queue)?))
             .and_then(|count| count.checked_add(Queue::<io::Request>::worst_case(queue)?))
             .and_then(|count| count.checked_add(Map::<Token, Route>::worst_case(operations)?))
-            .and_then(|count| count.checked_add(u64::try_from(std::mem::size_of::<Self>()).ok()?))
+            .and_then(|count| count.checked_add(u64::try_from(size_of::<Self>()).ok()?))
             .ok_or("shell memory calculation overflowed")?;
         let accounts = resources
             .accounts
@@ -157,8 +164,8 @@ impl Local {
             right: 1,
             events: Queue::with_capacity(queue),
             requests,
-            local_completions: Queue::with_capacity(queue),
-            local_submissions: Queue::with_capacity(queue),
+            store_completions: Queue::with_capacity(queue),
+            store_submissions: Queue::with_capacity(queue),
             completions: Queue::with_capacity(outer_queue),
             submissions: Queue::with_capacity(outer_queue),
             exit: None,
@@ -206,7 +213,7 @@ impl Local {
             let event = match request {
                 domain::Request::Load => self.store.load(),
                 domain::Request::SaveState { state, fresh } => self.store.save_state(state, fresh),
-                domain::Request::SaveTurn { number, read, turn } => self.store.save_turn(number, read, turn),
+                domain::Request::SaveTurn { number, read, turn } => self.store.save_turn(number, read, &turn),
                 domain::Request::SaveDelivery { record } => self.store.save_delivery(&record),
                 domain::Request::Credential { account } => {
                     self.credential(account);
@@ -238,6 +245,10 @@ impl Local {
         }
     }
 
+    #[expect(
+        clippy::single_match_else,
+        reason = "10-product replaces the shell token-store driver with skein OAuth io"
+    )]
     fn authentication(&mut self) {
         for auth in &mut self.accounts {
             if self.exit.is_some() {
@@ -279,7 +290,13 @@ impl Local {
                         value,
                     } => {
                         let length = u16::try_from(auth.account_id().len()).expect("bounded account identifier");
-                        let mut envelope = Vec::with_capacity(2 + auth.account_id().len() + value.len());
+                        let mut envelope = Vec::with_capacity(
+                            auth.account_id()
+                                .len()
+                                .checked_add(value.len())
+                                .and_then(|bytes| bytes.checked_add(2))
+                                .expect("bounded credential envelope"),
+                        );
                         envelope.extend_from_slice(&length.to_be_bytes());
                         envelope.extend_from_slice(auth.account_id());
                         envelope.extend_from_slice(&value);
@@ -297,18 +314,18 @@ impl Local {
 
     fn writer_up(&mut self) {
         while self.writer.is_ready() {
-            io::resume(&mut self.writer, &self.env, &mut self.events, &mut self.local_submissions);
+            io::resume(&mut self.writer, &self.env, &mut self.events, &mut self.store_submissions);
         }
-        for _ in 0..self.local_completions.capacity() {
-            let Some(complete) = self.local_completions.pop() else { break };
-            io::up(&mut self.writer, &self.env, complete, &mut self.events, &mut self.local_submissions);
+        for _ in 0..self.store_completions.capacity() {
+            let Some(complete) = self.store_completions.pop() else { break };
+            io::up(&mut self.writer, &self.env, complete, &mut self.events, &mut self.store_submissions);
         }
         for _ in 0..self.env.limits.sockets {
             if self.writer.is_ready() {
-                io::resume(&mut self.writer, &self.env, &mut self.events, &mut self.local_submissions);
+                io::resume(&mut self.writer, &self.env, &mut self.events, &mut self.store_submissions);
             }
             if self.writer.is_due(self.env.now) {
-                io::fire(&mut self.writer, &self.env, &mut self.events, &mut self.local_submissions);
+                io::fire(&mut self.writer, &self.env, &mut self.events, &mut self.store_submissions);
             }
         }
         while let Some(event) = self.events.pop() {
@@ -320,7 +337,7 @@ impl Local {
             match event {
                 io::Event::Output { owner, up: OutputUp::Settled { right, outcome } } if owner == self.output => {
                     let (wanted, text) = self.pending.take().expect("terminal has one output right");
-                    assert_eq!(right, wanted);
+                    assert_eq!(right, wanted, "terminal settled its sole output right");
                     match outcome {
                         OutputOutcome::Granted => self.requests.push(io::Request::Output {
                             stream: self.output,
@@ -330,10 +347,18 @@ impl Local {
                     }
                 }
                 io::Event::Failed { .. } | io::Event::Stream { up: skein_lib::stream::Up::Failed(_), .. } => {
-                    self.write_failed()
+                    self.write_failed();
                 }
                 io::Event::Closed { .. } => {}
-                other => panic!("unexpected terminal writer event: {other:?}"),
+                other @ (io::Event::Listening { .. }
+                | io::Event::Accepted { .. }
+                | io::Event::Connecting { .. }
+                | io::Event::Connected { .. }
+                | io::Event::Stream { .. }
+                | io::Event::Output { .. }
+                | io::Event::Spawned { .. }
+                | io::Event::Exited { .. }
+                | io::Event::Shutdown { .. }) => panic!("unexpected terminal writer event: {other:?}"),
             }
         }
     }
@@ -366,7 +391,7 @@ impl Local {
         }
         while self.writer.takes() {
             let Some(request) = self.requests.pop() else { break };
-            io::down(&mut self.writer, &self.env, request, &mut self.local_submissions);
+            io::down(&mut self.writer, &self.env, request, &mut self.store_submissions);
         }
         self.writer.reclaim();
     }
@@ -385,7 +410,30 @@ impl Local {
                     .unwrap_or(Token::new(u64::MAX));
                 kernel::Op::Cancel { target }
             }
-            other => other,
+            other @ (kernel::Op::Socket { .. }
+            | kernel::Op::Bind { .. }
+            | kernel::Op::Listen { .. }
+            | kernel::Op::Accept { .. }
+            | kernel::Op::Connect { .. }
+            | kernel::Op::Recv { .. }
+            | kernel::Op::Send { .. }
+            | kernel::Op::Shutdown { .. }
+            | kernel::Op::Close { .. }
+            | kernel::Op::Open { .. }
+            | kernel::Op::Read { .. }
+            | kernel::Op::Write { .. }
+            | kernel::Op::Sync { .. }
+            | kernel::Op::Stat { .. }
+            | kernel::Op::Rename { .. }
+            | kernel::Op::Remove { .. }
+            | kernel::Op::MakeDirectory { .. }
+            | kernel::Op::List { .. }
+            | kernel::Op::Spawn { .. }
+            | kernel::Op::Wait { .. }
+            | kernel::Op::Signal { .. }
+            | kernel::Op::ReadSignal { .. }
+            | kernel::Op::PipeRead { .. }
+            | kernel::Op::PipeWrite { .. }) => other,
         };
         let op = Token::new(self.operation);
         self.operation = self.operation.checked_add(1).expect("shell operation names remain representable");
@@ -406,7 +454,7 @@ impl Host for Local {
                     result: complete.result,
                 }),
                 Route::Writer(op) => {
-                    self.local_completions.push(kernel::Complete { op, kind: complete.kind, result: complete.result })
+                    self.store_completions.push(kernel::Complete { op, kind: complete.kind, result: complete.result });
                 }
                 Route::Launch => {
                     self.launch_closing = false;
@@ -425,7 +473,7 @@ impl Host for Local {
             let op = submit.op;
             self.submit(submit, Route::Service(op));
         }
-        while let Some(submit) = self.local_submissions.pop() {
+        while let Some(submit) = self.store_submissions.pop() {
             let op = submit.op;
             self.submit(submit, Route::Writer(op));
         }
@@ -442,8 +490,8 @@ impl Host for Local {
             || self.writer.is_ready()
             || self.writer.is_due(now)
             || !self.completions.is_empty()
-            || !self.local_completions.is_empty()
-            || !self.local_submissions.is_empty()
+            || !self.store_completions.is_empty()
+            || !self.store_submissions.is_empty()
             || !self.events.is_empty()
             || !self.requests.is_empty()
     }
@@ -464,8 +512,8 @@ impl Host for Local {
             && self.launch_root.is_none()
             && self.completions.is_empty()
             && self.submissions.is_empty()
-            && self.local_completions.is_empty()
-            && self.local_submissions.is_empty()
+            && self.store_completions.is_empty()
+            && self.store_submissions.is_empty()
             && self.events.is_empty()
             && self.requests.is_empty()
     }

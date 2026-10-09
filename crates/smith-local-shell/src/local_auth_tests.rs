@@ -186,9 +186,11 @@ impl World {
                     self.terminal = Some(Ok(grant));
                 }
                 CredentialRequest::Failed { event: local::Event::NoCredential { reason, .. } } => {
-                    self.terminal = Some(Err(reason))
+                    self.terminal = Some(Err(reason));
                 }
-                _ => panic!("unexpected OAuth terminal"),
+                CredentialRequest::Ready { .. } | CredentialRequest::Failed { .. } => {
+                    panic!("unexpected OAuth terminal")
+                }
             }
         }
         while self.io.takes() {
@@ -251,7 +253,7 @@ impl World {
 
 impl Drop for World {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
+        drop(std::fs::remove_dir_all(&self.root));
     }
 }
 

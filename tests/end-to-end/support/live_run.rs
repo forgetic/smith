@@ -46,7 +46,7 @@ impl Referee<Process> for Judge {
                     }
                 }
                 Process::Script(Proc::Peer(peer)) if exit.is_some() || finished => peer.shutdown(),
-                _ => {}
+                Process::Binary(_) | Process::Script(_) => {}
             }
         }
     }
@@ -71,11 +71,12 @@ impl Referee<Process> for Judge {
         }
         let trace = std::fs::read(self.directory.join("agent-trace.jsonl")).expect("live agent trace");
         assert!(trace.starts_with(&self.trace_prefix), "durable trace prefix stays unchanged");
-        let records: Vec<serde_json::Value> = std::str::from_utf8(&trace[self.trace_prefix.len()..])
-            .expect("trace UTF-8")
-            .lines()
-            .map(|line| serde_json::from_str(line).expect("trace JSONL"))
-            .collect();
+        let records: Vec<serde_json::Value> =
+            std::str::from_utf8(trace.get(self.trace_prefix.len()..).expect("trace prefix preserved"))
+                .expect("trace UTF-8")
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("trace JSONL"))
+                .collect();
         assert!(
             records.iter().any(|record| record["type"] == "call" && record["name"] == "66696e697368"),
             "the shipped live agent actually called finish"
@@ -137,8 +138,8 @@ pub fn run(scratch: &Scratch, prompt: &str, change: bool, expectation: Expectati
 }
 
 /// Offline control of exactly the live outcome policy and shared binary driver.
-pub fn run_fake(scratch: &Scratch, scenario: smith_local_process_world::world::Scenario) {
-    super::settings(scratch, &scenario);
+pub fn run_fake(scratch: &Scratch, scenario: &smith_local_process_world::world::Scenario) {
+    super::settings(scratch, scenario);
     let change = scenario.launch.change;
     let files = if change {
         [

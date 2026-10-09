@@ -89,7 +89,9 @@ impl Invocation {
                 access_token: b"token".as_slice().into(),
                 refresh_token: b"refresh".as_slice().into(),
                 metadata: None,
-                expires_at: Wall::from_nanos(config.wall.as_nanos() + Duration::from_secs(7200).as_nanos()),
+                expires_at: Wall::from_nanos(
+                    config.wall.as_nanos().saturating_add(Duration::from_secs(7200).as_nanos()),
+                ),
             },
             &token_limits(),
         )
@@ -162,7 +164,10 @@ impl Invocation {
                 break;
             }
         }
-        assert!(matches!(self.local.result(), Some(Ok(local::ExitStatus::Success))));
+        assert!(
+            matches!(self.local.result(), Some(Ok(local::ExitStatus::Success))),
+            "local invocation finishes successfully"
+        );
         self.sim.assert_quiescent(self.pid);
         self.sim.assert_no_open_fds(self.pid);
     }
@@ -170,7 +175,7 @@ impl Invocation {
 
 impl Drop for Invocation {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.directory);
+        drop(std::fs::remove_dir_all(&self.directory));
     }
 }
 

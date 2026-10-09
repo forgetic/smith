@@ -3,7 +3,7 @@
 //! owns chat and run decisions. One Skein kernel loop drives terminal input,
 //! signals, the hosted agent and their deadlines.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -23,6 +23,7 @@ use crate::{
     local_settings,
 };
 
+#[expect(clippy::too_many_lines, reason = "10-product replaces spawned JSON startup with resolved product commands")]
 pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&Path>) -> Result<(), String> {
     let settings = local_settings::read(settings_path, workspace_settings)?;
     if settings.delivery_environment.len() > 64
@@ -145,6 +146,10 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
     }
 }
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "10-product composes the inline agent and writes no agent configuration file"
+)]
 fn save_agent_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path.parent().ok_or("agent configuration has no directory")?;
     let temporary = parent.join(".agent.json.tmp");
@@ -157,7 +162,7 @@ fn save_agent_config(path: &Path, bytes: &[u8]) -> Result<(), String> {
     file.write_all(bytes).map_err(|error| format!("agent configuration write: {error}"))?;
     file.sync_all().map_err(|error| format!("agent configuration sync: {error}"))?;
     fs::rename(&temporary, path).map_err(|error| format!("agent configuration rename: {error}"))?;
-    File::open(parent)
+    fs::File::open(parent)
         .and_then(|directory| directory.sync_all())
         .map_err(|error| format!("agent configuration directory sync: {error}"))
 }

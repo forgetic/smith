@@ -5,6 +5,7 @@ use smith_real_world::Scratch;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
+#[must_use]
 pub fn setting(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.trim().is_empty())
 }
@@ -13,6 +14,7 @@ fn required(name: &str) -> String {
     setting(name).unwrap_or_else(|| panic!("live suite requires {name}"))
 }
 
+#[must_use]
 pub fn enabled() -> bool {
     setting("NEXTEST_PROFILE").as_deref() == Some("live")
 }
@@ -25,6 +27,7 @@ pub struct Backend {
     pub tokens: PathBuf,
 }
 
+#[must_use]
 pub fn safe_directory(path: &Path) -> PathBuf {
     assert!(path.is_absolute(), "SMITH_TEST_LIVE_TOKEN_DIR must be absolute");
     assert!(
@@ -64,7 +67,7 @@ impl Environment {
         let metadata =
             std::fs::metadata(&root).expect("SMITH_TEST_LIVE_TOKEN_DIR must exist; bootstrap and sign in first");
         assert!(
-            metadata.is_dir() && metadata.permissions().mode() & 0o077 == 0,
+            metadata.is_dir() && metadata.permissions().mode().trailing_zeros() >= 6,
             "live token directory must be private (0700)"
         );
         let marker = root.join(".smith-live-test-tokens");
@@ -87,7 +90,8 @@ impl Environment {
                 serde_json::from_slice(&std::fs::read(account_file).expect("public account registration"))
                     .expect("account registration must be JSON");
             assert!(
-                account["account_id"].is_string() && account["oauth"].is_object(),
+                account.get("account_id").is_some_and(serde_json::Value::is_string)
+                    && account.get("oauth").is_some_and(serde_json::Value::is_object),
                 "registration requires account_id and oauth"
             );
             assert!(
@@ -99,20 +103,22 @@ impl Environment {
                 "public account registration has unknown fields"
             );
             assert!(
-                account["oauth"].as_object().expect("OAuth object").keys().all(|key| matches!(
-                    key.as_str(),
-                    "authorization_url"
-                        | "token_endpoint"
-                        | "client_id"
-                        | "redirect_uri"
-                        | "scope"
-                        | "address"
-                        | "server_name"
-                        | "json"
-                )),
+                account.get("oauth").expect("OAuth registration").as_object().expect("OAuth object").keys().all(
+                    |key| matches!(
+                        key.as_str(),
+                        "authorization_url"
+                            | "token_endpoint"
+                            | "client_id"
+                            | "redirect_uri"
+                            | "scope"
+                            | "address"
+                            | "server_name"
+                            | "json"
+                    )
+                ),
                 "public OAuth registration cannot contain credentials or unknown fields"
             );
-            account["number"] = serde_json::json!(0);
+            account.as_object_mut().expect("account object").insert("number".into(), serde_json::json!(0));
             let tokens = root.join(name);
             if bootstrap {
                 std::fs::DirBuilder::new()
@@ -150,6 +156,7 @@ impl Environment {
 }
 
 impl Backend {
+    #[must_use]
     pub fn settings(&self, directory: &Path, change: bool) -> serde_json::Value {
         let (host, identity, headers) = if self.name == "codex" {
             ("chatgpt.com", "plain", skein_llm::openai::identity::headers().iter().map(|header| serde_json::json!({"name":String::from_utf8_lossy(&header.name),"value":String::from_utf8_lossy(&header.value)})).collect::<Vec<_>>())
@@ -163,7 +170,7 @@ impl Backend {
             ("api.anthropic.com", "claude-code", headers.iter().map(|header| serde_json::json!({"name":String::from_utf8_lossy(&header.name),"value":String::from_utf8_lossy(&header.value)})).collect::<Vec<_>>())
         };
         let mut settings = serde_json::json!({
-            "agent":{"profile":"standard","memory_bytes":1099511627776_u64,"grace_ms":1000,
+            "agent":{"profile":"standard","memory_bytes":1_099_511_627_776_u64,"grace_ms":1000,
                 "endpoints":[{"name":self.name,"number":0,"dialect":0,"account":0,"provider":self.name,"address":format!("{host}:443"),"server_name":host,"transport":"tls","identity":identity,"headers":headers,"reasoning_effort":if self.name == "codex" { Some("low") } else { None }}],
                 "environment":[],"trace":{"path":directory.join("agent-trace.jsonl"),"capture":"calls"}},
             "chat":"chat","instructions":"@local-shell Follow the user's requested outcome exactly. Use the tools and call finish when done.",
@@ -172,10 +179,15 @@ impl Backend {
             "contract":{"form":"report","max":4096},"token_directory":self.tokens,"accounts":[self.account]
         });
         if change {
-            settings["directories"] =
-                serde_json::json!([{"name":"repo","path":directory.join("repo"),"writable":true,"git":true}]);
-            settings["conventions"] = serde_json::json!({"guide":".smith-test/guide","checks":".smith-test/check"});
-            settings["contract"] = serde_json::json!({"form":"change","checks_must_pass":true,"fields":[{"name":"title","max":256},{"name":"body","max":4096}]});
+            settings.as_object_mut().expect("settings object").insert(
+                "directories".into(),
+                serde_json::json!([{"name":"repo","path":directory.join("repo"),"writable":true,"git":true}]),
+            );
+            settings.as_object_mut().expect("settings object").insert(
+                "conventions".into(),
+                serde_json::json!({"guide":".smith-test/guide","checks":".smith-test/check"}),
+            );
+            settings.as_object_mut().expect("settings object").insert("contract".into(), serde_json::json!({"form":"change","checks_must_pass":true,"fields":[{"name":"title","max":256},{"name":"body","max":4096}]}));
         }
         settings
     }
@@ -183,12 +195,18 @@ impl Backend {
     pub fn configure(&self, scratch: &Scratch, change: bool, push: Option<(&str, &str)>) {
         let mut settings = self.settings(scratch.path(), change);
         if let Some((remote, branch)) = push {
-            settings["push"] = serde_json::json!([{"remote":remote,"branch":branch}]);
-            settings["delivery_environment"] = serde_json::json!(
-                ["HOME", "PATH", "SSH_AUTH_SOCK"]
-                    .into_iter()
-                    .filter_map(|name| setting(name).map(|value| format!("{name}={value}")))
-                    .collect::<Vec<_>>()
+            settings
+                .as_object_mut()
+                .expect("settings object")
+                .insert("push".into(), serde_json::json!([{"remote":remote,"branch":branch}]));
+            settings.as_object_mut().expect("settings object").insert(
+                "delivery_environment".into(),
+                serde_json::json!(
+                    ["HOME", "PATH", "SSH_AUTH_SOCK"]
+                        .into_iter()
+                        .filter_map(|name| setting(name).map(|value| format!("{name}={value}")))
+                        .collect::<Vec<_>>()
+                ),
             );
         }
         std::fs::write(
