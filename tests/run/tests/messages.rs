@@ -147,3 +147,22 @@ fn an_empty_brief_opens_on_the_first_message_after_its_actual_awaiting_notice() 
     );
     assert!(judge(world.message_seen()).iter().all(|verdict| *verdict == Verdict::Passed));
 }
+
+#[test]
+fn a_finish_crossing_queued_messages_offers_them_before_another_completion() {
+    let mut settings = Settings::calm(925);
+    settings.host.jobs = 1;
+    settings.host.changes = 0;
+    settings.host.reports = 1000;
+    settings.host.turns_min = 8;
+    settings.host.turns_max = 8;
+    settings.partner.finishes = 1000;
+    settings.partner.reports = 1000;
+    settings.partner.changes = 0;
+    let mut world = World::new(settings);
+    world.inject_messages(1000);
+    world.run(100_000);
+    assert!(world.stats().partner.crossed_finishes > 0);
+    assert!(world.message_seen().iter().any(|(_, _, seen)| matches!(seen, Seen::Read { .. })));
+    assert!(judge(world.message_seen()).iter().all(|verdict| *verdict == Verdict::Passed));
+}

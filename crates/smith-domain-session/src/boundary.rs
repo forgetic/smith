@@ -60,6 +60,15 @@ pub enum Event {
         /// historical spend is excluded. Only the inclusive parent prefix changes.
         spent: u64,
     },
+    /// Parent terminal for Delegate that yields after the settled tool turn, so its opener can append work.
+    AnsweredAndYield {
+        owner: Token,
+        /// Complete result bytes within the previously reserved delegated result cap.
+        text: Box<[u8]>,
+        error: bool,
+        /// Inclusive child activation bill, charged once by the live identity.
+        spent: u64,
+    },
     /// Parent terminal acknowledging Withdraw. Its current delegated identity
     /// settles exactly once and releases its reserved result space. A withdrawn
     /// child still reports its activation bill; stale repeats remain inert.

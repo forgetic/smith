@@ -181,7 +181,9 @@ impl World {
             | session::Event::Failed { owner, .. } => {
                 assert_eq!(self.completing.take(), Some(*owner), "one terminal per completion");
             }
-            session::Event::Answered { owner, .. } | session::Event::AnswerCancelled { owner, .. } => {
+            session::Event::Answered { owner, .. }
+            | session::Event::AnsweredAndYield { owner, .. }
+            | session::Event::AnswerCancelled { owner, .. } => {
                 let position =
                     self.delegated.iter().position(|pending| pending == owner).expect("one terminal per delegate");
                 self.delegated.remove(position);

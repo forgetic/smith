@@ -255,6 +255,8 @@ const SETTLED: Waiting = Waiting { call: false, runs: 0, kit: Kit::Closed };
 /// one that writes runs alone.
 #[derive(Debug)]
 struct Tools {
+    /// What follows the complete settled tool batch, requested by its opener.
+    after: After,
     /// A slot for each call reached, in call order, with room for them all.
     slots: List<Slot>,
     /// The runs of the batch still in flight.
@@ -1255,7 +1257,7 @@ fn use_tools(
         return finish(End::TranscriptFull);
     }
     conversation.transcript.push(Message { role: Role::Assistant, content }).expect("checked for room above");
-    let tools = Tools { slots: List::with_capacity(count), running: 0, next: 0 };
+    let tools = Tools { after: After::Complete, slots: List::with_capacity(count), running: 0, next: 0 };
     advance(conversation, id, calls, tools, env, out)
 }
 
@@ -1406,7 +1408,16 @@ fn finish_tools(
     }
     let results = Message { role: Role::User, content: results.into_boxed() };
     conversation.transcript.push(results).expect("room was checked when the message was recorded");
-    call(conversation, id, 0, env, out)
+    match tools.after {
+        After::Complete => call(conversation, id, 0, env, out),
+        After::Yield => {
+            if let Some(end) = tell_turn(conversation, out) {
+                return finish(end);
+            }
+            out.push(Request::Yielded { opener: conversation.opener, stop: Yield::Done, text: Box::default() });
+            State::Yielded
+        }
+    }
 }
 
 /// Whether a call with `effect` joins a batch of `batch` that has started
@@ -2539,10 +2550,21 @@ fn tell_turn(conversation: &mut Conversation, out: &mut Queue<Request>) -> Optio
     None
 }
 
+/// Opener-requested continuation after its actual result and tool turn settle.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum After {
+    /// Request the next completion directly.
+    Complete,
+    /// Return control to the opener before requesting the next completion.
+    Yield,
+}
+
 /// A child's exact cumulative inclusive bill. This fixed handoff carries no
 /// payload and never changes the receiver's own price.
 #[derive(Debug)]
 pub(crate) struct Bill {
+    /// The opener's choice after the settled batch; closing always settles without continuation.
+    pub(crate) after: After,
     /// Exact child bill, added once after the identity guard.
     pub(crate) spent: u64,
 }
@@ -2593,17 +2615,23 @@ pub(crate) fn delegate_ended(
     domain.facts.push_call(env.now, fact, &metadata);
     let state = mem::replace(&mut session.state, State::Closed);
     session.state = match state {
-        State::Tooling { mut tools } => match added {
-            Some(_) => tool_ran(conversation, id, &mut domain.calls, tools, slot, block, credit, result, env, out),
-            None => {
-                tools.running = tools.running.checked_sub(1).expect("settled delegated call");
-                let _: bool = receive_result(conversation, credit, &result, &env.limits);
-                let result = Block::ToolResult { id: call_id(conversation, block), result };
-                *tools.slots.get_mut(slot).expect("settled slot") = Slot::Done { result };
-                clear_pending(conversation);
-                abandon(conversation, &domain.calls.runs, tools, End::PriceOverflow, out)
+        State::Tooling { mut tools } => {
+            match bill.after {
+                After::Complete => {}
+                After::Yield => tools.after = After::Yield,
             }
-        },
+            match added {
+                Some(_) => tool_ran(conversation, id, &mut domain.calls, tools, slot, block, credit, result, env, out),
+                None => {
+                    tools.running = tools.running.checked_sub(1).expect("settled delegated call");
+                    let _: bool = receive_result(conversation, credit, &result, &env.limits);
+                    let result = Block::ToolResult { id: call_id(conversation, block), result };
+                    *tools.slots.get_mut(slot).expect("settled slot") = Slot::Done { result };
+                    clear_pending(conversation);
+                    abandon(conversation, &domain.calls.runs, tools, End::PriceOverflow, out)
+                }
+            }
+        }
         State::Closing { end, waiting } => {
             let end = match added {
                 Some(_) => keep_closing(conversation, slot, block, credit, result, &env.limits).unwrap_or(end),

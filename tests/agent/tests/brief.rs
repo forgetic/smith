@@ -402,3 +402,63 @@ fn the_first_provider_request_contains_the_carried_messages_with_the_briefs_inst
         assert!(world.messages_seen().iter().any(|(_, seen)| matches!(seen, smith_agent_world::messages_referee::Seen::Turn { read: Some(name), .. } if *name == Token::new(0))));
     }
 }
+
+#[test]
+fn the_request_after_a_crossed_finish_contains_the_call_answer_and_queued_messages_together() {
+    use skein_lib::{Duration, Time};
+    use skein_world::domain::{Referee, Verdict};
+    use smith_agent_world::messages_referee::{Meeting, Seen};
+    for wait in [true, false] {
+        let settings = Settings {
+            job: Job::Reporting,
+            network: Span::millis(0, 0),
+            provider: skein_fake_llm_domain::Config {
+                latency_min: Duration::from_millis(100),
+                latency_max: Duration::from_millis(100),
+                ..Settings::calm(1192).provider
+            },
+            ..Settings::calm(1192)
+        };
+        let mut charter = charter(&settings, "@finish-crossing");
+        charter.grants.wait = wait;
+        let scripts = Box::new([Script {
+            cue: b"@finish-crossing".as_slice().into(),
+            turns: Box::new([
+                calls(vec![call(b"finish", FINISH_INPUT)], 1),
+                calls(vec![call(b"finish", FINISH_INPUT)], 1),
+            ]),
+        }]);
+        let mut world = World::with_workspace_scripts_charter(settings, None, None, Checkout::new(), scripts, charter);
+        world.message_at(
+            Time::ZERO.saturating_add(Duration::from_millis(50)),
+            Token::new(0),
+            b"person".as_slice().into(),
+            b"late work".as_slice().into(),
+        );
+        world.run(10_000);
+        assert_eq!(world.prompts().len(), if wait { 2 } else { 1 });
+        assert!(matches!(world.answer(), run::Answer::Accepted { .. }));
+        if wait {
+            let query = &world.prompts()[1];
+            assert!(query.messages.iter().flat_map(|message| &message.parts).any(|part| matches!(part,
+                Part::ToolOutput { output, is_error: false, .. } if output.as_ref() == b"Finish was not accepted because messages arrived. Read them before finishing.")));
+            assert!(matches!(query.messages.last().expect("queued work").parts.as_ref(),
+                [Part::Text { text }] if text.as_ref() == b"person: late work"));
+            let mut referee = Referee::new(Meeting::new(0, settings.waiting));
+            for (at, seen) in world.messages_seen() {
+                referee.observe(*at, seen.clone(), &mut Vec::new());
+            }
+            assert_eq!(referee.verdict(), Verdict::Passed);
+            assert!(world.messages_seen().iter().any(
+                |(_, seen)| matches!(seen, Seen::Turn { number: 2, read: Some(name), .. } if *name == Token::new(0))
+            ));
+            assert!(
+                world.messages_seen().iter().any(|(_, seen)| matches!(seen, Seen::Turn { number: 1, read: None, .. }))
+            );
+        } else {
+            assert!(world.facts().iter().any(|fact| matches!(fact, smith_domain::Fact::Run {
+                fact: run::facts::Fact { kind: run::facts::FactKind::MessageUnread { name, .. }, .. }
+            } if *name == Token::new(0))));
+        }
+    }
+}

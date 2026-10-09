@@ -1968,7 +1968,9 @@ impl World {
 /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
 fn ended_run(event: &agent::Event) -> Option<Token> {
     match event {
-        agent::Event::Answered { owner, .. } | agent::Event::AnswerCancelled { owner, .. } => Some(*owner),
+        agent::Event::Answered { owner, .. }
+        | agent::Event::AnsweredAndYield { owner, .. }
+        | agent::Event::AnswerCancelled { owner, .. } => Some(*owner),
         agent::Event::Open { .. }
         | agent::Event::Continue { .. }
         | agent::Event::Close { .. }
@@ -1988,6 +1990,9 @@ fn describe_agent_event(event: &agent::Event) -> String {
         agent::Event::Open { opener, opening } => format!("open {} {opening:?}", opener.raw()),
         agent::Event::Answered { owner, text, error, spent, .. } => {
             format!("answered {} {text:?} {error} {spent}", owner.raw())
+        }
+        agent::Event::AnsweredAndYield { owner, text, error, spent } => {
+            format!("answered and yield {} {text:?} {error} {spent}", owner.raw())
         }
         agent::Event::Continue { session, content } => {
             format!("continue {} {:?}", session.raw(), String::from_utf8_lossy(content))

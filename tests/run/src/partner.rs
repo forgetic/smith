@@ -200,6 +200,8 @@ pub enum Out {
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Tally {
+    /// Actual finish terminals redirected to queued person messages.
+    pub crossed_finishes: u32,
     /// Actual successful settled wait results, independent of accepted outcomes.
     /// Contract: domain/run.md, section 6.
     pub waiting: u32,
@@ -551,6 +553,7 @@ impl Partner {
                 self.tally.host_rejected += 1;
             }
             Returned::Waiting => self.tally.waiting += 1,
+            Returned::Crossed { .. } => self.tally.crossed_finishes += 1,
             Returned::Delivered(_) if mid_delivery => self.tally.delivered += 1,
             Returned::Accepted | Returned::Delivered(_) => self.tally.accepted += 1,
             Returned::Nothing | Returned::DeliveryRefused(_) | Returned::DeliveryFailed { .. } => {
@@ -592,7 +595,7 @@ impl Partner {
             Phase::Calling { pending: _, over } => match over {
                 Some(exhausted) => self.end(peer, End::Budget(exhausted), out),
                 None if now >= expires => self.end(peer, End::Budget(Exhausted::Time), out),
-                None if *result == Returned::Waiting => {
+                None if matches!(result, Returned::Waiting | Returned::Crossed { .. }) => {
                     let talk = self.talks.get_mut(&peer).expect("a waiting main");
                     talk.phase = Phase::Yielded;
                     out.push(Out::Event(Event::Yielded {

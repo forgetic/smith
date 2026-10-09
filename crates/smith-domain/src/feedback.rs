@@ -46,7 +46,9 @@ pub fn feedback(returned: Returned, max_bytes: u64) -> Result<Feedback, Feedback
             let (text, error) = answer.into_parts();
             return unchanged(text, error, max_bytes);
         }
-        Returned::Answered { text, cut: 0, stop: Stop::EndTurn } => return unchanged(text, false, max_bytes),
+        Returned::Answered { text, cut: 0, stop: Stop::EndTurn } | Returned::Crossed { text } => {
+            return unchanged(text, false, max_bytes);
+        }
         returned @ (Returned::Waiting
         | Returned::HostUnknown
         | Returned::HostTooLarge { .. }
@@ -116,6 +118,7 @@ pub fn feedback_worst_case(limits: &run::Limits) -> Option<u64> {
 fn render(text: &mut Text, returned: &Returned) {
     match returned {
         Returned::Waiting => text.put(b"waiting"),
+        Returned::Crossed { text: note } => text.put(note),
         Returned::HostAnswered(answer) => text.put(answer.text()),
         Returned::HostUnknown => text.put(b"host-unknown"),
         Returned::HostTooLarge { bytes, max } => {

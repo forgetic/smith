@@ -122,6 +122,9 @@ pub enum Asked {
 /// How a call returned.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Return {
+    /// Main finish returned to queued work without accepting its declared outcome.
+    Crossed,
+
     /// Main wait intent accepted.
     Waiting,
     /// Actual bounded host text reached the caller.
@@ -265,6 +268,7 @@ pub(crate) fn tell(
 fn result_of(result: &Returned) -> Return {
     match result {
         Returned::Waiting => Return::Waiting,
+        Returned::Crossed { .. } => Return::Crossed,
         Returned::HostAnswered(_) => Return::HostAnswered,
         Returned::HostTooLarge { .. } | Returned::HostReportedTooLarge => Return::HostTooLarge,
         Returned::HostUnknown => Return::HostUnknown,

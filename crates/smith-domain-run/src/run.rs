@@ -1421,6 +1421,13 @@ fn finish(
     let Asking { name, call, deadline } = made;
     let conversation = conversations.get(main).expect("main lives while its run works");
     assert!(conversation.calls == 0, "a finish is a write, which a conversation runs alone");
+    if run.charter.grants.wait && run.inbox.has_queued() {
+        out.push(Request::Return { spent: 0, call, result: Returned::Crossed { text: prompt::crossed() } });
+        return match over {
+            None => State::Working { reply_to, main },
+            Some(exhausted) => State::Over { reply_to, main, exhausted },
+        };
+    }
     let max = env.limits.outcome_bytes;
     let judged = match outcome::owned_bytes(&declared) {
         Some(cost) if cost <= max => outcome::judge(&run.charter.outcome, &declared),

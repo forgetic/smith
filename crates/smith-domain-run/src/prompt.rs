@@ -23,6 +23,11 @@ use crate::workspace::{self, Directory, Workspace};
 /// The first user message of a main conversation.
 pub(crate) const BEGIN: &[u8] = b"Begin the work your brief describes.";
 
+/// The finish result says why the run returns to its queued messages.
+pub(crate) fn crossed() -> Box<[u8]> {
+    skein_lib::bytes::copy_of(b"Finish was not accepted because messages arrived. Read them before finishing.")
+}
+
 /// A brief has work when any literal title or text is present.
 pub(crate) fn has_brief(charter: &Charter) -> bool {
     for section in &charter.brief.sections {

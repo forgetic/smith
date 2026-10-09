@@ -22,6 +22,7 @@ fn every_run_call_terminal_has_canonical_feedback() {
     let host = run::HostAnswer::new(bytes(b"host text"), false).expect("host text");
     let rows = [
         (run::Returned::Waiting, "waiting", false),
+        (run::Returned::Crossed { text: b"messages came".as_slice().into() }, "messages came", false),
         (run::Returned::HostAnswered(host), "host text", false),
         (
             run::Returned::HostTooLarge { bytes: 9312, max: 8192 },

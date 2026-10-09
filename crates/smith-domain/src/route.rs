@@ -210,6 +210,9 @@ pub(crate) fn deliver(domain: &mut Domain, env: &Env<Limits>, handoff: Handoff) 
                 Due::Answered { feedback, spent } => {
                     session::Event::Answered { owner, text: feedback.text, error: feedback.error, spent }
                 }
+                Due::Yielding { feedback, spent } => {
+                    session::Event::AnsweredAndYield { owner, text: feedback.text, error: feedback.error, spent }
+                }
                 Due::Cancelled { spent } => session::Event::AnswerCancelled { owner, spent },
                 Due::Waiting => unreachable!("a call is on the ready list once the run has returned it"),
             }
@@ -454,7 +457,7 @@ fn from_session(domain: &mut Domain, env: &Env<Limits>, request: session::Reques
             match &flight.answer {
                 Due::Waiting => {}
                 // The answer won the race: the run has returned it.
-                Due::Answered { .. } | Due::Cancelled { .. } => return,
+                Due::Answered { .. } | Due::Yielding { .. } | Due::Cancelled { .. } => return,
             }
             let conversation = domain.peers.get(flight.peer).expect("a peer outlives its calls").conversation;
             run::Event::Withdraw { conversation, call: owner }
@@ -545,9 +548,33 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
             if flight.withdrawn && result == run::Returned::Cancelled {
                 flight.answer = Due::Cancelled { spent };
             } else {
+                let yields = match &result {
+                    run::Returned::Crossed { .. } => true,
+                    run::Returned::Waiting
+                    | run::Returned::HostAnswered(_)
+                    | run::Returned::HostUnknown
+                    | run::Returned::HostTooLarge { .. }
+                    | run::Returned::HostReportedTooLarge
+                    | run::Returned::HostRejected(_)
+                    | run::Returned::Delivered(_)
+                    | run::Returned::Nothing
+                    | run::Returned::DeliveryRefused(_)
+                    | run::Returned::Accepted
+                    | run::Returned::Rejected { .. }
+                    | run::Returned::ChecksFailed { .. }
+                    | run::Returned::Stale
+                    | run::Returned::DeliveryFailed { .. }
+                    | run::Returned::Cancelled
+                    | run::Returned::TimedOut
+                    | run::Returned::Busy
+                    | run::Returned::Answered { .. }
+                    | run::Returned::Unanswered { .. }
+                    | run::Returned::Refused { .. } => false,
+                };
                 let feedback = crate::feedback(result, env.limits.session.delegated_result_bytes)
                     .expect("compatible canonical receiving cap was checked before any effect");
-                flight.answer = Due::Answered { feedback, spent };
+                flight.answer =
+                    if yields { Due::Yielding { feedback, spent } } else { Due::Answered { feedback, spent } };
             }
             return domain.ready.defer(Handoff::Answer { owner: call });
         }

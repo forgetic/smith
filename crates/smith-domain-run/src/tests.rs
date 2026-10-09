@@ -3511,3 +3511,51 @@ fn awaiting_keeps_resume_binding_until_first_message_opens_main() {
     assert_eq!(opening.activation, 2);
     assert_eq!(opening.prompt.as_ref(), b"person: new task");
 }
+
+#[test]
+fn a_finish_crossing_a_message_continues_only_with_wait_authority() {
+    for wait in [true, false] {
+        let mut harness = Harness::new(LIMITS);
+        let mut charter = text_charter(false);
+        charter.grants.wait = wait;
+        let (run, main) = harness.running_on(95, 100, charter);
+        assert!(
+            harness
+                .step(Event::Message { run, name: Token::new(0), label: bytes(b"person"), text: bytes(b"late work") })
+                .is_empty()
+        );
+        let emitted = harness.step(finish(main, 96, text_result(false, b"done")));
+        if wait {
+            assert_eq!(emitted.as_ref(), [returned(96, Returned::Crossed { text: crate::prompt::crossed() })]);
+            let emitted = harness.step(end_turn(main));
+            let [Request::Say { peer, text }] = emitted.as_ref() else { panic!("queued work is the continuation") };
+            assert_eq!((*peer, text.as_ref()), (Token::new(100), b"person: late work".as_slice()));
+            let emitted = harness.step(Event::Turn { conversation: main, record: Token::new(97), sequence: 1 });
+            let [Request::Turn { read, .. }] = emitted.as_ref() else { panic!("told turn fence") };
+            assert_eq!(*read, Some(Token::new(0)));
+            assert_eq!(
+                harness.step(finish(main, 98, text_result(false, b"done"))).as_ref(),
+                [returned(98, Returned::Accepted), Request::Close { peer: Token::new(100) }]
+            );
+        } else {
+            assert_eq!(emitted.as_ref(), [returned(96, Returned::Accepted), Request::Close { peer: Token::new(100) }]);
+        }
+        harness.step(Event::Ended { conversation: main, end: End::Closed, spend: Spend::ZERO });
+        let facts = observed_facts(&mut harness);
+        let mut read = 0_u32;
+        let mut unread = 0_u32;
+        for fact in facts {
+            if let Fact::MessageRead { name, .. } = fact.kind
+                && name == Token::new(0)
+            {
+                read += 1;
+            }
+            if let Fact::MessageUnread { name, .. } = fact.kind
+                && name == Token::new(0)
+            {
+                unread += 1;
+            }
+        }
+        assert_eq!((read, unread), if wait { (1, 0) } else { (0, 1) });
+    }
+}

@@ -785,3 +785,31 @@ fn maximum_owned_result(
         _ => unreachable!("four owning result kinds"),
     }
 }
+
+#[test]
+fn a_delegated_result_can_yield_after_its_actual_turn_before_the_next_provider_request() {
+    let mut world = World::new(26, 256);
+    world.open(opening(None, 100));
+    world.complete(recorded::called(), llm::Stop::ToolUse, recorded::USAGE);
+    let owner = world.delegated[0];
+    world.step(session::Event::AnsweredAndYield {
+        owner,
+        text: b"messages-arrived".as_slice().into(),
+        error: false,
+        spent: 0,
+    });
+    assert_eq!(world.turns.len(), 1, "the result settles in its original concrete turn");
+    assert_eq!(world.prompts.len(), 1, "the opener chooses the next user work");
+    assert!(world.completing.is_none() && world.delegated.is_empty());
+    world.step(session::Event::Continue {
+        session: world.session.expect("yielded session"),
+        content: b"person: late work".as_slice().into(),
+    });
+    assert_eq!(world.prompts.len(), 2);
+    let prompt = &world.prompts[1];
+    assert!(prompt.messages.iter().flat_map(|message| &message.content).any(|block| matches!(block,
+        llm::Block::ToolResult { result: llm::Returned::Text { text, error: false, .. }, .. } if text.as_ref() == b"messages-arrived")));
+    assert!(matches!(prompt.messages.last().expect("new work").content.as_ref(),
+        [llm::Block::Text { text, .. }] if text.as_ref() == b"person: late work"));
+    world.close();
+}

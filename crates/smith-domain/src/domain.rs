@@ -140,6 +140,8 @@ pub(crate) enum Due {
     Waiting,
     /// The run's answer, kept under a ticket, waiting on the ready list.
     Answered { feedback: crate::Feedback, spent: u64 },
+    /// The settled result yields so the run can append queued work before the next request.
+    Yielding { feedback: crate::Feedback, spent: u64 },
     /// The run returned it cancelled, after the session withdrew it.
     Cancelled { spent: u64 },
 }

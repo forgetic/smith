@@ -216,6 +216,7 @@ pub(crate) const fn failed(returned: &run::Returned) -> bool {
     match returned {
         run::Returned::HostAnswered(answer) => answer.error(),
         run::Returned::Waiting
+        | run::Returned::Crossed { .. }
         | run::Returned::Accepted
         | run::Returned::Delivered(_)
         | run::Returned::Answered { .. } => false,

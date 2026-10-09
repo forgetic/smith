@@ -449,6 +449,9 @@ pub enum Ask {
 #[derive(PartialEq, Eq, Hash, Debug)]
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Returned {
+    /// Main finish crossed queued messages; the run offers them before another completion.
+    Crossed { text: Box<[u8]> },
+
     /// Main's wait intent was accepted; ordinary result and continuation settle first.
     Waiting,
 
