@@ -170,10 +170,11 @@ fn child_completions_and_raw_usage_cross_the_host_final_answer_once() {
     assert!(spent.turns > turns, "actual child completions exceed transmitted main Turns");
     assert_raw_terminals(&agent, spent);
     let main = agent.turns().last().expect("actual settled main Turn");
-    assert!(
-        spent.input > main.usage.input_tokens.expect("peer supplies count")
-            && spent.output > main.usage.output_tokens.expect("peer supplies count")
-    );
+    let main_prompt = main.usage.input_tokens.expect("peer supplies count")
+        + main.usage.cache_read_tokens.expect("peer supplies count")
+        + main.usage.cache_write_tokens.expect("peer supplies count");
+    let global_prompt = spent.input + spent.cache_read + spent.cache_write;
+    assert!(global_prompt > main_prompt && spent.output > main.usage.output_tokens.expect("peer supplies count"));
 
     let mut host = Host::new(
         942,
