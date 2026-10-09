@@ -1,0 +1,11 @@
+Final rebased-tip reliability05.1 evidence, supplementing the commit body:
+parent85fe8d1d4b2c989df86247f8ecf374fbd4507b02,
+tip5a85c8b4815f05361ca4a0f1ec04663b61ffcfc2.
+cargo fmt --check passed. Heavy task412 clippy workspace/all-targets
+-Dwarnings passed in4.09s. Heavy task413 default workspace passed1530
+of1530 tests in3.119s, zero skips. Heavy task416 fuzzy workspace passed
+20 of20 tests in3.569s, zero skips. All gates checked the final rebased
+source tip before the shared-lock ff-only local merge; worktree clean.
+Probe:none, deterministic tests cover05.1. Evidence pending:runtime smoke,
+until the benchmark product line adapter and05.13 support that evidence.
+No credentials used. Main and the primary bench worktree were not rewritten.
