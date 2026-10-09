@@ -289,8 +289,8 @@ pub struct Outcome {
     pub forced: Forced,
     pub warnings: Vec<String>,
     pub checks: Vec<CheckVerdict>,
-    /// The grader's verdict is apart from the agent's terminal classification.
-    pub grade: Measure<bool>,
+    /// No grader is None; an expected but unobserved grade is Some(Unavailable).
+    pub grade: Option<Measure<bool>>,
     pub protected_files_changed: Measure<Vec<PathBuf>>,
     pub writes_outside_workspace: Measure<Vec<PathBuf>>,
 }

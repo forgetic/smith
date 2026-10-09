@@ -499,6 +499,13 @@ their reasons; no agent or network runs in this tier. There is no fuzzy
 parser sweep yet. The one-second focused share and suite budgets remain
 unchanged; builds retain assertions with debug information disabled.
 
+Benchmark increment 00.4 adds seeded statistics, summaries, baselines and
+committed-median guard costs. Its idle serial `heavy` measurement on
+2026-10-09 passed 49 unit/offline tests in 0.702 seconds. It counts every
+end, keeps unavailable grades and metrics explicit, and compares only
+complete interleaved arms. There is no fuzzy parser sweep yet. The
+one-second focused share and suite budgets remain unchanged.
+
 ## 5. Opt-in live suite
 
 The `live` profile runs the shipped binary against real backends, serially,

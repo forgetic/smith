@@ -18,6 +18,8 @@ Commands available so far:
 ```sh
 cargo run -p smith-bench -- check [TASKS_DIRECTORY]
 cargo run -p smith-bench -- guards --suite benchmarks/tests/recorded/suites/sample.toml --tasks benchmarks/tests/recorded/tasks/valid 'benchmarks.md, section 5.2'
+cargo run -p smith-bench -- summarise RESULTS_DIRECTORY SUITE TIER single 123
+cargo run -p smith-bench -- baseline benchmarks/summaries/RUN.json NAME
 cargo nextest run -p smith-bench
 ```
 
@@ -54,7 +56,25 @@ or agent pin. Comparison schedules arrive with their tasks.
 `guards` uses a suite's wall and token budgets to list guarded tasks
 cheapest first and explain omissions. Estimates reserve the configured
 repetitions, agents, arms and failure rerun. Missing costs are reported
-as unavailable. Committed medians join after summaries exist.
+as unavailable. The latest committed medians in `summaries/` replace estimates
+only when their task version, digests, tier, model and current agent pins match,
+and every configured agent has complete wall and token observations. Variant
+costs are separate; missing variant costs fall back to the base estimate.
+
+`summarise` reads `result.json` files recursively or one explicit result file.
+It writes `summaries/<run>.json`, recording the seed, suite, tier and design
+(`single` or `interleaved`). An optional baseline path is its final argument.
+Every end and every missing metric is counted; medians use all observed ends,
+with observed and total counts beside them. Only `interleaved` runs compare
+arms, with five complete observations each and 10,000 seeded resamples.
+Comparisons preserve token conventions and spend bases; cross-agent resource
+figures are kept apart. Audit samples include every check/grader disagreement.
+
+`baseline` freezes one configuration, binary and tier in `baselines/<name>.json`.
+Both commands refuse to overwrite an existing record. Drift notices ask for a
+comparison in one session. They never declare a regression. No grader is
+represented by an absent grade; an expected but missing grade has an explicit
+unavailable reason.
 
 The `small` tier is pinned for both providers. `working.codex` awaits
 the user's model and effort; `working.anthropic` belongs to the next

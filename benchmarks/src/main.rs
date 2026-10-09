@@ -10,6 +10,12 @@ fn main() -> ExitCode {
     match arguments.as_slice() {
         [command] if command == "check" => check_all(),
         [command, directory] if command == "check" => check(Path::new(directory)),
+        [command, results, suite, tier, design, seed, reference @ ..]
+            if command == "summarise" && reference.len() <= 1 =>
+        {
+            summarize_command(Path::new(results), suite, tier, design, seed, reference.first().map(Path::new))
+        }
+        [command, summary, name] if command == "baseline" => baseline_command(Path::new(summary), name),
         [command, flag, suite, tasks_flag, directory, sections @ ..]
             if command == "guards" && flag == "--suite" && tasks_flag == "--tasks" && !sections.is_empty() =>
         {
@@ -20,11 +26,67 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: smith-bench check [TASKS_DIRECTORY]\n       smith-bench guards --suite SUITE [--tasks TASKS_DIRECTORY] SECTION..."
+                "usage: smith-bench check [TASKS_DIRECTORY]\n       smith-bench guards --suite SUITE [--tasks TASKS_DIRECTORY] SECTION...\n       smith-bench summarise RESULTS SUITE TIER DESIGN SEED [BASELINE]\n       smith-bench baseline SUMMARY NAME"
             );
             ExitCode::from(2)
         }
     }
+}
+
+fn committed_output(directory: &str, name: &str) -> Result<PathBuf, String> {
+    if name.is_empty() || !name.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')) {
+        return Err("committed output name must use letters, digits, '-' or '_'".into());
+    }
+    let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(directory);
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory.join(format!("{name}.json")))
+}
+
+fn report_output(result: Result<PathBuf, String>) -> ExitCode {
+    match result {
+        Ok(path) => {
+            println!("{}", path.display());
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn summarize_command(
+    results: &Path,
+    suite: &str,
+    tier: &str,
+    design: &str,
+    seed: &str,
+    reference: Option<&Path>,
+) -> ExitCode {
+    report_output((|| {
+        let design = match design {
+            "single" => smith_bench::Design::Single,
+            "interleaved" => smith_bench::Design::Interleaved,
+            _ => return Err("design must be single or interleaved".into()),
+        };
+        let seed = seed.parse::<u64>().map_err(|error| error.to_string())?;
+        let results = smith_bench::read_results(results).map_err(|error| error.to_string())?;
+        let reference = reference.map(smith_bench::read_baseline).transpose().map_err(|error| error.to_string())?;
+        let summary = smith_bench::summarise(&results, suite, tier, design, seed, reference.as_ref())?;
+        let output = committed_output("summaries", &summary.run)?;
+        smith_bench::write_summary(&output, &summary)?;
+        Ok(output)
+    })())
+}
+
+fn baseline_command(summary: &Path, name: &str) -> ExitCode {
+    report_output((|| {
+        let summary = smith_bench::read_summary(summary).map_err(|error| error.to_string())?;
+        let reference = smith_bench::baseline(&summary)?;
+        let output = committed_output("baselines", name)?;
+        smith_bench::write_summary(&output, &reference)?;
+        Ok(output)
+    })())
 }
 
 fn check_all() -> ExitCode {
@@ -32,8 +94,8 @@ fn check_all() -> ExitCode {
     match smith_bench::check_benchmark_tree(&root, &root.join("../docs/design")) {
         Ok(counts) => {
             println!(
-                "checked {} tasks, {} suites, {} configuration pins",
-                counts.tasks, counts.suites, counts.configurations
+                "checked {} tasks, {} suites, {} configuration pins, {} summaries, {} baselines",
+                counts.tasks, counts.suites, counts.configurations, counts.summaries, counts.baselines
             );
             ExitCode::SUCCESS
         }
@@ -75,7 +137,22 @@ fn guarded_tasks(
     let agents = root.join("agents");
     let models = smith_bench::read_model_tiers(&agents.join("models.toml"))?;
     smith_bench::validate_suite(file, &suite, &tasks, &agents, &models)?;
-    Ok(smith_bench::choose_guards(&suite, &tasks, sections))
+    let summaries_directory = root.join("summaries");
+    let mut summaries = Vec::new();
+    if summaries_directory.exists() {
+        for entry in std::fs::read_dir(&summaries_directory)
+            .map_err(|error| smith_bench::Refusal::new(&summaries_directory, "summaries", error.to_string()))?
+        {
+            let entry = entry
+                .map_err(|error| smith_bench::Refusal::new(&summaries_directory, "summaries", error.to_string()))?;
+            if entry.path().extension().is_some_and(|extension| extension == "json") {
+                summaries.push(smith_bench::read_summary(&entry.path())?);
+            }
+        }
+    }
+    let costs = smith_bench::committed_costs(&suite, &tasks, &summaries, &agents, &models)
+        .map_err(|error| smith_bench::Refusal::new(file, "summaries", error))?;
+    Ok(smith_bench::choose_guards_with_costs(&suite, &tasks, sections, &costs))
 }
 
 fn check(directory: &Path) -> ExitCode {

@@ -226,10 +226,7 @@
       "state": "unavailable",
       "reason": "calls not fully observed"
     },
-    "grade": {
-      "state": "unavailable",
-      "reason": "probe has no grader"
-    }
+    "grade": null
   },
   "health": {
     "loss_per_sink": {

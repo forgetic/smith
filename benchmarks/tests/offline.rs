@@ -124,3 +124,24 @@ fn a_recorded_attempt_round_trips_without_erasing_measurement_gaps() {
     assert_eq!(result.outcome.end, smith_bench::End::Completed);
     assert_eq!(result.outcome.forced, smith_bench::Forced::Killed);
 }
+
+#[test]
+fn a_summary_and_baseline_from_recorded_results_round_trip_offline() {
+    let file = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/recorded/results/attempt.json");
+    let results = smith_bench::read_results(&file).expect("recorded attempts");
+    let summary =
+        smith_bench::summarise(&results, "recorded", "small", smith_bench::Design::Single, 123, None).expect("summary");
+    assert_eq!(summary.groups[0].counts_by_end["completed"], 1);
+    assert_eq!(summary.groups[0].metrics["task_wall_ms"].observed, 1);
+    let baseline = smith_bench::baseline(&summary).expect("single configuration baseline");
+    let root = std::env::temp_dir().join(format!("smith-bench-summary-{}", std::process::id()));
+    std::fs::create_dir(&root).expect("fresh test root");
+    let summary_file = root.join("summary.json");
+    let baseline_file = root.join("baseline.json");
+    smith_bench::write_summary(&summary_file, &summary).expect("summary output");
+    smith_bench::write_summary(&baseline_file, &baseline).expect("baseline output");
+    assert_eq!(smith_bench::read_summary(&summary_file).expect("round-trip"), summary);
+    assert_eq!(smith_bench::read_baseline(&baseline_file).expect("round-trip"), baseline);
+    assert!(smith_bench::write_summary(&summary_file, &summary).is_err(), "committed evidence is not overwritten");
+    std::fs::remove_dir_all(root).expect("test root removed");
+}

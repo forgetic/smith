@@ -28,6 +28,8 @@ pub struct ManifestCounts {
     pub tasks: usize,
     pub suites: usize,
     pub configurations: usize,
+    pub summaries: usize,
+    pub baselines: usize,
 }
 
 /// Validate a benchmark tree's tasks, suites, model tiers and configuration pins.
@@ -68,7 +70,23 @@ pub fn check_benchmark_tree(root: &Path, design: &Path) -> Result<ManifestCounts
             suites += 1;
         }
     }
-    Ok(ManifestCounts { tasks: tasks.len(), suites, configurations })
+    let mut summaries = 0;
+    let mut baselines = 0;
+    for (name, count) in [("summaries", &mut summaries), ("baselines", &mut baselines)] {
+        let directory = root.join(name);
+        for file in fs::read_dir(&directory).map_err(|error| Refusal::new(&directory, name, error.to_string()))? {
+            let file = file.map_err(|error| Refusal::new(&directory, name, error.to_string()))?;
+            if file.path().extension().is_some_and(|extension| extension == "json") {
+                if name == "summaries" {
+                    crate::read_summary(&file.path())?;
+                } else {
+                    crate::read_baseline(&file.path())?;
+                }
+                *count += 1;
+            }
+        }
+    }
+    Ok(ManifestCounts { tasks: tasks.len(), suites, configurations, summaries, baselines })
 }
 
 pub(crate) fn find_manifests(directory: &Path, manifests: &mut Vec<PathBuf>) -> Result<(), Refusal> {

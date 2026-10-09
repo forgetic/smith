@@ -9,7 +9,9 @@ mod check;
 mod formats;
 mod models;
 mod result;
+mod stats;
 mod suite;
+mod summary;
 mod task;
 mod tokens;
 
@@ -22,9 +24,17 @@ pub use result::{
     Headroom, Health, Identity, Measure, ModelIdentity, Outcome, RESULT_VERSION, ResourceScope, Resources, SmithFace,
     Spend, SpendBasis, Timing, classify_smith_exit, parse_result, read_result, render_result,
 };
+pub use stats::{
+    Comparison, Interval, ProbeVerdict, audit_sample, bootstrap_ratio, coefficient_of_variation, interleave, median,
+    minimum_detectable_effect, pass_interval, probe_verdict,
+};
 pub use suite::{
-    Arm, CatalogueTask, Design, GuardSelection, Selection, Suite, SuiteAgent, catalogue, choose_guards, read_suite,
-    validate_suite,
+    Arm, CatalogueTask, Design, GuardSelection, Selection, Suite, SuiteAgent, catalogue, choose_guards,
+    choose_guards_with_costs, read_suite, validate_suite,
+};
+pub use summary::{
+    ArmSummary, Baseline, MetricSummary, PassCounts, RunSummary, SummaryComparison, baseline, committed_costs,
+    read_baseline, read_results, read_summary, summarise, write_summary,
 };
 pub use tokens::{Convention, ScopeKind, TokenCounts, TokenLedger, TokenRecord, Usage};
 

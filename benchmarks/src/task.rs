@@ -146,7 +146,8 @@ pub struct Refusal {
 }
 
 impl Refusal {
-    pub(crate) fn new(file: &Path, key: &str, reason: impl Into<String>) -> Self {
+    /// A caller's named refusal, retaining the document and exact key path.
+    pub fn new(file: &Path, key: &str, reason: impl Into<String>) -> Self {
         Self { file: file.to_path_buf(), key: key.to_owned(), reason: reason.into() }
     }
 }

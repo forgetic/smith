@@ -6,12 +6,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{Agent, Kind, ModelTiers, Provider, Refusal, Task, check_task, read_configuration};
 
 /// The attempt ordering requested by the suite author.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Design {
     /// Each task runs once per repetition and configuration.
@@ -229,6 +229,17 @@ fn task_exists(name: &str, tasks: &[CatalogueTask]) -> bool {
 /// Missing estimates are omitted with a reason, never treated as zero cost.
 #[must_use]
 pub fn choose_guards(suite: &Suite, tasks: &[CatalogueTask], sections: &[String]) -> GuardSelection {
+    choose_guards_with_costs(suite, tasks, sections, &BTreeMap::new())
+}
+
+/// Select guards using matching committed medians before task estimates.
+#[must_use]
+pub fn choose_guards_with_costs(
+    suite: &Suite,
+    tasks: &[CatalogueTask],
+    sections: &[String],
+    costs: &BTreeMap<String, crate::Estimate>,
+) -> GuardSelection {
     let mut candidates = Vec::new();
     let mut selection =
         GuardSelection { selected: Vec::new(), omitted: Vec::new(), estimated_seconds: 0, estimated_tokens: 0 };
@@ -238,24 +249,25 @@ pub fn choose_guards(suite: &Suite, tasks: &[CatalogueTask], sections: &[String]
         if !entry.task.guards.iter().any(|guard| sections.contains(guard)) {
             continue;
         }
-        let Some(estimate) = &entry.task.estimate else {
-            selection.omitted.push((entry.name.clone(), "cost unavailable".into()));
-            continue;
-        };
         let repetitions = u64::from(entry.task.repetitions.unwrap_or(suite.repetitions));
         let multiplier = repetitions
             .checked_mul(u64::from(suite.rerun_failed) + 1)
             .and_then(|count| count.checked_mul(agents))
             .and_then(|count| count.checked_mul(arms));
-        let cost = multiplier
-            .and_then(|count| Some((estimate.seconds.checked_mul(count)?, estimate.tokens.checked_mul(count)?)));
-        if let Some((seconds, tokens)) = cost {
-            candidates.push((seconds, tokens, entry.name.clone()));
-            for variant in &entry.task.variant {
-                candidates.push((seconds, tokens, format!("{}/{}", entry.name, variant.name)));
+        let names = std::iter::once(entry.name.clone())
+            .chain(entry.task.variant.iter().map(|variant| format!("{}/{}", entry.name, variant.name)));
+        for name in names {
+            let Some(estimate) = costs.get(&name).or(entry.task.estimate.as_ref()) else {
+                selection.omitted.push((name, "cost unavailable".into()));
+                continue;
+            };
+            let cost = multiplier
+                .and_then(|count| Some((estimate.seconds.checked_mul(count)?, estimate.tokens.checked_mul(count)?)));
+            if let Some((seconds, tokens)) = cost {
+                candidates.push((seconds, tokens, name));
+            } else {
+                selection.omitted.push((name, "cost overflow".into()));
             }
-        } else {
-            selection.omitted.push((entry.name.clone(), "cost overflow".into()));
         }
     }
     candidates.sort();

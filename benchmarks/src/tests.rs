@@ -545,3 +545,224 @@ fn smith_exit_codes_reconcile_answers_deadlines_and_own_budgets() {
         ));
     }
 }
+
+fn recorded_result() -> crate::AttemptResult {
+    crate::read_result(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/recorded/results/attempt.json"))
+        .expect("recorded result")
+}
+
+#[test]
+fn the_probe_rerun_rule_reports_regressions_and_quarantines_disagreement() {
+    use crate::{ProbeVerdict, probe_verdict};
+    assert_eq!(probe_verdict(true, None), ProbeVerdict::Passed);
+    assert_eq!(probe_verdict(false, None), ProbeVerdict::Rerun);
+    assert_eq!(probe_verdict(false, Some(false)), ProbeVerdict::Regression);
+    assert_eq!(probe_verdict(false, Some(true)), ProbeVerdict::Quarantined);
+    assert_eq!(probe_verdict(true, Some(false)), ProbeVerdict::Quarantined);
+}
+
+#[test]
+fn seeded_blocks_and_audit_samples_reproduce_and_keep_every_disagreement() {
+    let blocks = crate::interleave(4, 5, 123);
+    assert_eq!(blocks, crate::interleave(4, 5, 123));
+    for mut block in blocks {
+        block.sort_unstable();
+        assert_eq!(block, [0, 1, 2, 3]);
+    }
+    let sample = crate::audit_sample(20, 3, &[0, 19], 45).expect("sample");
+    assert_eq!(sample, crate::audit_sample(20, 3, &[0, 19], 45).expect("replay"));
+    assert!(sample.contains(&0) && sample.contains(&19));
+    assert_eq!(crate::audit_sample(20, 0, &[2, 8], 45).expect("mandatory only"), [2, 8]);
+    assert!(crate::audit_sample(2, 3, &[2], 1).is_err());
+}
+
+#[test]
+fn bootstrap_intervals_and_effects_reproduce_from_the_seed() {
+    let left = [10.0, 11.0, 12.0, 13.0, 14.0];
+    let right = [20.0, 21.0, 22.0, 23.0, 24.0];
+    let comparison = crate::bootstrap_ratio(&left, &right, 99, 1000).expect("comparison");
+    assert_eq!(comparison, crate::bootstrap_ratio(&left, &right, 99, 1000).expect("replay"));
+    assert!(comparison.interval_95.lower > 1.0 && comparison.detected);
+    let equal = crate::bootstrap_ratio(&[10.0; 5], &[10.0; 5], 99, 1000).expect("equal arms");
+    assert!(!equal.detected);
+    assert!((equal.ratio - 1.0).abs() < f64::EPSILON);
+    assert!(crate::bootstrap_ratio(&[1.0; 3], &[2.0; 3], 99, 1000).is_err());
+    assert!(crate::bootstrap_ratio(&[0.0; 5], &[2.0; 5], 99, 1000).is_err());
+    let effect = crate::minimum_detectable_effect(0.1, 5).expect("MDE");
+    assert!((effect - 0.177_087_548_969_429_24).abs() < 1e-12);
+    assert!(crate::coefficient_of_variation(&[f64::MAX; 5]).expect("scaled CV") < f64::EPSILON);
+}
+
+#[test]
+fn exact_pass_intervals_hold_at_empty_and_extreme_counts() {
+    assert!(crate::pass_interval(0, 0).is_err());
+    assert!(crate::pass_interval(2, 1).is_err());
+    let single = crate::pass_interval(1, 1).expect("one pass");
+    assert!((single.lower - 0.025).abs() < 1e-12);
+    assert!((single.upper - 1.0).abs() < f64::EPSILON);
+    let all = crate::pass_interval(10, 10).expect("ten passes");
+    assert!((all.lower - 0.691_502_892_181_239_2).abs() < 1e-10);
+    let middle = crate::pass_interval(5, 10).expect("balanced");
+    assert!((middle.lower - 0.187_086_028_447_398_5).abs() < 1e-10);
+    assert!((middle.upper - 0.812_913_971_552_601_5).abs() < 1e-10);
+    let zero = crate::pass_interval(0, 10).expect("no passes");
+    assert!((zero.upper + all.lower - 1.0).abs() < 1e-10);
+}
+
+#[test]
+fn summaries_include_failed_attempt_metrics_and_report_budget_and_setup_apart() {
+    let template = recorded_result();
+    let ends = [
+        crate::End::Completed,
+        crate::End::Completed,
+        crate::End::Timeout,
+        crate::End::Budget { which: crate::BudgetLimit::Time },
+        crate::End::Refused { setup: "missing login".into() },
+    ];
+    let results: Vec<_> = ends
+        .into_iter()
+        .zip([10, 20, 100, 50, 30])
+        .enumerate()
+        .map(|(index, (end, wall))| {
+            let mut result = template.clone();
+            result.identity.attempt = format!("attempt-{index}");
+            result.outcome.end = end;
+            result.timing.task_wall_ms = crate::Measure::Observed { value: wall };
+            result
+        })
+        .collect();
+    let summary = crate::summarise(&results, "sample", "small", crate::Design::Single, 1, None).expect("summary");
+    let group = &summary.groups[0];
+    assert_eq!(group.attempts.len(), 5);
+    assert_eq!(group.passes.passed, 2);
+    assert_eq!(group.passes.failed, 1);
+    assert_eq!((group.passes.budget, group.passes.setup), (1, 1));
+    let metric = &group.metrics["task_wall_ms"];
+    assert_eq!(metric.observed, 5);
+    assert_eq!(metric.median, crate::Measure::Observed { value: 30.0 });
+    assert_eq!(group.metrics["cpu_ms/pidfd-walk"].observed, 0);
+    assert_eq!(group.metrics["cpu_ms/pidfd-walk"].missing.len(), 5);
+    assert!(summary.comparisons.is_empty());
+}
+
+#[test]
+fn summaries_audit_disagreements_and_keep_unknown_grades_out_of_observed_rates() {
+    let mut results: Vec<_> = (0..10)
+        .map(|index| {
+            let mut result = recorded_result();
+            result.identity.attempt = format!("attempt-{index:02}");
+            result
+        })
+        .collect();
+    results[8].outcome.grade = Some(crate::Measure::Observed { value: false });
+    results[9].outcome.grade = Some(crate::Measure::unavailable("grader crashed"));
+    let summary = crate::summarise(&results, "sample", "small", crate::Design::Single, 3, None).expect("summary");
+    assert!(summary.audits.contains(&"attempt-08".into()));
+    assert_eq!(
+        (summary.groups[0].passes.passed, summary.groups[0].passes.failed, summary.groups[0].passes.unavailable),
+        (8, 1, 1)
+    );
+    assert!(matches!(summary.groups[0].passes.interval_95, crate::Measure::Unavailable { .. }));
+    let mut changed = results.clone();
+    changed[0].identity.task_version += 1;
+    assert!(crate::summarise(&changed, "sample", "small", crate::Design::Single, 3, None).is_err());
+    let mut duplicate = results.clone();
+    duplicate.push(results[0].clone());
+    assert!(crate::summarise(&duplicate, "sample", "small", crate::Design::Single, 3, None).is_err());
+}
+
+#[test]
+fn baselines_raise_drift_notices_and_refuse_mixed_configurations() {
+    let results: Vec<_> = (0..5)
+        .map(|index| {
+            let mut result = recorded_result();
+            result.identity.attempt = format!("attempt-{index}");
+            result
+        })
+        .collect();
+    let summary = crate::summarise(&results, "sample", "small", crate::Design::Single, 3, None).expect("summary");
+    let baseline = crate::baseline(&summary).expect("one configuration");
+    let changed: Vec<_> = results
+        .into_iter()
+        .map(|mut result| {
+            result.timing.task_wall_ms = crate::Measure::Observed { value: 60 };
+            result
+        })
+        .collect();
+    let drift =
+        crate::summarise(&changed, "sample", "small", crate::Design::Single, 3, Some(&baseline)).expect("drift");
+    assert!(
+        drift
+            .drift_notices
+            .iter()
+            .any(|notice| notice.contains("task_wall_ms") && notice.contains("compare in one session"))
+    );
+    let mut mixed = summary.clone();
+    let mut other = summary.groups[0].clone();
+    other.arm = "other".into();
+    mixed.groups.push(other);
+    assert!(crate::baseline(&mixed).is_err());
+}
+
+#[test]
+fn matching_committed_medians_replace_estimates_and_stale_pins_do_not() {
+    use sha2::{Digest, Sha256};
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let agents = root.join("agents");
+    let models = crate::read_model_tiers(&agents.join("models.toml")).expect("tiers");
+    let tasks = sample_catalogue();
+    let suite = sample_suite();
+    let mut result = recorded_result();
+    let pin = crate::read_configuration(&agents.join("codex/standard.pin.toml")).expect("pin");
+    result.identity.configuration_sha256 = pin.sha256;
+    result.identity.prompt_sha256 = format!("{:x}", Sha256::digest(tasks[0].task.prompt.as_bytes()));
+    let summary = crate::summarise(&[result], "sample", "small", crate::Design::Single, 1, None).expect("summary");
+    let costs =
+        crate::committed_costs(&suite, &tasks, std::slice::from_ref(&summary), &agents, &models).expect("costs");
+    assert_eq!((costs["probes/recorded"].seconds, costs["probes/recorded"].tokens), (1, 110));
+    let chosen = crate::choose_guards_with_costs(&suite, &tasks, &["benchmarks.md, section 5.2".into()], &costs);
+    assert_eq!(chosen.selected, ["probes/recorded"]);
+    assert_eq!((chosen.estimated_seconds, chosen.estimated_tokens), (2, 220));
+    let mut stale = summary;
+    stale.groups[0].configuration_sha256 = "old-pin".into();
+    assert!(crate::committed_costs(&suite, &tasks, &[stale], &agents, &models).expect("stale ignored").is_empty());
+}
+
+#[test]
+fn summaries_compare_complete_interleaved_arms_and_keep_single_runs_apart() {
+    let mut results = Vec::new();
+    for arm in ["a-reference", "b-candidate"] {
+        for index in 0..5 {
+            let mut result = recorded_result();
+            result.identity.attempt = format!("{arm}-{index}");
+            result.identity.arm = arm.into();
+            result.timing.task_wall_ms = crate::Measure::Observed { value: if arm == "a-reference" { 30 } else { 60 } };
+            results.push(result);
+        }
+    }
+    let comparison = crate::summarise(&results, "sample", "small", crate::Design::Interleaved, 17, None)
+        .expect("interleaved summary");
+    let wall =
+        comparison.comparisons.iter().find(|comparison| comparison.metric == "task_wall_ms").expect("wall comparison");
+    assert!(
+        matches!(&wall.result, crate::Measure::Observed { value } if value.detected && (value.ratio - 2.0).abs() < f64::EPSILON)
+    );
+    assert!(
+        crate::summarise(&results, "sample", "small", crate::Design::Single, 17, None)
+            .expect("single summary")
+            .comparisons
+            .is_empty()
+    );
+    results[0].timing.task_wall_ms = crate::Measure::unavailable("missing task end");
+    let partial =
+        crate::summarise(&results, "sample", "small", crate::Design::Interleaved, 17, None).expect("partial summary");
+    assert!(matches!(
+        partial
+            .comparisons
+            .iter()
+            .find(|comparison| comparison.metric == "task_wall_ms")
+            .expect("wall comparison")
+            .result,
+        crate::Measure::Unavailable { .. }
+    ));
+}
