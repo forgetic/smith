@@ -445,6 +445,8 @@ pub struct Answer {
 pub enum Up {
     /// Independent run admission after process Started, exactly once.
     Admitted,
+    /// The run refused one sent message before a fence read it.
+    MessageRefused { name: Token, reason: crate::MessageRefusal },
     /// Generic named host operation; parent owes terminal.
     Call {
         call: Token,

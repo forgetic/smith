@@ -4,6 +4,8 @@ use alloc::boxed::Box;
 use skein_lib::{List, Token};
 use smith_domain::{self as agent, session, tools};
 
+pub(crate) const LABEL: &[u8] = b"person";
+
 /// One person line whose saved name precedes delivery to the agent.
 #[derive(Debug)]
 pub(crate) struct Line {

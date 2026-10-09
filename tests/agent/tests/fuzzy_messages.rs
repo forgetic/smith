@@ -105,7 +105,7 @@ fn inputs(seed: u64, late: bool) -> Vec<(Time, Token, Box<[u8]>)> {
 fn world(seed: u64, fixture: Fixture, cancel_at: Option<Duration>, late: bool) -> World {
     let mut world = World::new(Settings { cancel_at, ..settings(seed, fixture) });
     for (at, name, text) in inputs(seed, late) {
-        world.message_at(at, name, text);
+        world.message_at(at, name, b"person".as_slice().into(), text[8..].into());
     }
     world
 }

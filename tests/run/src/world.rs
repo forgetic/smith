@@ -817,6 +817,7 @@ impl World {
             run::Request::Turn { host_run, number, position: _, read, spent, record: _ } => {
                 current = Some(self.observed_turn(host_run, number, read, spent));
             }
+            run::Request::MessageRefused { .. } => {}
             run::Request::Waiting { host_run, read } => {
                 let run = self.run_of_owner[&host_run];
                 let view = self.views.get_mut(&run).expect("admitted run");
@@ -1039,6 +1040,7 @@ impl World {
             run::Request::HostCall { .. }
             | run::Request::WithdrawHost { .. }
             | run::Request::Turn { .. }
+            | run::Request::MessageRefused { .. }
             | run::Request::Waiting { .. }
             | run::Request::Admitted { .. }
             | run::Request::Answer { .. }
@@ -1514,6 +1516,8 @@ impl World {
     fn fact(&mut self, fact: &run::facts::Fact) {
         use run::facts::Fact;
         let (Fact::Admitted { run }
+        | Fact::MessageReceived { run, .. }
+        | Fact::MessageRefused { run, .. }
         | Fact::Prepared { run, .. }
         | Fact::Opened { run, .. }
         | Fact::Ended { run, .. }
@@ -1741,6 +1745,8 @@ impl World {
 fn kind(fact: &run::facts::Fact) -> &'static str {
     use run::facts::Fact;
     match fact {
+        Fact::MessageReceived { .. } => "message_received",
+        Fact::MessageRefused { .. } => "message_refused",
         Fact::Admitted { .. } => "admitted",
         Fact::Prepared { .. } => "prepared",
         Fact::Opened { .. } => "opened",

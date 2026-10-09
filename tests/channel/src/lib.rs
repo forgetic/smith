@@ -5,8 +5,8 @@
 use std::collections::VecDeque;
 
 use skein_channel::{Closed, Control, Lower, LowerEvent, StreamMode, control_frame};
-use skein_lib::Queue;
 use skein_lib::stream::{self, OutputOutcome};
+use skein_lib::{Queue, Token};
 use smith_host_protocol as host;
 use smith_protocol_channel as agent;
 
@@ -44,13 +44,15 @@ pub enum Observation {
     /// A saved host decision reached the domain vocabulary with its stable name.
     AgentSavedHost { activation: u64, tool: Box<[u8]>, text: Box<[u8]>, error: bool },
     /// Host's sender label and message text reached the agent's domain face.
-    AgentMessage { name: skein_lib::Token, text: Box<[u8]> },
+    AgentMessage { name: skein_lib::Token, label: Box<[u8]>, text: Box<[u8]> },
     /// The host saw the run wait after reading a named message.
     HostWaiting { read: Option<skein_lib::Token> },
     /// The host received a long operation's bounded span.
     HostLong { span: skein_lib::Duration },
     /// The host received the end of the long operation.
     HostLongDone,
+    /// A named message ended refused at the agent ingress.
+    HostMessageRefused { name: Token, reason: smith_host_domain::MessageRefusal },
     /// The host received a numbered durable transcript body.
     HostTurn { number: u32, spent: u64, read: Option<skein_lib::Token>, body: Box<[u8]> },
     /// A best-effort content-free fact reached the host.
@@ -238,6 +240,9 @@ impl Peer {
                 host::OpenEvent::Hangup { why } => output.push(Observation::HostEnded(why)),
                 host::OpenEvent::Sent { token } => output.push(Observation::HostSent(token)),
                 host::OpenEvent::Unsent { token, why } => output.push(Observation::HostUnsent(token, why)),
+                host::OpenEvent::MessageRefused { name, reason } => {
+                    output.push(Observation::HostMessageRefused { name, reason });
+                }
                 host::OpenEvent::Admitted => output.push(Observation::HostAdmitted),
                 host::OpenEvent::Waiting { read } => output.push(Observation::HostWaiting { read }),
                 host::OpenEvent::Long { span } => output.push(Observation::HostLong { span }),
@@ -328,7 +333,9 @@ impl Peer {
                     assert!(self.agent_start.replace(start).is_none(), "one decoded Start per channel");
                 }
                 agent::OpenEvent::Ended { why } => output.push(Observation::AgentEnded(why)),
-                agent::OpenEvent::Message { name, text } => output.push(Observation::AgentMessage { name, text }),
+                agent::OpenEvent::Message { name, label, text } => {
+                    output.push(Observation::AgentMessage { name, label, text });
+                }
                 agent::OpenEvent::HostReturned { relay, reply } => {
                     output.push(Observation::AgentHostReturned { relay, reply });
                 }
@@ -357,7 +364,7 @@ fn test_endpoints() -> agent::Endpoints {
 
 fn channel_limits(bodies: smith_channel::Limits) -> skein_channel::Limits {
     let schema = smith_channel::schema(&bodies).expect("bounded bodies");
-    let version = schema.version(1).expect("v1");
+    let version = schema.version(2).expect("v2");
     let largest = version.kinds.iter().map(|kind| kind.largest).max().expect("kinds");
     skein_channel::Limits {
         chunk: 4096,
@@ -365,7 +372,7 @@ fn channel_limits(bodies: smith_channel::Limits) -> skein_channel::Limits {
         skip: 4096,
         output_bytes: largest.checked_add(8).expect("frame fits"),
         output_frames: 4,
-        kinds: 17,
+        kinds: 18,
     }
 }
 
@@ -575,6 +582,15 @@ impl World {
             agent
                 .send_admitted(skein_lib::Token::new(3), &mut self.agent.agent_events, &mut self.agent.below)
                 .expect("bounded admitted");
+        }
+    }
+
+    /// Tell one actual run refusal through the agent half.
+    pub fn agent_refuses_message(&mut self, name: Token, reason: smith_domain::run::MessageRefusal) {
+        if let Half::Agent(agent) = &mut self.agent.half {
+            agent
+                .send_message_refused(name, reason, Token::new(34), &mut self.agent.agent_events, &mut self.agent.below)
+                .expect("bounded message refusal");
         }
     }
 
@@ -830,10 +846,10 @@ impl World {
         }
     }
 
-    /// Inject an Open from a later version to exercise version refusal.
+    /// Inject a version-one Open to exercise version refusal.
     pub fn agent_hears_foreign_version(&mut self) {
         let frame = control_frame(
-            &Control::Open { magic: *b"smth", lowest: 2, highest: 2, features: 0, credential: Box::default() },
+            &Control::Open { magic: *b"smth", lowest: 1, highest: 1, features: 0, credential: Box::default() },
             &self.channel,
         )
         .expect("bounded foreign opening");

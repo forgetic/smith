@@ -118,7 +118,8 @@ impl Harness {
                 Request::ChecksEnded { .. } => {
                     self.checks_ended = self.checks_ended.checked_add(1).expect("bounded checks");
                 }
-                request @ (Request::Waiting { .. }
+                request @ (Request::MessageRefused { .. }
+                | Request::Waiting { .. }
                 | Request::Turn { .. }
                 | Request::HostCall { .. }
                 | Request::WithdrawHost { .. }
@@ -1705,7 +1706,9 @@ fn failed_push_reason_and_diagnostics_return_to_the_finish_caller() {
     for fact in facts(&mut h) {
         match fact {
             Fact::Delivered { status: push, .. } => pushed = Some(push),
-            Fact::Admitted { .. }
+            Fact::MessageReceived { .. }
+            | Fact::MessageRefused { .. }
+            | Fact::Admitted { .. }
             | Fact::Prepared { .. }
             | Fact::Opened { .. }
             | Fact::Ended { .. }
@@ -2409,11 +2412,14 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_main_turn() {
         &[Request::Waiting { host_run: Token::new(1), read: None }]
     );
     assert_eq!(
-        &*h.step(Event::Message { run, name: Token::new(0), text: bytes(b"person: first") }),
+        &*h.step(Event::Message { label: bytes(b"person"), run, name: Token::new(0), text: bytes(b"first") }),
         &[Request::Say { peer: Token::new(9), text: bytes(b"person: first") }]
     );
-    for (name, text) in [(99, b"person: second".as_slice()), (7, b"person: third".as_slice())] {
-        assert!(h.step(Event::Message { run, name: Token::new(name), text: bytes(text) }).is_empty());
+    for (name, text) in [(99, b"second".as_slice()), (7, b"third".as_slice())] {
+        assert!(
+            h.step(Event::Message { label: bytes(b"person"), run, name: Token::new(name), text: bytes(text) })
+                .is_empty()
+        );
     }
     for (sequence, read, next) in
         [(2, 0, Some(b"person: second".as_slice())), (3, 99, Some(b"person: third".as_slice())), (4, 7, None)]
@@ -2454,7 +2460,14 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_main_turn() {
         answered(h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })),
         (1, Answer::Parked { spent: Spend::ZERO, turns: 4 })
     );
-    assert!(h.step(Event::Message { run, name: Token::new(8), text: bytes(b"late") }).is_empty());
+    assert_eq!(
+        &*h.step(Event::Message { label: Box::from(&b"host"[..]), run, name: Token::new(8), text: bytes(b"late") }),
+        &[Request::MessageRefused {
+            host_run: Token::new(1),
+            name: Token::new(8),
+            reason: crate::MessageRefusal::Ending
+        }]
+    );
     h.domain.reclaim();
     assert_eq!((h.domain.runs(), h.domain.conversations(), h.domain.calls()), (0, 0, 0));
 }
@@ -2507,13 +2520,16 @@ fn zero_waiting_time_parks_when_main_yields() {
 
 #[test]
 fn bounded_message_and_input_at_idle_deadline_preserve_existing_fifo() {
-    let limits = Limits { messages: 1, message_bytes: 4, ..LIMITS };
+    let limits = Limits { messages: 1, message_bytes: 10, ..LIMITS };
     let mut h = Harness::new(limits);
     let (run, conversation) = h.running(1, 9);
-    assert!(h.step(Event::Message { run, name: Token::new(5), text: bytes(b"full") }).is_empty());
+    assert!(
+        h.step(Event::Message { label: Box::from(&b"host"[..]), run, name: Token::new(5), text: bytes(b"full") })
+            .is_empty()
+    );
     assert_eq!(
         &*h.step(Event::Yielded { conversation, stop: Stop::EndTurn, text: bytes(b"done") }),
-        &[Request::Say { peer: Token::new(9), text: bytes(b"full") }]
+        &[Request::Say { peer: Token::new(9), text: bytes(b"host: full") }]
     );
     assert_eq!(
         &*h.step(Event::Turn { conversation, record: Token::new(40), sequence: 1 }),
@@ -2542,8 +2558,8 @@ fn bounded_message_and_input_at_idle_deadline_preserve_existing_fifo() {
     );
     h.after(Duration::from_secs(30));
     assert_eq!(
-        &*h.step(Event::Message { run, name: Token::new(0), text: bytes(b"wake") }),
-        &[Request::Say { peer: Token::new(9), text: bytes(b"wake") }]
+        &*h.step(Event::Message { label: Box::from(&b"host"[..]), run, name: Token::new(0), text: bytes(b"wake") }),
+        &[Request::Say { peer: Token::new(9), text: bytes(b"host: wake") }]
     );
     assert!(!h.domain.is_due(h.env.now), "same-iteration input cancels idle expiry before fire");
     assert_eq!(&*h.step(Event::Cancel { run }), &[Request::Close { peer: Token::new(9) }]);
@@ -2989,4 +3005,115 @@ fn a_session_usage_overflow_becomes_the_run_failure() {
     let answer =
         answered(harness.step(Event::Ended { conversation: main, end: End::UsageOverflow, spend: Spend::ZERO })).1;
     assert_eq!(answer, failed(Failure::Budget(Exhausted::Overflow(crate::Overflow::Usage)), Spend::ZERO));
+}
+
+#[test]
+fn labelled_message_ingress_checks_rendered_bytes_names_and_inbox_before_retaining() {
+    let mut harness = Harness::new(Limits { message_bytes: 12, messages: 2, ..LIMITS });
+    let (run, _) = harness.running(1, 9);
+    let message =
+        |name, text: &[u8]| Event::Message { run, name: Token::new(name), label: bytes(b"peer"), text: bytes(text) };
+    assert!(harness.step(message(10, b"123456")).is_empty(), "exact rendered bound is admitted");
+    for (name, text, reason) in [
+        (11, b"1234567".as_slice(), crate::MessageRefusal::TooLarge),
+        (10, b"x".as_slice(), crate::MessageRefusal::NameInUse),
+    ] {
+        assert_eq!(
+            &*harness.step(message(name, text)),
+            &[Request::MessageRefused { host_run: Token::new(1), name: Token::new(name), reason }]
+        );
+    }
+    assert!(harness.step(message(12, b"x")).is_empty(), "refused inputs consume no inbox room");
+    assert_eq!(
+        &*harness.step(message(13, b"x")),
+        &[Request::MessageRefused {
+            host_run: Token::new(1),
+            name: Token::new(13),
+            reason: crate::MessageRefusal::Full
+        }]
+    );
+    harness.step(Event::Cancel { run });
+    assert_eq!(
+        &*harness.step(message(14, b"x")),
+        &[Request::MessageRefused {
+            host_run: Token::new(1),
+            name: Token::new(14),
+            reason: crate::MessageRefusal::Ending
+        }]
+    );
+}
+
+#[test]
+fn preparation_refuses_bad_messages_without_disrupting_the_admitted_opening() {
+    let mut harness = Harness::new(Limits { message_bytes: 12, messages: 1, ..LIMITS });
+    let run = harness.prepare(1);
+    assert_eq!(
+        &*harness.step(Event::Message { run, name: Token::new(1), label: bytes(b"peer"), text: bytes(b"1234567") }),
+        &[Request::MessageRefused {
+            host_run: Token::new(1),
+            name: Token::new(1),
+            reason: crate::MessageRefusal::TooLarge
+        }]
+    );
+    assert!(
+        harness
+            .step(Event::Message { run, name: Token::new(2), label: bytes(b"peer"), text: bytes(b"123456") })
+            .is_empty()
+    );
+    let emitted = harness.step(Event::Read { owner: run, read: Read::Missing });
+    let [Request::Open { conversation, opening }] = &*emitted else { panic!("prepared run opens main") };
+    assert_eq!(opening.prompt.as_ref(), b"Begin the work your brief describes.");
+    let main = *conversation;
+    harness.step(Event::Started { conversation: main, peer: Token::new(9) });
+    assert_eq!(&*harness.step(end_turn(main)), &[Request::Say { peer: Token::new(9), text: bytes(b"peer: 123456") }]);
+}
+
+#[test]
+fn messages_during_stopping_over_winding_and_closed_each_have_an_ending_terminal() {
+    let mut preparing = Harness::new(LIMITS);
+    let stopping = preparing.prepare(1);
+    preparing.step(Event::Cancel { run: stopping });
+    assert_eq!(
+        &*preparing.step(Event::Message {
+            run: stopping,
+            name: Token::new(20),
+            label: bytes(b"peer"),
+            text: bytes(b"stopping"),
+        }),
+        &[Request::MessageRefused {
+            host_run: Token::new(1),
+            name: Token::new(20),
+            reason: crate::MessageRefusal::Ending,
+        }]
+    );
+
+    let mut running = Harness::new(LIMITS);
+    let (run, main) = running.running(2, 9);
+    running.step(Event::Used { conversation: main, spend: spend(BUDGET.spend) });
+    for (name, phase) in [(21, "over"), (22, "winding"), (23, "closed")] {
+        assert_eq!(
+            &*running.step(Event::Message {
+                run,
+                name: Token::new(name),
+                label: bytes(b"peer"),
+                text: bytes(phase.as_bytes()),
+            }),
+            &[Request::MessageRefused {
+                host_run: Token::new(2),
+                name: Token::new(name),
+                reason: crate::MessageRefusal::Ending,
+            }],
+            "{phase} refuses each message once"
+        );
+        match name {
+            21 => {
+                running.step(end_turn(main));
+            }
+            22 => {
+                running.step(Event::Ended { conversation: main, end: End::Closed, spend: spend(BUDGET.spend) });
+            }
+            23 => {}
+            _ => unreachable!("three known phases"),
+        }
+    }
 }

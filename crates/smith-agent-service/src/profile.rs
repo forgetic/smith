@@ -179,7 +179,7 @@ pub fn standard_limits(memory: u64) -> Result<service::Limits, ProfileError> {
                 skip: 4096,
                 output_bytes,
                 output_frames: 4,
-                kinds: 17,
+                kinds: 18,
             },
             endpoints: ENDPOINTS,
             calls: 16,
@@ -265,7 +265,7 @@ fn channel_output(bodies: &smith_channel::Limits) -> Result<u32, ProfileError> {
         Ok(schema) => schema,
         Err(error) => return Err(ProfileError::ChannelSchema(error)),
     };
-    let version = schema.version(1).ok_or(ProfileError::ChannelVersion)?;
+    let version = schema.version(2).ok_or(ProfileError::ChannelVersion)?;
     let mut largest = 0;
     for kind in &version.kinds {
         largest = largest.max(kind.largest);

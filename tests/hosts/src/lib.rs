@@ -284,6 +284,9 @@ impl HostService {
     fn route_channel(&mut self, agent: Token, event: protocol::OpenEvent) {
         use protocol::OpenEvent;
         let event = match event {
+            OpenEvent::MessageRefused { name, reason } => {
+                host::Event::Received { owner: agent, message: host::Up::MessageRefused { name, reason } }
+            }
             // Opened is transport-only. A failed write already settles its
             // send via Unsent; the independent read still owns Hangup.
             OpenEvent::Opened { .. } | OpenEvent::WriteFailed => return,
@@ -381,7 +384,7 @@ impl HostService {
             | host::Request::Exhausted { .. }
             | host::Request::Told { .. }
             | host::Request::Faulted { .. }
-            | host::Request::Bounced { .. } => {}
+            | host::Request::MessageRefused { .. } => {}
         }
     }
 

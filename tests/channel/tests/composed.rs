@@ -53,7 +53,9 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
     let mut writer = Writer::new(usize::try_from(record.measure()).expect("small charter"));
     record.encode(&mut writer).expect("measured charter");
     let charter = writer.finish();
-    let limits = smith_agent_world::LIMITS;
+    let mut limits = smith_agent_world::LIMITS;
+    limits.run.message_bytes = 12;
+    limits.run.messages = 1;
     let largest_turn = agent::max_turn_bytes(&limits).expect("bounded concrete turn");
     let mut host_limits = smith_host_world::limits();
     host_limits.charter_bytes = u64::try_from(charter.len()).expect("small charter");
@@ -119,6 +121,52 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
     assert!(wire.observations().contains(&Observation::HostAdmitted));
     host_world.up(Up::Admitted);
     assert!(host_world.seen.admitted);
+
+    // Send beyond the kit's ingress directly through the host channel half.
+    // Every hostile-but-decodable input reaches the real root/run ingress.
+    for (name, text, expected) in [
+        (10, b"123456".as_slice(), None),
+        (11, b"1234567".as_slice(), Some(agent::run::MessageRefusal::TooLarge)),
+        (10, b"x".as_slice(), Some(agent::run::MessageRefusal::NameInUse)),
+        (12, b"x".as_slice(), Some(agent::run::MessageRefusal::Full)),
+    ] {
+        let name = Token::new(name);
+        wire.send_message(name, Box::from(*b"peer"), Box::from(text));
+        wire.settle();
+        let message = wire
+            .observations()
+            .iter()
+            .rev()
+            .find_map(|seen| match seen {
+                Observation::AgentMessage { name: seen, label, text } if *seen == name => {
+                    Some((label.clone(), text.clone()))
+                }
+                _ => None,
+            })
+            .expect("channel decoded labelled message");
+        agent::step(&mut domain, &env, AgentEvent::Message { run, name, label: message.0, text: message.1 }, &mut out);
+        match expected {
+            None => assert!(out.pop().is_none(), "exact-bound message admitted"),
+            Some(expected) => {
+                let AgentRequest::MessageRefused { name: refused, reason, .. } =
+                    out.pop().expect("typed ingress terminal")
+                else {
+                    panic!("expected typed refusal")
+                };
+                assert_eq!((refused, reason), (name, expected));
+                assert!(out.pop().is_none());
+                wire.agent_refuses_message(name, reason);
+                wire.settle();
+                let reason = match reason {
+                    agent::run::MessageRefusal::TooLarge => host::MessageRefusal::TooLarge,
+                    agent::run::MessageRefusal::Full => host::MessageRefusal::Full,
+                    agent::run::MessageRefusal::NameInUse => host::MessageRefusal::NameInUse,
+                    agent::run::MessageRefusal::Ending => host::MessageRefusal::Ending,
+                };
+                assert!(wire.observations().contains(&Observation::HostMessageRefused { name, reason }));
+            }
+        }
+    }
     host_world.event(host::Event::Stop { agent: host_world.agent() });
     let down = host_world.seen.down.pop().expect("host domain cancelled live run");
     assert_eq!(down, Down::Cancel);

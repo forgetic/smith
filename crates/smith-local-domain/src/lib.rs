@@ -56,4 +56,4 @@ pub use boundary::{
 pub use config::{Config, Contract, Invalid, PushTarget, charter};
 pub use domain::{Domain, fire, max_out, resume, step};
 pub use facts::Fact;
-pub use limits::{Limits, worst_case};
+pub use limits::{Limits, max_line_bytes, worst_case};

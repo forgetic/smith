@@ -56,8 +56,8 @@ mod tests;
 mod workspace;
 
 pub use boundary::{
-    Answer, Ask, AskRefusal, CompletionEvidence, CompletionFailure, End, Event, Exit, Failure, Fault, Invalid, Opening,
-    Place, Policy, Ran, Read, Refusal, Request, Returned, Stop, TranscriptRefusal, Window,
+    Answer, Ask, AskRefusal, CompletionEvidence, CompletionFailure, End, Event, Exit, Failure, Fault, Invalid,
+    MessageRefusal, Opening, Place, Policy, Ran, Read, Refusal, Request, Returned, Stop, TranscriptRefusal, Window,
 };
 pub use budget::{Budget, CompletionPermit, Exhausted, Overflow, Prices, ReceivingLimit, Share, Spend};
 pub use charter::{Brief, Charter, Conventions, Section};

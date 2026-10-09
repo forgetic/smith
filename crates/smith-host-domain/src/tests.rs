@@ -78,7 +78,7 @@ fn a_spawn_beyond_the_slots_is_refused_as_busy_without_displacing_the_active_own
         | Request::Told { .. }
         | Request::Answered { .. }
         | Request::Faulted { .. }
-        | Request::Bounced { .. }
+        | Request::MessageRefused { .. }
         | Request::Gone { .. }
         | Request::Send { .. }
         | Request::Read { .. }
@@ -105,7 +105,7 @@ fn a_spawn_beyond_the_slots_is_refused_as_busy_without_displacing_the_active_own
         | Request::Told { .. }
         | Request::Answered { .. }
         | Request::Faulted { .. }
-        | Request::Bounced { .. }
+        | Request::MessageRefused { .. }
         | Request::Send { .. }
         | Request::Read { .. }
         | Request::Signal { .. }
@@ -155,7 +155,7 @@ fn host_mount_metadata_admission_agrees_with_optional_workspace_and_git_kind() {
         | Request::Told { .. }
         | Request::Answered { .. }
         | Request::Faulted { .. }
-        | Request::Bounced { .. }
+        | Request::MessageRefused { .. }
         | Request::Gone { .. }
         | Request::Send { .. }
         | Request::Read { .. }
@@ -198,7 +198,7 @@ fn host_mount_metadata_admission_agrees_with_optional_workspace_and_git_kind() {
             | Request::Told { .. }
             | Request::Answered { .. }
             | Request::Faulted { .. }
-            | Request::Bounced { .. }
+            | Request::MessageRefused { .. }
             | Request::Send { .. }
             | Request::Read { .. }
             | Request::Signal { .. }
@@ -207,4 +207,38 @@ fn host_mount_metadata_admission_agrees_with_optional_workspace_and_git_kind() {
         }
     }
     assert!(crate::worst_case(&crate::Limits { path_bytes: 4097, ..receiving }).is_none());
+}
+
+#[test]
+fn message_admission_includes_the_label_separator_at_the_bound_and_one_byte_over() {
+    let limits = crate::Limits { message_bytes: 12, ..limits() };
+    let mut domain = Domain::new(&limits);
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut out = Queue::with_capacity(crate::max_out(&limits));
+    crate::step(&mut domain, &env, Event::Spawn { client: Token::new(1), start: start() }, &mut out);
+    let Some(Request::Spawn { owner, .. }) = out.pop() else { panic!("spawn admitted") };
+    crate::step(&mut domain, &env, Event::Spawned { owner, process: Token::new(2) }, &mut out);
+    while out.pop().is_some() {}
+    crate::step(
+        &mut domain,
+        &env,
+        Event::Message { agent: owner, name: Token::new(10), label: Box::from(*b"peer"), text: Box::from(*b"123456") },
+        &mut out,
+    );
+    assert!(out.pop().is_none(), "exact rendered bound queues behind the first Send");
+    crate::step(
+        &mut domain,
+        &env,
+        Event::Message { agent: owner, name: Token::new(11), label: Box::from(*b"peer"), text: Box::from(*b"1234567") },
+        &mut out,
+    );
+    assert_eq!(
+        out.pop(),
+        Some(Request::MessageRefused {
+            client: Token::new(1),
+            name: Token::new(11),
+            reason: crate::MessageRefusal::TooLarge
+        })
+    );
+    assert!(out.pop().is_none());
 }

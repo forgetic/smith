@@ -92,7 +92,7 @@ pub enum Event {
     },
 
     /// Parent-labelled live message; names, including zero, are opaque and
-    /// unique for the active run. Admission yields a bounce only on refusal.
+    /// unique for the active run. Admission yields a typed terminal on refusal.
     Message {
         /// Admitted live run handle.
         run: Token,
@@ -100,7 +100,10 @@ pub enum Event {
         /// Parent-issued active-run unique name.
         name: Token,
 
-        /// Attested UTF-8, including the sender label, bounded before retention.
+        /// Sender label rendered by the run before admission.
+        label: Box<[u8]>,
+
+        /// Attested UTF-8 text; the run checks its rendered bound at ingress.
         text: Box<[u8]>,
     },
 
@@ -214,10 +217,26 @@ pub enum Event {
     Delivered { owner: Token, delivery: Delivery },
 }
 
+/// Why the run refuses a host message at its entrance (domain/run.md, section 6).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum MessageRefusal {
+    /// The label, separator and text exceed the rendered-byte bound.
+    TooLarge,
+    /// The bounded unread inbox has no room.
+    Full,
+    /// An outstanding message or the latest read fence uses this name.
+    NameInUse,
+    /// The run has decided its answer and takes no more messages.
+    Ending,
+}
+
 /// run -> parent
 #[derive(PartialEq, Eq, Debug)]
 #[expect(clippy::large_enum_variant, reason = "bounded diagnostics stay inline and are included in worst_case")]
 pub enum Request {
+    /// A host message refused at ingress; this is its one terminal.
+    MessageRefused { host_run: Token, name: Token, reason: MessageRefusal },
+
     /// Main yielded after a settled wait with an empty inbox. No terminal is owed.
     Waiting {
         /// Stable parent logical run scope.

@@ -75,7 +75,7 @@ pub fn limits() -> agent::Limits {
     domain.session.completion_bytes = completion;
     let channel_bodies = smith_channel::CEILINGS;
     let schema = smith_channel::schema(&channel_bodies).expect("bounded channel schema");
-    let version = schema.version(1).expect("version one");
+    let version = schema.version(2).expect("version two");
     let largest = version.kinds.iter().map(|kind| kind.largest).max().expect("kinds");
     let llm_io = io::Limits {
         sockets: 3,
@@ -101,7 +101,7 @@ pub fn limits() -> agent::Limits {
                 skip: 4096,
                 output_bytes: largest.checked_add(8).expect("largest frame"),
                 output_frames: 4,
-                kinds: 17,
+                kinds: 18,
             },
             endpoints: 1,
             calls: 8,
@@ -208,7 +208,7 @@ pub fn configuration() -> agent::Config {
 pub fn host() -> ScriptedPeer {
     let limits = limits().channel;
     let schema = smith_channel::schema(&limits.bodies).expect("schema");
-    ScriptedPeer::new(schema, Role::Initiator, limits.channel, 1, Box::new([])).expect("scripted host")
+    ScriptedPeer::new(schema, Role::Initiator, limits.channel, 2, Box::new([])).expect("scripted host")
 }
 
 /// One activation Start sent by the scripted host, ending with an Answer.

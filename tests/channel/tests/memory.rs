@@ -14,14 +14,14 @@ static HEAP: Counting = Counting;
 
 fn channel_limits() -> skein_channel::Limits {
     let schema = smith_channel::schema(&CEILINGS).expect("ceiling body schema");
-    let largest = schema.version(1).expect("version one").kinds.iter().map(|kind| kind.largest).max().expect("kinds");
+    let largest = schema.version(2).expect("version two").kinds.iter().map(|kind| kind.largest).max().expect("kinds");
     skein_channel::Limits {
         chunk: 4096,
         credential: 0,
         skip: 4096,
         output_bytes: largest.checked_add(8).expect("one largest frame"),
         output_frames: 4,
-        kinds: 17,
+        kinds: 18,
     }
 }
 

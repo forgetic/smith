@@ -20,6 +20,7 @@ fn check_all(bytes: &[u8]) {
     check!(bytes, smith_transcript, Turn);
     check!(bytes, smith_channel, Start);
     check!(bytes, smith_channel, Message);
+    check!(bytes, smith_channel, MessageRefused);
     check!(bytes, smith_channel, HostAnswer);
     check!(bytes, smith_channel, Acknowledge);
     check!(bytes, smith_channel, GrantRefresh);
@@ -54,23 +55,24 @@ fn arbitrary_and_mutated_wires_never_panic_and_round_trip_when_valid() {
         ("smith-charter", "v1", "charter"),
         ("smith-charter", "v1", "run_result"),
         ("smith-transcript", "v2", "turn"),
-        ("smith-channel", "v1", "start"),
-        ("smith-channel", "v1", "message"),
-        ("smith-channel", "v1", "host_answer"),
-        ("smith-channel", "v1", "acknowledge"),
-        ("smith-channel", "v1", "grant_refresh"),
-        ("smith-channel", "v1", "cancel"),
-        ("smith-channel", "v1", "admitted"),
-        ("smith-channel", "v1", "call"),
-        ("smith-channel", "v1", "withdraw"),
-        ("smith-channel", "v1", "turn"),
-        ("smith-channel", "v1", "waiting"),
-        ("smith-channel", "v1", "long"),
-        ("smith-channel", "v1", "long_done"),
-        ("smith-channel", "v1", "rejected"),
-        ("smith-channel", "v1", "exhausted"),
-        ("smith-channel", "v1", "fact"),
-        ("smith-channel", "v1", "answer"),
+        ("smith-channel", "v2", "start"),
+        ("smith-channel", "v2", "message"),
+        ("smith-channel", "v2", "message_refused"),
+        ("smith-channel", "v2", "host_answer"),
+        ("smith-channel", "v2", "acknowledge"),
+        ("smith-channel", "v2", "grant_refresh"),
+        ("smith-channel", "v2", "cancel"),
+        ("smith-channel", "v2", "admitted"),
+        ("smith-channel", "v2", "call"),
+        ("smith-channel", "v2", "withdraw"),
+        ("smith-channel", "v2", "turn"),
+        ("smith-channel", "v2", "waiting"),
+        ("smith-channel", "v2", "long"),
+        ("smith-channel", "v2", "long_done"),
+        ("smith-channel", "v2", "rejected"),
+        ("smith-channel", "v2", "exhausted"),
+        ("smith-channel", "v2", "fact"),
+        ("smith-channel", "v2", "answer"),
     ] {
         let name = format!("record_{record}_full.bin");
         let golden = std::fs::read(root.join(family).join("golden").join(version).join(name)).expect("golden readable");

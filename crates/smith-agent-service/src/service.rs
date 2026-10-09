@@ -16,6 +16,13 @@ use smith_protocol_channel as channel;
 use smith_protocol_llm as llm;
 use smith_protocol_machine as machine;
 
+#[derive(Debug)]
+struct PendingMessage {
+    name: Token,
+    label: Box<[u8]>,
+    text: Box<[u8]>,
+}
+
 const TRACE_PROMPT_BYTES: u32 = 65_536;
 const COMPONENT_OWNER_BIT: u64 = 1 << 63;
 
@@ -117,7 +124,7 @@ pub struct Service {
     trace_facts: Queue<domain::Fact>,
     trace_prompt: Option<(Token, Box<[u8]>)>,
     capture_prompts: bool,
-    pending_messages: Queue<(Token, Box<[u8]>)>,
+    pending_messages: Queue<PendingMessage>,
     channel_below: Queue<ChannelLower>,
     llm_events: Queue<llm::ToDomain>,
     llm_below: Queue<io::Request>,
@@ -241,7 +248,8 @@ impl Effects {
             | domain::Request::Probe { .. }
             | domain::Request::Check { .. }
             | domain::Request::Abort { .. }) => self.service.domain_requests.push(request),
-            domain::Request::Waiting { .. }
+            domain::Request::MessageRefused { .. }
+            | domain::Request::Waiting { .. }
             | domain::Request::Turn { .. }
             | domain::Request::HostCall { .. }
             | domain::Request::WithdrawHost { .. }
@@ -339,7 +347,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(Queue::<domain::Fact>::worst_case(queue)?)?
         .checked_add(List::<u8>::worst_case(TRACE_PROMPT_BYTES)?.checked_mul(2)?)?
         .checked_add(Queue::<ChannelLower>::worst_case(queue)?)?
-        .checked_add(Queue::<(Token, Box<[u8]>)>::worst_case(queue)?)?
+        .checked_add(Queue::<PendingMessage>::worst_case(queue)?)?
         .checked_add(Queue::<llm::ToDomain>::worst_case(queue)?)?
         .checked_add(Queue::<io::Request>::worst_case(queue)?.checked_mul(2)?)?
         .checked_add(Queue::<machine::ToDomain>::worst_case(queue)?)?
@@ -1193,11 +1201,11 @@ fn channel_event(service: &mut Service, event: channel::OpenEvent) {
                 service.start_ready();
             }
         }
-        channel::OpenEvent::Message { name, text } => {
+        channel::OpenEvent::Message { name, label, text } => {
             if let Some(run) = service.admitted {
-                service.domain_events.push(domain::Event::Message { run, name, text });
+                service.domain_events.push(domain::Event::Message { run, name, label, text });
             } else {
-                service.pending_messages.push((name, text));
+                service.pending_messages.push(PendingMessage { name, label, text });
             }
         }
         channel::OpenEvent::HostReturned { relay, reply } => {
@@ -1298,11 +1306,11 @@ fn domain_down(service: &mut Service) {
             if service.domain_events.room() == 0 {
                 break;
             }
-            let (name, text) = match service.pending_messages.pop() {
+            let PendingMessage { name, label, text } = match service.pending_messages.pop() {
                 Some(message) => message,
                 None => break,
             };
-            service.domain_events.push(domain::Event::Message { run, name, text });
+            service.domain_events.push(domain::Event::Message { run, name, label, text });
         }
     }
     for _ in 0..service.domain_requests.capacity() {
@@ -1420,6 +1428,18 @@ fn domain_request(service: &mut Service, request: domain::Request) {
                 .as_mut()
                 .expect("framed agent owns its channel")
                 .send_withdraw(relay, token, &mut service.channel_events, &mut service.channel_below)
+                .is_err()
+            {
+                service.mark_failed(Failure::Send);
+            }
+        }
+        domain::Request::MessageRefused { host_run: _, name, reason } => {
+            let token = service.next_send();
+            if service
+                .channel
+                .as_mut()
+                .expect("framed agent owns its channel")
+                .send_message_refused(name, reason, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
                 service.mark_failed(Failure::Send);
@@ -1899,7 +1919,7 @@ mod tests {
         let decoded_call_bytes = 4096;
         let channel_bodies = smith_channel::CEILINGS;
         let schema = smith_channel::schema(&channel_bodies).expect("bounded channel schema");
-        let version = schema.version(1).expect("v1");
+        let version = schema.version(2).expect("v2");
         let mut largest = 0;
         for kind in &version.kinds {
             largest = largest.max(kind.largest);
@@ -1929,7 +1949,7 @@ mod tests {
                     skip: 4096,
                     output_bytes: largest.checked_add(8).expect("largest frame"),
                     output_frames: 4,
-                    kinds: 17,
+                    kinds: 18,
                 },
                 endpoints: 1,
                 calls: 8,
@@ -2095,13 +2115,17 @@ mod tests {
             }
             other => panic!("unexpected terminal: {other:?}"),
         }
-        channel_event(&mut service, channel::OpenEvent::Message { name: owner, text: Box::from(&b"hello"[..]) });
+        channel_event(
+            &mut service,
+            channel::OpenEvent::Message { name: owner, label: Box::from(&b"host"[..]), text: Box::from(&b"hello"[..]) },
+        );
         assert_eq!(service.pending_messages.len(), 1);
         assert!(service.domain_events.is_empty());
         service.admitted = Some(Token::new(9));
         domain_down(&mut service);
         match service.domain_events.pop().expect("message") {
-            domain::Event::Message { run, name, text } => {
+            domain::Event::Message { run, name, label, text } => {
+                assert_eq!(label.as_ref(), b"host");
                 assert_eq!(run, Token::new(9));
                 assert_eq!(name, owner);
                 assert_eq!(&*text, b"hello");

@@ -441,6 +441,7 @@ impl Process {
                 | OpenEvent::Hangup { .. }
                 | OpenEvent::Sent { .. }
                 | OpenEvent::Unsent { .. }
+                | OpenEvent::MessageRefused { .. }
                 | OpenEvent::Admitted
                 | OpenEvent::Waiting { .. }
                 | OpenEvent::Long { .. }

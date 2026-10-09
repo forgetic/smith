@@ -95,8 +95,9 @@ impl Config {
         {
             return Err(Invalid::Text);
         }
-        if limits.line_bytes > limits.agent.run.message_bytes {
-            return Err(Invalid::Limits);
+        match crate::max_line_bytes(limits.agent.run.message_bytes) {
+            Some(max) if limits.line_bytes <= max => {}
+            Some(_) | None => return Err(Invalid::Limits),
         }
         match &self.contract {
             Contract::Change(spec) => {

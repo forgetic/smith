@@ -2,8 +2,8 @@
 //! observations (domain/host.md, section 10; testing-strategy.md, sections 2.2, 6).
 use skein_lib::{Duration, Time, Token};
 use smith_host_domain::{
-    Answer, Ask, Bounce, CallName, Delivered, Delivery, Down, Effect, End, Event, Fault, Grant, Invalid, ModelFault,
-    Receipt, Reply, RunFailure, RunResult, Signal, Turn, Up,
+    Answer, Ask, CallName, Delivered, Delivery, Down, Effect, End, Event, Fault, Grant, Invalid, MessageRefusal,
+    ModelFault, Receipt, Reply, RunFailure, RunResult, Signal, Turn, Up,
 };
 use smith_host_world::{Lower, World, limits, start};
 
@@ -98,7 +98,7 @@ fn process_started_precedes_agent_admitted_and_start_is_first() {
         label: Box::new([]),
         text: Box::from(&b"early"[..]),
     });
-    assert_eq!(world.seen.bounces, [Bounce::Ending]);
+    assert_eq!(world.seen.bounces, [MessageRefusal::Ending]);
     world.spawned();
     assert!(!world.seen.admitted);
     match world.seen.down.first().expect("Start issued") {
@@ -118,7 +118,7 @@ fn process_started_precedes_agent_admitted_and_start_is_first() {
     }
     // Messages may queue while Start is still owned by the lower Send.
     for name in 11..14 {
-        message(&mut world, name, 64);
+        message(&mut world, name, 62);
     }
     assert_eq!(world.seen.down.len(), 1);
     world.sent();
@@ -395,12 +395,12 @@ fn inbound_messages_are_ordered_bounded_and_named_opaquely() {
     let mut world = World::new(24, limits());
     world.live();
     for name in [u64::MAX, 0, 31] {
-        message(&mut world, name, 64);
+        message(&mut world, name, 62);
     }
-    message(&mut world, 32, 64);
-    message(&mut world, 33, 65);
+    message(&mut world, 32, 62);
+    message(&mut world, 33, 63);
     message(&mut world, 0, 1);
-    assert_eq!(world.seen.bounces, [Bounce::Full, Bounce::TooLarge, Bounce::ReusedName]);
+    assert_eq!(world.seen.bounces, [MessageRefusal::Full, MessageRefusal::TooLarge, MessageRefusal::NameInUse]);
     for _ in 0..3 {
         world.sent();
     }
@@ -441,7 +441,7 @@ fn a_message_sends_its_label_and_text_to_the_agent_as_given() {
         label: b"x".as_slice().into(),
         text: vec![b'm'; 64].into_boxed_slice(),
     });
-    assert_eq!(world.seen.bounces, [Bounce::TooLarge], "label and text share the message byte cap");
+    assert_eq!(world.seen.bounces, [MessageRefusal::TooLarge], "label and text share the message byte cap");
     world.sent();
     finish(&mut world);
 }
@@ -457,7 +457,7 @@ fn sent_message_at_run_end_stays_outside_the_read_fence() {
     assert_eq!(world.seen.answer.as_ref().expect("final word").turns, 0);
     assert_eq!(world.seen.fault, None);
     message(&mut world, 78, 4);
-    assert_eq!(world.seen.bounces, [Bounce::Ending]);
+    assert_eq!(world.seen.bounces, [MessageRefusal::Ending]);
     world.cleanup();
     world.settled();
 }
@@ -476,7 +476,7 @@ fn read_watermarks_cover_only_sent_names_and_release_exact_prefix() {
     message(&mut world, 33, 1);
     message(&mut world, 34, 1);
     message(&mut world, 35, 1);
-    assert_eq!(world.seen.bounces, [Bounce::Full]);
+    assert_eq!(world.seen.bounces, [MessageRefusal::Full]);
     world.sent();
     world.sent();
     world.event(Event::Acknowledge { agent: world.agent(), turn: 1 });
@@ -492,7 +492,7 @@ fn read_watermarks_cover_only_sent_names_and_release_exact_prefix() {
         world.up(Up::Waiting { read: Some(Token::new(30)) });
         if fence == Some(Token::new(30)) {
             message(&mut world, 30, 1);
-            assert_eq!(world.seen.bounces, [Bounce::ReusedName]);
+            assert_eq!(world.seen.bounces, [MessageRefusal::NameInUse]);
             finish(&mut world);
         } else {
             world.up(Up::Waiting { read: fence });
@@ -1172,4 +1172,26 @@ fn surviving_descendants_keep_reap_right_through_terminate_and_kill() {
     world.settled();
     assert_eq!(world.seen.fault, None);
     assert_eq!(world.seen.gone_detail.as_deref(), Some(b"descendants gone".as_slice()));
+}
+
+#[test]
+fn the_kit_counts_the_label_separator_at_the_exact_message_bound_and_one_byte_over() {
+    let mut world = World::new(1051, smith_host_domain::Limits { message_bytes: 12, messages: 2, ..limits() });
+    world.live();
+    world.event(Event::Message {
+        agent: world.agent(),
+        name: Token::new(1),
+        label: Box::from(*b"peer"),
+        text: Box::from(*b"123456"),
+    });
+    assert!(world.seen.bounces.is_empty(), "twelve rendered bytes fit");
+    world.sent();
+    world.event(Event::Message {
+        agent: world.agent(),
+        name: Token::new(2),
+        label: Box::from(*b"peer"),
+        text: Box::from(*b"1234567"),
+    });
+    assert_eq!(world.seen.bounces, [MessageRefusal::TooLarge]);
+    finish(&mut world);
 }

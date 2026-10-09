@@ -19,7 +19,7 @@ fn a_start_keeps_host_bytes_and_service_values_in_order() {
             skip: 8,
             output_bytes: u32::MAX,
             output_frames: 2,
-            kinds: 17,
+            kinds: 18,
         },
     };
     let start = channel::Start {
@@ -70,7 +70,7 @@ fn the_host_sends_open_before_the_domain_hears_anything() {
             skip: 8,
             output_bytes: u32::MAX,
             output_frames: 2,
-            kinds: 17,
+            kinds: 18,
         },
     };
     let mut component = Component::new(&limits, StreamMode::Two).expect("checked schema");
@@ -98,7 +98,7 @@ fn process_limits() -> Limits {
             skip: 8,
             output_bytes: u32::MAX,
             output_frames: 2,
-            kinds: 17,
+            kinds: 18,
         },
     }
 }

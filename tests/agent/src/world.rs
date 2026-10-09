@@ -236,7 +236,7 @@ enum Family {
     reason = "scheduled copied terminal records retain their fixed diagnostic tails without another allocation"
 )]
 enum Delivery {
-    Message { name: Token, text: Box<[u8]> },
+    Message { name: Token, label: Box<[u8]>, text: Box<[u8]> },
     Acknowledge { turn: u32 },
     Terminal { family: Family, owner: Token, event: Event },
     Io { owner: Token, op: tools::Op, deadline: Time },
@@ -900,8 +900,8 @@ impl World {
 
     /// Script an actual parent input; delivery requires prior Admitted, as the host does.
     /// Contract: domain/run.md, section 6; testing-strategy.md, section 7.
-    pub fn message_at(&mut self, at: Time, name: Token, text: Box<[u8]>) {
-        self.schedule.send(at, Delivery::Message { name, text });
+    pub fn message_at(&mut self, at: Time, name: Token, label: Box<[u8]>, text: Box<[u8]>) {
+        self.schedule.send(at, Delivery::Message { name, label, text });
     }
 
     /// Script durable host acknowledgement of this turn and its prefix.
@@ -1418,7 +1418,7 @@ impl World {
                 self.host_history.withdraw(relay).expect("withdraw retains actual terminal");
                 assert!(self.host_pending.contains_key(&(relay.owner.raw(), relay.attempt)));
             }
-            Request::Rejected { .. } | Request::Exhausted { .. } => {}
+            Request::MessageRefused { .. } | Request::Rejected { .. } | Request::Exhausted { .. } => {}
         }
     }
 
@@ -1458,10 +1458,14 @@ impl World {
 
     fn deliver(&mut self, delivery: Delivery) {
         match delivery {
-            Delivery::Message { name, text } => {
-                self.messages_seen.push((self.now, crate::messages_referee::Seen::Input { name, text: text.clone() }));
+            Delivery::Message { name, label, text } => {
+                let mut rendered = label.to_vec();
+                rendered.extend_from_slice(b": ");
+                rendered.extend_from_slice(&text);
+                self.messages_seen
+                    .push((self.now, crate::messages_referee::Seen::Input { name, text: rendered.into_boxed_slice() }));
                 let run = self.admitted.expect("parent sends only after actual admission");
-                self.stage.push(Event::Message { run, name, text });
+                self.stage.push(Event::Message { label, run, name, text });
             }
             Delivery::Acknowledge { turn } => {
                 let run = self.admitted.expect("parent acknowledges only an admitted run");

@@ -144,7 +144,10 @@ pub enum Event {
         /// Active-run unique opaque name, including zero.
         name: Token,
 
-        /// Attested UTF-8 including sender label, at most `Limits.run.message_bytes`.
+        /// Sender label rendered by the run before admission.
+        label: Box<[u8]>,
+
+        /// Attested UTF-8 text; label, separator and text share the rendered-byte cap.
         text: Box<[u8]>,
     },
 
@@ -216,6 +219,9 @@ pub enum Event {
 /// the root. Calls require the typed terminal documented on their variant.
 #[derive(PartialEq, Eq, Debug)]
 pub enum Request {
+    /// A host message refused at ingress; this is its one terminal.
+    MessageRefused { host_run: Token, name: Token, reason: run::MessageRefusal },
+
     /// Settled main wait and yield with empty inbox; wall time keeps running.
     /// This observation to the parent owes no terminal; Start's reply right
     /// remains pending until the run's final Answer.

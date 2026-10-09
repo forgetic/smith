@@ -66,7 +66,7 @@ pub struct Seen {
     /// Downlink words handed to the agent by the scripted transport.
     pub down: Vec<Down>,
     /// Message names bounced by the kit.
-    pub bounces: Vec<host::Bounce>,
+    pub bounces: Vec<host::MessageRefusal>,
     /// Notices the parent actually heard.
     pub rejected: Vec<(u32, u64)>,
     /// Generic facts forwarded without interpretation.
@@ -387,7 +387,7 @@ impl World {
                     };
                     self.lower.open(key, owner);
                 }
-                Request::Bounced { bounce, .. } => self.seen.bounces.push(bounce),
+                Request::MessageRefused { reason, .. } => self.seen.bounces.push(reason),
                 Request::Rejected { account, generation, .. } => self.seen.rejected.push((account, generation)),
                 Request::Told { .. } => self.seen.told += 1,
                 Request::Waiting { .. } | Request::Exhausted { .. } => {}

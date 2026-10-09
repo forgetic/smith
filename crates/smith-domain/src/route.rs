@@ -60,7 +60,7 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
         }
         Event::Acknowledge { run, turn } => return acknowledge(domain, env, run, turn),
         Event::Grant { grant } => return granted(domain, env, grant),
-        Event::Message { run, name, text } => run::Event::Message { run, name, text },
+        Event::Message { run, name, label, text } => run::Event::Message { run, name, label, text },
         Event::Cancel { run } => run::Event::Cancel { run },
         Event::HostReturned { relay, reply } => run::Event::HostReturned { relay, reply },
         Event::Delivered { owner, delivery } => run::Event::Delivered { owner, delivery },
@@ -471,6 +471,9 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
             return out.push(Request::HostCall { host_run, relay, name, tool, effect, input, deadline });
         }
         run::Request::WithdrawHost { relay } => return out.push(Request::WithdrawHost { relay }),
+        run::Request::MessageRefused { host_run, name, reason } => {
+            return out.push(Request::MessageRefused { host_run, name, reason });
+        }
         run::Request::Admitted { host_run, run } => return out.push(Request::Admitted { host_run, run }),
         run::Request::Answer { to, answer } => {
             let id = Id::<StartContext>::from_token(to.into_token());

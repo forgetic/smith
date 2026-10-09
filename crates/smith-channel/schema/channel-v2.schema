@@ -1,4 +1,4 @@
-family smith-channel 1
+family smith-channel 2
 
 # The receiving host/agent additionally checks aggregate ownership and counts
 # against its configured domain Limits. Bytes carried from other codec families
@@ -62,6 +62,8 @@ record GrantRefresh { grant: Grant }
 record Cancel {}
 
 record Admitted {}
+enum MessageRefusal { too_large, full, name_in_use, ending }
+record MessageRefused { name: u64 reason: MessageRefusal }
 enum Effect { read, write }
 record HostAsk { tool: text 64 input: bytes 1048576 }
 record Field { name: text 64 text: text 262144 }

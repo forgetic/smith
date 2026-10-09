@@ -271,7 +271,8 @@ impl Driver {
                         self.seen[15] += 1;
                     }
                 }
-                Request::Turn { .. }
+                Request::MessageRefused { .. }
+                | Request::Turn { .. }
                 | Request::Waiting { .. }
                 | Request::Checking { .. }
                 | Request::ChecksEnded { .. }

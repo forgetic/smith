@@ -592,11 +592,16 @@ fn send_line(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
         Placement::InProcess => agent::step(
             domain.agent.as_mut().expect("in-process agent"),
             &agent_env(env),
-            agent::Event::Message { run, name: line.name, text: line.text },
+            agent::Event::Message { run, name: line.name, label: Box::from(crate::person::LABEL), text: line.text },
             &mut domain.agent_out,
         ),
         Placement::External => {
-            out.push(Request::External(Box::new(ExternalRequest::Message { run, name: line.name, text: line.text })));
+            out.push(Request::External(Box::new(ExternalRequest::Message {
+                run,
+                name: line.name,
+                label: Box::from(crate::person::LABEL),
+                text: line.text,
+            })));
         }
     }
     observe(domain, Fact::Message { name: line.name });
@@ -747,6 +752,9 @@ fn route_agent(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>)
             }
             agent::Request::Waiting { host_run: _, read: _ } => {
                 out.push(Request::Show { text: Box::from(&b"Waiting for a message"[..]) });
+            }
+            agent::Request::MessageRefused { .. } => {
+                out.push(Request::Show { text: Box::from(&b"Line not delivered"[..]) });
             }
             agent::Request::Checking { host_run: _, deadline: _ } => {
                 out.push(Request::Show { text: Box::from(&b"Running checks"[..]) });

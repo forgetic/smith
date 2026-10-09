@@ -235,6 +235,7 @@ fn observed_request(request: Request, selected: Option<&smith_domain_run::Conven
         Request::HostCall { .. }
         | Request::WithdrawHost { .. }
         | Request::Turn { .. }
+        | Request::MessageRefused { .. }
         | Request::Waiting { .. }
         | Request::Admitted { .. }
         | Request::Say { .. }
@@ -484,6 +485,7 @@ fn delivery_memory_step(
                 answered = true;
             }
             Request::Turn { .. }
+            | Request::MessageRefused { .. }
             | Request::Waiting { .. }
             | Request::Admitted { .. }
             | Request::Checking { .. }
@@ -678,6 +680,7 @@ fn host_memory_take(
                 token = Some(conversation);
             }
             Request::Turn { .. }
+            | Request::MessageRefused { .. }
             | Request::Waiting { .. }
             | Request::Admitted { .. }
             | Request::WithdrawHost { .. }

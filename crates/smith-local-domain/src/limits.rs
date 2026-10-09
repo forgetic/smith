@@ -33,6 +33,13 @@ pub struct Limits {
     pub facts: u32,
 }
 
+/// Largest terminal line that fits the run's rendered message bound (domain/host.md, section 8).
+#[must_use]
+pub fn max_line_bytes(message_bytes: u32) -> Option<u32> {
+    let label_bytes = u32::try_from(crate::person::LABEL.len()).ok()?;
+    message_bytes.checked_sub(label_bytes)?.checked_sub(2)
+}
+
 /// Bound on owned local state, including the child domain.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {

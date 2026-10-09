@@ -315,13 +315,14 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
     follow(runs, alarms, id);
 }
 
-/// Retain a host-bounded named message while the run can read it; a message
-/// arriving during shutdown remains unread. Input precedes idle alarms.
+/// Admit a named, labelled host message or emit its typed refusal.
+/// Input precedes idle alarms; once the answer is decided every message ends refused.
 pub(crate) fn message(
     domain: &mut Domain,
     env: &Env<Limits>,
     token: Token,
     name: Token,
+    label: Box<[u8]>,
     text: Box<[u8]>,
     out: &mut Queue<Request>,
 ) {
@@ -329,20 +330,52 @@ pub(crate) fn message(
     let Some(run) = domain.runs.get(id) else {
         return;
     };
-    match run.state {
-        State::Stopping { .. } | State::Winding { .. } | State::Closed => return,
-        State::Preparing { .. } | State::Working { .. } | State::Waiting { .. } | State::Over { .. } => {}
-    }
-    assert!(
-        u64::try_from(text.len()).expect("owned length fits") <= u64::from(env.limits.message_bytes),
-        "host message exceeds run limit"
-    );
-    assert!(run.offered != Some(name) && run.read != Some(name), "host reused a message name");
+    let ending = match run.state {
+        State::Stopping { .. } | State::Over { .. } | State::Winding { .. } | State::Closed => true,
+        State::Preparing { .. } | State::Working { .. } | State::Waiting { .. } => false,
+    };
+    let rendered = match label.len().checked_add(2) {
+        Some(bytes) => bytes.checked_add(text.len()),
+        None => None,
+    };
+    let bytes = match rendered {
+        Some(bytes) => u64::try_from(bytes).expect("owned lengths fit"),
+        None => u64::MAX,
+    };
+    let too_large = match rendered {
+        Some(bytes) => u64::try_from(bytes).expect("owned lengths fit") > u64::from(env.limits.message_bytes),
+        None => true,
+    };
+    let mut named = run.offered == Some(name) || run.read == Some(name);
     for queued in &run.inbox {
-        assert!(queued.name != name, "host reused a queued message name");
+        if queued.name == name {
+            named = true;
+        }
     }
-    assert!(run.inbox.room() > 0, "host exceeded run message count");
+    let held = run.inbox.len().saturating_add(u32::from(run.offered.is_some()));
+    let reason = if ending {
+        Some(crate::MessageRefusal::Ending)
+    } else if too_large {
+        Some(crate::MessageRefusal::TooLarge)
+    } else if named {
+        Some(crate::MessageRefusal::NameInUse)
+    } else if held >= env.limits.messages {
+        Some(crate::MessageRefusal::Full)
+    } else {
+        None
+    };
     domain.facts.about(token);
+    if let Some(reason) = reason {
+        domain.facts.push(Fact::MessageRefused { run: token, name, bytes, reason });
+        out.push(Request::MessageRefused { host_run: run.host_name, name, reason });
+        return;
+    }
+    let mut writer = skein_lib::Writer::new(rendered.expect("checked rendered size"));
+    writer.put(&label).expect("checked rendered size");
+    writer.put(b": ").expect("checked rendered size");
+    writer.put(&text).expect("checked rendered size");
+    let text = writer.finish();
+    domain.facts.push(Fact::MessageReceived { run: token, name, bytes });
     let run = domain.runs.get_mut(id).expect("checked live run above");
     run.inbox.push(Message { name, text });
     let state = mem::replace(&mut run.state, State::Closed);
@@ -358,8 +391,10 @@ pub(crate) fn message(
             let message = run.inbox.pop().expect("admitted one message above");
             continue_message(run, reply_to, main, peer, message, out)
         }
-        state @ (State::Preparing { .. } | State::Working { .. } | State::Over { .. }) => state,
-        State::Stopping { .. } | State::Winding { .. } | State::Closed => unreachable!("checked active run"),
+        state @ (State::Preparing { .. } | State::Working { .. }) => state,
+        State::Stopping { .. } | State::Over { .. } | State::Winding { .. } | State::Closed => {
+            unreachable!("checked active run")
+        }
     };
     follow(&mut domain.runs, &mut domain.alarms, id);
 }

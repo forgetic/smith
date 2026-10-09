@@ -121,7 +121,7 @@ fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Re
             );
         }
         Event::Acknowledge { run, turn } => run::acknowledge(domain, run, turn),
-        Event::Message { run, name, text } => run::message(domain, env, run, name, text, out),
+        Event::Message { run, name, label, text } => run::message(domain, env, run, name, label, text, out),
         Event::Turn { conversation, record, sequence } => run::turn(domain, conversation, record, sequence, out),
         Event::Cancel { run } => run::cancel(domain, run, out),
         Event::Started { conversation, peer } => run::started(domain, conversation, peer, out),

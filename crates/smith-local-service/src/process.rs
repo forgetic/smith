@@ -827,7 +827,7 @@ impl ProcessAdapter {
             | host::Request::Told { .. }
             | host::Request::Answered { .. }
             | host::Request::Faulted { .. }
-            | host::Request::Bounced { .. }
+            | host::Request::MessageRefused { .. }
             | host::Request::Gone { .. } => unreachable!("parent notice cannot reach lower process adapter"),
         }
     }
@@ -852,6 +852,9 @@ fn channel_event(agent: Token, event: protocol::OpenEvent) -> host::Event {
         OpenEvent::Unsent { .. } => host::Event::Unsent { owner: agent },
         OpenEvent::Answer { answer, .. } => {
             host::Event::Received { owner: agent, message: host::Up::Answer { answer } }
+        }
+        OpenEvent::MessageRefused { name, reason } => {
+            host::Event::Received { owner: agent, message: host::Up::MessageRefused { name, reason } }
         }
         OpenEvent::Admitted => host::Event::Received { owner: agent, message: host::Up::Admitted },
         OpenEvent::Waiting { read } => host::Event::Received { owner: agent, message: host::Up::Waiting { read } },

@@ -150,9 +150,10 @@ fn spawned_agent_receives_saved_start_message_and_durable_turn_ack() {
 
     crate::step(&mut domain, &env, Event::External(ExternalEvent::Admitted { run: Token::new(3) }), &mut out);
     let Some(Request::External(message)) = out.pop() else { panic!("first message") };
-    let ExternalRequest::Message { run, name, text } = *message else { panic!("message request") };
+    let ExternalRequest::Message { run, name, label, text } = *message else { panic!("message request") };
     assert_eq!(run, Token::new(3));
     assert_eq!(name, Token::new(1));
+    assert_eq!(label.as_ref(), b"person");
     assert_eq!(text.as_ref(), b"hello");
 
     let turn = smith_domain::Turn {

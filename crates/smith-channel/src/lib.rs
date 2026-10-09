@@ -1,4 +1,4 @@
-//! Bounded channel records and the version-one kind table. This crate keeps no
+//! Bounded channel records and the version-two kind table. This crate keeps no
 //! runtime state and knows no domain, credentials or host policy. Generated
 //! constructors, encoders and decoders handle bodies; [`schema`] advertises
 //! their largest permitted encodings. Contracts: `protocol/channel.md`,
@@ -10,13 +10,13 @@
 extern crate alloc;
 
 #[rustfmt::skip]
-#[path = "generated/v1.rs"]
-pub mod v1;
+#[path = "generated/v2.rs"]
+pub mod v2;
 
 mod kinds;
 
-pub use kinds::{KindRule, Overflow, V1, peer_terms_gap, schema};
-pub use v1::{
+pub use kinds::{KindRule, Overflow, V2, peer_terms_gap, schema};
+pub use v2::{
     Accepted, AcceptedParts, Acknowledge, AcknowledgeParts, Admitted, AdmittedParts, Answer, AnswerParts, AnsweredCall,
     AnsweredCallParts, Ask, BudgetFailure, BudgetFailureValue, BudgetFailureValueParts, CEILINGS, Call, CallName,
     CallNameParts, CallParts, Cancel, CancelParts, CompletionEvidence, CompletionFailure, CompletionFault,
@@ -26,9 +26,10 @@ pub use v1::{
     Field, FieldParts, Grant, GrantParts, GrantRefresh, GrantRefreshParts, GrantValue, GrantValueParts, HostAnswer,
     HostAnswerParts, HostAsk, HostAskParts, HostReply, HostReplyParts, InvalidStart, InvalidStartValue,
     InvalidStartValueParts, Limits, Long, LongDone, LongDoneParts, LongParts, Marker, MarkerParts, Message,
-    MessageParts, ModelFault, ModelFaultValue, ModelFaultValueParts, Overflow as BudgetOverflow, OverflowValue,
-    OverflowValueParts, PolicyFailure, PolicyFailureParts, Receipt, ReceiptParts, ReceivingLimit, ReceivingLimitValue,
-    ReceivingLimitValueParts, Refused, RefusedParts, Rejected, RejectedParts, Reply, RunFailure, RunResult, SavedReply,
-    Start, StartParts, StartRefusal, TranscriptRefusal, TranscriptRefusalValue, TranscriptRefusalValueParts, Turn,
-    TurnParts, Waiting, WaitingParts, Window, WindowParts, Withdraw, WithdrawParts, Workspace, WorkspaceParts,
+    MessageParts, MessageRefusal, MessageRefused, MessageRefusedParts, ModelFault, ModelFaultValue,
+    ModelFaultValueParts, Overflow as BudgetOverflow, OverflowValue, OverflowValueParts, PolicyFailure,
+    PolicyFailureParts, Receipt, ReceiptParts, ReceivingLimit, ReceivingLimitValue, ReceivingLimitValueParts, Refused,
+    RefusedParts, Rejected, RejectedParts, Reply, RunFailure, RunResult, SavedReply, Start, StartParts, StartRefusal,
+    TranscriptRefusal, TranscriptRefusalValue, TranscriptRefusalValueParts, Turn, TurnParts, Waiting, WaitingParts,
+    Window, WindowParts, Withdraw, WithdrawParts, Workspace, WorkspaceParts,
 };

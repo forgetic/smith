@@ -172,6 +172,7 @@ pub fn review(observations: &[Observation], credential: Box<[u8]>) -> Referee<Me
             | Observation::AgentContext { .. }
             | Observation::AgentSavedTooLarge
             | Observation::AgentSavedHost { .. }
+            | Observation::HostMessageRefused { .. }
             | Observation::AgentMessage { .. }
             | Observation::HostWaiting { .. }
             | Observation::HostLong { .. }

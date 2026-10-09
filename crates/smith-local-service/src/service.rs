@@ -546,13 +546,8 @@ impl Service {
                 self.process.capture_plain(directories, now.saturating_add(start.charter.budget.time));
                 self.pending_start = Some(start);
             }
-            local::ExternalRequest::Message { run, name, text } => {
-                self.host_events.push(host::Event::Message {
-                    agent: run,
-                    name,
-                    label: Box::from(&b"person"[..]),
-                    text,
-                });
+            local::ExternalRequest::Message { run, name, label, text } => {
+                self.host_events.push(host::Event::Message { agent: run, name, label, text });
             }
             local::ExternalRequest::Acknowledge { run, turn } => {
                 self.host_events.push(host::Event::Acknowledge { agent: run, turn });
@@ -690,7 +685,7 @@ impl Service {
             host::Request::Exhausted { .. } => {
                 self.local_events.push(local::Event::External(local::ExternalEvent::Exhausted));
             }
-            host::Request::Faulted { .. } | host::Request::Bounced { .. } => {
+            host::Request::Faulted { .. } | host::Request::MessageRefused { .. } => {
                 self.failed = true;
                 self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
             }

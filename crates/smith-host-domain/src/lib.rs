@@ -29,7 +29,7 @@ mod limits;
 #[cfg(test)]
 mod tests;
 
-pub use boundary::{Bounce, End, Event, Fault, Invalid, Request, Signal};
+pub use boundary::{End, Event, Fault, Invalid, MessageRefusal, Request, Signal};
 
 pub use channel::{
     Answer, AnsweredCall, Ask, CallName, CompletionEvidence, CompletionFailure, Directory, Down, Effect, Exhausted,

@@ -50,10 +50,7 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
                 let Down::Message { name, label, text } = host.seen.down.last().expect("actual downlink write") else {
                     panic!("parent input must become the actual Message Send")
                 };
-                let mut joined = label.to_vec();
-                joined.extend_from_slice(b": ");
-                joined.extend_from_slice(text);
-                agent.message_at(*at, *name, joined.into_boxed_slice());
+                agent.message_at(*at, *name, label.clone(), text.clone());
                 host.sent();
             }
         }

@@ -1360,7 +1360,7 @@ impl World {
                 self.host_history.withdraw(relay).expect("withdraw retains actual terminal");
                 assert!(self.host_pending.contains_key(&(relay.owner.raw(), relay.attempt)));
             }
-            Request::Rejected { .. } | Request::Exhausted { .. } => {}
+            Request::MessageRefused { .. } | Request::Rejected { .. } | Request::Exhausted { .. } => {}
         }
     }
 
@@ -1403,7 +1403,7 @@ impl World {
             Delivery::Message { name, text } => {
                 self.messages_seen.push((self.now, crate::messages_referee::Seen::Input { name, text: text.clone() }));
                 let run = self.admitted.expect("parent sends only after actual admission");
-                self.stage.push(Event::Message { run, name, text });
+                self.stage.push(Event::Message { label: Box::from(&b"host"[..]), run, name, text });
             }
             Delivery::Host { relay, reply } => {
                 self.host_terminals.push((relay, self.now, reply.clone()));

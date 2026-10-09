@@ -24,8 +24,18 @@ fn observed() -> Vec<(Time, Seen)> {
         },
         ..calm
     });
-    world.message_at(Time::from_nanos(500_000_000), Token::new(0), b"person: first".as_slice().into());
-    world.message_at(Time::from_nanos(501_000_000), Token::new(99), b"person: second".as_slice().into());
+    world.message_at(
+        Time::from_nanos(500_000_000),
+        Token::new(0),
+        b"person".as_slice().into(),
+        b"first".as_slice().into(),
+    );
+    world.message_at(
+        Time::from_nanos(501_000_000),
+        Token::new(99),
+        b"person".as_slice().into(),
+        b"second".as_slice().into(),
+    );
     world.run(2000);
     let actual = world.messages_seen().to_vec();
     assert_eq!(judge(&actual), Verdict::Passed, "positive comes from actual forwarded root output");

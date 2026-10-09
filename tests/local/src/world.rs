@@ -1444,7 +1444,8 @@ impl World {
             agent::Request::Abort { owner } => {
                 self.events.push_back(Event::Agent(AgentIo::Aborted { owner }));
             }
-            agent::Request::Waiting { .. }
+            agent::Request::MessageRefused { .. }
+            | agent::Request::Waiting { .. }
             | agent::Request::Turn { .. }
             | agent::Request::Admitted { .. }
             | agent::Request::Answer { .. }

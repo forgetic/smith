@@ -274,7 +274,7 @@ fn answered_host_call_before_turn_crash_wakes_as_host_text_with_new_call_namespa
             &mut resumed,
             &env,
             &mut out,
-            run::Event::Message { run, name: Token::new(5), text: notice.clone() },
+            run::Event::Message { label: Box::from(&b"host"[..]), run, name: Token::new(5), text: notice[6..].into() },
         )
         .is_empty()
     );

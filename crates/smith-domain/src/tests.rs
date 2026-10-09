@@ -296,6 +296,7 @@ impl Harness {
                 | Request::Probe { .. }
                 | Request::Check { .. }
                 | Request::Abort { .. }
+                | Request::MessageRefused { .. }
                 | Request::Waiting { .. }) => {
                     requests.push(request).expect("room for max_out");
                 }
@@ -1060,7 +1061,8 @@ fn assert_no_provider_completion(emitted: &[Request]) {
             Request::Complete { .. } => {
                 panic!("no room for another provider receiving reserve after the exact result edge")
             }
-            Request::Waiting { .. }
+            Request::MessageRefused { .. }
+            | Request::Waiting { .. }
             | Request::Turn { .. }
             | Request::HostCall { .. }
             | Request::WithdrawHost { .. }

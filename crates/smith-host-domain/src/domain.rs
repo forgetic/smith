@@ -3,8 +3,8 @@
 //! The kit knows channel send order, not private agent stop
 //! decisions; policy and durable decisions remain in the parent.
 use crate::{
-    AnsweredCall, Ask, Bounce, CallName, Delivery, Down, End, Event, Fact, Fault, Grant, Invalid, Limits, Reply,
-    Request, RunFailure, RunResult, Signal, Start, Up,
+    AnsweredCall, Ask, CallName, Delivery, Down, End, Event, Fact, Fault, Grant, Invalid, Limits, MessageRefusal,
+    Reply, Request, RunFailure, RunResult, Signal, Start, Up,
 };
 use alloc::boxed::Box;
 use skein_lib::{Deadlines, Env, Id, Map, Queue, Slab, Time, Token};
@@ -691,26 +691,29 @@ fn message(
     env: &Env<Limits>,
     out: &mut Queue<Request>,
 ) {
-    let too_large = match label.len().checked_add(text.len()) {
+    let too_large = match match label.len().checked_add(2) {
+        Some(bytes) => bytes.checked_add(text.len()),
+        None => None,
+    } {
         Some(bytes) => match u64::try_from(bytes) {
             Ok(bytes) => bytes > env.limits.message_bytes,
             Err(_) => true,
         },
         None => true,
     };
-    let bounce = if too_large {
-        Some(Bounce::TooLarge)
-    } else if !accepts(agent) {
-        Some(Bounce::Ending)
+    let reason = if !accepts(agent) {
+        Some(MessageRefusal::Ending)
+    } else if too_large {
+        Some(MessageRefusal::TooLarge)
     } else if named_message(agent, name) {
-        Some(Bounce::ReusedName)
+        Some(MessageRefusal::NameInUse)
     } else if agent.messages.saturating_add(agent.unread.len()) >= env.limits.messages {
-        Some(Bounce::Full)
+        Some(MessageRefusal::Full)
     } else {
         None
     };
-    if let Some(bounce) = bounce {
-        out.push(Request::Bounced { client: agent.client, name, bounce });
+    if let Some(reason) = reason {
+        out.push(Request::MessageRefused { client: agent.client, name, reason });
         return;
     }
     agent.messages = agent.messages.checked_add(1).expect("bounded messages");
@@ -884,6 +887,16 @@ fn receive(agent: &mut Agent, owner: Token, message: Up, env: &Env<Limits>, out:
             }
             Some(_) | None => {}
         },
+        Up::MessageRefused { name, reason } => {
+            let held = agent.unread.len();
+            for _ in 0..held {
+                let old = agent.unread.pop().expect("bounded unread count");
+                if old != name {
+                    agent.unread.push(old);
+                }
+            }
+            out.push(Request::MessageRefused { client: agent.client, name, reason });
+        }
         Up::Turn { turn } => {
             agent.waiting = false;
             mark_read(agent, turn.read);
@@ -923,7 +936,7 @@ fn receive(agent: &mut Agent, owner: Token, message: Up, env: &Env<Limits>, out:
 fn discarded_work(agent: &Agent, message: &Up) -> bool {
     match agent.phase {
         Phase::Terminating | Phase::Killing => match message {
-            Up::Answer { .. } => false,
+            Up::Answer { .. } | Up::MessageRefused { .. } => false,
             Up::Admitted
             | Up::Call { .. }
             | Up::Withdraw { .. }
@@ -984,6 +997,7 @@ fn too_large(message: &Up, limits: &Limits) -> bool {
             RunResult::Refused { .. } | RunResult::Parked | RunResult::Failed { .. } => false,
         },
         Up::Admitted
+        | Up::MessageRefused { .. }
         | Up::Withdraw { .. }
         | Up::Long { .. }
         | Up::LongDone
@@ -997,6 +1011,15 @@ fn valid_record(agent: &Agent, message: &Up, env: &Env<Limits>) -> bool {
     let limits = &env.limits;
     match message {
         Up::Admitted => !agent.admitted && !agent.last_word,
+        Up::MessageRefused { name, .. } => {
+            let mut sent = false;
+            for old in &agent.unread {
+                if old == name {
+                    sent = true;
+                }
+            }
+            agent.admitted && sent
+        }
         Up::Answer { answer } => valid_answer(agent, answer, limits),
         Up::Call { call, name, deadline, ask } => {
             if !agent.admitted || name.activation != agent.activation || name.completion == 0 || *deadline < env.now {
@@ -1418,7 +1441,7 @@ fn observations(domain: &mut Domain, out: &Queue<Request>, before: u32) {
                 | Request::Rejected { .. }
                 | Request::Exhausted { .. }
                 | Request::Told { .. }
-                | Request::Bounced { .. }
+                | Request::MessageRefused { .. }
                 | Request::Spawn { .. }
                 | Request::Send { .. }
                 | Request::Read { .. }

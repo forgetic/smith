@@ -905,6 +905,7 @@ impl Counted {
                 | Request::Deliver { .. }
                 | Request::Rejected { .. }
                 | Request::Exhausted { .. }
+                | Request::MessageRefused { .. }
                 | Request::Cancel { .. }
                 | Request::Io { .. }
                 | Request::CancelIo { .. }
@@ -1113,7 +1114,8 @@ fn assert_generated(history: &root::Transcript, messages: u32) {
                 match block {
                     session::llm::Block::Text { text, .. } => {
                         if text.len() == LARGE {
-                            assert!(text.iter().all(|byte| *byte == b'x'));
+                            assert_eq!(&text[..6], b"host: ");
+                            assert!(text[6..].iter().all(|byte| *byte == b'x'));
                             large += 1;
                         }
                     }
@@ -1178,8 +1180,8 @@ fn generate_prefix(counted: &mut Counted, configuration: &Configuration, message
     for at in 1..cycles {
         counted.waiting = false;
         let run = counted.admitted.expect("actual admitted handle");
-        let text = if at == 1 { vec![b'x'; LARGE].into_boxed_slice() } else { b"x".as_slice().into() };
-        counted.step(Event::Message { run, name: Token::new(u64::from(at)), text });
+        let text = if at == 1 { vec![b'x'; LARGE - 6].into_boxed_slice() } else { b"x".as_slice().into() };
+        counted.step(Event::Message { label: Box::from(&b"host"[..]), run, name: Token::new(u64::from(at)), text });
         counted.cycle(configuration, cycles);
         assert!(counted.waiting);
     }

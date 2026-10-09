@@ -64,7 +64,7 @@ pub enum OpenEvent {
     /// A structurally valid Start with its charter translated before domain admission.
     Start { start: Box<DecodedStart> },
     /// A host-labelled message for the admitted run.
-    Message { name: Token, text: Box<[u8]> },
+    Message { name: Token, label: Box<[u8]>, text: Box<[u8]> },
     /// A declared host tool's one settled terminal.
     HostReturned { relay: run::RelayName, reply: run::HostReply },
     /// A delivery's one settled terminal.
@@ -176,6 +176,38 @@ impl Component {
         let mut frame = frame_writer(0x0106, record.measure())?;
         frame.put(&body.finish())?;
         self.phase = Phase::Admitted;
+        self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
+        self.drain(to_service, below);
+        self.fire(to_service, below);
+        Ok(())
+    }
+
+    /// Tell the host the one terminal of a refused message.
+    pub fn send_message_refused(
+        &mut self,
+        name: Token,
+        reason: run::MessageRefusal,
+        token: Token,
+        to_service: &mut Queue<OpenEvent>,
+        below: &mut Queue<Lower>,
+    ) -> Result<(), Error> {
+        if self.phase != Phase::Admitted {
+            return Err(Error::Order);
+        }
+        let reason = match reason {
+            run::MessageRefusal::TooLarge => smith_channel::MessageRefusal::TooLarge,
+            run::MessageRefusal::Full => smith_channel::MessageRefusal::Full,
+            run::MessageRefusal::NameInUse => smith_channel::MessageRefusal::NameInUse,
+            run::MessageRefusal::Ending => smith_channel::MessageRefusal::Ending,
+        };
+        let record = smith_channel::MessageRefused::new(
+            &self.bodies,
+            smith_channel::MessageRefusedParts { name: name.raw(), reason },
+        )?;
+        let mut body = Writer::new(usize::try_from(record.measure()).expect("fixed refusal length"));
+        record.encode(&mut body)?;
+        let mut frame = frame_writer(0x0111, record.measure())?;
+        frame.put(&body.finish())?;
         self.machine.down(Request::Send { token, frame: frame.finish()? }, &mut self.events, below);
         self.drain(to_service, below);
         self.fire(to_service, below);
@@ -579,7 +611,7 @@ impl Component {
             match event {
                 Some(Event::Opening { credential, lowest: _, highest }) => {
                     if credential.is_empty() {
-                        self.machine.down(Request::Accept { version: highest.min(1) }, &mut self.events, below);
+                        self.machine.down(Request::Accept { version: highest.min(2) }, &mut self.events, below);
                     } else {
                         self.machine.down(
                             Request::Refuse { reason: UNAUTHORIZED, text: Box::from(*b"credential on pipe") },
@@ -608,13 +640,14 @@ impl Component {
                     if self.phase == Phase::Started || self.phase == Phase::Admitted =>
                 {
                     match smith_channel::Message::decode(&self.bodies, &mut Reader::new(&body)) {
-                        Ok(message) => match labelled_message(&message) {
-                            Some(text) => {
-                                to_service.push(OpenEvent::Message { name: Token::new(message.name()), text });
-                                self.machine.down(Request::Read, &mut self.events, below);
-                            }
-                            None => self.refuse_rules(below),
-                        },
+                        Ok(message) => {
+                            to_service.push(OpenEvent::Message {
+                                name: Token::new(message.name()),
+                                label: Box::from(message.label()),
+                                text: Box::from(message.text()),
+                            });
+                            self.machine.down(Request::Read, &mut self.events, below);
+                        }
                         Err(_) => self.refuse_rules(below),
                     }
                 }
@@ -872,15 +905,6 @@ impl Component {
             self.refuse_rules(below);
         }
     }
-}
-
-fn labelled_message(message: &smith_channel::Message) -> Option<Box<[u8]>> {
-    let capacity = message.label().len().checked_add(2)?.checked_add(message.text().len())?;
-    let mut writer = Writer::new(capacity);
-    writer.put(message.label()).ok()?;
-    writer.put(b": ").ok()?;
-    writer.put(message.text()).ok()?;
-    Some(writer.finish())
 }
 
 fn invalid_answer(limits: &smith_channel::Limits, invalid: smith_channel::InvalidStart) -> Option<Frame> {

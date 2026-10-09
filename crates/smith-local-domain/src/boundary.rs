@@ -70,7 +70,7 @@ pub enum ExternalRequest {
     /// Spawn one agent with the local host's durable start.
     Start(ExternalStart),
     /// Forward a saved person message to the admitted child.
-    Message { run: Token, name: Token, text: Box<[u8]> },
+    Message { run: Token, name: Token, label: Box<[u8]>, text: Box<[u8]> },
     /// Acknowledge a concrete turn only after its file and directory sync.
     Acknowledge { run: Token, turn: u32 },
     /// Replace a rejected or expiring grant.

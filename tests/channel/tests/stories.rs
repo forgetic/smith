@@ -8,8 +8,8 @@ fn the_halves_open_on_the_highest_version_both_speak() {
     for mode in [StreamMode::One, StreamMode::Two] {
         let mut world = World::new(CEILINGS, CEILINGS, mode);
         world.settle();
-        assert!(world.observations().contains(&Observation::HostOpened(1)));
-        assert!(world.observations().contains(&Observation::AgentOpened(1)));
+        assert!(world.observations().contains(&Observation::HostOpened(2)));
+        assert!(world.observations().contains(&Observation::AgentOpened(2)));
     }
 }
 
@@ -19,7 +19,7 @@ fn no_version_in_common_ends_the_channel_before_a_start() {
     world.agent_hears_foreign_version();
     world.settle();
     assert!(world.observations().contains(&Observation::AgentEnded(Closed::RefusedHere(1))));
-    assert!(!world.observations().contains(&Observation::AgentOpened(1)));
+    assert!(!world.observations().contains(&Observation::AgentOpened(2)));
 }
 
 #[test]
@@ -494,7 +494,11 @@ fn a_message_reaches_the_llm_with_its_senders_label() {
     let name = skein_lib::Token::new(31);
     world.send_message(name, Box::from(*b"Ada"), Box::from(*b"Please retry"));
     world.settle();
-    assert!(world.observations().contains(&Observation::AgentMessage { name, text: Box::from(*b"Ada: Please retry") }));
+    assert!(world.observations().contains(&Observation::AgentMessage {
+        name,
+        label: Box::from(*b"Ada"),
+        text: Box::from(*b"Please retry")
+    }));
     world.agent_waits(Some(name));
     world.settle();
     assert!(world.observations().contains(&Observation::HostWaiting { read: Some(name) }));
@@ -731,12 +735,11 @@ fn a_failed_agent_write_does_not_end_its_read_stream() {
     assert!(world.observations().contains(&Observation::AgentWriteFailed));
     world.send_message(skein_lib::Token::new(44), Box::from(*b"Ada"), Box::from(*b"continue"));
     world.settle();
-    assert!(
-        world.observations().contains(&Observation::AgentMessage {
-            name: skein_lib::Token::new(44),
-            text: Box::from(*b"Ada: continue"),
-        })
-    );
+    assert!(world.observations().contains(&Observation::AgentMessage {
+        name: skein_lib::Token::new(44),
+        label: Box::from(*b"Ada"),
+        text: Box::from(*b"continue"),
+    }));
 }
 
 #[test]

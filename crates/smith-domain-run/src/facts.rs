@@ -24,6 +24,10 @@ use crate::run::{self, Conversation, Run};
 /// `Admitted` gives it).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Fact {
+    /// A host message entered the bounded inbox, counted as rendered bytes.
+    MessageReceived { run: Token, name: Token, bytes: u64 },
+    /// A host message ended refused before retention, counted as rendered bytes.
+    MessageRefused { run: Token, name: Token, bytes: u64, reason: crate::MessageRefusal },
     /// The run was admitted.
     Admitted { run: Token },
     /// It looked in its checkout, and found `guides` guides and `checks`
@@ -225,7 +229,8 @@ pub(crate) fn tell(
                 Fact::CheckStarted { run, deadline: *deadline }
             }
             Request::Answer { to: _, answer } => Fact::Answered { run, answer: answered(answer) },
-            Request::Waiting { .. }
+            Request::MessageRefused { .. }
+            | Request::Waiting { .. }
             | Request::Turn { .. }
             | Request::HostCall { .. }
             | Request::WithdrawHost { .. }

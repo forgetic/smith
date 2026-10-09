@@ -58,13 +58,13 @@ pub enum Error {
     /// The measured result did not fit its output writer.
     ResultWrite(skein_lib::Overflow),
     /// A domain answer exceeds the configured channel body limits.
-    Answer(smith_channel::v1::Problem),
+    Answer(smith_channel::v2::Problem),
     /// A measured application frame could not be built.
     Frame(skein_channel::FrameError),
 }
 
-impl From<smith_channel::v1::Problem> for Error {
-    fn from(problem: smith_channel::v1::Problem) -> Error {
+impl From<smith_channel::v2::Problem> for Error {
+    fn from(problem: smith_channel::v2::Problem) -> Error {
         Error::Answer(problem)
     }
 }

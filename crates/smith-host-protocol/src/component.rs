@@ -51,6 +51,8 @@ pub enum OpenEvent {
     Answer { answer: channel::Answer, record: smith_channel::Answer },
     /// The agent admitted the Start before its later final answer.
     Admitted,
+    /// The run refused one named host message at ingress.
+    MessageRefused { name: Token, reason: smith_host_domain::MessageRefusal },
     /// The run is waiting after reading the named message, if any.
     Waiting { read: Option<Token> },
     /// The run announced a long operation with a bounded progress extension.
@@ -335,6 +337,25 @@ impl Component {
                     }
                 }
                 Some(Event::Body { kind, body }) => match kind {
+                    0x0111 if self.phase == Phase::Admitted => {
+                        match smith_channel::MessageRefused::decode(&self.bodies, &mut Reader::new(&body)) {
+                            Ok(record) => {
+                                let reason = match record.reason() {
+                                    smith_channel::MessageRefusal::TooLarge => {
+                                        smith_host_domain::MessageRefusal::TooLarge
+                                    }
+                                    smith_channel::MessageRefusal::Full => smith_host_domain::MessageRefusal::Full,
+                                    smith_channel::MessageRefusal::NameInUse => {
+                                        smith_host_domain::MessageRefusal::NameInUse
+                                    }
+                                    smith_channel::MessageRefusal::Ending => smith_host_domain::MessageRefusal::Ending,
+                                };
+                                to_service.push(OpenEvent::MessageRefused { name: Token::new(record.name()), reason });
+                                self.machine.down(Request::Read, &mut self.events, below);
+                            }
+                            Err(_) => self.refuse_rules(below),
+                        }
+                    }
                     0x0107 if self.phase == Phase::Admitted => {
                         match smith_channel::Call::decode(&self.bodies, &mut Reader::new(&body)) {
                             Ok(record) => {

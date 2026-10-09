@@ -22,7 +22,7 @@ pub enum Event {
         /// Bounded V2 start admitted before process IO.
         start: Start,
     },
-    /// Parent notice, bounced if full/ending/reused.
+    /// Parent message, ending refused if the ingress cannot admit it.
     Message {
         agent: Token,
         /// Opaque parent message name.
@@ -160,12 +160,12 @@ pub enum Request {
         fault: Fault,
     },
     /// Message rejected before queue mutation.
-    Bounced {
+    MessageRefused {
         client: Token,
         /// Original rejected message name.
         name: Token,
         /// Admission reason.
-        bounce: Bounce,
+        reason: MessageRefusal,
     },
     /// Spawn terminal; all process and parent rights settled.
     Gone {
@@ -231,7 +231,7 @@ pub enum Fault {
 
 /// Parent message admission refusal.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Bounce {
+pub enum MessageRefusal {
     /// Payload exceeded bytes.
     TooLarge,
     /// Bounded queued or unread messages full.
@@ -239,7 +239,7 @@ pub enum Bounce {
     /// Agent no longer accepts messages.
     Ending,
     /// Outstanding name or current read watermark reused.
-    ReusedName,
+    NameInUse,
 }
 
 /// Start refused before process resources or payload copying.

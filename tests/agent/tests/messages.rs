@@ -43,8 +43,18 @@ fn text_seen(world: &World, expected: &[u8]) -> bool {
 #[test]
 fn wait_result_settles_before_waiting_then_opaque_fifo_names_cross_only_turns() {
     let mut world = World::new(waiting(900));
-    world.message_at(Time::from_nanos(500_000_000), Token::new(0), b"person: first".as_slice().into());
-    world.message_at(Time::from_nanos(501_000_000), Token::new(99), b"person: second".as_slice().into());
+    world.message_at(
+        Time::from_nanos(500_000_000),
+        Token::new(0),
+        b"person".as_slice().into(),
+        b"first".as_slice().into(),
+    );
+    world.message_at(
+        Time::from_nanos(501_000_000),
+        Token::new(99),
+        b"person".as_slice().into(),
+        b"second".as_slice().into(),
+    );
     world.run(2000);
     assert!(matches!(world.answer(), run::Answer::Parked { turns: 6, .. }));
     assert_eq!(
@@ -70,11 +80,16 @@ fn wait_result_settles_before_waiting_then_opaque_fifo_names_cross_only_turns() 
 fn bounded_message_keeps_the_zero_name_and_wall_time_runs_while_waiting() {
     let calm = waiting(901);
     let limits =
-        smith_domain::Limits { run: run::Limits { messages: 1, message_bytes: 4, ..calm.limits.run }, ..calm.limits };
+        smith_domain::Limits { run: run::Limits { messages: 1, message_bytes: 12, ..calm.limits.run }, ..calm.limits };
     let mut world = World::new(Settings { limits, ..calm });
-    world.message_at(Time::ZERO.saturating_add(Duration::from_millis(50)), Token::new(0), b"full".as_slice().into());
+    world.message_at(
+        Time::ZERO.saturating_add(Duration::from_millis(50)),
+        Token::new(0),
+        b"person".as_slice().into(),
+        b"full".as_slice().into(),
+    );
     world.run(2000);
-    assert!(text_seen(&world, b"full"));
+    assert!(text_seen(&world, b"person: full"));
     assert!(matches!(world.answer(), run::Answer::Parked { turns: 4, .. }));
     let mut wall = World::new(Settings {
         waiting: Duration::from_secs(20),

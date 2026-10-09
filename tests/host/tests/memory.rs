@@ -134,7 +134,7 @@ impl Measured {
                 | Request::Told { .. }
                 | Request::Answered { .. }
                 | Request::Faulted { .. }
-                | Request::Bounced { .. }
+                | Request::MessageRefused { .. }
                 | Request::Gone { .. }
                 | Request::Read { .. }
                 | Request::Signal { .. }
@@ -213,7 +213,7 @@ fn maximum_v2_starts_and_full_queued_replies_fit_every_slot() {
                         agent: owner,
                         name: Token::new(100 + u64::from(name)),
                         label: Box::new([]),
-                        text: bytes(limits.message_bytes),
+                        text: bytes(limits.message_bytes - 2),
                     },
                     false,
                 );
@@ -257,7 +257,12 @@ fn maximum_start_io_ownership_coexists_with_full_pre_read_message_queue() {
     let mut measured = Measured::new(limits, caller);
     let owner = measured.spawn(1);
     measured.step(
-        Event::Message { agent: owner, name: Token::new(100), label: Box::new([]), text: bytes(limits.message_bytes) },
+        Event::Message {
+            agent: owner,
+            name: Token::new(100),
+            label: Box::new([]),
+            text: bytes(limits.message_bytes - 2),
+        },
         false,
     );
     measured.step(Event::Spawned { owner, process: owner }, true);
@@ -267,13 +272,13 @@ fn maximum_start_io_ownership_coexists_with_full_pre_read_message_queue() {
                 agent: owner,
                 name: Token::new(100 + u64::from(name)),
                 label: Box::new([]),
-                text: bytes(limits.message_bytes),
+                text: bytes(limits.message_bytes - 2),
             },
             false,
         );
     }
     assert!(measured.held_start.is_some(), "actual IO still owns the maximum first Send");
-    assert!(measured.meter.held() >= caller + u64::from(limits.messages) * limits.message_bytes);
+    assert!(measured.meter.held() >= caller + u64::from(limits.messages) * (limits.message_bytes - 2));
     // The domain max and caller ownership sum are checked at every step;
     // dropping the caller's Start is a send terminal ownership boundary.
     measured.held_start = None;
