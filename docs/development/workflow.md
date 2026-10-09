@@ -663,3 +663,20 @@ checked bound of 359,734,783,998 bytes; the exact request-boundary fixture
 peaked at 2,126,475 bytes against the shared client's 102,358,592-byte bound.
 Existing suite budgets remain unchanged; complete workspace gates apply
 before a main merge.
+
+### Delegated run capacity validation, 2026-10-09
+
+The standard profile admits up to 128 aggregate own completions across main
+and child conversations. An actual translated charter at 128 opens under the
+production preset; 129 refuses before effects. An existing run-domain harness
+checks both a smaller 64-turn host budget and the 128-turn boundary with main
+and two children, exact remaining shares, duplicate child terminals, global
+admission gates and one final answer. Retained messages, encoded requests and
+other accounting ceilings remain independent and unchanged.
+
+The affected run-domain focused suite passed 126 tests serially in 0.813
+seconds, and six production admission/receiving tests passed in 1.526 seconds.
+The scalar change leaves eager service allocation at 4,233,560 bytes and its
+checked worst case at 359,734,783,998 bytes. Formatting and affected all-target
+Clippy passed. Existing suite budgets remain unchanged; complete workspace
+gates apply before a main merge.

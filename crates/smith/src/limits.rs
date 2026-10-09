@@ -6,7 +6,7 @@ use skein_lib::Duration;
 use smith_domain::{Limits, run, session, tools};
 
 /// The largest run budget under the standard profile.
-const BUDGET: run::Budget = run::Budget { turns: 64, spend: 1, time: Duration::from_secs(3600) };
+const BUDGET: run::Budget = run::Budget { turns: 128, spend: 1, time: Duration::from_secs(3600) };
 
 const CEILING: session::Budget = session::Budget {
     turns: BUDGET.turns,

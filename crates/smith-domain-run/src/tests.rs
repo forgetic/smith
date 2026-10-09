@@ -1439,6 +1439,71 @@ fn a_sub_agent_answers_with_its_last_message_once_it_has_ended() {
 }
 
 #[test]
+fn delegated_turns_reach_the_global_128_boundary_without_terminal_double_counting() {
+    for requested in [64_u32, 128] {
+        let ceiling = Budget { turns: 128, ..LIMITS.budget };
+        let mut harness = Harness::new(Limits { budget: ceiling, ..LIMITS });
+        let policy = Charter { budget: Budget { turns: requested, ..BUDGET }, ..agents() };
+        let (_, main) = harness.running_on(1, 100, policy);
+        let one = Spend { turns: 1, input: 1, ..Spend::ZERO };
+        for _ in 0..18_u32 {
+            assert!(harness.step(Event::Used { conversation: main, spend: one }).is_empty());
+        }
+        let (first, opening) = harness.child(main, 7, families(true, false, false), 101);
+        assert_eq!(opening.budget.turns, requested - 18);
+        for _ in 0..35_u32 {
+            assert!(harness.step(Event::Used { conversation: first, spend: one }).is_empty());
+        }
+        drop(harness.step(Event::Yielded { conversation: first, stop: Stop::EndTurn, text: bytes(b"first result") }));
+        let first_terminal = || Event::Ended {
+            conversation: first,
+            end: End::Closed,
+            spend: Spend { turns: 35, input: 35, ..Spend::ZERO },
+        };
+        let result = harness.step(first_terminal());
+        let [Request::Return { call, spent, .. }] = result.as_ref() else { panic!("one child return: {result:?}") };
+        assert_eq!((*call, *spent), (Token::new(7), 0));
+        assert!(harness.step(first_terminal()).is_empty(), "duplicate child terminal contributes nothing");
+        let (second, opening) = harness.child(main, 8, families(true, false, false), 102);
+        assert_eq!(opening.budget.turns, requested - 53, "18 own and 35 child completions were counted exactly once");
+        for _ in 0..requested - 54 {
+            assert!(harness.step(Event::Used { conversation: second, spend: one }).is_empty());
+        }
+        assert_eq!(crate::completion_permit(&harness.domain, main), crate::CompletionPermit::Allowed);
+        assert_eq!(crate::completion_permit(&harness.domain, second), crate::CompletionPermit::Allowed);
+        assert!(harness.step(Event::Used { conversation: second, spend: one }).is_empty());
+        assert_eq!(crate::completion_permit(&harness.domain, main), crate::CompletionPermit::Denied(Exhausted::Turns));
+        assert_eq!(
+            crate::completion_permit(&harness.domain, second),
+            crate::CompletionPermit::Denied(Exhausted::Turns)
+        );
+        drop(harness.step(Event::Ended {
+            conversation: second,
+            end: End::Budget(Exhausted::Turns),
+            spend: Spend { turns: requested - 53, input: u64::from(requested - 53), ..Spend::ZERO },
+        }));
+        drop(harness.step(end_turn(main)));
+        let answer = harness.step(Event::Ended {
+            conversation: main,
+            end: End::Closed,
+            spend: Spend { turns: 18, input: 18, ..Spend::ZERO },
+        });
+        assert_eq!(
+            answered(answer),
+            (
+                1,
+                failed(
+                    Failure::Budget(Exhausted::Turns),
+                    Spend { turns: requested, input: u64::from(requested), ..Spend::ZERO }
+                )
+            )
+        );
+        harness.domain.reclaim();
+        assert_eq!((harness.domain.runs(), harness.domain.conversations(), harness.domain.calls()), (0, 0, 0));
+    }
+}
+
+#[test]
 fn simultaneous_sessions_reserve_one_run_budget_and_return_unused_credit() {
     let mut harness = Harness::new(LIMITS);
     let (_, main) = harness.running_on(1, 100, agents());
