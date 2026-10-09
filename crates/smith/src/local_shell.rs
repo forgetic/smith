@@ -131,7 +131,9 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
                 service::Diagnostic::RunFailed { failure } => eprintln!("smith: agent run failed: {failure:?}"),
                 service::Diagnostic::Faulted { fault } => eprintln!("smith: agent failure: {fault:?}"),
                 service::Diagnostic::Gone { end, detail } => {
-                    if !detail.is_empty() {
+                    if detail.is_empty() {
+                        eprintln!("smith: agent ended ({end:?})");
+                    } else {
                         eprintln!("smith: agent ended ({end:?}): {}", String::from_utf8_lossy(&detail));
                     }
                 }

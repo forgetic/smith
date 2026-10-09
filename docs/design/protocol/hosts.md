@@ -114,6 +114,8 @@ what its host's protocol layer would do:
   tail when the tree settles. These observations never enter person messages,
   saved turns or LLM prompts. The shell drains the bounded diagnostic queue
   between service passes; a full queue pauses host routing without dropping detail.
+  Admission refusals and failed spawns report their typed end and bounded detail
+  even without an earlier failure notice; an empty detail still shows the end.
 - **While the run waits,** a prompt says so.
 - **Interrupting:**
   - the first interrupt is the run's cancel;

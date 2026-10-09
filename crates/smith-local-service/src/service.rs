@@ -91,7 +91,7 @@ pub enum Diagnostic {
     RunFailed { failure: host::channel::RunFailure },
     /// The host reports a typed process or channel failure before its answer.
     Faulted { fault: host::Fault },
-    /// The host reports process settlement and its bounded standard-error tail.
+    /// The host reports admission or process settlement and its bounded error detail.
     Gone { end: host::End, detail: Box<[u8]> },
 }
 
@@ -745,7 +745,11 @@ impl Service {
                 self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
             }
             host::Request::Gone { end, detail, .. } => {
-                if self.diagnostic_failure {
+                let report = match end {
+                    host::End::Busy | host::End::Invalid(_) | host::End::Unspawned => true,
+                    host::End::Stopped => self.diagnostic_failure,
+                };
+                if report {
                     self.diagnostics.push(Diagnostic::Gone { end, detail });
                 }
                 self.local_events.push(local::Event::External(local::ExternalEvent::Gone));
@@ -998,6 +1002,41 @@ mod diagnostic_tests {
             detail: Box::from(&b"agent startup diagnostic"[..]),
         });
         assert_eq!(service.pop_diagnostic(), None);
+    }
+
+    #[test]
+    fn refused_or_unspawned_agent_preserves_its_bounded_detail_without_an_earlier_fault() {
+        for end in [host::End::Busy, host::End::Invalid(host::Invalid::Directories), host::End::Unspawned] {
+            let config = crate::tests::config();
+            let mut detail = List::with_capacity(config.limits.host.detail_bytes);
+            for _ in 0..config.limits.host.detail_bytes {
+                detail.push(b'x').expect("bounded host detail");
+            }
+            let detail = detail.into_boxed();
+            let mut service = Service::new(config, 7).expect("bounded service");
+            assert!(!service.diagnostic_failure, "there is no earlier failure observation");
+            service.route_host(host::Request::Gone { client: Token::new(1), end, detail: detail.clone() });
+            assert_eq!(service.pop_diagnostic(), Some(Diagnostic::Gone { end, detail }));
+            assert_eq!(service.pop_diagnostic(), None, "one operator observation");
+            assert!(service.output().is_empty(), "operator details never enter conversation text");
+            let Some(local::Event::External(local::ExternalEvent::Gone)) = service.local_events.pop() else {
+                panic!("local policy receives only the typed settlement");
+            };
+        }
+    }
+
+    #[test]
+    fn invalid_admission_with_no_detail_still_reports_its_typed_end() {
+        let mut service = Service::new(crate::tests::config(), 7).expect("bounded service");
+        service.route_host(host::Request::Gone {
+            client: Token::new(1),
+            end: host::End::Invalid(host::Invalid::Directories),
+            detail: Box::new([]),
+        });
+        assert_eq!(
+            service.pop_diagnostic(),
+            Some(Diagnostic::Gone { end: host::End::Invalid(host::Invalid::Directories), detail: Box::new([]) })
+        );
     }
 
     #[test]
