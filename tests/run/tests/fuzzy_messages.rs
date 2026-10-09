@@ -12,7 +12,6 @@ fn seeded_message_callbacks_replay_with_read_and_unread_terminals() {
         let mut world = World::new(settings);
         world.inject_messages(500);
         world.run(1_000_000);
-        assert_eq!(world.facts().1, 0);
         assert!(judge(world.message_seen()).iter().all(|verdict| *verdict == Verdict::Passed), "seed {seed}");
         for (cell, count) in world.message_cells() {
             *cells.entry(cell).or_default() += count;

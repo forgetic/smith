@@ -224,6 +224,7 @@ fn fill(original: Limits, route: Route, full_service: bool) {
     let mut step = |event: Event| -> Option<Asked> {
         let may_rest = matches!(route, Route::Invalid) && matches!(event, Event::Completed { .. });
         meter.start();
+        while domain.pop_fact().is_some() {}
         smith_domain_session::step(&mut domain, &env, event, &mut out);
         let measured = meter.end();
         let mut asked = observe_fill(&mut out, &mut observed, full_service);
@@ -233,6 +234,7 @@ fn fill(original: Limits, route: Route, full_service: bool) {
         }
         if domain.is_ready() {
             meter.start();
+            while domain.pop_fact().is_some() {}
             smith_domain_session::resume(&mut domain, &env, &mut out);
             let measured = meter.end();
             asked = observe_fill(&mut out, &mut observed, full_service).or(asked);
@@ -408,6 +410,10 @@ fn a_domain_with_every_session_full_stays_within_its_worst_case() {
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one metered fixture keeps delegated ownership and exact emitted copies together"
+)]
 fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
     use smith_domain_session::record;
     let block = size(size_of::<Block>());
@@ -432,6 +438,7 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
     let mut ended = None;
     let mut drive = |event| {
         meter.start();
+        while domain.pop_fact().is_some() {}
         smith_domain_session::step(&mut domain, &env, event, &mut out);
         let measured = meter.end();
         let mut completion = None;
@@ -565,6 +572,7 @@ fn restoring_a_maximum_recorded_history_stays_within_the_counted_bound() {
         }]),
     };
     meter.start();
+    while domain.pop_fact().is_some() {}
     smith_domain_session::step(
         &mut domain,
         &env,
@@ -651,6 +659,7 @@ fn an_oversized_waking_result_tail_is_refused_before_cloning_provider_ids() {
         budget: limits.budget,
     };
     meter.start();
+    while domain.pop_fact().is_some() {}
     smith_domain_session::step(
         &mut domain,
         &env,
@@ -702,7 +711,7 @@ fn restore_tail_tools() -> smith_domain_tools::Limits {
         shell_tail: 0,
         search_hits: 1,
         search_bytes: 16,
-        facts: 0,
+        facts: 6,
         ..LIMITS.tools
     }
 }
@@ -794,6 +803,7 @@ fn measured_step(
     event: Event,
 ) -> MemorySeen {
     meter.start();
+    while domain.pop_fact().is_some() {}
     smith_domain_session::step(domain, env, event, out);
     let measured = meter.end();
     let seen = memory_seen(out);
@@ -810,6 +820,7 @@ fn measured_resume(
 ) -> MemorySeen {
     assert!(domain.is_ready());
     meter.start();
+    while domain.pop_fact().is_some() {}
     smith_domain_session::resume(domain, env, out);
     let measured = meter.end();
     let seen = memory_seen(out);

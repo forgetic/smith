@@ -77,6 +77,7 @@ fn crash_take(
     out: &mut Queue<run::Request>,
     event: run::Event,
 ) -> Vec<run::Request> {
+    while domain.pop_fact().is_some() {}
     run::step(domain, env, event, out);
     let mut requests = Vec::new();
     while let Some(request) = out.pop() {
@@ -823,24 +824,26 @@ fn a_cancelled_run_closes_its_sub_agents_down_the_tree() {
     panic!("no cancellation found a live child");
 }
 
-/// The facts a run tells say what it did, and whether they are kept changes
-/// nothing: a world whose fact queue keeps none runs as one whose queue has
-/// room for every fact.
+/// A bounded native queue holds pending inputs and preserves every observation.
 #[test]
-fn facts_tell_what_runs_did_and_nothing_depends_on_them() {
+fn a_fact_queue_at_its_bound_holds_the_step_and_loses_nothing() {
     let settings = asking(40);
     let settings = Settings { checkout: Checkouts { checks: 1000, ..settings.checkout }, ..settings };
     let roomy = settled(&Settings { run: Limits { facts: 100_000, ..settings.run }, ..settings });
-    let tight = settled(&Settings { run: Limits { facts: 0, ..settings.run }, ..settings });
-    assert_eq!(roomy.trace(), tight.trace());
-    let (told, lost) = roomy.facts();
-    let stats = roomy.stats();
-    assert_eq!(lost, 0);
-    assert_eq!(told.get("opened"), Some(&stats.opens));
-    assert_eq!(told.get("admitted"), told.get("answered"), "every run admitted answers once: {told:?}");
-    assert!(told.get("called").is_some_and(|called| *called == told["returned"]), "every call returns: {told:?}");
-    let (_, lost) = tight.facts();
-    assert!(lost > 0, "a tight queue drops facts");
+    let tight = settled(&Settings {
+        run: Limits { facts: smith_domain_run::max_facts(&settings.run), ..settings.run },
+        ..settings
+    });
+    assert_eq!(roomy.fact_holds(), 0);
+    assert!(tight.fact_holds() > 0, "actual pending work was held for the native fact drain");
+    for world in [&roomy, &tight] {
+        let told = world.facts();
+        let stats = world.stats();
+        assert_eq!(told.get("opened"), Some(&stats.opens));
+        assert_eq!(told.get("admitted"), told.get("answered"), "every admitted run answers once");
+        assert!(told.get("called").is_some_and(|called| *called == told["returned"]), "every call returns");
+        assert_eq!(answers(world).len(), usize::try_from(settings.host.jobs).expect("bounded scripted jobs"));
+    }
 }
 
 #[test]
@@ -886,10 +889,13 @@ fn empty_reports_and_declared_failures_are_terminal_results_without_delivery() {
         }
         assert_eq!((world.stats().checks, world.stats().pushes), (0, 0));
         assert_eq!(world.stats().partner.accepted, 4);
-        let silent = settled(&Settings { run: Limits { facts: 0, ..settings.run }, ..settings });
+        let silent = settled(&Settings {
+            run: Limits { facts: smith_domain_run::max_facts(&settings.run), ..settings.run },
+            ..settings
+        });
         assert_eq!(silent.trace(), world.trace(), "facts never decide text-result behavior");
         assert_eq!(answers(&silent), answers(&world));
-        assert!(silent.facts().1 > 0);
+        assert_eq!(silent.facts(), world.facts());
         skein_world::domain::assert_replays(41, 42, |seed| {
             let world = settled(&Settings { seed, ..settings });
             (world.trace().to_vec(), (world.stats(), world.now()))

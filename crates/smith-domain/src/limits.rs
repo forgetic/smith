@@ -212,9 +212,12 @@ pub(crate) fn handoffs(limits: &Limits) -> Option<u32> {
     limits.run.conversations.checked_add(flights(limits)?)
 }
 
-/// Facts kept until the loop drains them: as many as both child domains keep.
+/// One composed step reserve plus the children's configured buffering slack.
 pub(crate) fn facts(limits: &Limits) -> Option<u32> {
-    limits.run.facts.checked_add(limits.session.facts)
+    let reserve = run_steps(limits)
+        .checked_mul(run::max_facts(&limits.run))?
+        .checked_add(session_steps(limits).checked_mul(session::max_facts(&limits.session))?)?;
+    reserve.checked_add(limits.run.facts)?.checked_add(limits.session.facts)
 }
 
 /// Room for what the run emits in an entry point: its most, for each step it

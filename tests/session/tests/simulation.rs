@@ -6,7 +6,7 @@ use skein_lib::{Duration, Time};
 use smith_domain_session::llm::Failure;
 use smith_domain_session::{Budget, Dimension, End, Limits, Spec, Yield};
 use smith_domain_tools::{self as tools, Authority, Grants};
-use smith_session_world::{BUDGET, Count, Ended, Settings, Span, Told, World, noisy, spec, submit_noisily};
+use smith_session_world::{BUDGET, Count, Ended, Settings, Span, World, noisy, spec, submit_noisily};
 
 const ITERATIONS: u32 = 100_000;
 
@@ -84,7 +84,7 @@ fn malformed_calls_are_answered_with_their_problem_and_the_conversation_goes_on(
     // provider would refuse the next query.
     assert_eq!(yields(&world, opener), [(Yield::Done, &b"done"[..])]);
     assert_eq!((world.stats().ops, world.stats().results), (0, 0));
-    let (told, _) = world.told();
+    let told = world.told();
     assert!(told.invalid_calls >= 2 && told.invalid_calls == told.calls, "{told:?}");
 }
 
@@ -118,7 +118,7 @@ fn reads_in_one_answer_run_side_by_side_and_writes_alone() {
     for opener in openers {
         assert_eq!((end(&world, opener), turns(&world, opener)), (End::Closed, 5));
     }
-    let (told, _) = world.told();
+    let told = world.told();
     assert_eq!(world.stats().results, told.calls, "each call's result went back, what comes of that call");
     assert_eq!(world.stats().most_parallel, 3, "reads ran as many at once as the limits allow");
 }
@@ -409,7 +409,7 @@ fn the_turn_budget_ends_a_session_that_keeps_calling_tools() {
 
     // The tools of the last turn run; their results do not go back.
     assert_eq!((end(&world, opener), turns(&world, opener)), (out_of(Dimension::Turns), 3));
-    let (told, _) = world.told();
+    let told = world.told();
     assert_eq!((world.stats().results, told.calls, told.tools_answered), (2, 3, 3));
 }
 
@@ -467,28 +467,30 @@ fn a_seed_replays_to_the_same_run() {
     assert!(trace.len() > 20, "the run did something");
 }
 
-/// Facts are told on the side: sessions that keep none of them make the same
-/// requests at the same times as sessions that keep them all, and the facts
-/// kept add up to what crossed the boundary (checked by `World::run`).
+/// The parent holds a step until its complete fact reserve is available.
 #[test]
-fn facts_change_nothing_the_sessions_do() {
+fn a_fact_queue_at_its_bound_holds_the_step_and_loses_nothing() {
+    let mut holds = 0;
     for seed in 0..100 {
-        let run = |facts| {
-            let noisy = noisy(seed);
-            let tools = tools::Limits { facts, ..noisy.agent.tools };
-            let settings = Settings { agent: Limits { facts, tools, ..noisy.agent }, ..noisy };
+        let run = |minimum| {
+            let mut settings = noisy(seed);
+            if minimum {
+                settings.agent.tools.facts =
+                    (settings.agent.parallel_tools + 2) * tools::max_facts(&settings.agent.tools);
+                settings.agent.facts = smith_domain_session::max_facts(&settings.agent);
+            }
             let mut world = World::new(settings);
             submit_noisily(&mut world, &settings, seed);
             world.run(ITERATIONS);
-            (world.trace().to_vec(), world.stats(), world.told())
+            (world.fact_holds(), world.stats(), world.told())
         };
-        let (trace, stats, (told, lost)) = run(4096);
-        assert_eq!(lost, 0, "seed {seed}: room for every fact");
-        assert!(told.ended > 0, "seed {seed}: facts were told");
-        let (silent, same, (none, dropped)) = run(0);
-        assert!(silent == trace && same == stats, "seed {seed}: the same requests, at the same times");
-        assert_eq!((none, dropped > 0), (Told::default(), true), "seed {seed}: every fact dropped");
+        let (_, stats, told) = run(false);
+        assert!(told.ended > 0 && stats.calls > 0, "seed {seed}: actual calls settled");
+        let (held, same, all) = run(true);
+        holds += held;
+        assert!(all.ended > 0 && same.calls > 0, "seed {seed}: every pressured call settled");
     }
+    assert!(holds > 0, "actual pending work was held for native facts");
 }
 
 #[test]

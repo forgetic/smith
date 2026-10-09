@@ -113,7 +113,7 @@ fn bounds(messages: u32) -> Limits {
             guide_bytes: 64,
             outcome_bytes: 256,
             check_tail: 64,
-            facts: 0,
+            facts: 10,
             messages: 1,
             message_bytes: u32::try_from(LARGE).expect("bounded caller message"),
             ..LIMITS.run
@@ -130,7 +130,7 @@ fn bounds(messages: u32) -> Limits {
             failure_bytes: 256,
             delegated_result_bytes: 262_144,
             parallel_tools: 1,
-            facts: 0,
+            facts: 15,
             tools: root::tools::Limits {
                 kits: 1,
                 calls: 1,
@@ -147,7 +147,7 @@ fn bounds(messages: u32) -> Limits {
                 shell_tail: 0,
                 search_hits: 1,
                 search_bytes: 64,
-                facts: 0,
+                facts: 6,
                 ..LIMITS.session.tools
             },
             ..LIMITS.session

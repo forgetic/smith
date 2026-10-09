@@ -189,7 +189,7 @@ fn closing_preserves_withdrawn_and_late_answers_and_provider_completions() {
             );
         }
         assert_eq!(world.end, Some(session::End::Closed));
-        let mut resumed = World::new(6, 0);
+        let mut resumed = World::new(6, session::max_facts(&smith_session_world::Settings::calm(0).agent));
         resumed.open(opening(Some(transcript(&world)), 100));
         assert!(resumed.end.is_none());
         resumed.close();
@@ -262,7 +262,7 @@ fn replay_and_facts_capacity_change_no_decision() {
     let replayed = scenario(19, 256);
     assert_eq!(first.trace, replayed.trace);
     assert_eq!(first.snapshots, replayed.snapshots, "the complete frozen domain states replay too");
-    assert_eq!(first.trace, scenario(19, 0).trace);
+    assert_eq!(first.trace, scenario(19, session::max_facts(&smith_session_world::Settings::calm(0).agent)).trace);
 }
 
 #[test]
@@ -413,7 +413,7 @@ fn owned_io_cancellation_keeps_terminal_results_in_the_turn() {
         } else {
             assert_eq!(*outcome, Outcome::Cancelled);
         }
-        let mut resumed = World::new(32, 0);
+        let mut resumed = World::new(32, session::max_facts(&smith_session_world::Settings::calm(0).agent));
         resumed.open(opening(Some(transcript(&world)), 100));
         assert!(resumed.end.is_none(), "the settled owned terminal is resumable");
         resumed.close();
@@ -466,7 +466,7 @@ fn fill_initial(spec: &mut record::Opening, total: u64) {
 
 #[test]
 fn cap_filled_provider_credit_preserves_replay_completion_that_wins_cancel() {
-    let mut world = World::new(101, 0);
+    let mut world = World::new(101, session::max_facts(&smith_session_world::Settings::calm(0).agent));
     world.env.limits.session_bytes = 16_384;
     world.env.limits.completion_bytes = 2048;
     world.env.limits.completion_blocks = 3;
@@ -526,7 +526,7 @@ fn cap_filled_provider_credit_preserves_replay_completion_that_wins_cancel() {
 #[test]
 fn one_byte_or_one_message_less_refuses_before_provider_and_tools() {
     for short_slot in [false, true] {
-        let mut world = World::new(102, 0);
+        let mut world = World::new(102, session::max_facts(&smith_session_world::Settings::calm(0).agent));
         world.env.limits.session_bytes = 16_384;
         world.env.limits.completion_bytes = 256;
         world.env.limits.completion_blocks = 1;
@@ -548,7 +548,7 @@ fn one_byte_or_one_message_less_refuses_before_provider_and_tools() {
 fn full_history_batch_credit_keeps_maximum_late_results_or_prevents_every_effect() {
     use smith_domain_tools::Effect;
     for short in [false, true] {
-        let mut world = World::new(103, 0);
+        let mut world = World::new(103, session::max_facts(&smith_session_world::Settings::calm(0).agent));
         world.env.limits.session_bytes = 16_384;
         world.env.limits.completion_bytes = 512;
         world.env.limits.completion_blocks = 2;
@@ -659,7 +659,7 @@ fn fullest_history_keeps_maximum_owned_read_list_search_and_shell_after_cancel()
     use smith_domain_tools::{self as tools, Authority, Call, Grants, Name, Repo};
     for kind in 0..4 {
         for short in [false, true] {
-            let mut world = World::new(110 + kind, 0);
+            let mut world = World::new(110 + kind, session::max_facts(&smith_session_world::Settings::calm(0).agent));
             world.env.limits.session_bytes = 16_384;
             world.env.limits.completion_bytes = 512;
             world.env.limits.completion_blocks = 1;

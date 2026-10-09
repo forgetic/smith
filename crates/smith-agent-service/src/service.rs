@@ -1269,9 +1269,11 @@ fn channel_event(service: &mut Service, event: channel::OpenEvent) {
 
 fn domain_up(service: &mut Service) {
     let maximum = domain::max_out(&service.limits.domain);
+    let facts = domain::max_facts(&service.limits.domain);
     for _ in 0..service.limits.domain.run.conversations {
         if !service.domain.as_ref().expect("framed agent owns its domain").is_ready()
             || service.domain_requests.room() < maximum
+            || service.domain.as_ref().expect("framed agent owns its domain").facts_room() < facts
         {
             break;
         }
@@ -1282,7 +1284,9 @@ fn domain_up(service: &mut Service) {
         );
     }
     for _ in 0..service.domain_events.capacity() {
-        if service.domain_requests.room() < maximum {
+        if service.domain_requests.room() < maximum
+            || service.domain.as_ref().expect("framed agent owns its domain").facts_room() < facts
+        {
             break;
         }
         let event = match service.domain_events.pop() {
@@ -1298,6 +1302,7 @@ fn domain_up(service: &mut Service) {
     }
     if service.domain.as_ref().expect("framed agent owns its domain").is_due(service.domain_env.now)
         && service.domain_requests.room() >= maximum
+        && service.domain.as_ref().expect("framed agent owns its domain").facts_room() >= facts
     {
         domain::fire(
             service.domain.as_mut().expect("framed agent owns its domain"),

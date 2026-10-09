@@ -83,7 +83,7 @@ const LIMITS: Limits = Limits {
     delivery_timeout: Duration::from_secs(60),
     check_timeout: Duration::from_secs(60),
     check_tail: 1024,
-    facts: 16,
+    facts: 24,
     messages: 8,
     message_bytes: 4096,
     offer_messages: 8,
@@ -295,6 +295,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
     // checked less them.
     let mut step = |event: Event| -> Vec<Asked> {
         meter.start();
+        while domain.pop_fact().is_some() {}
         smith_domain_run::step(&mut domain, &env, event, &mut out);
         let measured = meter.end();
         let mut asked = Vec::new();
@@ -394,6 +395,7 @@ fn refuse_oversized_charter(limits: Limits, env: &Env<Limits>, out: &mut Queue<R
         transcript: None,
         resumed: false,
     };
+    while domain.pop_fact().is_some() {}
     smith_domain_run::step(&mut domain, env, start, out);
     let Some(Request::Answer { to: _, answer, read: _ }) = out.pop() else { panic!("expected an answer") };
     assert_eq!(answer, Answer::Refused(Refusal::Invalid(Invalid::TooLarge)));
@@ -474,6 +476,7 @@ fn delivery_memory_step(
     event: Event,
 ) -> (Option<Token>, bool) {
     meter.start();
+    while domain.pop_fact().is_some() {}
     smith_domain_run::step(domain, env, event, out);
     let measured = meter.end();
     let mut token = None;
@@ -668,6 +671,7 @@ fn host_memory_take(
     meter: &Meter,
     event: Option<Event>,
 ) -> (Option<Token>, Option<smith_domain_run::RelayName>) {
+    while domain.pop_fact().is_some() {}
     meter.start();
     match event {
         Some(event) => smith_domain_run::step(domain, env, event, out),

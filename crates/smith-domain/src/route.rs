@@ -357,12 +357,14 @@ pub(crate) fn hand_off(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<R
 fn run_step(domain: &mut Domain, env: &Env<Limits>, event: run::Event) {
     assert!(domain.run_out.room() >= run::MAX_OUT, "an entry point steps the run no more than its bound");
     run::step(&mut domain.run, &run_env(env), event, &mut domain.run_out);
+    crate::domain::gather(domain, &env.limits);
 }
 
 fn session_step(domain: &mut Domain, env: &Env<Limits>, event: session::Event) {
     let room = session::max_out(&env.limits.session);
     assert!(domain.session_out.room() >= room, "an entry point steps the sessions no more than its bound");
     session::step(&mut domain.session, &session_env(env), event, &mut domain.session_out);
+    crate::domain::gather(domain, &env.limits);
 }
 
 /// One of the sessions' requests: out to the protocol layer, or to the run.

@@ -65,8 +65,7 @@ pub struct Limits {
     pub search_bytes: u32,
     /// How long a search may take, within its call's deadline.
     pub search_timeout: Duration,
-    /// Facts kept until the parent drains them. Beyond them, facts are
-    /// dropped and counted.
+    /// Reserved observations buffered until the parent drains them; at least [`crate::max_facts`].
     pub facts: u32,
 }
 
@@ -79,6 +78,9 @@ pub struct Limits {
 /// outcomes answered.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
+    if limits.facts < crate::max_facts(limits) {
+        return None;
+    }
     let smallest_entry = u64::try_from(size_of::<Entry>()).ok()?.checked_add(1)?;
     if limits.list_bytes < smallest_entry {
         return None;

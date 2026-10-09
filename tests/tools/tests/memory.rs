@@ -27,6 +27,7 @@ fn fill(limits: Limits) {
     // keeping only the token it names, and the step's peak checked less them.
     let mut step = |event: Event| -> Vec<Token> {
         meter.start();
+        while domain.pop_fact().is_some() {}
         smith_domain_tools::step(&mut domain, &env, event, &mut out);
         domain.reclaim();
         let measured = meter.end();

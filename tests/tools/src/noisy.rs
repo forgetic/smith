@@ -72,7 +72,7 @@ pub fn noisy_world(seed: u64) -> World {
             read_bytes: pick(16, 2048),
             list_entries: pick(1, 12),
             list_bytes: 4096,
-            facts: pick(1, 64),
+            facts: pick(1, 64).max(smith_domain_tools::max_facts(&calm.tools)),
             file_timeout,
             ..calm.tools
         },

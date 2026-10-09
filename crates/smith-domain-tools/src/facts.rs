@@ -3,9 +3,9 @@
 //! classifications, never a path, a file or what a command wrote), in a
 //! bounded queue the parent drains at its own pace.
 //!
-//! Facts are outside the boundary's flow control: they are not requests, take
-//! no room in `out`, and when the queue is full they are dropped and counted.
-//! Nothing the tools decide depends on whether a fact was kept.
+//! Facts are a separate step output. The parent reserves [`crate::max_facts`]
+//! slots before each entrance, holding work while its drain is behind; every
+//! observation is preserved and none changes a tool's decision.
 
 use skein_lib::{Queue, Time, Token};
 
@@ -185,43 +185,38 @@ fn len(bytes: &[u8]) -> u64 {
     u64::try_from(bytes.len()).unwrap_or(u64::MAX)
 }
 
-/// The facts not yet drained, and how many did not fit.
+/// Reserved step observations not yet drained by the parent.
 #[derive(Debug)]
 pub(crate) struct Facts {
     queue: Queue<Fact>,
-    lost: u64,
     now: Time,
 }
 
 impl Facts {
     pub(crate) fn with_capacity(capacity: u32) -> Facts {
-        Facts { queue: Queue::with_capacity(capacity), lost: 0, now: Time::ZERO }
+        Facts { queue: Queue::with_capacity(capacity), now: Time::ZERO }
     }
 
     pub(crate) fn begin(&mut self, now: Time) {
         self.now = now;
     }
 
-    /// Keeps `fact` if there is room for it, and counts it otherwise.
+    /// Keeps one fact in the room the parent reserved for this entry point.
     pub(crate) fn push(&mut self, kind: FactKind) {
         let fact = Fact { at: self.now, kind, call: None };
-        if self.queue.try_push(fact).is_err() {
-            self.lost = self.lost.saturating_add(1);
-        }
+        self.queue.push(fact);
     }
 
     pub(crate) fn push_call(&mut self, kind: FactKind, call: Option<CallInfo>) {
-        if self.queue.try_push(Fact { at: self.now, kind, call }).is_err() {
-            self.lost = self.lost.saturating_add(1);
-        }
+        self.queue.push(Fact { at: self.now, kind, call });
     }
 
     pub(crate) fn pop(&mut self) -> Option<Fact> {
         self.queue.pop()
     }
 
-    pub(crate) fn lost(&self) -> u64 {
-        self.lost
+    pub(crate) fn room(&self) -> u32 {
+        self.queue.room()
     }
 }
 

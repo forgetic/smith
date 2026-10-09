@@ -44,14 +44,29 @@ const ALL: Grants = Grants { inspect: true, modify: true, shell: true };
 
 /// The domain, its environment, and room for one step's output.
 struct Harness {
+    observed: Queue<crate::facts::Fact>,
     domain: Domain,
     env: Env<Limits>,
     out: Queue<Request>,
 }
 
 impl Harness {
+    fn keep_facts(&mut self) {
+        while let Some(fact) = self.domain.pop_fact() {
+            self.observed.push(fact);
+        }
+    }
+
+    fn pop_fact(&mut self) -> Option<crate::facts::Fact> {
+        match self.observed.pop() {
+            Some(fact) => Some(fact),
+            None => self.domain.pop_fact(),
+        }
+    }
+
     fn new(limits: Limits) -> Harness {
         Harness {
+            observed: Queue::with_capacity(4096),
             domain: Domain::new(&limits),
             env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits },
             out: Queue::with_capacity(max_out(&limits)),
@@ -59,6 +74,7 @@ impl Harness {
     }
 
     fn step(&mut self, event: Event) -> Option<Request> {
+        self.keep_facts();
         step(&mut self.domain, &self.env, event, &mut self.out);
         let request = self.out.pop();
         assert!(self.out.is_empty(), "one request at most");
@@ -67,6 +83,7 @@ impl Harness {
 
     /// Every request one event emits.
     fn emit(&mut self, event: Event) -> Box<[Request]> {
+        self.keep_facts();
         step(&mut self.domain, &self.env, event, &mut self.out);
         let max_out = max_out(&self.env.limits);
         let mut requests = List::with_capacity(max_out);
@@ -1124,7 +1141,7 @@ fn a_search_asks_io_for_bounded_hits_and_answers_with_them() {
 fn told(h: &mut Harness) -> List<Fact> {
     let mut facts = List::with_capacity(LIMITS.facts);
     for _ in 0..LIMITS.facts {
-        if let Some(fact) = h.domain.pop_fact() {
+        if let Some(fact) = h.pop_fact() {
             facts.push(fact.kind).expect("room for every fact");
         }
     }
@@ -1159,14 +1176,40 @@ fn a_kit_tells_what_happens_as_facts() {
 }
 
 #[test]
-fn facts_that_do_not_fit_are_counted_and_change_nothing() {
-    let mut h = Harness::new(Limits { facts: 1, ..LIMITS });
+fn a_minimum_fact_reserve_keeps_every_native_entrance_observation() {
+    assert!(worst_case(&Limits { facts: 1, ..LIMITS }).is_none());
+    let mut h = Harness::new(Limits { facts: crate::max_facts(&LIMITS), ..LIMITS });
     let kit = h.open(5, authority(ALL));
-    assert_eq!(h.call(kit, read(b"/etc/passwd")), Outcome::Outside, "a lost fact changes no answer");
+    assert!(h.domain.facts_room() < crate::max_facts(&LIMITS));
+    assert_eq!(h.call(kit, read(b"/etc/passwd")), Outcome::Outside);
     assert_eq!(h.step(Event::Close { kit }), Some(Request::Closed { session: Token::new(5) }));
-    assert_eq!(pop_kind(&mut h.domain), Some(Fact::Opened { session: Token::new(5) }));
-    assert_eq!(h.domain.pop_fact(), None);
-    assert_eq!(h.domain.facts_lost(), 2);
+    assert_eq!(h.observed.len() + h.env.limits.facts - h.domain.facts_room(), 3);
+    assert_eq!(told(&mut h).len(), 3);
+}
+
+#[test]
+fn the_last_cancelled_operation_fills_the_complete_two_fact_reserve() {
+    let mut h = Harness::new(Limits { facts: crate::max_facts(&LIMITS), ..LIMITS });
+    let kit = h.open(5, authority(ALL));
+    let (owner, _) = h.start(kit, 1, read(b"src/lib.rs"));
+    drop(h.emit(Event::Close { kit }));
+    h.keep_facts();
+    let before = h.observed.len();
+    drop(h.emit(Event::Done { owner, done: Done::Cancelled }));
+    assert_eq!(h.domain.facts_room(), 0, "the terminal uses its complete reserved output");
+    h.keep_facts();
+    assert_eq!(h.observed.len() - before, 2);
+    let mut tail = List::with_capacity(2);
+    for fact in h.observed.iter().skip(usize::try_from(before).expect("bounded observed history")) {
+        tail.push(fact.kind).expect("two terminal observations");
+    }
+    assert_eq!(
+        tail.as_slice(),
+        &[
+            Fact::Answered { session: Token::new(5), tool: Tool::Read, verdict: Verdict::Cancelled, bytes: 0 },
+            Fact::Closed { session: Token::new(5) },
+        ]
+    );
 }
 
 #[test]
@@ -1228,13 +1271,13 @@ fn fact_emission_times_and_call_context_survive_a_delayed_drain() {
     let mut invalid = authority(ALL);
     invalid.env = Box::new([var(b"A=B", b"")]);
     drop(h.step(Event::Open { session: Token::new(6), authority: invalid }));
-    assert_eq!(h.domain.pop_fact().expect("refused fact").at, h.env.now);
+    assert_eq!(h.pop_fact().expect("refused fact").at, h.env.now);
 }
 
 fn observed_facts(harness: &mut Harness) -> Box<[crate::Fact]> {
     let mut facts = List::with_capacity(LIMITS.facts);
     for _ in 0..LIMITS.facts {
-        if let Some(fact) = harness.domain.pop_fact() {
+        if let Some(fact) = harness.pop_fact() {
             facts.push(fact).expect("room for all observations");
         }
     }
@@ -1247,9 +1290,4 @@ fn fact_times(facts: &[crate::Fact]) -> Box<[Time]> {
         times.push(fact.at).expect("room for all observations");
     }
     times.into_boxed()
-}
-
-fn pop_kind(domain: &mut Domain) -> Option<Fact> {
-    let fact = domain.pop_fact()?;
-    Some(fact.kind)
 }

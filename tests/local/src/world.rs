@@ -775,6 +775,12 @@ impl World {
         self.domain.facts_lost()
     }
 
+    /// Native agent observations taken by the local owner before its stream sink exists.
+    #[must_use]
+    pub fn agent_facts_not_written(&self) -> u64 {
+        self.domain.agent_facts_not_written()
+    }
+
     /// Boundary chronology for deterministic replay.
     #[must_use]
     pub fn trace(&self) -> &[String] {

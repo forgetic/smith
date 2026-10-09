@@ -3,9 +3,8 @@
 //! classifications, never prompts, tool inputs or results, in a bounded
 //! queue the parent drains at its own pace.
 //!
-//! Facts are outside the boundary's flow control: they are not requests, take
-//! no room in `out`, and when the queue is full they are dropped and counted.
-//! Nothing the session decides depends on whether a fact was kept.
+//! Facts are a separate step output: the parent reserves [`crate::max_facts`]
+//! slots before each entrance and drains them before taking more work.
 
 use alloc::boxed::Box;
 
@@ -81,7 +80,7 @@ pub enum FactKind {
     /// conversation, as every other fact does.
     Tools {
         opener: Token,
-        /// Content-free child observation, dropped and counted if the queue is full.
+        /// Content-free child observation, preserved in reserved output room.
         fact: tools::FactKind,
     },
     /// The tool call at `block` of the last message was delegated to the
@@ -116,17 +115,16 @@ pub enum FactKind {
     },
 }
 
-/// The facts not yet drained, and how many did not fit.
+/// Reserved step observations not yet drained by the parent.
 #[derive(Debug)]
 pub(crate) struct Facts {
     queue: Queue<Fact>,
-    lost: u64,
     now: Time,
 }
 
 impl Facts {
     pub(crate) fn with_capacity(capacity: u32) -> Facts {
-        Facts { queue: Queue::with_capacity(capacity), lost: 0, now: Time::ZERO }
+        Facts { queue: Queue::with_capacity(capacity), now: Time::ZERO }
     }
 
     pub(crate) const fn now(&self) -> Time {
@@ -137,46 +135,31 @@ impl Facts {
         self.now = now;
     }
 
-    /// Keeps `fact` if there is room for it, and counts it otherwise.
+    /// Keeps one fact in the room the parent reserved for this entry point.
     pub(crate) fn push(&mut self, kind: FactKind) {
         let fact = Fact { at: self.now, kind, call: None, response: None };
-        if self.queue.try_push(fact).is_err() {
-            self.lost = self.lost.saturating_add(1);
-        }
+        self.queue.push(fact);
     }
 
     pub(crate) fn push_at(&mut self, at: Time, kind: FactKind) {
-        if self.queue.try_push(Fact { at, kind, call: None, response: None }).is_err() {
-            self.lost = self.lost.saturating_add(1);
-        }
+        self.queue.push(Fact { at, kind, call: None, response: None });
     }
 
     pub(crate) fn push_call(&mut self, at: Time, kind: FactKind, call: &ToolCall) {
-        // Copy identity only into reserved queue room. A dropped observation
-        // allocates nothing, so its peak is bounded by the retained queue.
-        if self.queue.room() == 0 {
-            self.lost = self.lost.saturating_add(1);
-            return;
-        }
+        assert!(self.queue.room() > 0, "parent reserved call observation before cloning");
         self.queue.push(Fact { at, kind, call: Some(call.clone()), response: None });
     }
 
     pub(crate) fn push_response(&mut self, kind: FactKind, number: u64, spent: Option<u64>) {
-        if self
-            .queue
-            .try_push(Fact { at: self.now, kind, call: None, response: Some(ResponseInfo { number, spent }) })
-            .is_err()
-        {
-            self.lost = self.lost.saturating_add(1);
-        }
+        self.queue.push(Fact { at: self.now, kind, call: None, response: Some(ResponseInfo { number, spent }) });
     }
 
     pub(crate) fn pop(&mut self) -> Option<Fact> {
         self.queue.pop()
     }
 
-    pub(crate) fn lost(&self) -> u64 {
-        self.lost
+    pub(crate) fn room(&self) -> u32 {
+        self.queue.room()
     }
 }
 

@@ -71,6 +71,7 @@ pub(crate) const LIMITS: Limits = Limits {
 
 /// The domain, its environment, and room for one step's output.
 struct Harness {
+    observed: Queue<crate::facts::Fact>,
     domain: Domain,
     env: Env<Limits>,
     out: Queue<Request>,
@@ -79,8 +80,22 @@ struct Harness {
 }
 
 impl Harness {
+    fn keep_facts(&mut self) {
+        while let Some(fact) = self.domain.pop_fact() {
+            self.observed.push(fact);
+        }
+    }
+
+    fn pop_fact(&mut self) -> Option<crate::facts::Fact> {
+        match self.observed.pop() {
+            Some(fact) => Some(fact),
+            None => self.domain.pop_fact(),
+        }
+    }
+
     fn new(limits: Limits) -> Harness {
         Harness {
+            observed: Queue::with_capacity(4096),
             domain: Domain::new(&limits),
             env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits },
             out: Queue::with_capacity(MAX_OUT),
@@ -97,17 +112,20 @@ impl Harness {
             let own_spent = previous.checked_add(spend.units).expect("fixture own units");
             self.prices.insert(*conversation, own_spent);
             let priced = Event::Priced { conversation: *conversation, own_spent, subtree_spent: own_spent };
+            self.keep_facts();
             step(&mut self.domain, &self.env, priced, &mut self.out);
         }
         if let Event::Priced { conversation, own_spent, .. } = &event {
             self.prices.insert(*conversation, *own_spent);
         }
+        self.keep_facts();
         step(&mut self.domain, &self.env, event, &mut self.out);
         self.drain()
     }
 
     fn fire(&mut self) -> Box<[Request]> {
         assert!(self.domain.is_due(self.env.now), "an alarm is due");
+        self.keep_facts();
         fire(&mut self.domain, &self.env, &mut self.out);
         self.drain()
     }
@@ -1635,7 +1653,7 @@ fn a_sub_agent_that_spends_past_the_budget_winds_the_run_down() {
 fn facts(h: &mut Harness) -> Box<[Fact]> {
     let mut facts = List::with_capacity(LIMITS.facts);
     for _ in 0..LIMITS.facts {
-        let Some(fact) = h.domain.pop_fact() else { break };
+        let Some(fact) = h.pop_fact() else { break };
         facts.push(fact.kind).expect("room for every fact kept");
     }
     facts.into_boxed()
@@ -1670,18 +1688,20 @@ fn a_run_tells_what_it_did_as_content_free_facts() {
         Fact::Answered { run, answer: Answered::Accepted },
     ];
     assert_eq!(&*told, &expected);
-    assert_eq!(h.domain.facts_lost(), 0);
 }
 
 #[test]
-fn facts_that_do_not_fit_are_dropped_and_counted_and_change_nothing() {
-    let mut h = Harness::new(Limits { facts: 2, ..LIMITS });
+fn a_minimum_fact_reserve_keeps_the_admitted_terminal_and_every_prior_fact() {
+    let required = crate::max_facts(&LIMITS);
+    assert!(worst_case(&Limits { facts: required - 1, ..LIMITS }).is_none());
+    let mut h = Harness::new(Limits { facts: required, ..LIMITS });
     let (run, conversation) = h.running(1, 100);
     assert_eq!(&*h.step(Event::Cancel { run }), &[Request::Close { peer: Token::new(100) }]);
     let emitted = h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO });
     assert_eq!(answered(emitted), (1, cancelled()));
-    assert_eq!(facts(&mut h).len(), 2);
-    assert_eq!(h.domain.facts_lost(), 3, "opened, ended and answered did not fit");
+    let observed = facts(&mut h);
+    assert_eq!(observed.len(), 5);
+    assert_eq!(observed.last(), Some(&Fact::Answered { run, answer: Answered::Failed(Failure::Cancelled) }));
 }
 
 #[test]
@@ -3160,7 +3180,7 @@ fn ordered_offers_end_each_message_read_or_unread_and_the_answer_keeps_the_last_
         let [Request::Answer { read, .. }] = &*terminal else { panic!("one run terminal") };
         assert_eq!(*read, Some(Token::new(0)), "an untold offer cannot move the final fence");
         let mut terminals = alloc::collections::BTreeMap::new();
-        while let Some(fact) = harness.domain.pop_fact() {
+        while let Some(fact) = harness.pop_fact() {
             match fact.kind {
                 Fact::MessageRead { name, turn, .. } => {
                     assert_eq!(turn, 1);
@@ -3253,7 +3273,7 @@ fn delayed_facts_keep_activation_history_and_child_parentage() {
 fn observed_facts(harness: &mut Harness) -> Box<[crate::facts::Fact]> {
     let mut facts = List::with_capacity(LIMITS.facts);
     for _ in 0..LIMITS.facts {
-        if let Some(fact) = harness.domain.pop_fact() {
+        if let Some(fact) = harness.pop_fact() {
             facts.push(fact).expect("room for all observations");
         }
     }
@@ -3306,7 +3326,7 @@ fn carried_messages_open_after_the_briefs_instruction_and_before_later_messages(
     assert_eq!(*read, Some(Token::new(8)));
     let mut reads = List::with_capacity(LIMITS.messages);
     for _ in 0..LIMITS.facts {
-        if let Some(fact) = harness.domain.pop_fact()
+        if let Some(fact) = harness.pop_fact()
             && let Fact::MessageRead { name, .. } = fact.kind
         {
             reads.push(name).expect("bounded read count");
@@ -3351,7 +3371,7 @@ fn a_start_refuses_all_carried_messages_atomically_at_its_count_byte_and_name_bo
         let mut harness = Harness::new(limits);
         let emitted = harness.step(carried_start(charter(), messages, None));
         assert_eq!(answered(emitted), (1, Answer::Refused(Refusal::Invalid(Invalid::Messages))));
-        assert!(harness.domain.pop_fact().is_none(), "no partial message admission");
+        assert!(harness.pop_fact().is_none(), "no partial message admission");
         let emitted = harness.step(carried_start(charter(), Box::new([carried(0, b"a")]), None));
         let [Request::Admitted { .. }, Request::Open { opening, .. }] = &*emitted else {
             panic!("exact bound admitted after refusal")

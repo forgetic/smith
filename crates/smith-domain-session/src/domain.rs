@@ -35,6 +35,15 @@ pub const fn max_to_opener(limits: &Limits) -> u32 {
     4_u32.saturating_add(limits.parallel_tools)
 }
 
+/// Own completion/request observations, one per delegated batch entry, and
+/// the tools' observations from a batch plus entrance and settlement steps.
+#[must_use]
+pub const fn max_facts(limits: &Limits) -> u32 {
+    8_u32
+        .saturating_add(limits.parallel_tools)
+        .saturating_add(tools::max_facts(&limits.tools).saturating_mul(limits.parallel_tools.saturating_add(2)))
+}
+
 /// The session child domain's state.
 #[derive(Debug)]
 pub struct Domain {
@@ -119,18 +128,15 @@ impl Domain {
         self.ready.is_ready()
     }
 
-    /// The oldest fact not yet drained, the tools' among them. The parent
-    /// drains them at its own pace; what does not fit meanwhile is dropped and
-    /// counted.
+    /// The oldest reserved observation, including the tools' observations.
     pub fn pop_fact(&mut self) -> Option<Fact> {
         self.facts.pop()
     }
 
-    /// How many facts were dropped for want of room, the tools' included,
-    /// since the domain was made.
+    /// Free observation slots the parent reserves before each entrance.
     #[must_use]
-    pub fn facts_lost(&self) -> u64 {
-        self.facts.lost().saturating_add(self.calls.tools.facts_lost())
+    pub fn facts_room(&self) -> u32 {
+        self.facts.room()
     }
 
     /// The reclaim point: frees what closed in this iteration.
@@ -144,6 +150,7 @@ impl Domain {
 
 /// Handles one event, emitting at most [`max_out`] requests.
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
+    assert!(domain.facts_room() >= max_facts(&env.limits), "parent reserved fact step output");
     domain.facts.begin(env.now);
     match event {
         Event::Open { opener, opening } => session::open(domain, env, opener, *opening, out),
@@ -180,6 +187,7 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
 /// progress that arrived in the same iteration wins over a deadline that passed
 /// while the loop waited.
 pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
+    assert!(domain.facts_room() >= max_facts(&env.limits), "parent reserved fact step output");
     domain.facts.begin(env.now);
     let Some(alarm) = domain.alarms.expire(env.now) else {
         return;
@@ -195,6 +203,7 @@ pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
 /// [`max_out`] requests: one that rested in an earlier iteration, after a
 /// batch the tools answered within the step that started it.
 pub fn resume(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
+    assert!(domain.facts_room() >= max_facts(&env.limits), "parent reserved fact step output");
     domain.facts.begin(env.now);
     let Some(id) = domain.ready.pop() else {
         return;

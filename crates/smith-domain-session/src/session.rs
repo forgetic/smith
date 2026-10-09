@@ -925,6 +925,7 @@ enum News {
 /// at most one call: an open, a close or an operation's end concerns one kit,
 /// and a call is answered at the entrance or later.
 fn tools_step(calls: &mut Calls, env: &Env<Limits>, event: tools::Event, out: &mut Queue<Request>) -> Heard {
+    assert!(calls.tools.facts_room() >= tools::max_facts(&env.limits.tools), "session reserved child observations");
     let tools_env = Env { now: env.now, wall: env.wall, limits: env.limits.tools };
     tools::step(&mut calls.tools, &tools_env, event, &mut calls.out);
     let mut heard = Heard { answer: None, kit: None };

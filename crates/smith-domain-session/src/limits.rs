@@ -75,8 +75,7 @@ pub struct Limits {
     /// is answered as such, to the LLM. A delegated call has no timeout here:
     /// the opener races it against the session's time.
     pub tool_timeout: Duration,
-    /// Facts kept until the parent drains them, the tools' passed on among
-    /// them. Beyond them, facts are dropped and counted.
+    /// Reserved observations, including tools, buffered until the parent drains them.
     pub facts: u32,
     /// The tools child domain's, which the session owns: a kit for each
     /// session, with room for its widest batch.
@@ -108,6 +107,10 @@ pub fn completion_reserve(limits: &Limits) -> Option<u64> {
 /// held by the opener, which count them. Call observations copy only provider IDs and names, bounded by the completion byte cap.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
+    let tools_facts = limits.parallel_tools.checked_add(2)?.checked_mul(tools::max_facts(&limits.tools))?;
+    if limits.tools.facts < tools_facts || limits.facts < crate::max_facts(limits) {
+        return None;
+    }
     let parallel = limits.parallel_tools;
     if !(1..=MAX_PARALLEL).contains(&parallel) || parallel > limits.tools.calls || limits.messages < 2 {
         return None;

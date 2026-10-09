@@ -126,10 +126,10 @@ pub struct Stats {
     ///
     /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     pub calls: u32,
-    /// Facts the tools dropped for want of room.
+    /// Native facts drained from the tools parent output.
     ///
     /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
-    pub facts_lost: u64,
+    pub facts: u64,
     /// Operations the tools asked of io, and the commands among them.
     ///
     /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
@@ -353,12 +353,12 @@ impl World {
         self.now
     }
 
-    /// Observed boundary counters, including dropped facts.
+    /// Observed boundary counters.
     ///
     /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn stats(&self) -> Stats {
-        Stats { facts_lost: self.tools.facts_lost(), ..self.stats }
+        self.stats
     }
 
     /// Borrowed contained checkout after all effects delivered so far.
@@ -454,7 +454,9 @@ impl World {
 
         // The tools take their events while they have room for what one more
         // may produce.
-        while let Some(event) = self.stage.next_event() {
+        while self.tools.facts_room() >= tools::max_facts(&self.stage.env.limits)
+            && let Some(event) = self.stage.next_event()
+        {
             self.log(&format!("tools <- {event:?}"));
             // The operations a step asks for are for the kit of the call, or
             // of the operation, the event is about.
@@ -487,6 +489,7 @@ impl World {
 
         // Facts, at the world's own pace.
         while let Some(fact) = self.tools.pop_fact() {
+            self.stats.facts += 1;
             self.log(&format!("tools tell {fact:?}"));
             self.facts.entry(session_of(&fact).raw()).or_default().push(fact);
         }
@@ -843,12 +846,10 @@ impl World {
 
     /// The facts tell what happened, as the world saw it: each session's kit
     /// opened or was refused, closed once if it opened, and every call was
-    /// answered once, having started or not. Facts may be lost: then at most
-    /// as many were told.
+    /// answered once, having started or not.
     ///
     /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
     fn assert_told(&self) {
-        let lossless = self.tools.facts_lost() == 0;
         for (name, session) in &self.sessions {
             let mut told = Told::default();
             for fact in self.facts.get(name).map_or(&[][..], Vec::as_slice) {
@@ -866,15 +867,10 @@ impl World {
                 State::Refused(_) => 1,
                 State::Opening | State::Running { .. } | State::Waiting { .. } | State::Closing | State::Closed => 0,
             };
-            if lossless {
-                let opened = 1 - refused;
-                let expected = Told { opened, refused, started: told.started, answered: calls, closed: opened };
-                assert_eq!(told, expected, "session {name}: the facts tell what the world saw");
-                assert!(told.started <= calls, "session {name}: a call starts at most once");
-            } else {
-                assert!(told.opened + told.refused <= 1 && told.closed <= 1, "session {name}: {told:?}");
-                assert!(told.started <= calls && told.answered <= calls, "session {name}: {told:?}");
-            }
+            let opened = 1 - refused;
+            let expected = Told { opened, refused, started: told.started, answered: calls, closed: opened };
+            assert_eq!(told, expected, "session {name}: the facts tell what the world saw");
+            assert!(told.started <= calls, "session {name}: a call starts at most once");
         }
     }
 

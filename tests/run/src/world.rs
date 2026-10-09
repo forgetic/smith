@@ -589,6 +589,7 @@ pub struct World {
     message_answers: Vec<(Token, Option<Token>)>,
     deadline_cells: BTreeMap<&'static str, u32>,
     iteration: u64,
+    fact_holds: u64,
     /// The run the last request answered, for the iteration's attribution;
     /// the call the step being attributed took, if it asked for a sub-agent,
     /// with what its run had left then; and the sub-agent each such call
@@ -660,6 +661,7 @@ impl World {
             message_answers: Vec::new(),
             deadline_cells: BTreeMap::new(),
             iteration: 0,
+            fact_holds: 0,
             just_answered: None,
             asked: None,
             child_of_call: BTreeMap::new(),
@@ -722,12 +724,18 @@ impl World {
         self.now
     }
 
-    /// Observed boundary counters, including dropped facts.
+    /// Observed boundary counters.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn stats(&self) -> Stats {
         Stats { host: self.host.tally(), partner: self.partner.tally(), ..self.stats }
+    }
+
+    /// Parent passes that left pending work untouched until native facts drained.
+    #[must_use]
+    pub fn fact_holds(&self) -> u64 {
+        self.fact_holds
     }
 
     /// What crossed between the domains and the world, in order, with times.
@@ -794,7 +802,9 @@ impl World {
         // for what one more may produce.
         self.iteration += 1;
         let mut made = Vec::new();
-        while let Some(event) = self.run_stage.next_event() {
+        while self.run.facts_room() >= run::max_facts(&self.run_stage.env.limits)
+            && let Some(event) = self.run_stage.next_event()
+        {
             self.log(&format!("run <- {event:?}"));
             let run = self.run_of(&event);
             let cancel = self.note(&event, run);
@@ -810,7 +820,10 @@ impl World {
             run::step(&mut self.run, &self.run_stage.env, event, &mut self.run_stage.out);
             made.push(Made { run, requests: self.run_stage.out.len() - before, cancel, asked });
         }
-        while self.run_stage.has_room() && self.run.is_due(self.now) {
+        while self.run.facts_room() >= run::max_facts(&self.run_stage.env.limits)
+            && self.run_stage.has_room()
+            && self.run.is_due(self.now)
+        {
             self.log("run alarm");
             let run = self.deadline_due();
             let before = self.run_stage.out.len();
@@ -818,6 +831,11 @@ impl World {
             made.push(Made { run, requests: self.run_stage.out.len() - before, cancel: None, asked: None });
         }
 
+        if self.run.facts_room() < run::max_facts(&self.run_stage.env.limits)
+            && (self.run_stage.has_events() || self.run.is_due(self.now))
+        {
+            self.fact_holds += 1;
+        }
         // What the steps asked for, submitted at the end of the iteration, each
         // attributed to the run its step was about.
         let mut answered = BTreeMap::new();
@@ -1667,12 +1685,12 @@ impl World {
         *self.facts.entry(kind(fact)).or_insert(0) += 1;
     }
 
-    /// The facts the run told, by kind, and how many it dropped.
+    /// Every actual fact the run told, counted by kind.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     #[must_use]
-    pub fn facts(&self) -> (&BTreeMap<&'static str, u32>, u64) {
-        (&self.facts, self.run.facts_lost())
+    pub fn facts(&self) -> &BTreeMap<&'static str, u32> {
+        &self.facts
     }
 
     /// Hands the run `event`, and with the configured chance, the host's

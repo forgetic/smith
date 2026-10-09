@@ -98,7 +98,7 @@ pub fn noisy(seed: u64) -> Settings {
         calls: small(pick(1, 8)),
         run_conversations: small(pick(1, 4)),
         answer_bytes: small(pick(0, 200)),
-        facts: small(pick(0, 64)),
+        facts: smith_domain_run::max_facts(&run).saturating_add(small(pick(0, 64))),
         ..run
     };
     let host = feature_host(host, &mut pick);

@@ -215,6 +215,7 @@ fn decoded_receiving_cells_are_required_before_provider_work() {
 
 /// The domain, its environment, and room for one entry point's output.
 struct Harness {
+    observed: Queue<Fact>,
     domain: Domain,
     env: Env<Limits>,
     out: Queue<Request>,
@@ -222,12 +223,26 @@ struct Harness {
 }
 
 impl Harness {
+    fn keep_facts(&mut self) {
+        while let Some(fact) = self.domain.pop_fact() {
+            self.observed.push(fact);
+        }
+    }
+
+    fn pop_fact(&mut self) -> Option<Fact> {
+        match self.observed.pop() {
+            Some(fact) => Some(fact),
+            None => self.domain.pop_fact(),
+        }
+    }
+
     fn new() -> Harness {
         Harness::with(&LIMITS)
     }
 
     fn with(limits: &Limits) -> Harness {
         Harness {
+            observed: Queue::with_capacity(4096),
             domain: Domain::new(
                 limits,
                 crate::Config {
@@ -269,12 +284,14 @@ impl Harness {
 
     /// Steps `event`, returning what it emitted, oldest first.
     fn step(&mut self, event: Event) -> Box<[Request]> {
+        self.keep_facts();
         step(&mut self.domain, &self.env, event, &mut self.out);
         self.drain()
     }
 
     fn fire(&mut self) -> Box<[Request]> {
         assert!(self.domain.is_due(self.env.now), "an alarm is due");
+        self.keep_facts();
         fire(&mut self.domain, &self.env, &mut self.out);
         self.drain()
     }
@@ -288,6 +305,7 @@ impl Harness {
             if !self.domain.is_ready() {
                 break;
             }
+            self.keep_facts();
             resume(&mut self.domain, &self.env, &mut self.out);
             for request in self.drain() {
                 all.push(request).expect("a test's iteration emits little");
@@ -693,14 +711,14 @@ fn opaque_reasoning_returns_in_its_position_without_becoming_text() {
 #[test]
 fn content_overflow_drops_and_counts_without_changing_decisions() {
     let mut keeping = Harness::new();
-    let limits = Limits { session: session::Limits { facts: 0, ..LIMITS.session }, ..LIMITS };
-    let mut dropping = Harness::with(&limits);
+    let mut dropping = Harness::new();
+    dropping.domain.content = Queue::with_capacity(0);
     let (_, kept, _) = keeping.admit(7, charter());
     let (_, dropped, _) = dropping.admit(7, charter());
     assert_eq!(keeping.says(kept, b"working"), dropping.says(dropped, b"working"));
     assert!(keeping.domain.pop_content().is_some());
     assert!(dropping.domain.pop_content().is_none());
-    assert!(dropping.domain.facts_lost() > keeping.domain.facts_lost(), "content loss is counted");
+    assert!(dropping.domain.content_lost() > keeping.domain.content_lost(), "content loss is counted");
 }
 
 #[test]
@@ -1278,14 +1296,14 @@ fn the_facts_of_both_child_domains_are_gathered() {
     let mut run = 0_u32;
     let mut sessions = 0_u32;
     for _ in 0..64_u32 {
-        match h.domain.pop_fact() {
+        match h.pop_fact() {
             Some(Fact::Run { .. }) => run += 1,
             Some(Fact::Session { .. }) => sessions += 1,
             None => break,
         }
     }
     assert!(run > 0 && sessions > 0, "{run} of the run's, {sessions} of the sessions'");
-    assert_eq!(h.domain.facts_lost(), 0);
+    assert_eq!(h.domain.content_lost(), 0);
 }
 
 fn delivered() -> run::Delivery {
@@ -2081,7 +2099,7 @@ fn missing_provider_usage_settles_the_root_reservation_and_keeps_the_raw_fact() 
         assert_eq!((turn.usage, turn.spent), (raw, 30));
         let mut observed = false;
         for _ in 0..harness.env.limits.session.facts {
-            match harness.domain.pop_fact() {
+            match harness.pop_fact() {
                 Some(Fact::Session { fact }) => match fact.kind {
                     session::FactKind::Used { usage, .. } => {
                         assert_eq!(usage, raw);

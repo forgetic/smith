@@ -112,8 +112,7 @@ pub struct Limits {
     pub check_timeout: Duration,
     /// The most bytes of a failed check's output the LLM is shown: its tail.
     pub check_tail: u32,
-    /// Facts kept until the parent drains them. Beyond them, facts are
-    /// dropped and counted.
+    /// Reserved observations buffered until the parent drains them; at least [`crate::max_facts`].
     pub facts: u32,
 }
 
@@ -125,6 +124,10 @@ pub struct Limits {
 /// what it receives and only passes on (a check's output) is the sender's.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
+    let facts = limits.messages.checked_mul(2)?.checked_add(8)?;
+    if limits.facts < facts {
+        return None;
+    }
     if limits.offer_messages == 0 || limits.offer_bytes < limits.message_bytes {
         return None;
     }

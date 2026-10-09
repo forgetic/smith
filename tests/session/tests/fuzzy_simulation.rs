@@ -49,7 +49,7 @@ fn random_worlds_settle_with_every_session_ended() {
         parallel = parallel.max(world.stats().most_parallel);
         most_runs = most_runs.max(world.stats().most_runs);
         op_timeouts += world.stats().op_timeouts;
-        invalid += world.told().0.invalid_calls;
+        invalid += world.told().invalid_calls;
         not_run += world.stats().not_run;
         let stats = world.stats();
         let delegated = [

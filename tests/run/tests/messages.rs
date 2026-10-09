@@ -17,7 +17,6 @@ fn observed() -> Vec<(Time, Token, Seen)> {
     let mut world = World::new(settings);
     world.inject_messages(1000);
     world.run(100_000);
-    assert_eq!(world.facts().1, 0, "the observation queue was fully drained");
     let seen = world.message_seen().to_vec();
     assert!(seen.iter().any(|(_, _, seen)| matches!(seen, Seen::Read { .. })));
     assert!(seen.iter().any(|(_, _, seen)| matches!(seen, Seen::Unread { .. })));

@@ -276,24 +276,19 @@ fn a_world_replays_its_boundaries_and_answer_from_its_seed() {
 }
 
 #[test]
-fn dropping_facts_changes_no_agent_decision_or_host_boundary() {
+fn a_silent_run_drains_every_native_fact_without_changing_the_answer() {
     for job in [Job::Coding, Job::Review, Job::Reporting, Job::Failing] {
         let calm = Settings { job, ..Settings::calm(44) };
         let kept = settled(&calm);
-        let limits = smith_domain::Limits {
-            run: run::Limits { facts: 0, ..calm.limits.run },
-            session: smith_domain::session::Limits {
-                facts: 0,
-                tools: smith_domain::tools::Limits { facts: 0, ..calm.limits.session.tools },
-                ..calm.limits.session
-            },
-            ..calm.limits
-        };
-        let silent = settled(&Settings { limits, drain_facts: false, ..calm });
+        let silent = settled(&Settings { drain_facts: false, ..calm });
         assert_eq!(silent.answer(), kept.answer());
         assert_eq!(silent.trace(), kept.trace());
         assert_eq!(silent.landed(), kept.landed());
-        assert!(silent.facts().is_empty() && silent.lost() > 0);
+        assert!(silent.facts().is_empty());
+        assert_eq!(
+            silent.agent_facts_not_written(),
+            u64::try_from(kept.facts().len()).expect("bounded observed fact history")
+        );
     }
 }
 

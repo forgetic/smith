@@ -77,6 +77,7 @@ const OUT_OF_TIME: End = End::Budget { spent: Dimension::Time };
 /// The domain, its environment, room for one step's output, and the `Used`
 /// it has reported.
 struct Harness {
+    observed: Queue<crate::facts::Fact>,
     domain: Domain,
     env: Env<Limits>,
     out: Queue<Request>,
@@ -87,8 +88,22 @@ struct Harness {
 }
 
 impl Harness {
+    fn keep_facts(&mut self) {
+        while let Some(fact) = self.domain.pop_fact() {
+            self.observed.push(fact);
+        }
+    }
+
+    fn pop_fact(&mut self) -> Option<crate::facts::Fact> {
+        match self.observed.pop() {
+            Some(fact) => Some(fact),
+            None => self.domain.pop_fact(),
+        }
+    }
+
     fn new(limits: Limits) -> Harness {
         Harness {
+            observed: Queue::with_capacity(4096),
             domain: Domain::new(&limits, 1),
             env: Env { now: Time::ZERO, wall: Wall::EPOCH, limits },
             out: Queue::with_capacity(max_out(&limits)),
@@ -105,6 +120,7 @@ impl Harness {
     /// Steps the domain with `event`, which emits at most one request besides
     /// `Used`.
     fn step(&mut self, event: Event) -> Option<Request> {
+        self.keep_facts();
         step(&mut self.domain, &self.env, event, &mut self.out);
         self.one()
     }
@@ -113,6 +129,7 @@ impl Harness {
     /// `Used`.
     fn fire(&mut self) -> Option<Request> {
         assert!(self.domain.is_due(self.env.now), "an alarm is due");
+        self.keep_facts();
         fire(&mut self.domain, &self.env, &mut self.out);
         self.one()
     }
@@ -121,6 +138,7 @@ impl Harness {
     /// besides `Used`.
     fn resume(&mut self) -> Option<Request> {
         assert!(self.domain.is_ready(), "a session is ready");
+        self.keep_facts();
         resume(&mut self.domain, &self.env, &mut self.out);
         self.one()
     }
@@ -193,6 +211,7 @@ impl Harness {
     /// Steps the domain with `event`, which starts or cancels a batch of tool
     /// runs, and returns the tokens of the runs it names, in order.
     fn batch(&mut self, event: Event) -> List<Token> {
+        self.keep_facts();
         step(&mut self.domain, &self.env, event, &mut self.out);
         let mut runs = List::with_capacity(max_out(&self.env.limits));
         while let Some(request) = self.next() {
@@ -253,9 +272,9 @@ impl Harness {
     /// Drains the facts told so far, checking that they are `expected`.
     fn told(&mut self, expected: &[Fact]) {
         for fact in expected {
-            assert_eq!(pop_kind(&mut self.domain).as_ref(), Some(fact));
+            assert_eq!(pop_kind(self).as_ref(), Some(fact));
         }
-        assert_eq!(self.domain.pop_fact(), None, "nothing more was told");
+        assert_eq!(self.pop_fact(), None, "nothing more was told");
     }
 
     fn after(&mut self, span: Duration) {
@@ -616,10 +635,10 @@ fn an_invalid_call_is_answered_with_its_problem_and_nothing_runs_for_it() {
     let opener = Token::new(1);
     let started = Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 };
     let kit = Fact::Tools { opener, fact: tools::FactKind::Opened { session: owner } };
-    let opening = [pop_kind(&mut h.domain), pop_kind(&mut h.domain), pop_kind(&mut h.domain)];
+    let opening = [pop_kind(&mut h), pop_kind(&mut h), pop_kind(&mut h)];
     assert_eq!(opening, [Some(Fact::Opened { opener }), Some(started), Some(kit)]);
     let answered = Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 3, calls: 3, invalid: 2 };
-    assert_eq!(pop_kind(&mut h.domain), Some(answered));
+    assert_eq!(pop_kind(&mut h), Some(answered));
 }
 
 #[test]
@@ -788,6 +807,23 @@ fn a_batch_as_wide_as_the_most_a_step_emits_fits() {
     // A batch the tools could not take whole, and a session without a kit.
     assert_eq!(worst_case(&Limits { tools: tools::Limits { calls: 1, ..TOOLS }, ..LIMITS }), None);
     assert_eq!(worst_case(&Limits { tools: tools::Limits { kits: 1, ..TOOLS }, ..LIMITS }), None);
+}
+
+#[test]
+fn the_minimum_fact_reserve_keeps_a_maximum_batch_answered_at_the_tools_entrance() {
+    let base = Limits { parallel_tools: MAX_PARALLEL, ..LIMITS };
+    let required = crate::max_facts(&base);
+    let tools = tools::Limits { facts: (MAX_PARALLEL + 2) * tools::max_facts(&TOOLS), ..TOOLS };
+    let mut h = Harness::new(Limits { facts: required, tools, ..base });
+    let (owner, _) = h.open(1);
+    let mut content = List::with_capacity(MAX_PARALLEL);
+    for _ in 0..MAX_PARALLEL {
+        content.push(tool_call(b"c", Call::Read { path: outside(), skip: 0, lines: None })).expect("batch bound");
+    }
+    h.keep_facts();
+    assert_eq!(h.step(Event::Completed { owner, completion: completion(content.into_boxed(), Stop::ToolUse) }), None);
+    assert_eq!(required - h.domain.facts_room(), MAX_PARALLEL + 2, "one terminal per call plus response and use");
+    assert_eq!(h.domain.calls.tools.facts_room(), tools.facts, "every child observation passed to its parent");
 }
 
 #[test]
@@ -1640,29 +1676,19 @@ fn drive(h: &mut Harness) -> (Token, Prompt, Option<Request>, Option<Request>) {
 }
 
 #[test]
-fn facts_beyond_their_room_are_dropped_and_counted_and_change_nothing() {
-    let mut full = Harness::new(Limits { facts: 2, ..LIMITS });
-    let mut none = Harness::new(Limits { facts: 0, ..LIMITS });
+fn the_minimum_fact_reserve_keeps_the_same_complete_native_call_history() {
+    let required = crate::max_facts(&LIMITS);
+    assert!(worst_case(&Limits { facts: required - 1, ..LIMITS }).is_none());
+    let mut bounded = Harness::new(Limits { facts: required, ..LIMITS });
     let mut roomy = Harness::new(LIMITS);
-    let requests = drive(&mut roomy);
-    assert_eq!(drive(&mut full), requests);
-    assert_eq!(drive(&mut none), requests);
-    // Three facts on opening, the tools' among them, three on the completion,
-    // two on the tool's result.
-    assert_eq!((full.domain.facts_lost(), none.domain.facts_lost(), roomy.domain.facts_lost()), (6, 8, 0));
-    let opener = Token::new(1);
-    full.told(&[
-        Fact::Opened { opener },
-        Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 },
-    ]);
-    none.told(&[]);
-
-    // Drained, there is room again; what was dropped stays counted.
-    let (owner, ..) = requests;
-    drop(yielded(full.step(Event::Completed { owner, completion: done() })));
-    let answered = Fact::CompletionAnswered { opener, stop: Stop::EndTurn, blocks: 1, calls: 0, invalid: 0 };
-    full.told(&[answered, Fact::Used { opener, usage: USAGE }]);
-    assert_eq!(full.domain.facts_lost(), 7);
+    assert_eq!(drive(&mut bounded), drive(&mut roomy));
+    bounded.keep_facts();
+    roomy.keep_facts();
+    assert_eq!(bounded.observed.len(), 8);
+    while let Some(fact) = bounded.observed.pop() {
+        assert_eq!(Some(fact), roomy.observed.pop());
+    }
+    assert!(roomy.observed.is_empty());
 }
 
 #[test]
@@ -1832,7 +1858,7 @@ fn raw_overflow_ends_before_the_completion_is_charged_or_told() {
             reported: first
         })
     );
-    while let Some(fact) = harness.domain.pop_fact() {
+    while let Some(fact) = harness.pop_fact() {
         if let Fact::Used { usage, .. } = fact.kind {
             assert_ne!(usage, second);
         }
@@ -2038,7 +2064,7 @@ fn usage_fact_carries_the_exact_accepted_host_unit_charge() {
 fn observed_facts(harness: &mut Harness) -> Box<[crate::Fact]> {
     let mut facts = List::with_capacity(LIMITS.facts);
     for _ in 0..LIMITS.facts {
-        if let Some(fact) = harness.domain.pop_fact() {
+        if let Some(fact) = harness.pop_fact() {
             facts.push(fact).expect("room for all observations");
         }
     }
@@ -2053,8 +2079,8 @@ fn fact_times(facts: &[crate::Fact]) -> Box<[Time]> {
     times.into_boxed()
 }
 
-fn pop_kind(domain: &mut Domain) -> Option<Fact> {
-    let fact = domain.pop_fact()?;
+fn pop_kind(harness: &mut Harness) -> Option<Fact> {
+    let fact = harness.pop_fact()?;
     Some(fact.kind)
 }
 

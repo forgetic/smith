@@ -22,6 +22,12 @@ pub const fn max_out(limits: &Limits) -> u32 {
     if limits.calls > 2 { limits.calls } else { 2 }
 }
 
+/// At most an operation terminal and its kit's close are observed together.
+#[must_use]
+pub const fn max_facts(_limits: &Limits) -> u32 {
+    2
+}
+
 /// The tools child domain's state.
 #[derive(Debug)]
 pub struct Domain {
@@ -54,17 +60,15 @@ impl Domain {
         self.jobs.len()
     }
 
-    /// The oldest fact not yet drained. The parent drains them at its own
-    /// pace; what does not fit meanwhile is dropped and counted.
+    /// The oldest reserved observation; the parent drains it before more work.
     pub fn pop_fact(&mut self) -> Option<Fact> {
         self.facts.pop()
     }
 
-    /// How many facts were dropped for want of room, since the domain was
-    /// made.
+    /// Free fact slots the parent reserves before each entrance.
     #[must_use]
-    pub fn facts_lost(&self) -> u64 {
-        self.facts.lost()
+    pub fn facts_room(&self) -> u32 {
+        self.facts.room()
     }
 
     /// The reclaim point: frees what closed in this iteration.
@@ -76,6 +80,7 @@ impl Domain {
 
 /// Handles one event, emitting at most [`max_out`] requests.
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
+    assert!(domain.facts_room() >= max_facts(&env.limits), "parent reserved fact step output");
     domain.facts.begin(env.now);
     match event {
         Event::Open { session, authority } => kit::open(domain, env, session, authority, out),

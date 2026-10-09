@@ -142,7 +142,7 @@ pub struct Settings {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub races: u32,
-    /// Whether the shell drains facts; disabling this exercises lossy telemetry.
+    /// Whether the scripted parent retains drained facts; false drains without a sink.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     pub drain_facts: bool,
@@ -405,6 +405,7 @@ pub struct World {
     auto_ack: bool,
     waiting: Vec<(Time, Option<Token>)>,
     facts: Vec<Fact>,
+    agent_facts_not_written: u64,
     trace: Trace,
     referee: Referee<Meeting>,
     stimuli: Vec<()>,
@@ -685,6 +686,7 @@ impl World {
             auto_ack: false,
             waiting: Vec::new(),
             facts: Vec::new(),
+            agent_facts_not_written: 0,
             trace: Trace::default(),
             referee,
             stimuli,
@@ -969,16 +971,24 @@ impl World {
             while let Some(delivery) = self.schedule.next(self.now) {
                 self.deliver(delivery);
             }
-            while self.stage.has_room() && self.agent.is_ready() {
+            while self.agent.facts_room() >= agent::max_facts(&self.stage.env.limits)
+                && self.stage.has_room()
+                && self.agent.is_ready()
+            {
                 agent::resume(&mut self.agent, &self.stage.env, &mut self.stage.out);
                 self.gather();
             }
-            while let Some(event) = self.stage.next_event() {
+            while self.agent.facts_room() >= agent::max_facts(&self.stage.env.limits)
+                && let Some(event) = self.stage.next_event()
+            {
                 self.trace.log(self.now, format!("agent <- {event:?}"));
                 agent::step(&mut self.agent, &self.stage.env, event, &mut self.stage.out);
                 self.gather();
             }
-            while self.stage.has_room() && self.agent.is_due(self.now) {
+            while self.agent.facts_room() >= agent::max_facts(&self.stage.env.limits)
+                && self.stage.has_room()
+                && self.agent.is_due(self.now)
+            {
                 agent::fire(&mut self.agent, &self.stage.env, &mut self.stage.out);
                 self.gather();
             }
@@ -1080,12 +1090,14 @@ impl World {
     }
 
     fn gather(&mut self) {
-        if self.settings.drain_facts {
-            while let Some(fact) = self.agent.pop_fact() {
+        while let Some(fact) = self.agent.pop_fact() {
+            if self.settings.drain_facts {
                 self.facts.push(fact);
+            } else {
+                self.agent_facts_not_written += 1;
             }
-            while self.agent.pop_content().is_some() {}
         }
+        while self.agent.pop_content().is_some() {}
     }
 
     #[expect(
@@ -1710,7 +1722,7 @@ impl World {
             (0, 0, 0),
             "root routing holds nothing"
         );
-        if self.settings.drain_facts && self.agent.facts_lost() == 0 {
+        if self.settings.drain_facts {
             self.check_facts();
         }
     }
@@ -1831,20 +1843,26 @@ impl World {
         &self.landed
     }
 
-    /// Content-free facts drained by the shell, never used to choose stimuli.
+    /// Native observations drained and counted when this parent has no retained sink.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
+    #[must_use]
+    pub fn agent_facts_not_written(&self) -> u64 {
+        self.agent_facts_not_written
+    }
+
+    /// Actual native observations retained by this scripted parent.
     #[must_use]
     pub fn facts(&self) -> &[Fact] {
         &self.facts
     }
 
-    /// How many facts or content observations the copied agent dropped.
+    /// Optional content observations omitted by the capture buffer.
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 7.
     #[must_use]
     pub fn lost(&self) -> u64 {
-        self.agent.facts_lost()
+        self.agent.content_lost()
     }
 
     /// Provider queries observed at its boundary, including returned tool IDs.

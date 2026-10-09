@@ -18,8 +18,8 @@
 //! to call this typed domain. The domain never knows credential secrets,
 //! authentication, channel bytes, forge state, CI, posting or merge policy.
 //! IO owns confined paths and process effects; the host owns delivery.
-//! Content-free facts may be dropped and never decide behavior. Owned content
-//! observations are separately drained or discarded by the caller.
+//! Native facts are reserved step outputs, preserved until the owner drains them.
+//! Owned content observations are separately drained or discarded by the caller.
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
@@ -45,7 +45,7 @@ mod waking;
 
 pub use boundary::{Answered, AnsweredCall, Event, Grant, GrantName, Request, Window};
 pub use config::{Config, ConfiguredModel};
-pub use domain::{Domain, fire, max_out, resume, step};
+pub use domain::{Domain, fire, max_facts, max_out, resume, step};
 pub use facts::{Content, Fact};
 
 pub use feedback::{Feedback, FeedbackRefusal, feedback, feedback_worst_case};

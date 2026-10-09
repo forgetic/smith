@@ -827,6 +827,7 @@ pub struct World {
 
     stats: Stats,
     told: Told,
+    fact_holds: u64,
     trace: Trace,
 }
 
@@ -881,6 +882,7 @@ impl World {
             openers: BTreeMap::new(),
             stats: Stats::default(),
             told: Told::default(),
+            fact_holds: 0,
             trace: Trace::default(),
         }
     }
@@ -893,7 +895,7 @@ impl World {
         self.now
     }
 
-    /// Observed boundary counters, including dropped facts.
+    /// Observed boundary counters.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
@@ -901,13 +903,18 @@ impl World {
         self.stats
     }
 
-    /// The facts the sessions told, and how many they dropped for want of
-    /// room.
+    /// Parent passes that left pending work untouched until native facts drained.
+    #[must_use]
+    pub fn fact_holds(&self) -> u64 {
+        self.fact_holds
+    }
+
+    /// Every native fact the sessions told, counted by kind.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
-    pub fn told(&self) -> (Told, u64) {
-        (self.told, self.agent.facts_lost())
+    pub fn told(&self) -> Told {
+        self.told
     }
 
     /// What crossed between the domains and the world, in order, with times.
@@ -981,13 +988,18 @@ impl World {
 
         // Each stage resumes what is ready, then takes its events, then fires
         // its alarms, while it has room for what one more may produce.
-        while self.agent_stage.has_room() && self.agent.is_ready() {
+        while self.agent.facts_room() >= agent::max_facts(&self.agent_stage.env.limits)
+            && self.agent_stage.has_room()
+            && self.agent.is_ready()
+        {
             self.log("agent ready");
             let from = self.agent_stage.out.len();
             agent::resume(&mut self.agent, &self.agent_stage.env, &mut self.agent_stage.out);
             self.check_sent(from);
         }
-        while let Some(event) = self.agent_stage.next_event() {
+        while self.agent.facts_room() >= agent::max_facts(&self.agent_stage.env.limits)
+            && let Some(event) = self.agent_stage.next_event()
+        {
             self.log(&format!("agent <- {}", describe_agent_event(&event)));
             if let agent::Event::Close { session } = &event
                 && let Some(opener) = self.openers.get(session)
@@ -1008,11 +1020,19 @@ impl World {
                 self.runs.remove(&run);
             }
         }
-        while self.agent_stage.has_room() && self.agent.is_due(self.now) {
+        while self.agent.facts_room() >= agent::max_facts(&self.agent_stage.env.limits)
+            && self.agent_stage.has_room()
+            && self.agent.is_due(self.now)
+        {
             self.log("agent alarm");
             let from = self.agent_stage.out.len();
             agent::fire(&mut self.agent, &self.agent_stage.env, &mut self.agent_stage.out);
             self.check_sent(from);
+        }
+        if self.agent.facts_room() < agent::max_facts(&self.agent_stage.env.limits)
+            && (self.agent_stage.has_events() || self.agent.is_due(self.now))
+        {
+            self.fact_holds += 1;
         }
         // The facts, drained as the shell would write them out.
         while let Some(fact) = self.agent.pop_fact() {
@@ -1593,14 +1613,11 @@ impl World {
         }
         let told = self.starting.get_mut(&session).and_then(VecDeque::pop_front);
         let writes = match told {
-            Some(tool) if self.agent.facts_lost() == 0 => match tool {
+            Some(tool) => match tool {
                 tools::Tool::Write | tools::Tool::Edit | tools::Tool::Shell => true,
                 tools::Tool::Read | tools::Tool::List | tools::Tool::Search => false,
             },
-            Some(_) | None => {
-                assert!(self.agent.facts_lost() > 0, "a call's first operation follows the fact of its start");
-                stores
-            }
+            None => panic!("a call's first operation follows its native start observation"),
         };
         assert!(writes || !stores, "only a call that writes stores or runs a command");
         self.writing.insert(owner, writes);
@@ -1865,7 +1882,7 @@ impl World {
         *count += 1;
     }
 
-    /// What the facts must add up to when none were dropped: what the world
+    /// What every native fact must add up to: what the world
     /// saw cross the boundary.
     ///
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
@@ -1921,9 +1938,7 @@ impl World {
                 assert!(session.priced >= session.turns, "every actual usage and final terminal is priced");
             }
         }
-        if self.agent.facts_lost() == 0 {
-            self.assert_told();
-        }
+        self.assert_told();
     }
 
     fn send(&mut self, delivery: Delivery) {

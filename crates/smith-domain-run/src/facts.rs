@@ -3,11 +3,10 @@
 //! classifications, never what an LLM, the charter or the host said), in a
 //! bounded queue the parent drains at its own pace.
 //!
-//! Facts are outside the boundary's flow control: they are not requests, take
-//! no room in `out`, and when the queue is full they are dropped and counted.
-//! Nothing the run decides depends on whether a fact was kept, and nothing
-//! outside may either: the host's watchdog hears of a check's deadline from
-//! `Request::Checking`, which is not lossy.
+//! Facts are a separate step output. The parent reserves [`crate::max_facts`]
+//! slots before each entrance, holding work while its drain is behind; every
+//! observation is preserved. Facts change no decision: the host's watchdog
+//! hears of a check's deadline from `Request::Checking`.
 //!
 //! A start refused at the entrance tells nothing: no run was. Each step of an
 //! admitted run says which run it is about; the facts its requests tell are
@@ -176,35 +175,32 @@ pub enum Answered {
     Failed(Failure),
 }
 
-/// The facts not yet drained, how many did not fit, and the run the step
+/// The facts not yet drained and the run the step
 /// being taken is about.
 #[derive(Debug)]
 pub(crate) struct Facts {
     queue: Queue<Fact>,
-    lost: u64,
     now: Time,
     about: Option<Token>,
 }
 
 impl Facts {
     pub(crate) fn with_capacity(capacity: u32) -> Facts {
-        Facts { queue: Queue::with_capacity(capacity), lost: 0, now: Time::ZERO, about: None }
+        Facts { queue: Queue::with_capacity(capacity), now: Time::ZERO, about: None }
     }
 
-    /// Keeps `fact` if there is room for it, and counts it otherwise.
+    /// Keeps one fact in the room the parent reserved for this entry point.
     pub(crate) fn push(&mut self, kind: FactKind) {
         let fact = Fact { at: self.now, kind };
-        if self.queue.try_push(fact).is_err() {
-            self.lost = self.lost.saturating_add(1);
-        }
+        self.queue.push(fact);
     }
 
     pub(crate) fn pop(&mut self) -> Option<Fact> {
         self.queue.pop()
     }
 
-    pub(crate) fn lost(&self) -> u64 {
-        self.lost
+    pub(crate) fn room(&self) -> u32 {
+        self.queue.room()
     }
 
     /// The step being taken is about the run `run`.

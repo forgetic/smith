@@ -575,6 +575,8 @@ fn facts_do_not_change_the_chat_when_their_queue_is_full() {
     assert_eq!(observed.saved_turns(), dropped.saved_turns());
     assert_eq!(observed.shown(), dropped.shown());
     assert!(dropped.facts_lost() > 0);
+    assert!(observed.agent_facts_not_written() > 0, "the local owner drains actual native agent observations");
+    assert_eq!(dropped.agent_facts_not_written(), observed.agent_facts_not_written());
     assert!(observed.judged().0 > 0);
 }
 

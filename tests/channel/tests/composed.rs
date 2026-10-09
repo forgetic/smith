@@ -48,6 +48,7 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
     let mut domain = agent::Domain::new(&limits, configuration(), 7);
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
     let mut out = Queue::with_capacity(agent::max_out(&limits));
+    while domain.pop_fact().is_some() {}
     agent::step(
         &mut domain,
         &env,
@@ -107,6 +108,7 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
                 _ => None,
             })
             .expect("channel decoded labelled message");
+        while domain.pop_fact().is_some() {}
         agent::step(&mut domain, &env, AgentEvent::Message { run, name, label: message.0, text: message.1 }, &mut out);
         match expected {
             None => assert!(out.pop().is_none(), "exact-bound message admitted"),
@@ -137,13 +139,16 @@ fn the_host_start_enters_the_agent_domain_and_its_answer_returns_to_the_host_dom
     wire.settle();
     host_world.sent();
     assert!(wire.observations().contains(&Observation::AgentCancel));
+    while domain.pop_fact().is_some() {}
     agent::step(&mut domain, &env, AgentEvent::Cancel { run }, &mut out);
     assert!(out.pop().is_none(), "cancel first enters the child handoff");
     domain.reclaim();
     assert!(domain.is_ready());
+    while domain.pop_fact().is_some() {}
     agent::resume(&mut domain, &env, &mut out);
     assert_eq!(out.pop(), Some(AgentRequest::Cancel { owner: completion }));
     assert!(out.pop().is_none());
+    while domain.pop_fact().is_some() {}
     agent::step(&mut domain, &env, AgentEvent::Cancelled { owner: completion }, &mut out);
     let answer = match out.pop().expect("real agent domain answers after provider settlement") {
         AgentRequest::Answer { to, answer, read: _ } => {
@@ -246,6 +251,7 @@ fn carried_start_messages_cross_the_wire_in_order_and_an_overfull_start_is_refus
         let mut domain = agent::Domain::new(&limits, configuration(), 7);
         let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
         let mut out = Queue::with_capacity(agent::max_out(&limits));
+        while domain.pop_fact().is_some() {}
         agent::step(
             &mut domain,
             &env,
@@ -339,6 +345,7 @@ fn an_empty_start_waits_without_a_fence_and_the_first_wire_message_opens_main() 
     let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
     let mut domain = agent::Domain::new(&limits, configuration(), 7);
     let mut out = Queue::with_capacity(agent::max_out(&limits));
+    while domain.pop_fact().is_some() {}
     agent::step(
         &mut domain,
         &env,
@@ -376,6 +383,7 @@ fn an_empty_start_waits_without_a_fence_and_the_first_wire_message_opens_main() 
             _ => None,
         })
         .expect("actual decoded message");
+    while domain.pop_fact().is_some() {}
     agent::step(&mut domain, &env, AgentEvent::Message { run, name: Token::new(0), label, text }, &mut out);
     assert!(matches!(out.pop(), Some(AgentRequest::Complete { .. })), "first wire work opens the provider");
     assert!(out.pop().is_none());

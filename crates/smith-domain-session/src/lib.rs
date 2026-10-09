@@ -21,9 +21,9 @@
 //! The conversation is provider-neutral ([`llm`]): the protocol layer speaks
 //! each provider's wire format.
 //!
-//! What happens is also told as content-free [`Fact`]s, kept in a bounded
-//! queue the parent drains ([`Domain::pop_fact`]); what does not fit is dropped
-//! and counted, and nothing the session decides depends on it.
+//! What happens is also told as bounded [`Fact`]s. The parent reserves
+//! [`max_facts`] slots before each entrance and drains [`Domain::pop_fact`]
+//! before more work; every native observation is preserved.
 //!
 //! One concrete opening admits fresh or restored bounded messages. It keeps
 //! live call/descriptor tickets, completion/retry state,
@@ -56,7 +56,7 @@ mod session;
 mod tests;
 
 pub use boundary::{Budget, BudgetDenial, Dimension, End, Event, Request, Spec, Yield};
-pub use domain::{Domain, fire, max_out, max_to_opener, resume, step};
+pub use domain::{Domain, fire, max_facts, max_out, max_to_opener, resume, step};
 pub use facts::{Fact, FactKind, ResponseInfo, ToolCall, ToolSource};
 pub use limits::{Derivation, Limits, MAX_PARALLEL, completion_reserve, derive, worst_case};
 pub use session::{preview_completion, preview_reservation, reserve_completion};

@@ -63,6 +63,7 @@ fn churn(limits: Limits, seed: u64, rounds: u32) {
         };
         let Some(event) = event else { continue };
         meter.start();
+        while domain.pop_fact().is_some() {}
         smith_domain_tools::step(&mut domain, &env, event, &mut out);
         domain.reclaim();
         let measured = meter.end();
@@ -71,10 +72,12 @@ fn churn(limits: Limits, seed: u64, rounds: u32) {
     }
     // Everything settles: every kit closes, and io ends what is in flight.
     while let Some(kit) = kits.pop() {
+        while domain.pop_fact().is_some() {}
         smith_domain_tools::step(&mut domain, &env, Event::Close { kit }, &mut out);
         drain(&mut out, &mut kits, &mut ops, &mut counted);
     }
     while let Some((owner, _)) = ops.pop() {
+        while domain.pop_fact().is_some() {}
         smith_domain_tools::step(&mut domain, &env, Event::Done { owner, done: Done::Cancelled }, &mut out);
         drain(&mut out, &mut kits, &mut ops, &mut counted);
         domain.reclaim();

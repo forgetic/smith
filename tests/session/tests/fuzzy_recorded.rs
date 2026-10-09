@@ -11,7 +11,10 @@ fn randomized_priced_turns_and_terminal_races() {
     let mut next_stopped = 0;
     for seed in 0..64 {
         let mut rng = Rng::new(seed);
-        let mut world = World::new(seed, if seed % 2 == 0 { 0 } else { 256 });
+        let mut world = World::new(
+            seed,
+            if seed % 2 == 0 { session::max_facts(&smith_session_world::Settings::calm(0).agent) } else { 256 },
+        );
         world.open(opening(None, 20));
         let usage = llm::Usage {
             input_tokens: Some(rng.below(30)),

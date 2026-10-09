@@ -63,7 +63,7 @@ pub use boundary::{
 pub use budget::{Budget, CompletionPermit, Exhausted, Overflow, Prices, ReceivingLimit, Share, Spend};
 pub use charter::{Brief, Charter, Conventions, Section};
 pub use domain::{
-    Domain, MAX_OUT, completion_overflow, completion_permit, fire, owner, reserve, settle_reservation, step,
+    Domain, MAX_OUT, completion_overflow, completion_permit, fire, max_facts, owner, reserve, settle_reservation, step,
 };
 pub use inbox::rendered_bytes;
 pub use limits::{Derivation, Limits, derive, worst_case};

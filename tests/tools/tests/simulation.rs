@@ -935,7 +935,7 @@ fn a_search_is_bounded_and_says_when_it_cannot_run() {
 }
 
 #[test]
-fn a_world_with_no_room_for_facts_runs_as_one_with_room() {
+fn a_fact_queue_at_its_bound_holds_the_step_and_loses_nothing() {
     let run_with = |facts| {
         let calm = Settings::calm(80);
         let settings = Settings { tools: Limits { facts, ..calm.tools }, ..calm };
@@ -952,14 +952,14 @@ fn a_world_with_no_room_for_facts_runs_as_one_with_room() {
                 .into_iter()
                 .map(|(path, content)| (path.to_vec(), content.to_vec()))
                 .collect::<Vec<_>>(),
-            world.stats().facts_lost,
+            world.stats().facts,
         )
     };
-    let (answers, files, lost) = run_with(64);
-    assert_eq!(lost, 0);
-    let (lossy_answers, lossy_files, lossy_lost) = run_with(1);
-    assert!(lossy_lost > 0, "facts were dropped");
-    assert_eq!((lossy_answers, lossy_files), (answers, files), "nothing decided depends on a fact");
+    let (answers, files, facts) = run_with(64);
+    let (held_answers, held_files, held_facts) = run_with(2);
+    assert!(facts > 0);
+    assert_eq!(held_facts, facts, "every actual observation is retained");
+    assert_eq!((held_answers, held_files), (answers, files), "reservation holds work without changing its answer");
 }
 
 #[test]
