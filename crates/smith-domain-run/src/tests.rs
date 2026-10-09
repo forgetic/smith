@@ -5,7 +5,7 @@ use alloc::boxed::Box;
 use skein_lib::{Duration, Env, List, Queue, ReplyTo, Time, Token, Wall};
 
 use crate::charter::{Endpoint, Grants, HostTool, Llm, Tools};
-use crate::facts::{Answered, Asked, Fact, Return};
+use crate::facts::{Answered, Asked, FactKind as Fact, Return};
 use crate::outcome::{
     Change, ChangeSpec, Declared, Field, FieldRule, Item, OutcomeSpec, Problem, Problems, Verdict, VerdictRule,
 };
@@ -1630,7 +1630,7 @@ fn facts(h: &mut Harness) -> Box<[Fact]> {
     let mut facts = List::with_capacity(LIMITS.facts);
     for _ in 0..LIMITS.facts {
         let Some(fact) = h.domain.pop_fact() else { break };
-        facts.push(fact).expect("room for every fact kept");
+        facts.push(fact.kind).expect("room for every fact kept");
     }
     facts.into_boxed()
 }
@@ -1651,11 +1651,11 @@ fn a_run_tells_what_it_did_as_content_free_facts() {
     drop(h.step(Event::Ended { conversation: main, end: End::Closed, spend: Spend::ZERO }));
     let told = facts(&mut h);
     let expected = [
-        Fact::Admitted { run },
+        Fact::Admitted { run, resumed: false },
         Fact::Prepared { run, guides: 1, checks: 0 },
-        Fact::Opened { run, conversation: main, child: false },
+        Fact::Opened { run, conversation: main, child: false, parent: None, call: None },
         Fact::Called { run, conversation: main, call: Token::new(7), ask: Asked::SubAgent },
-        Fact::Opened { run, conversation: child, child: true },
+        Fact::Opened { run, conversation: child, child: true, parent: Some(main), call: Some(Token::new(7)) },
         Fact::Ended { run, conversation: child, end: End::Closed },
         Fact::Returned { run, call: Token::new(7), result: Return::Answered },
         Fact::Called { run, conversation: main, call: Token::new(8), ask: Asked::Finish },
@@ -3152,7 +3152,7 @@ fn ordered_offers_end_each_message_read_or_unread_and_the_answer_keeps_the_last_
         assert_eq!(*read, Some(Token::new(0)), "an untold offer cannot move the final fence");
         let mut terminals = alloc::collections::BTreeMap::new();
         while let Some(fact) = harness.domain.pop_fact() {
-            match fact {
+            match fact.kind {
                 Fact::MessageRead { name, turn, .. } => {
                     assert_eq!(turn, 1);
                     assert!(terminals.insert(name, "read").is_none(), "each message ends once");
@@ -3199,4 +3199,52 @@ fn a_charters_host_deadline_uses_the_tool_ceiling_and_preserves_the_default() {
         assert_eq!(*deadline, harness.env.now.saturating_add(Duration::from_secs(seconds.min(7))));
         assert_eq!(harness.env.limits.host_timeout, Duration::from_secs(1));
     }
+}
+
+#[test]
+fn delayed_facts_keep_activation_history_and_child_parentage() {
+    for transcript in [None, Some(Token::new(77))] {
+        let mut h = Harness::new(LIMITS);
+        h.env.now = Time::from_nanos(7);
+        let started = h.step(Event::Start {
+            reply_to: ReplyTo::new(Token::new(1)),
+            host_run: Token::new(1),
+            activation: 1,
+            window: crate::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
+            charter: agents(),
+            workspace: Some(workspace()),
+            transcript,
+        });
+        let [Request::Admitted { run, .. }, Request::Read { .. }] = &*started else { panic!("run admitted") };
+        let run = *run;
+        h.env.now = Time::from_nanos(11);
+        let opening = h.step(Event::Read { owner: run, read: Read::Text { text: bytes(b"Be kind."), whole: true } });
+        let [Request::Open { conversation: main, opening }] = &*opening else { panic!("main opens") };
+        let main = *main;
+        assert_eq!(opening.transcript, transcript);
+        drop(h.step(Event::Started { conversation: main, peer: Token::new(100) }));
+        h.env.now = Time::from_nanos(13);
+        let (child, _) = h.child(main, 7, families(true, false, false), 101);
+        h.env.now = Time::from_nanos(99);
+        let facts = observed_facts(&mut h);
+        assert_eq!(facts[0].at, Time::from_nanos(7));
+        assert_eq!(facts[0].kind, Fact::Admitted { run, resumed: transcript.is_some() });
+        assert_eq!(facts[2].at, Time::from_nanos(11));
+        assert_eq!(facts[2].kind, Fact::Opened { run, conversation: main, child: false, parent: None, call: None });
+        assert_eq!(facts[4].at, Time::from_nanos(13));
+        assert_eq!(
+            facts[4].kind,
+            Fact::Opened { run, conversation: child, child: true, parent: Some(main), call: Some(Token::new(7)) }
+        );
+    }
+}
+
+fn observed_facts(harness: &mut Harness) -> Box<[crate::facts::Fact]> {
+    let mut facts = List::with_capacity(LIMITS.facts);
+    for _ in 0..LIMITS.facts {
+        if let Some(fact) = harness.domain.pop_fact() {
+            facts.push(fact).expect("room for all observations");
+        }
+    }
+    facts.into_boxed()
 }

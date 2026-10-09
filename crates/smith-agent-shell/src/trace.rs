@@ -77,8 +77,14 @@ impl Trace {
         }
     }
 
-    pub fn fact(&mut self, fact: domain::Fact, at_ns: u64) {
-        self.offer(json!({ "type": "fact", "at_ns": at_ns, "fact": format!("{fact:?}") }).to_string());
+    pub fn fact(&mut self, fact: &domain::Fact) {
+        // The legacy Debug face retains classifications only. Provider identity
+        // belongs to the bounded typed event stream that replaces this adapter.
+        let description = match fact {
+            domain::Fact::Run { fact } => format!("Run {{ fact: {:?} }}", fact.kind),
+            domain::Fact::Session { fact } => format!("Session {{ fact: {:?} }}", fact.kind),
+        };
+        self.offer(json!({ "type": "fact", "at_ns": fact.emitted().as_nanos(), "fact": description }).to_string());
     }
 
     pub fn prompt(&mut self, owner: skein_lib::Token, prompt: &[u8], at_ns: u64) {
@@ -221,6 +227,40 @@ mod tests {
             },
             receiver,
         )
+    }
+
+    #[test]
+    fn legacy_fact_hook_preserves_emission_time_and_kind_shape_without_metadata_content() {
+        let (mut trace, receiver) = trace(Capture::None);
+        trace.fact(&domain::Fact::Run {
+            fact: domain::run::facts::Fact {
+                at: skein_lib::Time::from_nanos(17),
+                kind: domain::run::facts::FactKind::Admitted { run: Token::new(1), resumed: true },
+            },
+        });
+        let record: serde_json::Value = serde_json::from_str(&receiver.try_recv().expect("run record")).expect("JSON");
+        assert_eq!(record["at_ns"], 17);
+        assert_eq!(record["fact"], "Run { fact: Admitted { run: Token(1), resumed: true } }");
+        trace.fact(&domain::Fact::Session {
+            fact: domain::session::Fact {
+                at: skein_lib::Time::from_nanos(23),
+                kind: domain::session::FactKind::DelegateStarted { opener: Token::new(2), block: 0 },
+                call: Some(domain::session::ToolCall {
+                    owner: Token::new(3),
+                    id: b"private-provider-id".to_vec().into(),
+                    name: b"private-provider-name".to_vec().into(),
+                    source: domain::session::ToolSource::Host,
+                    effect: tools::Effect::Read,
+                    deadline: skein_lib::Time::from_nanos(29),
+                    input_bytes: 31,
+                }),
+                response: None,
+            },
+        });
+        let record: serde_json::Value =
+            serde_json::from_str(&receiver.try_recv().expect("session record")).expect("JSON");
+        assert_eq!(record["at_ns"], 23);
+        assert_eq!(record["fact"], "Session { fact: DelegateStarted { opener: Token(2), block: 0 } }");
     }
 
     #[test]

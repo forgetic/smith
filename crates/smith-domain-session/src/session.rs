@@ -139,7 +139,7 @@ use smith_domain_tools::{self as tools, Call, Effect, Entry, Grants, Outcome};
 
 use crate::boundary::{Budget, BudgetDenial, Dimension, End, Request, Spec, Yield};
 use crate::domain::Domain;
-use crate::facts::{Fact, Facts};
+use crate::facts::{FactKind, Facts};
 use crate::limits::Limits;
 use crate::llm::{
     Block, Completion, Decoded, Descriptor, Endpoint, Failure, Message, Problem, Prompt, Returned, Role, Stop, Usage,
@@ -275,6 +275,7 @@ pub(crate) struct Run {
     block: u32,
     by: By,
     credit: u64,
+    metadata: crate::ToolCall,
 }
 
 /// Who runs a call: the tools, or the opener, which serves a delegated one.
@@ -455,7 +456,11 @@ pub(crate) fn completed(
     let session = domain.sessions.get_mut(id).expect("a session lives until its requests have ended");
     let (opener, stop, blocks) = (session.conversation.opener, completion.stop, count(completion.content.len()));
     let (calls, invalid) = tally(&completion.content);
-    domain.facts.push(Fact::CompletionAnswered { opener, stop, blocks, calls, invalid });
+    domain.facts.push_response(
+        FactKind::CompletionAnswered { opener, stop, blocks, calls, invalid },
+        next_response(&session.conversation),
+        None,
+    );
     let state = mem::replace(&mut session.state, State::Closed);
     let conversation = &mut session.conversation;
     session.state = match state {
@@ -612,7 +617,11 @@ pub(crate) fn failed(
     drop(detail);
     release_provider(&mut session.conversation);
     let opener = session.conversation.opener;
-    domain.facts.push(Fact::CompletionFailed { opener, failure, evidence });
+    domain.facts.push_response(
+        FactKind::CompletionFailed { opener, failure, evidence },
+        next_response(&session.conversation),
+        None,
+    );
     let state = mem::replace(&mut session.state, State::Closed);
     session.state = match state {
         State::Calling { attempt } => call_failed(attempt, failure, evidence, &mut domain.rng, env),
@@ -630,7 +639,11 @@ pub(crate) fn failed(
     match &session.state {
         State::Backoff { attempt, until } => {
             let delay = until.saturating_since(env.now);
-            domain.facts.push(Fact::CompletionRetried { opener, attempt: *attempt, delay });
+            domain.facts.push_response(
+                FactKind::CompletionRetried { opener, attempt: *attempt, delay },
+                next_response(&session.conversation),
+                None,
+            );
         }
         State::Calling { .. }
         | State::Tooling { .. }
@@ -647,7 +660,11 @@ pub(crate) fn cancelled(domain: &mut Domain, env: &Env<Limits>, owner: Token, ou
     let id = Id::from_token(owner);
     let session = domain.sessions.get_mut(id).expect("a session lives until its requests have ended");
     release_provider(&mut session.conversation);
-    domain.facts.push(Fact::CompletionCancelled { opener: session.conversation.opener });
+    domain.facts.push_response(
+        FactKind::CompletionCancelled { opener: session.conversation.opener },
+        next_response(&session.conversation),
+        None,
+    );
     let state = mem::replace(&mut session.state, State::Closed);
     session.state = match state {
         State::Closing { end, waiting: waiting @ Waiting { call: true, .. } } => {
@@ -702,7 +719,7 @@ fn owned_answered(
     outcome: Outcome,
     out: &mut Queue<Request>,
 ) -> Id<Session> {
-    let Run { session: id, slot, block, by, credit, ended: _ } = ended_run(&mut domain.calls.runs, run);
+    let Run { session: id, slot, block, by, credit, metadata: _, ended: _ } = ended_run(&mut domain.calls.runs, run);
     assert!(by == By::Tools, "the tools answer only the calls they were given");
     let session = domain.sessions.get_mut(id).expect("a session lives until its requests have ended");
     let state = mem::replace(&mut session.state, State::Closed);
@@ -808,21 +825,32 @@ pub(crate) fn pass_on_facts(domain: &mut Domain, env: &Env<Limits>) {
         let Some(fact) = domain.calls.tools.pop_fact() else {
             break;
         };
-        let session = domain.sessions.get(Id::from_token(kit_session(fact)));
+        let session = domain.sessions.get(Id::from_token(kit_session(fact.kind)));
         let opener = session.expect("a kit's session lives until the reclaim point").conversation.opener;
-        domain.facts.push(Fact::Tools { opener, fact });
+        let kind = FactKind::Tools { opener, fact: fact.kind };
+        match fact.call {
+            Some(call) => {
+                let run = domain
+                    .calls
+                    .runs
+                    .get(Id::from_token(call.owner))
+                    .expect("observed call lives through the reclaim point");
+                domain.facts.push_call(fact.at, kind, &run.metadata);
+            }
+            None => domain.facts.push_at(fact.at, kind),
+        }
     }
 }
 
 /// The session, as the tools name it, whose kit `fact` is of.
-const fn kit_session(fact: tools::Fact) -> Token {
+const fn kit_session(fact: tools::FactKind) -> Token {
     match fact {
-        tools::Fact::Opened { session }
-        | tools::Fact::Refused { session, .. }
-        | tools::Fact::Started { session, .. }
-        | tools::Fact::Answered { session, .. }
-        | tools::Fact::Closing { session, .. }
-        | tools::Fact::Closed { session } => session,
+        tools::FactKind::Opened { session }
+        | tools::FactKind::Refused { session, .. }
+        | tools::FactKind::Started { session, .. }
+        | tools::FactKind::Answered { session, .. }
+        | tools::FactKind::Closing { session, .. }
+        | tools::FactKind::Closed { session } => session,
     }
 }
 
@@ -839,6 +867,7 @@ fn ended_run(runs: &mut Slab<Run>, run: Id<Run>) -> Run {
         by: found.by,
         credit: found.credit,
         ended: true,
+        metadata: found.metadata.clone(),
     };
     runs.retire(run);
     ended
@@ -985,11 +1014,11 @@ fn tell(facts: &mut Facts, runs: &Slab<Run>, session: &Session, out: &Queue<Requ
     let made = usize::try_from(mark).expect("a u32 fits in a usize");
     for request in out.iter().skip(made) {
         let fact = match request {
-            Request::Opened { opener, session: _ } => Fact::Opened { opener: *opener },
-            Request::Yielded { opener, stop, text: _ } => Fact::Yielded { opener: *opener, stop: *stop },
-            Request::Used { opener, usage } => Fact::Used { opener: *opener, usage: *usage },
+            Request::Opened { opener, session: _ } => FactKind::Opened { opener: *opener },
+            Request::Yielded { opener, stop, text: _ } => FactKind::Yielded { opener: *opener, stop: *stop },
+            Request::Used { opener, usage } => FactKind::Used { opener: *opener, usage: *usage },
             Request::Ended { opener, end, turns, usage } => {
-                Fact::Ended { opener: *opener, end: *end, turns: *turns, usage: *usage }
+                FactKind::Ended { opener: *opener, end: *end, turns: *turns, usage: *usage }
             }
             Request::Complete {
                 owner: _,
@@ -1000,11 +1029,11 @@ fn tell(facts: &mut Facts, runs: &Slab<Run>, session: &Session, out: &Queue<Requ
                 max_failure_bytes: _,
             } => {
                 let (messages, max_tokens) = (count(prompt.messages.len()), prompt.max_tokens);
-                Fact::CompletionStarted { opener, attempt: attempt(&session.state), messages, max_tokens }
+                FactKind::CompletionStarted { opener, attempt: attempt(&session.state), messages, max_tokens }
             }
             Request::Delegate { owner, opener: _, call: _, deadline: _, origin: _ } => {
                 let run = runs.get(Id::from_token(*owner)).expect("a run lives while its call is asked for");
-                Fact::DelegateStarted { opener, block: run.block }
+                FactKind::DelegateStarted { opener, block: run.block }
             }
             Request::Turn { .. }
             | Request::Priced { .. }
@@ -1015,7 +1044,29 @@ fn tell(facts: &mut Facts, runs: &Slab<Run>, session: &Session, out: &Queue<Requ
                 continue;
             }
         };
-        facts.push(fact);
+        match request {
+            Request::Delegate { owner, .. } => {
+                let run = runs.get(Id::from_token(*owner)).expect("a delegated call lives through its start");
+                facts.push_call(facts.now(), fact, &run.metadata);
+            }
+            Request::Complete { .. } => facts.push_response(fact, next_response(&session.conversation), None),
+            Request::Used { usage, .. } => {
+                let spent = session
+                    .conversation
+                    .recording
+                    .prices
+                    .price(*usage)
+                    .expect("accepted usage was priced before emission");
+                facts.push_response(fact, u64::from(session.conversation.turns), Some(spent));
+            }
+            Request::Opened { .. } | Request::Yielded { .. } | Request::Ended { .. } => facts.push(fact),
+            Request::Turn { .. }
+            | Request::Priced { .. }
+            | Request::Cancel { .. }
+            | Request::Withdraw { .. }
+            | Request::Io { .. }
+            | Request::CancelIo { .. } => unreachable!("requests without facts were skipped"),
+        }
     }
 }
 
@@ -1218,7 +1269,7 @@ fn advance(
         let message = conversation.transcript.last().expect("the assistant message is last while tooling");
         let block = message.content.get(usize::try_from(index).expect("a u32 fits in a usize"));
         match block.expect("within the message") {
-            Block::ToolCall { id: _, name: _, input: _, call: Decoded::Owned { call }, .. } => {
+            Block::ToolCall { id: provider_id, name, input, call: Decoded::Owned { call }, .. } => {
                 let effect = tools::effect(call);
                 if !joins(batch, effect, started, env.limits.parallel_tools) {
                     next = index;
@@ -1226,12 +1277,18 @@ fn advance(
                 }
                 let credit = owned_credit(call, &env.limits);
                 let call = call.clone();
-                let run =
-                    Run { session: id, slot: tools.slots.len(), block: index, by: By::Tools, credit, ended: false };
-                let run = calls.runs.insert(run).expect("the run slab has room for two batches a session");
                 let deadline = env.now.saturating_add(env.limits.tool_timeout).min(conversation.expires);
+                let metadata = tool_metadata(provider_id, name, input, crate::ToolSource::Workspace, effect, deadline);
+                let run = observed_run(calls, id, tools.slots.len(), index, By::Tools, credit, metadata);
                 let (kit, reply_to) = (conversation.kit, ReplyTo::new(run.token()));
-                let heard = tools_step(calls, env, tools::Event::Call { kit, reply_to, call, deadline }, out);
+                let observation = Some(tools::CallInfo {
+                    owner: run.token(),
+                    effect,
+                    deadline,
+                    input_bytes: u64::try_from(input.len()).expect("provider input byte count fits u64"),
+                });
+                let heard =
+                    tools_step(calls, env, tools::Event::Call { kit, reply_to, observation, call, deadline }, out);
                 assert!(heard.kit.is_none(), "a call is news of no kit");
                 started = started.saturating_add(1);
                 batch = Some(effect);
@@ -1252,15 +1309,20 @@ fn advance(
                 let result = Block::ToolResult { id: call_id(conversation, index), result };
                 tools.slots.push(Slot::Done { result }).expect("a slot for every call");
             }
-            Block::ToolCall { id: _, name: _, input: _, call: Decoded::Delegated { ticket, effect }, .. } => {
+            Block::ToolCall {
+                id: provider_id,
+                name,
+                input,
+                call: Decoded::Delegated { source, ticket, effect },
+                ..
+            } => {
                 if !joins(batch, *effect, started, env.limits.parallel_tools) {
                     next = index;
                     break;
                 }
                 let credit = delegated_credit(&env.limits);
-                let run =
-                    Run { session: id, slot: tools.slots.len(), block: index, by: By::Opener, credit, ended: false };
-                let run = calls.runs.insert(run).expect("the run slab has room for two batches a session");
+                let metadata = tool_metadata(provider_id, name, input, *source, *effect, conversation.expires);
+                let run = observed_run(calls, id, tools.slots.len(), index, By::Opener, credit, metadata);
                 // The opener runs the race, and the session waits for it as
                 // long as it lives.
                 let (opener, call, deadline) = (conversation.opener, *ticket, conversation.expires);
@@ -1568,7 +1630,7 @@ const OUT_OF_TIME: End = End::Budget { spent: Dimension::Time };
 
 /// Refuses an open at the entrance: the session ends without having opened.
 fn refuse(facts: &mut Facts, opener: Token, end: End, out: &mut Queue<Request>) {
-    facts.push(Fact::Ended { opener, end, turns: 0, usage: Usage::ZERO });
+    facts.push(FactKind::Ended { opener, end, turns: 0, usage: Usage::ZERO });
     out.push(Request::Ended { opener, end, turns: 0, usage: Usage::ZERO });
 }
 
@@ -1985,7 +2047,7 @@ fn payload_cost(block: &Block) -> Option<u64> {
             // A delegated call is the opener's to hold.
             let decoded = match call {
                 Decoded::Owned { call } => call_cost(call)?,
-                Decoded::Delegated { ticket: _, effect: _ } | Decoded::Historical => 0,
+                Decoded::Delegated { source: _, ticket: _, effect: _ } | Decoded::Historical => 0,
                 Decoded::Invalid { problem } => problem_cost(problem)?,
             };
             len(id)?
@@ -2436,7 +2498,7 @@ pub(crate) fn delegate_ended(
         return;
     }
     let mark = out.len();
-    let Run { session: id, slot, block, by, credit, ended: _ } =
+    let Run { session: id, slot, block, by, credit, metadata, ended: _ } =
         ended_run(&mut domain.calls.runs, Id::from_token(owner));
     assert!(by == By::Opener, "the opener answers its delegated call once");
     let session = domain.sessions.get_mut(id).expect("a call keeps its session alive");
@@ -2452,14 +2514,14 @@ pub(crate) fn delegate_ended(
     }
     let fact = match &result {
         Returned::Text { text, error, replay: _ } => {
-            Fact::DelegateAnswered { opener: conversation.opener, bytes: count(text.len()).into(), error: *error }
+            FactKind::DelegateAnswered { opener: conversation.opener, bytes: count(text.len()).into(), error: *error }
         }
-        Returned::Withdrawn => Fact::DelegateCancelled { opener: conversation.opener },
+        Returned::Withdrawn => FactKind::DelegateCancelled { opener: conversation.opener },
         Returned::Owned { .. } | Returned::Invalid { .. } | Returned::NotRun => {
             unreachable!("terminals carry a concrete answer or withdrawal")
         }
     };
-    domain.facts.push(fact);
+    domain.facts.push_call(env.now, fact, &metadata);
     let state = mem::replace(&mut session.state, State::Closed);
     session.state = match state {
         State::Tooling { mut tools } => match added {
@@ -2667,4 +2729,43 @@ pub(crate) fn exhaust_origin_for_test(domain: &mut Domain, owner: Token) {
 pub(crate) fn provider_credit_for_test(domain: &Domain, owner: Token) -> (u64, Option<u64>) {
     let session = domain.sessions.get(Id::from_token(owner)).expect("admitted test session before reclaim");
     (session.conversation.reserved, session.conversation.provider_credit)
+}
+
+fn next_response(conversation: &Conversation) -> u64 {
+    u64::from(conversation.turns).checked_add(1).expect("a u32 completion count fits in u64")
+}
+
+fn tool_metadata(
+    id: &[u8],
+    name: &[u8],
+    input: &[u8],
+    source: crate::ToolSource,
+    effect: Effect,
+    deadline: Time,
+) -> crate::ToolCall {
+    crate::ToolCall {
+        owner: Token::new(0),
+        id: skein_lib::bytes::copy_of(id),
+        name: skein_lib::bytes::copy_of(name),
+        source,
+        effect,
+        deadline,
+        input_bytes: u64::try_from(input.len()).expect("provider input byte count fits u64"),
+    }
+}
+
+/// Set the slab-issued observation identity before any request or fact can expose it.
+fn observed_run(
+    calls: &mut Calls,
+    session: Id<Session>,
+    slot: u32,
+    block: u32,
+    by: By,
+    credit: u64,
+    metadata: crate::ToolCall,
+) -> Id<Run> {
+    let run = Run { session, slot, block, by, credit, ended: false, metadata };
+    let id = calls.runs.insert(run).expect("the run slab has room for two batches a session");
+    calls.runs.get_mut(id).expect("inserted above").metadata.owner = id.token();
+    id
 }

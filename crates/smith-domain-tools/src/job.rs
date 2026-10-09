@@ -82,6 +82,7 @@ pub(crate) struct Job {
     kit: Id<Kit>,
     /// The tool the call is for, to tell of it.
     tool: Tool,
+    observation: Option<crate::CallInfo>,
     state: State,
 }
 
@@ -167,10 +168,15 @@ pub(crate) enum Work {
 /// Starts a job for `work` in the kit `kit`, which has room for one, asking
 /// io for its operation by `deadline`, or sooner if the tools' own limit on
 /// file operations, or on commands, falls first.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the call boundary carries its affine right and observation context beside its work"
+)]
 pub(crate) fn start(
     jobs: &mut Slab<Job>,
     kit: Id<Kit>,
     reply_to: ReplyTo,
+    observation: Option<crate::CallInfo>,
     work: Work,
     deadline: Time,
     env: &Env<Limits>,
@@ -223,7 +229,7 @@ pub(crate) fn start(
     // Room: a kit has at most `calls` jobs, and the slab twice that many slots
     // per kit, for the jobs retired in this iteration, which are at most those
     // running when it began.
-    let id = jobs.insert(Job { kit, tool, state }).expect("the job slab has room for every kit's jobs");
+    let id = jobs.insert(Job { kit, tool, observation, state }).expect("the job slab has room for every kit's jobs");
     out.push(Request::Io { owner: id.token(), op, deadline });
     id
 }
@@ -254,17 +260,24 @@ pub(crate) fn done(domain: &mut Domain, env: &Env<Limits>, owner: Token, done: D
         State::Running { reply_to } => exited(reply_to, done),
         State::Done => unreachable!("a job that has answered has nothing in flight"),
     };
-    job.state = settle(next, kit::session(kit), job.tool, facts, out);
+    job.state = settle(next, kit::session(kit), job.tool, job.observation, facts, out);
     follow(kits, jobs, facts, id, out);
 }
 
 /// The state a cell leads to: the one it moves to, or Done once it has
 /// answered the call, which is told as a fact.
-fn settle(next: Next, session: Token, tool: Tool, facts: &mut Facts, out: &mut Queue<Request>) -> State {
+fn settle(
+    next: Next,
+    session: Token,
+    tool: Tool,
+    observation: Option<crate::CallInfo>,
+    facts: &mut Facts,
+    out: &mut Queue<Request>,
+) -> State {
     match next {
         Next::Wait(state) => state,
         Next::Answer { reply_to, outcome } => {
-            facts.push(facts::answered(session, tool, &outcome));
+            facts.push_call(facts::answered(session, tool, &outcome), observation);
             out.push(Request::Answer { to: reply_to, outcome });
             State::Done
         }

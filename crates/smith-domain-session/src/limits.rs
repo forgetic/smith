@@ -107,7 +107,7 @@ pub fn completion_reserve(limits: &Limits) -> Option<u64> {
 /// the tools emit in a step. It counts the containers, their bookkeeping
 /// included, and the payloads, not allocator overhead. The prompts of calls in
 /// flight are copies held by the protocol layer, and the texts of yields copies
-/// held by the opener, which count them. Facts own nothing beyond their queue.
+/// held by the opener, which count them. Call observations copy only provider IDs and names, bounded by the completion byte cap.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
     let parallel = limits.parallel_tools;
@@ -118,10 +118,12 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         return None;
     }
     let sessions = Slab::<Session>::worst_case(limits.sessions)?;
-    let runs = Slab::<Run>::worst_case(runs(limits)?)?;
+    let runs = Slab::<Run>::worst_case(runs(limits)?)?
+        .checked_add(u64::from(runs(limits)?).checked_mul(limits.completion_bytes)?)?;
     let alarms = Deadlines::<Alarm>::worst_case(alarms(limits)?)?;
     let ready = Ready::worst_case(limits.sessions)?;
-    let facts = Queue::<Fact>::worst_case(limits.facts)?;
+    let facts = Queue::<Fact>::worst_case(limits.facts)?
+        .checked_add(u64::from(limits.facts).checked_mul(limits.completion_bytes)?)?;
     let tools = tools::worst_case(&limits.tools)?;
     let tools_out = Queue::<tools::Request>::worst_case(tools::max_out(&limits.tools))?;
     // Each session owns its transcript's list and up to its byte limit.
@@ -144,7 +146,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let opening = u64::try_from(size_of::<Opening>()).ok()?;
     let staging = List::<Turn>::worst_case(limits.messages)?
         .checked_add(List::<Message>::worst_case(limits.messages)?)?
-        .checked_add(opening)?;
+        .checked_add(opening)?
+        .checked_add(limits.completion_bytes)?;
     sessions
         .checked_add(runs)?
         .checked_add(alarms)?

@@ -1,21 +1,36 @@
 //! What the sessions tell whoever watches the agent (domain/session.md,
-//! sections 3–5): a fact for each thing that happened, content-free (tokens, counts and
-//! classifications, never what the LLM or the opener said), in a bounded
+//! sections 3–5): a fact for each thing that happened: bounded provider identity, counts and
+//! classifications, never prompts, tool inputs or results, in a bounded
 //! queue the parent drains at its own pace.
 //!
 //! Facts are outside the boundary's flow control: they are not requests, take
 //! no room in `out`, and when the queue is full they are dropped and counted.
 //! Nothing the session decides depends on whether a fact was kept.
 
-use skein_lib::{Duration, Queue, Token};
+use alloc::boxed::Box;
+
+use skein_lib::{Duration, Queue, Time, Token};
 use smith_domain_tools as tools;
 
 use crate::boundary::{End, Yield};
 use crate::llm::{Failure, Stop, Usage};
 
+/// An observation stamped with the injected time of its emitting step.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct Fact {
+    /// Emission time, preserved when parents drain this observation later.
+    pub at: Time,
+    /// The content-free observation.
+    pub kind: FactKind,
+    /// Provider call metadata for a workspace or delegated call observation.
+    pub call: Option<ToolCall>,
+    /// Conversation-local completion identity and its exact accepted charge.
+    pub response: Option<ResponseInfo>,
+}
+
 /// Something that happened in the session opened for `opener`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Fact {
+pub enum FactKind {
     /// The session was admitted.
     Opened { opener: Token },
     /// A completion was asked for, after `attempt` retries, with `messages`
@@ -67,7 +82,7 @@ pub enum Fact {
     Tools {
         opener: Token,
         /// Content-free child observation, dropped and counted if the queue is full.
-        fact: tools::Fact,
+        fact: tools::FactKind,
     },
     /// The tool call at `block` of the last message was delegated to the
     /// opener.
@@ -106,16 +121,52 @@ pub enum Fact {
 pub(crate) struct Facts {
     queue: Queue<Fact>,
     lost: u64,
+    now: Time,
 }
 
 impl Facts {
     pub(crate) fn with_capacity(capacity: u32) -> Facts {
-        Facts { queue: Queue::with_capacity(capacity), lost: 0 }
+        Facts { queue: Queue::with_capacity(capacity), lost: 0, now: Time::ZERO }
+    }
+
+    pub(crate) const fn now(&self) -> Time {
+        self.now
+    }
+
+    pub(crate) fn begin(&mut self, now: Time) {
+        self.now = now;
     }
 
     /// Keeps `fact` if there is room for it, and counts it otherwise.
-    pub(crate) fn push(&mut self, fact: Fact) {
+    pub(crate) fn push(&mut self, kind: FactKind) {
+        let fact = Fact { at: self.now, kind, call: None, response: None };
         if self.queue.try_push(fact).is_err() {
+            self.lost = self.lost.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn push_at(&mut self, at: Time, kind: FactKind) {
+        if self.queue.try_push(Fact { at, kind, call: None, response: None }).is_err() {
+            self.lost = self.lost.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn push_call(&mut self, at: Time, kind: FactKind, call: &ToolCall) {
+        // Copy identity only into reserved queue room. A dropped observation
+        // allocates nothing, so its peak is bounded by the retained queue.
+        if self.queue.room() == 0 {
+            self.lost = self.lost.saturating_add(1);
+            return;
+        }
+        self.queue.push(Fact { at, kind, call: Some(call.clone()), response: None });
+    }
+
+    pub(crate) fn push_response(&mut self, kind: FactKind, number: u64, spent: Option<u64>) {
+        if self
+            .queue
+            .try_push(Fact { at: self.now, kind, call: None, response: Some(ResponseInfo { number, spent }) })
+            .is_err()
+        {
             self.lost = self.lost.saturating_add(1);
         }
     }
@@ -127,4 +178,38 @@ impl Facts {
     pub(crate) fn lost(&self) -> u64 {
         self.lost
     }
+}
+
+/// The owner of a tool declaration, supplied by the conversation opener.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ToolSource {
+    /// The session's checkout tools.
+    Workspace,
+    /// A run-owned tool such as `sub_agent` or finish.
+    Run,
+    /// An opaque tool declared by the host.
+    Host,
+}
+
+/// Exact provider call identity and content-free start measurements.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct ToolCall {
+    /// Session-issued call identity, also used by a run opening its child.
+    pub owner: Token,
+    pub id: Box<[u8]>,
+    pub name: Box<[u8]>,
+    pub source: ToolSource,
+    pub effect: tools::Effect,
+    pub deadline: Time,
+    /// Exact raw provider argument bytes, independent of decoded storage.
+    pub input_bytes: u64,
+}
+
+/// A completion's number within its conversation and its accepted host-unit charge.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct ResponseInfo {
+    /// One-based completed turn, reused by retries of that turn.
+    pub number: u64,
+    /// Accepted charge in the opener's price unit; None before accounting.
+    pub spent: Option<u64>,
 }

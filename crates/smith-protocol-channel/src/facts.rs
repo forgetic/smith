@@ -8,47 +8,47 @@ use smith_channel::FactKind;
 use smith_domain::{self as domain, run, session, tools};
 
 /// Project one domain observation to a bounded public kind and count.
-pub(crate) fn project(fact: domain::Fact) -> Option<(FactKind, u64)> {
+pub(crate) fn project(fact: &domain::Fact) -> Option<(FactKind, u64)> {
     match fact {
-        domain::Fact::Run { fact } => match fact {
-            run::facts::Fact::Admitted { .. } => Some((FactKind::Admitted, 1)),
-            run::facts::Fact::Answered { .. } => Some((FactKind::Ended, 1)),
-            run::facts::Fact::Called { .. } => Some((FactKind::ToolStarted, 1)),
-            run::facts::Fact::Returned { .. } => Some((FactKind::ToolFinished, 1)),
-            run::facts::Fact::CheckStarted { .. } => Some((FactKind::CheckStarted, 1)),
-            run::facts::Fact::CheckFinished { .. } => Some((FactKind::CheckFinished, 1)),
-            run::facts::Fact::MessageRead { .. }
-            | run::facts::Fact::MessageFence { .. }
-            | run::facts::Fact::MessageUnread { .. }
-            | run::facts::Fact::MessageReceived { .. }
-            | run::facts::Fact::MessageRefused { .. }
-            | run::facts::Fact::Prepared { .. }
-            | run::facts::Fact::Opened { .. }
-            | run::facts::Fact::Ended { .. }
-            | run::facts::Fact::Delivered { .. } => None,
+        domain::Fact::Run { fact } => match &fact.kind {
+            run::facts::FactKind::Admitted { .. } => Some((FactKind::Admitted, 1)),
+            run::facts::FactKind::Answered { .. } => Some((FactKind::Ended, 1)),
+            run::facts::FactKind::Called { .. } => Some((FactKind::ToolStarted, 1)),
+            run::facts::FactKind::Returned { .. } => Some((FactKind::ToolFinished, 1)),
+            run::facts::FactKind::CheckStarted { .. } => Some((FactKind::CheckStarted, 1)),
+            run::facts::FactKind::CheckFinished { .. } => Some((FactKind::CheckFinished, 1)),
+            run::facts::FactKind::MessageRead { .. }
+            | run::facts::FactKind::MessageFence { .. }
+            | run::facts::FactKind::MessageUnread { .. }
+            | run::facts::FactKind::MessageReceived { .. }
+            | run::facts::FactKind::MessageRefused { .. }
+            | run::facts::FactKind::Prepared { .. }
+            | run::facts::FactKind::Opened { .. }
+            | run::facts::FactKind::Ended { .. }
+            | run::facts::FactKind::Delivered { .. } => None,
         },
-        domain::Fact::Session { fact } => match fact {
-            session::Fact::CompletionStarted { attempt, .. } => Some((FactKind::LlmStarted, u64::from(attempt))),
-            session::Fact::CompletionRetried { attempt, .. } => Some((FactKind::LlmRetried, u64::from(attempt))),
-            session::Fact::CompletionAnswered { blocks, .. } => Some((FactKind::LlmFinished, u64::from(blocks))),
-            session::Fact::CompletionFailed { .. } | session::Fact::CompletionCancelled { .. } => {
+        domain::Fact::Session { fact } => match &fact.kind {
+            session::FactKind::CompletionStarted { attempt, .. } => Some((FactKind::LlmStarted, u64::from(*attempt))),
+            session::FactKind::CompletionRetried { attempt, .. } => Some((FactKind::LlmRetried, u64::from(*attempt))),
+            session::FactKind::CompletionAnswered { blocks, .. } => Some((FactKind::LlmFinished, u64::from(*blocks))),
+            session::FactKind::CompletionFailed { .. } | session::FactKind::CompletionCancelled { .. } => {
                 Some((FactKind::LlmFinished, 0))
             }
-            session::Fact::Tools { fact, .. } => match fact {
-                tools::Fact::Started { .. } => Some((FactKind::ToolStarted, 1)),
-                tools::Fact::Answered { .. } => Some((FactKind::ToolFinished, 1)),
-                tools::Fact::Opened { .. }
-                | tools::Fact::Refused { .. }
-                | tools::Fact::Closing { .. }
-                | tools::Fact::Closed { .. } => None,
+            session::FactKind::Tools { fact, .. } => match fact {
+                tools::FactKind::Started { .. } => Some((FactKind::ToolStarted, 1)),
+                tools::FactKind::Answered { .. } => Some((FactKind::ToolFinished, 1)),
+                tools::FactKind::Opened { .. }
+                | tools::FactKind::Refused { .. }
+                | tools::FactKind::Closing { .. }
+                | tools::FactKind::Closed { .. } => None,
             },
-            session::Fact::Opened { .. }
-            | session::Fact::DelegateStarted { .. }
-            | session::Fact::DelegateAnswered { .. }
-            | session::Fact::DelegateCancelled { .. }
-            | session::Fact::Yielded { .. }
-            | session::Fact::Used { .. }
-            | session::Fact::Ended { .. } => None,
+            session::FactKind::Opened { .. }
+            | session::FactKind::DelegateStarted { .. }
+            | session::FactKind::DelegateAnswered { .. }
+            | session::FactKind::DelegateCancelled { .. }
+            | session::FactKind::Yielded { .. }
+            | session::FactKind::Used { .. }
+            | session::FactKind::Ended { .. } => None,
         },
     }
 }

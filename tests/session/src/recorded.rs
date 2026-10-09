@@ -296,7 +296,11 @@ pub fn called() -> Box<[llm::Block]> {
             id: b"provider-call".as_slice().into(),
             name: b"sub_agent".as_slice().into(),
             input: br#"{"task":"review"}"#.as_slice().into(),
-            call: llm::Decoded::Delegated { ticket: Token::new(991), effect: Effect::Write },
+            call: llm::Decoded::Delegated {
+                source: smith_domain_session::ToolSource::Run,
+                ticket: Token::new(991),
+                effect: Effect::Write,
+            },
             replay: None,
         },
     ])

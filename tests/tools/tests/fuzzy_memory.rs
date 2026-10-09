@@ -49,7 +49,7 @@ fn churn(limits: Limits, seed: u64, rounds: u32) {
                 let kit = kits[usize::try_from(rng.below(kits.len() as u64)).expect("an index")];
                 let reply_to = ReplyTo::new(Token::new(round));
                 let deadline = if rng.chance(50) { env.now } else { env.now.saturating_add(Duration::from_secs(1)) };
-                Some(Event::Call { kit, reply_to, call: random_call(&limits, &mut rng), deadline })
+                Some(Event::Call { kit, observation: None, reply_to, call: random_call(&limits, &mut rng), deadline })
             }
             5..=8 if !ops.is_empty() => {
                 let (owner, asked) = ops.swap_remove(usize::try_from(rng.below(ops.len() as u64)).expect("an index"));

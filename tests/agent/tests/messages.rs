@@ -305,6 +305,7 @@ fn every_transient_history_refusal_is_exact_and_starts_no_provider_or_tool_effec
                         match block {
                             session::llm::Block::ToolCall { call, .. } => {
                                 *call = session::llm::Decoded::Delegated {
+                                    source: smith_domain::session::ToolSource::Run,
                                     ticket: Token::new(80),
                                     effect: smith_domain::tools::Effect::Write,
                                 }

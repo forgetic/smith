@@ -21,12 +21,12 @@ fn settled(settings: &Settings) -> World {
     world
 }
 
-fn count(world: &World, predicate: impl Fn(&run::facts::Fact) -> bool) -> usize {
+fn count(world: &World, predicate: impl Fn(&run::facts::FactKind) -> bool) -> usize {
     world
         .facts()
         .iter()
         .filter(|fact| match fact {
-            Fact::Run { fact } => predicate(fact),
+            Fact::Run { fact } => predicate(&fact.kind),
             Fact::Session { .. } => false,
         })
         .count()
@@ -41,7 +41,7 @@ fn a_coding_run_fails_checks_then_fixes_and_lands_the_exact_tree() {
     assert_eq!(world.code(), FIXED);
     assert_eq!(world.landed(), FIXED);
     assert_eq!(
-        count(&world, |fact| matches!(fact, run::facts::Fact::Called { ask: run::facts::Asked::Finish, .. })),
+        count(&world, |fact| matches!(fact, run::facts::FactKind::Called { ask: run::facts::Asked::Finish, .. })),
         2
     );
     assert_eq!(world.lost(), 0);
@@ -70,7 +70,10 @@ fn a_review_retries_the_verdict_its_charter_rejected() {
     assert_eq!(verdict.items.len(), 1);
     assert!(world.checked().is_empty() && world.pushes().is_empty());
     assert_eq!(
-        count(&world, |fact| matches!(fact, run::facts::Fact::Returned { result: run::facts::Return::Rejected, .. })),
+        count(&world, |fact| matches!(
+            fact,
+            run::facts::FactKind::Returned { result: run::facts::Return::Rejected, .. }
+        )),
         1
     );
 }
@@ -114,14 +117,17 @@ fn sub_agents_return_results_and_a_child_gets_no_sub_agent_tool() {
     assert_eq!(world.checked(), [true]);
     assert_eq!(world.landed(), FIXED);
     assert_eq!(
-        count(&world, |fact| matches!(fact, run::facts::Fact::Called { ask: run::facts::Asked::SubAgent, .. })),
+        count(&world, |fact| matches!(fact, run::facts::FactKind::Called { ask: run::facts::Asked::SubAgent, .. })),
         3
     );
     assert_eq!(
-        count(&world, |fact| matches!(fact, run::facts::Fact::Returned { result: run::facts::Return::Answered, .. })),
+        count(&world, |fact| matches!(
+            fact,
+            run::facts::FactKind::Returned { result: run::facts::Return::Answered, .. }
+        )),
         3
     );
-    assert_eq!(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { .. })), 4);
+    assert_eq!(count(&world, |fact| matches!(fact, run::facts::FactKind::Opened { .. })), 4);
     let fixer = world
         .prompts()
         .iter()
@@ -138,7 +144,7 @@ fn sub_agents_return_results_and_a_child_gets_no_sub_agent_tool() {
         "an unoffered sub-agent call receives the ordinary refusal"
     );
     assert_eq!(
-        count(&world, |fact| matches!(fact, run::facts::Fact::Called { ask: run::facts::Asked::Finish, .. })),
+        count(&world, |fact| matches!(fact, run::facts::FactKind::Called { ask: run::facts::Asked::Finish, .. })),
         1,
         "the fixer's finish was never offered and never reached the run"
     );
@@ -152,7 +158,7 @@ fn the_shared_budget_ends_the_run_after_every_conversation_settles() {
         panic!("the run spends its shared turns")
     };
     assert!(spent.turns > 8 && spent.turns <= 12, "only in-flight completions can finish past the shared ceiling");
-    assert_eq!(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { .. })), 3);
+    assert_eq!(count(&world, |fact| matches!(fact, run::facts::FactKind::Opened { .. })), 3);
     assert!(world.landed().is_empty());
 }
 
@@ -201,8 +207,9 @@ fn host_cancellation_at_many_moments_closes_the_whole_tree() {
         match world.answer() {
             Answer::Failed { failure: Failure::Cancelled, .. } => {
                 cancelled += 1;
-                nested +=
-                    usize::from(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { child: true, .. })) > 0);
+                nested += usize::from(
+                    count(&world, |fact| matches!(fact, run::facts::FactKind::Opened { child: true, .. })) > 0,
+                );
             }
             Answer::Accepted { .. } => done += 1,
             answer @ (Answer::Parked { .. } | Answer::Refused(_) | Answer::Failed { .. }) => {
@@ -226,7 +233,8 @@ fn a_deadline_mid_tree_answers_only_after_the_tree_settles() {
             ..Settings::calm(700 + seed)
         });
         assert!(matches!(world.answer(), Answer::Failed { failure: Failure::Budget(Exhausted::Time), .. }));
-        nested += usize::from(count(&world, |fact| matches!(fact, run::facts::Fact::Opened { child: true, .. })) > 0);
+        nested +=
+            usize::from(count(&world, |fact| matches!(fact, run::facts::FactKind::Opened { child: true, .. })) > 0);
         assert!(world.answered_at() <= skein_lib::Time::ZERO.saturating_add(Duration::from_secs(5)));
     }
     assert!(nested > 0, "some deadlines crossed nested work");
@@ -299,7 +307,10 @@ fn a_declared_failure_with_an_empty_reason_is_an_accepted_result() {
     assert_eq!(&*failure.fields[0].name, b"cause");
     assert_eq!(&*failure.fields[0].value, b"missing-authority");
     assert_eq!(
-        count(&world, |fact| matches!(fact, run::facts::Fact::Returned { result: run::facts::Return::Rejected, .. })),
+        count(&world, |fact| matches!(
+            fact,
+            run::facts::FactKind::Returned { result: run::facts::Return::Rejected, .. }
+        )),
         0
     );
     assert!(world.pushes().is_empty() && world.checked().is_empty());

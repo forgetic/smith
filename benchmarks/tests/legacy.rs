@@ -100,6 +100,41 @@ fn child_finish_is_never_main_and_authoritative_run_answers_survive_missing_call
 }
 
 #[test]
+fn emission_metadata_shapes_preserve_legacy_run_and_child_observations() {
+    let mut observer = Observer::default();
+    for text in [
+        "Run { fact: Admitted { run: Token(1), resumed: true } }",
+        "Run { fact: Admitted { run: Token(1), resumed: false } }",
+        "Run { fact: Opened { run: Token(1), conversation: Token(2), child: false, parent: None, call: None } }",
+        "Run { fact: Opened { run: Token(1), conversation: Token(3), child: true, parent: Some(Token(2)), call: Some(Token(4)) } }",
+        "Run { fact: Called { run: Token(1), conversation: Token(3), call: Token(4), ask: Finish } }",
+        "Run { fact: Returned { run: Token(1), call: Token(4), result: Accepted } }",
+    ] {
+        observer.observe_line(&fact(text)).expect("metadata shape");
+    }
+    assert!(observer.accepted().is_none());
+    observer.observe_line(&fact("Run { fact: Answered { run: Token(1), answer: Accepted } }")).expect("terminal");
+    assert_eq!(observer.classify(Exit::Code(0), Forced::No).end, End::Completed);
+}
+
+#[test]
+fn emission_metadata_shapes_reject_partial_fields_wrong_types_and_unknown_fields() {
+    for text in [
+        "Run { fact: Admitted { run: Token(1), resumed: 1 } }",
+        "Run { fact: Admitted { run: Token(1), resumed: true, unknown: 0 } }",
+        "Run { fact: Opened { run: Token(1), conversation: Token(2), child: false, parent: None } }",
+        "Run { fact: Opened { run: Token(1), conversation: Token(2), child: false, call: None } }",
+        "Run { fact: Opened { run: Token(1), conversation: Token(2), child: false, parent: Token(1), call: None } }",
+        "Run { fact: Opened { run: Token(1), conversation: Token(2), child: false, parent: Some(1), call: None } }",
+        "Run { fact: Opened { run: Token(1), conversation: Token(2), child: false, parent: Some(Token(true)), call: None } }",
+        "Run { fact: Opened { run: Token(1), conversation: Token(2), child: false, parent: None, call: Some(Token(4), Token(5)) } }",
+        "Run { fact: Opened { run: Token(1), conversation: Token(2), child: false, parent: None, call: None, unknown: 0 } }",
+    ] {
+        assert!(parse_line(&fact(text)).is_err(), "{text}");
+    }
+}
+
+#[test]
 fn known_shape_changes_poison_classification_and_unknown_record_types_are_skipped() {
     assert!(parse_line(r#"{"type":"future","unexpected":2}"#).expect("unknown").is_none());
     for (text, field) in [

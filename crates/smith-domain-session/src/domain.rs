@@ -144,6 +144,7 @@ impl Domain {
 
 /// Handles one event, emitting at most [`max_out`] requests.
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
+    domain.facts.begin(env.now);
     match event {
         Event::Open { opener, opening } => session::open(domain, env, opener, *opening, out),
         Event::Answered { owner, text, error, spent } => {
@@ -179,6 +180,7 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
 /// progress that arrived in the same iteration wins over a deadline that passed
 /// while the loop waited.
 pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
+    domain.facts.begin(env.now);
     let Some(alarm) = domain.alarms.expire(env.now) else {
         return;
     };
@@ -193,6 +195,7 @@ pub fn fire(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
 /// [`max_out`] requests: one that rested in an earlier iteration, after a
 /// batch the tools answered within the step that started it.
 pub fn resume(domain: &mut Domain, env: &Env<Limits>, out: &mut Queue<Request>) {
+    domain.facts.begin(env.now);
     let Some(id) = domain.ready.pop() else {
         return;
     };

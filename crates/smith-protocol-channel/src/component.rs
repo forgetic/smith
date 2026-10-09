@@ -383,12 +383,13 @@ impl Component {
     /// Offer a content-free domain observation without spending reserved output room.
     pub fn send_fact(
         &mut self,
-        fact: smith_domain::Fact,
-        elapsed: Duration,
+        fact: &smith_domain::Fact,
+        started: Time,
         token: Token,
         to_service: &mut Queue<OpenEvent>,
         below: &mut Queue<Lower>,
     ) -> Result<bool, Error> {
+        let elapsed = fact.emitted().saturating_since(started);
         match facts::project(fact) {
             Some((kind, count)) => self.offer_fact(kind, elapsed, count, token, to_service, below),
             None => Ok(false),

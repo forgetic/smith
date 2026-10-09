@@ -487,7 +487,7 @@ fn recorded_delegated_turns_hold_exactly_the_byte_cap_and_count_their_copies() {
                     id: bytes(1),
                     name: bytes(1),
                     input: bytes(1),
-                    call: Decoded::Delegated { ticket: Token::new(99), effect: Effect::Write },
+                    call: run_call(99, Effect::Write),
                     replay: None,
                 },
             ]),
@@ -1159,4 +1159,8 @@ fn the_original_four_message_cap_refuses_the_next_provider_before_work() {
         assert!(seen.complete.is_none(), "original one-cell remainder never starts another provider effect");
         assert_eq!(seen.end, Some(smith_domain_session::End::TranscriptFull));
     }
+}
+
+fn run_call(ticket: u64, effect: Effect) -> Decoded {
+    Decoded::Delegated { source: smith_domain_session::ToolSource::Run, ticket: Token::new(ticket), effect }
 }

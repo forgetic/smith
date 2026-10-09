@@ -7,14 +7,25 @@
 //! no room in `out`, and when the queue is full they are dropped and counted.
 //! Nothing the tools decide depends on whether a fact was kept.
 
-use skein_lib::{Queue, Token};
+use skein_lib::{Queue, Time, Token};
 
 use crate::boundary::Refusal;
-use crate::call::{Exit, Fault, Outcome, Tool};
+use crate::call::{Effect, Exit, Fault, Outcome, Tool};
 
-/// Something that happened to the kit of the session `session`.
+/// An observation stamped with the injected time of its emitting step.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Fact {
+pub struct Fact {
+    /// Emission time, preserved when parents drain this observation later.
+    pub at: Time,
+    /// The content-free observation.
+    pub kind: FactKind,
+    /// Parent call context when the caller has a provider observation.
+    pub call: Option<CallInfo>,
+}
+
+/// Something that happened to a kit, emitted by the tools for its parent.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum FactKind {
     /// The kit opened.
     Opened { session: Token },
     /// No kit was opened.
@@ -124,7 +135,7 @@ pub enum Verdict {
 }
 
 /// The fact of `outcome` answering a call of `tool` from `session`.
-pub(crate) fn answered(session: Token, tool: Tool, outcome: &Outcome) -> Fact {
+pub(crate) fn answered(session: Token, tool: Tool, outcome: &Outcome) -> FactKind {
     let (verdict, bytes) = match outcome {
         Outcome::Read { content, .. } => (Verdict::Read, len(content)),
         Outcome::Listed { entries, .. } => {
@@ -167,7 +178,7 @@ pub(crate) fn answered(session: Token, tool: Tool, outcome: &Outcome) -> Fact {
         Outcome::Busy => (Verdict::Busy, 0),
         Outcome::NulByte => (Verdict::NulByte, 0),
     };
-    Fact::Answered { session, tool, verdict, bytes }
+    FactKind::Answered { session, tool, verdict, bytes }
 }
 
 fn len(bytes: &[u8]) -> u64 {
@@ -179,16 +190,28 @@ fn len(bytes: &[u8]) -> u64 {
 pub(crate) struct Facts {
     queue: Queue<Fact>,
     lost: u64,
+    now: Time,
 }
 
 impl Facts {
     pub(crate) fn with_capacity(capacity: u32) -> Facts {
-        Facts { queue: Queue::with_capacity(capacity), lost: 0 }
+        Facts { queue: Queue::with_capacity(capacity), lost: 0, now: Time::ZERO }
+    }
+
+    pub(crate) fn begin(&mut self, now: Time) {
+        self.now = now;
     }
 
     /// Keeps `fact` if there is room for it, and counts it otherwise.
-    pub(crate) fn push(&mut self, fact: Fact) {
+    pub(crate) fn push(&mut self, kind: FactKind) {
+        let fact = Fact { at: self.now, kind, call: None };
         if self.queue.try_push(fact).is_err() {
+            self.lost = self.lost.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn push_call(&mut self, kind: FactKind, call: Option<CallInfo>) {
+        if self.queue.try_push(Fact { at: self.now, kind, call }).is_err() {
             self.lost = self.lost.saturating_add(1);
         }
     }
@@ -200,4 +223,15 @@ impl Facts {
     pub(crate) fn lost(&self) -> u64 {
         self.lost
     }
+}
+
+/// Provider-parent identity and measurements, carried without owning content.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct CallInfo {
+    /// The parent's call token, distinct from the affine answer right.
+    pub owner: Token,
+    pub effect: Effect,
+    pub deadline: Time,
+    /// Exact raw provider argument bytes, measured before decoding.
+    pub input_bytes: u64,
 }

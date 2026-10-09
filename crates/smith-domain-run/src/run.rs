@@ -83,7 +83,7 @@ use crate::call::{self, Call, Calls, Withdrawal, Work};
 use crate::charter::{self, Charter, Families, count};
 use crate::delivery::{CallName, Delivery};
 use crate::domain::Domain;
-use crate::facts::{Asked, Fact, Facts};
+use crate::facts::{Asked, FactKind, Facts};
 use crate::host::{Relay as HostRelay, Stage as HostStage};
 use crate::land::{self, Settled};
 use crate::limits::Limits;
@@ -122,6 +122,7 @@ pub(crate) struct Run {
     state: State,
     /// Opaque restored history binding consumed when main opens.
     transcript: Option<Token>,
+    resumed: bool,
     /// Bounded host messages accepted but not yet given to main.
     inbox: Queue<Message>,
     /// Ordered names offered to main and awaiting its next told turn.
@@ -292,6 +293,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         deadline,
         state: State::Closed,
         transcript,
+        resumed: transcript.is_some(),
         inbox: Queue::with_capacity(env.limits.messages),
         offered: Queue::with_capacity(env.limits.messages),
         read: None,
@@ -379,7 +381,7 @@ pub(crate) fn message(
     };
     domain.facts.about(token);
     if let Some(reason) = reason {
-        domain.facts.push(Fact::MessageRefused { run: token, name, bytes, reason });
+        domain.facts.push(FactKind::MessageRefused { run: token, name, bytes, reason });
         out.push(Request::MessageRefused { host_run: run.host_name, name, reason });
         return;
     }
@@ -388,7 +390,7 @@ pub(crate) fn message(
     writer.put(b": ").expect("checked rendered size");
     writer.put(&text).expect("checked rendered size");
     let text = writer.finish();
-    domain.facts.push(Fact::MessageReceived { run: token, name, bytes });
+    domain.facts.push(FactKind::MessageReceived { run: token, name, bytes });
     let run = domain.runs.get_mut(id).expect("checked live run above");
     run.inbox.push(Message { name, text });
     let state = mem::replace(&mut run.state, State::Closed);
@@ -479,9 +481,9 @@ pub(crate) fn turn(domain: &mut Domain, conversation: Token, record: Token, sequ
     for _ in 0..offered {
         let name = run.offered.pop().expect("bounded offered prefix");
         run.read = Some(name);
-        domain.facts.push(Fact::MessageRead { run: conversation.run.token(), name, turn: run.turns });
+        domain.facts.push(FactKind::MessageRead { run: conversation.run.token(), name, turn: run.turns });
     }
-    domain.facts.push(Fact::MessageFence { run: conversation.run.token(), turn: run.turns, read: run.read });
+    domain.facts.push(FactKind::MessageFence { run: conversation.run.token(), turn: run.turns, read: run.read });
     out.push(Request::Turn {
         host_run: run.host_name,
         record,
@@ -917,7 +919,7 @@ pub(crate) fn delegated(
         Ask::Finish { .. } => Asked::Finish,
         Ask::SubAgent { .. } => Asked::SubAgent,
     };
-    facts.push(Fact::Called { run: run_id.token(), conversation: id.token(), call, ask: asked });
+    facts.push(FactKind::Called { run: run_id.token(), conversation: id.token(), call, ask: asked });
     // The call crossed its conversation's close: it would be withdrawn at once.
     if closing {
         out.push(Request::Return { spent: 0, call, result: Returned::Cancelled });
@@ -1031,7 +1033,7 @@ pub(crate) fn checked(domain: &mut Domain, env: &Env<Limits>, owner: Token, ran:
     let call = domain.calls.get_mut(id).expect("a call lives until it returns");
     let run = domain.runs.get(call.run).expect("a run lives until its calls have returned");
     domain.facts.about(call.run.token());
-    domain.facts.push(Fact::CheckFinished { run: call.run.token(), exit: ran.exit });
+    domain.facts.push(FactKind::CheckFinished { run: call.run.token(), exit: ran.exit });
     out.push(Request::ChecksEnded { host_run: run.host_name });
     let settled = match &mut call.work {
         Work::Landing(landing) => land::checked(landing, id, call.owner, run, may_finish(&run.state), ran, env, out),
@@ -1064,7 +1066,7 @@ pub(crate) fn delivered(domain: &mut Domain, owner: Token, delivery: Delivery, o
     let call = domain.calls.get_mut(id).expect("the named call is live");
     let run = domain.runs.get(call.run).expect("run waits for the terminal");
     domain.facts.about(call.run.token());
-    domain.facts.push(Fact::Delivered { run: call.run.token(), status: delivery.status() });
+    domain.facts.push(FactKind::Delivered { run: call.run.token(), status: delivery.status() });
     let settled = match &mut call.work {
         Work::Landing(landing) => land::delivered(landing, call.owner, delivery, run, out),
         Work::Child(_) | Work::Host(_) => unreachable!("host answers a delivery call"),
@@ -1095,7 +1097,7 @@ pub(crate) fn ended(domain: &mut Domain, conversation: Token, end: End, spend: S
     let (run_id, asker) = (conversation.run, conversation.asker);
     let bill = conversation.subtree_spent;
     facts.about(run_id.token());
-    facts.push(Fact::Ended { run: run_id.token(), conversation: id.token(), end });
+    facts.push(FactKind::Ended { run: run_id.token(), conversation: id.token(), end });
     conversations.retire(id);
     let run = runs.get_mut(run_id).expect("a run lives until its conversations have ended");
     run.spent = run.spent.accumulate(unaccounted).expect("terminal usage was checked before it was reported");
@@ -1173,17 +1175,36 @@ pub(crate) fn deadline(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request
 /// Whether `conversation` is a child, and for main what its run
 /// found in its checkout (its guides, and its repositories with checks), for
 /// their facts.
+pub(crate) struct OpeningFact {
+    pub(crate) child: bool,
+    pub(crate) parent: Option<Token>,
+    pub(crate) call: Option<Token>,
+    pub(crate) prepared: Option<(u32, u32)>,
+}
+
 pub(crate) fn opened(
     runs: &Slab<Run>,
     conversations: &Slab<Conversation>,
+    calls: &Calls,
     conversation: Token,
-) -> (bool, Option<(u32, u32)>) {
+) -> OpeningFact {
     let conversation = conversations.get(Id::from_token(conversation)).expect("a conversation is told of as it opens");
-    if conversation.asker.is_some() {
-        return (true, None);
+    if let Some(asker) = conversation.asker {
+        let call = calls.get(asker).expect("a child keeps its opening call alive");
+        return OpeningFact {
+            child: true,
+            parent: Some(call.conversation.token()),
+            call: Some(call.owner),
+            prepared: None,
+        };
     }
     let run = runs.get(conversation.run).expect("a run outlives its conversations");
-    (false, Some((run.found.guides.len(), run.found.checks.len())))
+    OpeningFact {
+        child: false,
+        parent: None,
+        call: None,
+        prepared: Some((run.found.guides.len(), run.found.checks.len())),
+    }
 }
 
 /// What a run's state implies, applied after every transition: whether its
@@ -1201,12 +1222,12 @@ fn follow(runs: &mut Slab<Run>, alarms: &mut Deadlines<Alarm>, facts: &mut Facts
         let offered = run.offered.len();
         for _ in 0..offered {
             let name = run.offered.pop().expect("retained offered prefix");
-            facts.push(Fact::MessageUnread { run: id.token(), name });
+            facts.push(FactKind::MessageUnread { run: id.token(), name });
         }
         let queued = run.inbox.len();
         for _ in 0..queued {
             let message = run.inbox.pop().expect("retained inbox prefix");
-            facts.push(Fact::MessageUnread { run: id.token(), name: message.name });
+            facts.push(FactKind::MessageUnread { run: id.token(), name: message.name });
         }
     }
     let alarm = Alarm::Deadline { run: id };
@@ -2064,4 +2085,9 @@ fn host_recover(
     };
     relay.stage = HostStage::Backoff { attempt: next, at };
     None
+}
+
+/// History presence is kept after its handle moves to the main opening.
+pub(crate) fn resumed(runs: &Slab<Run>, run: Token) -> bool {
+    runs.get(Id::from_token(run)).expect("an admitted run lives through its facts").resumed
 }

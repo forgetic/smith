@@ -47,6 +47,8 @@ pub enum Event {
         kit: Token,
         /// Single-use right to answer this call; exactly one terminal consumes it.
         reply_to: ReplyTo,
+        /// Content-free provider-parent observation context; never affects admission.
+        observation: Option<crate::CallInfo>,
         /// Parent-issued tool-call token, echoed on the single outcome terminal.
         call: Call,
         deadline: Time,

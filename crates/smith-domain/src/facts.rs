@@ -8,7 +8,7 @@
 //! conversation and of its session go together.
 
 use alloc::boxed::Box;
-use skein_lib::Token;
+use skein_lib::{Time, Token};
 use smith_domain_run::facts as run;
 use smith_domain_session as session;
 
@@ -74,7 +74,7 @@ fn fixed(count: usize, size: usize) -> u64 {
 }
 
 /// Something that happened in a child domain.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Fact {
     /// In the run child domain.
     Run {
@@ -86,4 +86,15 @@ pub enum Fact {
         /// Content-free child observation, dropped and counted if the queue is full.
         fact: session::Fact,
     },
+}
+
+impl Fact {
+    /// The injected time of the child step, independent of drain time.
+    #[must_use]
+    pub const fn emitted(&self) -> Time {
+        match self {
+            Fact::Run { fact } => fact.at,
+            Fact::Session { fact } => fact.at,
+        }
+    }
 }

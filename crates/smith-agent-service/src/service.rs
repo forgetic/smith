@@ -147,6 +147,7 @@ pub struct Service {
     output: Option<Token>,
     signals: Option<Token>,
     admitted: Option<Token>,
+    run_started: Time,
     cancel_pending: bool,
     answer_sent: bool,
     channel_ended: bool,
@@ -348,6 +349,7 @@ pub fn worst_case(limits: &Limits, endpoints: &llm::Endpoints) -> Option<u64> {
     let queue = limits.queue;
     let stages = Queue::<channel::OpenEvent>::worst_case(queue)?
         .checked_add(Queue::<domain::Fact>::worst_case(queue)?)?
+        .checked_add(u64::from(queue).checked_mul(limits.domain.session.completion_bytes)?)?
         .checked_add(List::<u8>::worst_case(TRACE_PROMPT_BYTES)?.checked_mul(2)?)?
         .checked_add(Queue::<ChannelLower>::worst_case(queue)?)?
         .checked_add(Queue::<PendingMessage>::worst_case(queue)?)?
@@ -464,6 +466,7 @@ impl Service {
             output: None,
             signals: None,
             admitted: None,
+            run_started: Time::ZERO,
             cancel_pending: false,
             answer_sent: false,
             channel_ended: false,
@@ -658,6 +661,7 @@ impl Service {
                 .push(domain::Grant { name: grant.name, valid: grant.valid })
                 .expect("grant count was checked at Start");
         }
+        self.run_started = self.domain_env.now;
         self.domain_events.push(domain::Event::Start {
             reply_to: ReplyTo::new(Token::new(1)),
             host_run: Token::new(1),
@@ -1351,7 +1355,7 @@ fn domain_down(service: &mut Service) {
                 None => break,
             };
             if service.trace_facts.room() > 0 {
-                service.trace_facts.push(fact);
+                service.trace_facts.push(fact.clone());
             } else {
                 service.lost_trace_facts = service.lost_trace_facts.saturating_add(1);
             }
@@ -1360,13 +1364,7 @@ fn domain_down(service: &mut Service) {
                 .channel
                 .as_mut()
                 .expect("framed agent owns its channel")
-                .send_fact(
-                    fact,
-                    service.domain_env.now.saturating_since(Time::ZERO),
-                    token,
-                    &mut service.channel_events,
-                    &mut service.channel_below,
-                )
+                .send_fact(&fact, service.run_started, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
                 service.mark_failed(Failure::Send);

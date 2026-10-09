@@ -95,6 +95,8 @@ pub enum Decoded {
     /// call is the opener's, kept under `ticket` (a ticket names a value the
     /// session cannot, and the layer that holds it resolves it).
     Delegated {
+        /// Declaration owner supplied by the protocol decoder.
+        source: crate::ToolSource,
         /// Opener-issued opaque name for a tool or delegated call.
         ticket: Token,
         /// Whether this delegated call may write, used to serialize writers.

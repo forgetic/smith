@@ -322,6 +322,18 @@ deadline, and cancel followed by terminate and kill. Its fuzzy sweep and
 memory test arrive in the next increment. The one-second focused share and
 workspace budgets are unchanged.
 
+### Fact emission metadata validation, 2026-10-09
+
+The eight new emission metadata stories passed serially through the heavy
+queue in 0.091 seconds. They delay drains across steps, retain workspace
+and delegated call identity through both terminals, record child parentage
+and resumed admission, retain completion numbering across retries, and
+check the accepted charge in the host's unit. The channel story checks
+elapsed emission time relative to activation. The legacy observer accepts
+both recorded baseline shapes and the new admission and opening fields,
+while rejecting malformed or unknown fields. Existing suite budgets are
+unchanged.
+
 The completed host process world was measured serially on 2026-10-08 with
 `measure -j 1`: nine focused stories, referee controls and the process-memory
 test passed in 0.163 seconds. The seeded crash sweep, including every step of

@@ -76,9 +76,12 @@ impl Domain {
 
 /// Handles one event, emitting at most [`max_out`] requests.
 pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
+    domain.facts.begin(env.now);
     match event {
         Event::Open { session, authority } => kit::open(domain, env, session, authority, out),
-        Event::Call { kit, reply_to, call, deadline } => kit::call(domain, env, kit, reply_to, call, deadline, out),
+        Event::Call { kit, reply_to, observation, call, deadline } => {
+            kit::call(domain, env, kit, reply_to, observation, call, deadline, out);
+        }
         Event::Close { kit } => kit::close(domain, kit, out),
         Event::Done { owner, done } => job::done(domain, env, owner, done, out),
     }

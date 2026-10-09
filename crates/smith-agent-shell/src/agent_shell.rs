@@ -206,7 +206,7 @@ impl Host for Agent {
         service::iterate(&mut self.service, now, wall);
         while let Some(fact) = self.service.pop_trace_fact() {
             if let Some(trace) = &mut self.trace {
-                trace.fact(fact, now.as_nanos());
+                trace.fact(&fact);
             }
         }
         while let Some(content) = self.service.pop_trace_content() {

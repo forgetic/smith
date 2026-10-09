@@ -155,7 +155,7 @@ fn block(part: provider::Part, tickets: &mut Tickets, opener: u64, served: &[age
             let call = match delegated(&name, served, tickets) {
                 Some((tool, effect)) => {
                     let ticket = tickets.issue(opener, Ticketed::Call { tool, arguments: arguments.clone() });
-                    agent::Decoded::Delegated { ticket, effect }
+                    agent::Decoded::Delegated { source: smith_domain_session::ToolSource::Run, ticket, effect }
                 }
                 None => decode(&name, &arguments),
             };

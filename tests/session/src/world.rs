@@ -1009,7 +1009,7 @@ impl World {
         }
         // The facts, drained as the shell would write them out.
         while let Some(fact) = self.agent.pop_fact() {
-            self.tell(fact);
+            self.tell(&fact);
         }
         while let Some(event) = self.provider_stage.next_event() {
             provider::step(&mut self.provider, &self.provider_stage.env, event, &mut self.provider_stage.out);
@@ -1806,47 +1806,48 @@ impl World {
         [self.wire.next_time(), self.agent.next_deadline(), self.provider.next_deadline()].into_iter().flatten().min()
     }
 
-    fn tell(&mut self, fact: agent::Fact) {
-        if let agent::Fact::Tools { opener, fact } = fact {
-            let (tools::Fact::Opened { session }
-            | tools::Fact::Refused { session, .. }
-            | tools::Fact::Started { session, .. }
-            | tools::Fact::Answered { session, .. }
-            | tools::Fact::Closing { session, .. }
-            | tools::Fact::Closed { session }) = fact;
+    fn tell(&mut self, fact: &agent::Fact) {
+        let fact = fact.kind;
+        if let agent::FactKind::Tools { opener, fact } = fact {
+            let (tools::FactKind::Opened { session }
+            | tools::FactKind::Refused { session, .. }
+            | tools::FactKind::Started { session, .. }
+            | tools::FactKind::Answered { session, .. }
+            | tools::FactKind::Closing { session, .. }
+            | tools::FactKind::Closed { session }) = fact;
             assert!(self.sessions.contains_key(&opener.raw()), "a kit's fact names an opener that opened");
             if let Some(&known) = self.openers.get(&session) {
                 assert_eq!(known, opener.raw(), "a kit's fact names the opener of its session");
             }
-            if let tools::Fact::Started { session, tool } = fact {
+            if let tools::FactKind::Started { session, tool } = fact {
                 self.starting.entry(session).or_default().push_back(tool);
             }
         }
         let told = &mut self.told;
-        if let agent::Fact::CompletionAnswered { calls, invalid, .. } = fact {
+        if let agent::FactKind::CompletionAnswered { calls, invalid, .. } = fact {
             told.calls += calls;
             told.invalid_calls += invalid;
         }
         let count = match fact {
-            agent::Fact::Opened { .. } => &mut told.opened,
-            agent::Fact::CompletionStarted { .. } => &mut told.completions_started,
-            agent::Fact::CompletionAnswered { .. } => &mut told.completions_answered,
-            agent::Fact::CompletionFailed { .. } => &mut told.completions_failed,
-            agent::Fact::CompletionCancelled { .. } => &mut told.completions_cancelled,
-            agent::Fact::CompletionRetried { .. } => &mut told.completions_retried,
-            agent::Fact::Tools { opener: _, fact } => match fact {
-                tools::Fact::Opened { .. } => &mut told.kits_opened,
-                tools::Fact::Closed { .. } => &mut told.kits_closed,
-                tools::Fact::Started { .. } => &mut told.tools_started,
-                tools::Fact::Answered { .. } => &mut told.tools_answered,
-                tools::Fact::Refused { .. } | tools::Fact::Closing { .. } => return,
+            agent::FactKind::Opened { .. } => &mut told.opened,
+            agent::FactKind::CompletionStarted { .. } => &mut told.completions_started,
+            agent::FactKind::CompletionAnswered { .. } => &mut told.completions_answered,
+            agent::FactKind::CompletionFailed { .. } => &mut told.completions_failed,
+            agent::FactKind::CompletionCancelled { .. } => &mut told.completions_cancelled,
+            agent::FactKind::CompletionRetried { .. } => &mut told.completions_retried,
+            agent::FactKind::Tools { opener: _, fact } => match fact {
+                tools::FactKind::Opened { .. } => &mut told.kits_opened,
+                tools::FactKind::Closed { .. } => &mut told.kits_closed,
+                tools::FactKind::Started { .. } => &mut told.tools_started,
+                tools::FactKind::Answered { .. } => &mut told.tools_answered,
+                tools::FactKind::Refused { .. } | tools::FactKind::Closing { .. } => return,
             },
-            agent::Fact::DelegateStarted { .. } => &mut told.delegates_started,
-            agent::Fact::DelegateAnswered { .. } => &mut told.delegates_answered,
-            agent::Fact::DelegateCancelled { .. } => &mut told.delegates_cancelled,
-            agent::Fact::Yielded { .. } => &mut told.yielded,
-            agent::Fact::Used { .. } => &mut told.used,
-            agent::Fact::Ended { .. } => &mut told.ended,
+            agent::FactKind::DelegateStarted { .. } => &mut told.delegates_started,
+            agent::FactKind::DelegateAnswered { .. } => &mut told.delegates_answered,
+            agent::FactKind::DelegateCancelled { .. } => &mut told.delegates_cancelled,
+            agent::FactKind::Yielded { .. } => &mut told.yielded,
+            agent::FactKind::Used { .. } => &mut told.used,
+            agent::FactKind::Ended { .. } => &mut told.ended,
         };
         *count += 1;
     }

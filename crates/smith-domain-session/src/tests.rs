@@ -12,8 +12,8 @@ use crate::llm::{
     Block, Completion, Decoded, Descriptor, Endpoint, Failure, Message, Problem, Prompt, Returned, Role, Stop, Usage,
 };
 use crate::{
-    Budget, Dimension, Domain, End, Event, Fact, Limits, MAX_PARALLEL, Request, Spec, Yield, fire, max_out, resume,
-    step, worst_case,
+    Budget, Dimension, Domain, End, Event, FactKind as Fact, Limits, MAX_PARALLEL, Request, Spec, Yield, fire, max_out,
+    resume, step, worst_case,
 };
 
 /// The budget every spec asks for, unless a test says otherwise: the most the
@@ -254,7 +254,7 @@ impl Harness {
     /// Drains the facts told so far, checking that they are `expected`.
     fn told(&mut self, expected: &[Fact]) {
         for fact in expected {
-            assert_eq!(self.domain.pop_fact().as_ref(), Some(fact));
+            assert_eq!(pop_kind(&mut self.domain).as_ref(), Some(fact));
         }
         assert_eq!(self.domain.pop_fact(), None, "nothing more was told");
     }
@@ -381,7 +381,7 @@ const FINISH: Descriptor = Descriptor { ticket: Token::new(7), effect: Effect::W
 
 /// The LLM's call `id` to a tool the opener serves, kept under `ticket`.
 fn delegated(id: &[u8], ticket: u64, effect: Effect) -> Block {
-    let call = Decoded::Delegated { ticket: Token::new(ticket), effect };
+    let call = Decoded::Delegated { source: crate::ToolSource::Run, ticket: Token::new(ticket), effect };
     Block::ToolCall { id: bytes(id), name: bytes(b"finish"), input: bytes(b"{}"), call, replay: None }
 }
 
@@ -464,7 +464,7 @@ fn ran(owner: Token, content: &[u8]) -> Event {
 }
 
 /// A fact the tools told, as the session for `opener` passes it on.
-fn by_tools(opener: Token, fact: tools::Fact) -> Fact {
+fn by_tools(opener: Token, fact: tools::FactKind) -> Fact {
     Fact::Tools { opener, fact }
 }
 
@@ -605,11 +605,11 @@ fn an_invalid_call_is_answered_with_its_problem_and_nothing_runs_for_it() {
 
     let opener = Token::new(1);
     let started = Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 };
-    let kit = Fact::Tools { opener, fact: tools::Fact::Opened { session: owner } };
-    let opening = [h.domain.pop_fact(), h.domain.pop_fact(), h.domain.pop_fact()];
+    let kit = Fact::Tools { opener, fact: tools::FactKind::Opened { session: owner } };
+    let opening = [pop_kind(&mut h.domain), pop_kind(&mut h.domain), pop_kind(&mut h.domain)];
     assert_eq!(opening, [Some(Fact::Opened { opener }), Some(started), Some(kit)]);
     let answered = Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 3, calls: 3, invalid: 2 };
-    assert_eq!(h.domain.pop_fact(), Some(answered));
+    assert_eq!(pop_kind(&mut h.domain), Some(answered));
 }
 
 #[test]
@@ -864,12 +864,15 @@ fn the_tools_tell_of_each_call_and_the_session_passes_it_on() {
     h.told(&[
         Fact::Opened { opener },
         Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 },
-        by_tools(opener, tools::Fact::Opened { session: owner }),
+        by_tools(opener, tools::FactKind::Opened { session: owner }),
         Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 3, calls: 2, invalid: 0 },
         Fact::Used { opener, usage: USAGE },
-        by_tools(opener, tools::Fact::Started { session: owner, tool: read }),
-        by_tools(opener, tools::Fact::Started { session: owner, tool: read }),
-        by_tools(opener, tools::Fact::Answered { session: owner, tool: read, verdict: tools::Verdict::Read, bytes: 1 }),
+        by_tools(opener, tools::FactKind::Started { session: owner, tool: read }),
+        by_tools(opener, tools::FactKind::Started { session: owner, tool: read }),
+        by_tools(
+            opener,
+            tools::FactKind::Answered { session: owner, tool: read, verdict: tools::Verdict::Read, bytes: 1 },
+        ),
     ]);
 }
 
@@ -1013,14 +1016,14 @@ fn delegated_calls_are_told_as_they_start_and_end() {
     h.told(&[
         Fact::Opened { opener },
         Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 },
-        Fact::Tools { opener, fact: tools::Fact::Opened { session: owner } },
+        Fact::Tools { opener, fact: tools::FactKind::Opened { session: owner } },
         Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 2, calls: 2, invalid: 0 },
         Fact::Used { opener, usage: USAGE },
         Fact::DelegateStarted { opener, block: 0 },
         Fact::DelegateStarted { opener, block: 1 },
         Fact::DelegateAnswered { opener, bytes: 3, error: true },
         // The kit closes as the session does, with nothing of its own to settle.
-        Fact::Tools { opener, fact: tools::Fact::Closed { session: owner } },
+        Fact::Tools { opener, fact: tools::FactKind::Closed { session: owner } },
         Fact::DelegateCancelled { opener },
         Fact::Ended { opener, end: End::Closed, turns: 1, usage: USAGE },
     ]);
@@ -1486,7 +1489,7 @@ fn oversized_provider_completions_end_before_calls_or_turns() {
         id: bytes(b"oversized"),
         name: bytes(b"finish"),
         input: huge,
-        call: Decoded::Delegated { ticket: FINISH.ticket, effect: Effect::Write },
+        call: Decoded::Delegated { source: crate::ToolSource::Run, ticket: FINISH.ticket, effect: Effect::Write },
         replay: None,
     };
     let completion = completion(Box::new([call]), Stop::ToolUse);
@@ -1537,20 +1540,20 @@ fn a_session_tells_what_happens_as_facts() {
     h.told(&[
         Fact::Opened { opener },
         Fact::CompletionStarted { opener, attempt: 0, messages: 1, max_tokens: 1024 },
-        by_tools(opener, tools::Fact::Opened { session: owner }),
+        by_tools(opener, tools::FactKind::Opened { session: owner }),
     ]);
 
     let (run, _) = running(h.step(Event::Completed { owner, completion: reading() }));
     h.told(&[
         Fact::CompletionAnswered { opener, stop: Stop::ToolUse, blocks: 1, calls: 1, invalid: 0 },
         Fact::Used { opener, usage: USAGE },
-        by_tools(opener, tools::Fact::Started { session: owner, tool: tools::Tool::Read }),
+        by_tools(opener, tools::FactKind::Started { session: owner, tool: tools::Tool::Read }),
     ]);
     drop(calling(h.step(ran(run, b"main.rs"))));
     let verdict = tools::Verdict::Read;
     h.told(&[
         Fact::CompletionStarted { opener, attempt: 0, messages: 3, max_tokens: 1024 },
-        by_tools(opener, tools::Fact::Answered { session: owner, tool: tools::Tool::Read, verdict, bytes: 7 }),
+        by_tools(opener, tools::FactKind::Answered { session: owner, tool: tools::Tool::Read, verdict, bytes: 7 }),
     ]);
     drop(yielded(h.step(Event::Completed { owner, completion: done() })));
     h.told(&[
@@ -1562,7 +1565,7 @@ fn a_session_tells_what_happens_as_facts() {
     let Some(Request::Ended { opener: _, end, turns, usage, .. }) = end else {
         panic!("expected the end, not {end:?}");
     };
-    h.told(&[Fact::Ended { opener, end, turns, usage }, by_tools(opener, tools::Fact::Closed { session: owner })]);
+    h.told(&[Fact::Ended { opener, end, turns, usage }, by_tools(opener, tools::FactKind::Closed { session: owner })]);
 }
 
 #[test]
@@ -1585,7 +1588,7 @@ fn retries_cancels_and_refusals_are_told_too() {
     h.told(&[
         Fact::Opened { opener },
         started,
-        Fact::Tools { opener, fact: tools::Fact::Opened { session: owner } },
+        Fact::Tools { opener, fact: tools::FactKind::Opened { session: owner } },
         Fact::CompletionFailed { opener, failure: Failure::Overloaded, evidence: crate::llm::Evidence::Unknown },
         Fact::CompletionRetried { opener, attempt: 1, delay },
     ]);
@@ -1598,7 +1601,7 @@ fn retries_cancels_and_refusals_are_told_too() {
     h.told(&[Fact::Ended { opener: refused, end: End::Busy, turns: 0, usage: Usage::ZERO }]);
 
     assert_eq!(h.step(Event::Close { session: owner }), Some(Request::Cancel { owner }));
-    h.told(&[Fact::Tools { opener, fact: tools::Fact::Closed { session: owner } }]);
+    h.told(&[Fact::Tools { opener, fact: tools::FactKind::Closed { session: owner } }]);
     drop(h.step(Event::Cancelled { owner }));
     let end = Fact::Ended { opener, end: End::Closed, turns: 0, usage: Usage::ZERO };
     h.told(&[Fact::CompletionCancelled { opener }, end]);
@@ -1647,8 +1650,12 @@ fn the_worst_case_is_bounded_or_refused() {
     let bytes = worst_case(&LIMITS).expect("the test limits fit");
     assert!(bytes > 2 * LIMITS.session_bytes, "every session may hold its bytes");
     let told = worst_case(&Limits { facts: LIMITS.facts + 1, ..LIMITS }).expect("the test limits fit");
-    let fact = u64::try_from(size_of::<Fact>()).expect("a size fits");
-    assert_eq!(told - bytes, fact, "the facts' queue is counted, and nothing else of theirs");
+    let fact = u64::try_from(size_of::<crate::Fact>()).expect("a size fits");
+    assert_eq!(
+        told - bytes,
+        fact + LIMITS.completion_bytes,
+        "the stamped fact and bounded provider identity are counted"
+    );
     assert_eq!(worst_case(&Limits { sessions: u32::MAX, session_bytes: u64::MAX, ..LIMITS }), None);
 }
 
@@ -1788,7 +1795,7 @@ fn raw_overflow_ends_before_the_completion_is_charged_or_told() {
         Some(Request::Ended { opener: Token::new(1), end: End::UsageOverflow, turns: 1, usage: first })
     );
     while let Some(fact) = harness.domain.pop_fact() {
-        if let Fact::Used { usage, .. } = fact {
+        if let Fact::Used { usage, .. } = fact.kind {
             assert_ne!(usage, second);
         }
     }
@@ -1858,4 +1865,187 @@ fn exact_batch_envelope_keeps_both_maximum_results_and_one_byte_short_starts_not
         Some(ended(End::TranscriptFull, 1))
     );
     assert_eq!((refused.domain.runs(), refused.domain.jobs()), (0, 0), "no partial batch is published");
+}
+
+#[test]
+fn delayed_facts_keep_their_times_completion_numbers_and_exact_call_measurements() {
+    let mut h = Harness::new(LIMITS);
+    h.env.now = Time::from_nanos(7);
+    let (owner, _) = h.open(1);
+    h.env.now = Time::from_nanos(11);
+    let (run, _) = running(h.step(Event::Completed { owner, completion: reading() }));
+    h.env.now = Time::from_nanos(13);
+    drop(calling(h.step(ran(run, b"main.rs"))));
+    h.env.now = Time::from_nanos(17);
+    drop(yielded(h.step(Event::Completed { owner, completion: done() })));
+    h.env.now = Time::from_nanos(19);
+    drop(h.step(Event::Close { session: owner }));
+    h.env.now = Time::from_nanos(99);
+    let facts = observed_facts(&mut h);
+    assert_eq!(fact_times(&facts).as_ref(), [7, 7, 7, 11, 11, 11, 13, 13, 17, 17, 17, 19, 19].map(Time::from_nanos));
+    for index in [1, 3, 4] {
+        assert_eq!(facts[index].response.expect("first response").number, 1);
+    }
+    for index in [6, 8, 9] {
+        assert_eq!(facts[index].response.expect("second response").number, 2);
+    }
+    assert_eq!(facts[4].response.expect("charged usage").spent, Some(0));
+    let call = facts[5].call.as_ref().expect("workspace start metadata");
+    assert_eq!(&*call.id, b"c1");
+    assert_eq!(&*call.name, b"tool");
+    assert_eq!(call.source, crate::ToolSource::Workspace);
+    assert_eq!(call.effect, Effect::Read);
+    assert_eq!(call.input_bytes, 2);
+    assert_eq!(call.deadline, Time::from_nanos(11).saturating_add(LIMITS.tool_timeout));
+    assert_eq!(facts[7].call.as_ref(), Some(call), "terminal retains metadata after transcript advances");
+}
+
+#[test]
+fn delegated_facts_keep_identity_source_and_time_at_both_terminals() {
+    let mut h = Harness::new(LIMITS);
+    h.env.now = Time::from_nanos(7);
+    let (owner, _) = h.open(1);
+    h.env.now = Time::from_nanos(11);
+    let mut host = delegated(b"host-a", 9, Effect::Read);
+    if let Block::ToolCall { call: Decoded::Delegated { source, .. }, .. } = &mut host {
+        *source = crate::ToolSource::Host;
+    }
+    let content = Box::new([host, delegated(b"run-b", 10, Effect::Read)]);
+    let runs = h.batch(Event::Completed { owner, completion: completion(content, Stop::ToolUse) });
+    h.env.now = Time::from_nanos(13);
+    assert_eq!(h.step(answered(runs.as_slice()[0], 20, 3, true)), None);
+    h.env.now = Time::from_nanos(17);
+    drop(h.batch(Event::Close { session: owner }));
+    h.env.now = Time::from_nanos(19);
+    drop(h.step(answer_cancelled(runs.as_slice()[1])));
+    h.env.now = Time::from_nanos(99);
+    let facts = observed_facts(&mut h);
+    assert_eq!(fact_times(&facts).as_ref(), [7, 7, 7, 11, 11, 11, 11, 13, 17, 19, 19].map(Time::from_nanos));
+    let host = facts[5].call.as_ref().expect("host start");
+    let run = facts[6].call.as_ref().expect("run start");
+    assert_eq!(&*host.id, b"host-a");
+    assert_eq!(host.source, crate::ToolSource::Host);
+    assert_eq!(host.owner, runs.as_slice()[0]);
+    assert_eq!(&*run.id, b"run-b");
+    assert_eq!(run.source, crate::ToolSource::Run);
+    assert_eq!(run.owner, runs.as_slice()[1]);
+    assert_eq!(host.effect, Effect::Read);
+    assert_eq!(host.input_bytes, 2);
+    assert_eq!(host.deadline, Time::from_nanos(7).saturating_add(BUDGET.time));
+    assert_eq!(facts[7].call.as_ref(), Some(host));
+    assert_eq!(facts[9].call.as_ref(), Some(run));
+}
+
+#[test]
+fn failed_retried_and_cancelled_facts_keep_one_response_number_and_step_times() {
+    let mut h = Harness::new(LIMITS);
+    h.env.now = Time::from_nanos(7);
+    let (owner, _) = h.open(1);
+    h.env.now = Time::from_nanos(11);
+    drop(h.step(Event::Failed {
+        owner,
+        failure: Failure::Overloaded,
+        evidence: crate::llm::Evidence::Unknown,
+        detail: bytes(b""),
+    }));
+    h.env.now = h.domain.next_deadline().expect("retry deadline");
+    let retried_at = h.env.now;
+    drop(calling(h.fire()));
+    h.after(Duration::from_nanos(2));
+    let closed_at = h.env.now;
+    drop(h.step(Event::Close { session: owner }));
+    h.after(Duration::from_nanos(2));
+    let cancelled_at = h.env.now;
+    drop(h.step(Event::Cancelled { owner }));
+    h.after(Duration::from_secs(10));
+    let facts = observed_facts(&mut h);
+    assert_eq!(
+        fact_times(&facts).as_ref(),
+        [
+            Time::from_nanos(7),
+            Time::from_nanos(7),
+            Time::from_nanos(7),
+            Time::from_nanos(11),
+            Time::from_nanos(11),
+            retried_at,
+            closed_at,
+            cancelled_at,
+            cancelled_at
+        ]
+    );
+    for index in [1, 3, 4, 5, 7] {
+        assert_eq!(facts[index].response.expect("same completion").number, 1);
+    }
+}
+
+#[test]
+fn usage_fact_carries_the_exact_accepted_host_unit_charge() {
+    let mut h = Harness::new(LIMITS);
+    let mut opened = opening(spec());
+    opened.prices = crate::record::Prices { input: 7, cached: 3, output: 11, unit: 5 };
+    let expected = opened.prices.price(USAGE).expect("price fits");
+    step(&mut h.domain, &h.env, Event::Open { opener: Token::new(1), opening: opened }, &mut h.out);
+    let Some(Request::Opened { session: owner, .. }) = h.next() else { panic!("session opens") };
+    drop(calling(h.one()));
+    step(&mut h.domain, &h.env, Event::Completed { owner, completion: done() }, &mut h.out);
+    for _ in 0..max_out(&h.env.limits) {
+        drop(h.out.pop());
+    }
+    let facts = observed_facts(&mut h);
+    let used = &facts[4];
+    assert_eq!(used.kind, Fact::Used { opener: Token::new(1), usage: USAGE });
+    assert_eq!(used.response, Some(crate::ResponseInfo { number: 1, spent: Some(expected) }));
+}
+
+fn observed_facts(harness: &mut Harness) -> Box<[crate::Fact]> {
+    let mut facts = List::with_capacity(LIMITS.facts);
+    for _ in 0..LIMITS.facts {
+        if let Some(fact) = harness.domain.pop_fact() {
+            facts.push(fact).expect("room for all observations");
+        }
+    }
+    facts.into_boxed()
+}
+
+fn fact_times(facts: &[crate::Fact]) -> Box<[Time]> {
+    let mut times = List::with_capacity(LIMITS.facts);
+    for fact in facts {
+        times.push(fact.at).expect("room for all observations");
+    }
+    times.into_boxed()
+}
+
+fn pop_kind(domain: &mut Domain) -> Option<Fact> {
+    let fact = domain.pop_fact()?;
+    Some(fact.kind)
+}
+
+#[test]
+fn a_workspace_refusal_keeps_its_provider_identity_without_starting_work() {
+    let mut h = Harness::new(LIMITS);
+    let (owner, _) = h.open(1);
+    h.env.now = Time::from_nanos(11);
+    let call = Call::Read { path: outside(), skip: 0, lines: None };
+    let content = Box::new([tool_call(b"refused", call)]);
+    assert_eq!(h.step(Event::Completed { owner, completion: completion(content, Stop::ToolUse) }), None);
+    h.env.now = Time::from_nanos(99);
+    let facts = observed_facts(&mut h);
+    assert_eq!(facts.len(), 6);
+    assert_eq!(facts[5].at, Time::from_nanos(11));
+    let call = facts[5].call.as_ref().expect("refusal metadata");
+    assert_eq!(&*call.id, b"refused");
+    assert_eq!(call.source, crate::ToolSource::Workspace);
+    assert_eq!(call.input_bytes, 2);
+    assert_eq!(
+        facts[5].kind,
+        Fact::Tools {
+            opener: Token::new(1),
+            fact: tools::FactKind::Answered {
+                session: owner,
+                tool: tools::Tool::Read,
+                verdict: tools::Verdict::Outside,
+                bytes: 0
+            }
+        }
+    );
 }

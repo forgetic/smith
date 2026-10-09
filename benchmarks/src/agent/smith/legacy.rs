@@ -98,6 +98,32 @@ impl Value {
         }
         Ok(())
     }
+
+    fn optional_token(&self, field: &str) -> Result<(), ParseError> {
+        match self.field(field)? {
+            Self::Name(name) if name == "None" => Ok(()),
+            Self::Tuple { name, values } if name == "Some" && values.len() == 1 => match &values[0] {
+                Self::Tuple { name, values } if name == "Token" && values.len() == 1 => {
+                    values[0].number(field)?;
+                    Ok(())
+                }
+                Self::Name(_)
+                | Self::Number(_)
+                | Self::String(_)
+                | Self::Bytes(_)
+                | Self::Sequence(_)
+                | Self::Tuple { .. }
+                | Self::Struct { .. } => Err(bad(field, "expected Some(Token(integer))")),
+            },
+            Self::Name(_)
+            | Self::Number(_)
+            | Self::String(_)
+            | Self::Bytes(_)
+            | Self::Sequence(_)
+            | Self::Tuple { .. }
+            | Self::Struct { .. } => Err(bad(field, "expected optional Token")),
+        }
+    }
 }
 
 struct Parser<'a> {
@@ -422,6 +448,7 @@ pub enum Observation {
 fn validate_fact(domain: &str, fact: &Value) -> Result<(), ParseError> {
     let name = fact.name().ok_or_else(|| bad("fact", "expected named fact"))?;
     let fields: &[&str] = match (domain, name) {
+        ("Run", "Admitted") if fact.field("resumed").is_ok() => &["run", "resumed"],
         ("Run", "Admitted") => &["run"],
         ("Run", "MessageReceived") => &["run", "name", "bytes"],
         ("Run", "MessageRefused") => &["run", "name", "bytes", "reason"],
@@ -429,6 +456,9 @@ fn validate_fact(domain: &str, fact: &Value) -> Result<(), ParseError> {
         ("Run", "MessageFence") => &["run", "turn", "read"],
         ("Run", "MessageUnread") => &["run", "name"],
         ("Run", "Prepared") => &["run", "guides", "checks"],
+        ("Run", "Opened") if fact.field("parent").is_ok() || fact.field("call").is_ok() => {
+            &["run", "conversation", "child", "parent", "call"]
+        }
         ("Run", "Opened") => &["run", "conversation", "child"],
         ("Run", "Ended") => &["run", "conversation", "end"],
         ("Run", "Called") => &["run", "conversation", "call", "ask"],
@@ -458,6 +488,7 @@ fn validate_fact(domain: &str, fact: &Value) -> Result<(), ParseError> {
     fact.fields(fields)?;
     for field in fields {
         match *field {
+            "parent" | "call" if domain == "Run" && name == "Opened" => fact.optional_token(field)?,
             "run" | "conversation" | "call" | "opener" | "session" | "name" => {
                 fact.token(field)?;
             }
@@ -473,11 +504,7 @@ fn validate_fact(domain: &str, fact: &Value) -> Result<(), ParseError> {
             }
             "read" => validate_read(fact.field(field)?)?,
             "reason" => unit(fact.field(field)?, field, &["TooLarge", "Full", "NameInUse", "Ending"])?,
-            "child" | "error" => {
-                if !matches!(fact.field(field)?, Value::Name(value) if value == "true" || value == "false") {
-                    return Err(bad(field, "expected boolean"));
-                }
-            }
+            "child" | "error" | "resumed" => unit(fact.field(field)?, field, &["true", "false"])?,
             "ask" => unit(fact.field(field)?, field, &["Wait", "Host", "Deliver", "Finish", "SubAgent"])?,
             "result" => unit(
                 fact.field(field)?,

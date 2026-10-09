@@ -1557,8 +1557,9 @@ impl World {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     fn fact(&mut self, fact: &run::facts::Fact) {
-        use run::facts::Fact;
-        let (Fact::Admitted { run }
+        use run::facts::FactKind as Fact;
+        let fact = &fact.kind;
+        let (Fact::Admitted { run, .. }
         | Fact::MessageRead { run, .. }
         | Fact::MessageFence { run, .. }
         | Fact::MessageUnread { run, .. }
@@ -1831,8 +1832,8 @@ impl World {
 /// A fact's kind, to count it by.
 ///
 /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
-fn kind(fact: &run::facts::Fact) -> &'static str {
-    use run::facts::Fact;
+fn kind(fact: &run::facts::FactKind) -> &'static str {
+    use run::facts::FactKind as Fact;
     match fact {
         Fact::MessageRead { .. } => "message_read",
         Fact::MessageFence { .. } => "message_fence",

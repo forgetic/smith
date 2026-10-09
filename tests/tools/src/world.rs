@@ -796,7 +796,7 @@ impl World {
             self.session_mut(session).calls.push(name);
             let deadline = self.now.saturating_add(self.settings.call_timeout);
             let reply_to = ReplyTo::new(Token::new(name));
-            self.stage.push(tools::Event::Call { kit, reply_to, call, deadline });
+            self.stage.push(tools::Event::Call { kit, observation: None, reply_to, call, deadline });
             self.stats.calls += 1;
             names.push(name);
         }
@@ -852,13 +852,13 @@ impl World {
         for (name, session) in &self.sessions {
             let mut told = Told::default();
             for fact in self.facts.get(name).map_or(&[][..], Vec::as_slice) {
-                match fact {
-                    tools::Fact::Opened { .. } => told.opened += 1,
-                    tools::Fact::Refused { .. } => told.refused += 1,
-                    tools::Fact::Started { .. } => told.started += 1,
-                    tools::Fact::Answered { .. } => told.answered += 1,
-                    tools::Fact::Closing { .. } => {}
-                    tools::Fact::Closed { .. } => told.closed += 1,
+                match fact.kind {
+                    tools::FactKind::Opened { .. } => told.opened += 1,
+                    tools::FactKind::Refused { .. } => told.refused += 1,
+                    tools::FactKind::Started { .. } => told.started += 1,
+                    tools::FactKind::Answered { .. } => told.answered += 1,
+                    tools::FactKind::Closing { .. } => {}
+                    tools::FactKind::Closed { .. } => told.closed += 1,
                 }
             }
             let calls = session.calls.len();
@@ -947,13 +947,13 @@ struct Told {
 ///
 /// World contract: domain/tools.md, sections 7 and 9; testing-strategy.md, section 2.2.
 fn session_of(fact: &tools::Fact) -> Token {
-    match fact {
-        tools::Fact::Opened { session }
-        | tools::Fact::Refused { session, .. }
-        | tools::Fact::Started { session, .. }
-        | tools::Fact::Answered { session, .. }
-        | tools::Fact::Closing { session, .. }
-        | tools::Fact::Closed { session } => *session,
+    match &fact.kind {
+        tools::FactKind::Opened { session }
+        | tools::FactKind::Refused { session, .. }
+        | tools::FactKind::Started { session, .. }
+        | tools::FactKind::Answered { session, .. }
+        | tools::FactKind::Closing { session, .. }
+        | tools::FactKind::Closed { session } => *session,
     }
 }
 

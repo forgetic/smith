@@ -563,7 +563,11 @@ fn full_history_batch_credit_keeps_maximum_late_results_or_prevents_every_effect
                 id: id.into(),
                 name: b"served".as_slice().into(),
                 input: b"{}".as_slice().into(),
-                call: llm::Decoded::Delegated { ticket: Token::new(19), effect: Effect::Read },
+                call: llm::Decoded::Delegated {
+                    source: smith_domain_session::ToolSource::Run,
+                    ticket: Token::new(19),
+                    effect: Effect::Read,
+                },
                 replay: Some(llm::Replay { bytes: b"\0token\xff".as_slice().into() }),
             });
             held += u64::try_from(

@@ -35,7 +35,7 @@ use crate::boundary::{Expect, Refusal, Request};
 use crate::call::{self, Call, Outcome};
 use crate::domain::Domain;
 use crate::edit::Edit;
-use crate::facts::{self, Fact, Facts};
+use crate::facts::{self, FactKind, Facts};
 use crate::job::{self, Job, Work};
 use crate::knowledge::Knowledge;
 use crate::limits::Limits;
@@ -85,20 +85,25 @@ pub(crate) fn open(
         state: State::Open,
     };
     let id = domain.kits.insert(kit).expect("checked for room above");
-    domain.facts.push(Fact::Opened { session });
+    domain.facts.push(FactKind::Opened { session });
     out.push(Request::Opened { session, kit: id.token() });
 }
 
 fn refuse(domain: &mut Domain, session: Token, refusal: Refusal, out: &mut Queue<Request>) {
-    domain.facts.push(Fact::Refused { session, refusal });
+    domain.facts.push(FactKind::Refused { session, refusal });
     out.push(Request::Refused { session, refusal });
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the call boundary carries its affine right and observation context beside its work"
+)]
 pub(crate) fn call(
     domain: &mut Domain,
     env: &Env<Limits>,
     kit: Token,
     reply_to: ReplyTo,
+    observation: Option<crate::CallInfo>,
     call: Call,
     deadline: Time,
     out: &mut Queue<Request>,
@@ -110,13 +115,13 @@ pub(crate) fn call(
     let tool = call::tool(&call);
     match admit(kit, call, deadline, env) {
         Ok(work) => {
-            facts.push(Fact::Started { session: kit.session, tool });
-            let job = job::start(jobs, id, reply_to, work, deadline, env, out);
+            facts.push_call(FactKind::Started { session: kit.session, tool }, observation);
+            let job = job::start(jobs, id, reply_to, observation, work, deadline, env, out);
             let fresh = kit.jobs.insert(job).expect("checked for room at the entrance");
             assert!(fresh, "a job is new to its kit");
         }
         Err(outcome) => {
-            facts.push(facts::answered(kit.session, tool, &outcome));
+            facts.push_call(facts::answered(kit.session, tool, &outcome), observation);
             out.push(Request::Answer { to: reply_to, outcome });
         }
     }
@@ -131,7 +136,7 @@ pub(crate) fn close(domain: &mut Domain, kit: Token, out: &mut Queue<Request>) {
         return;
     }
     kit.state = State::Closing;
-    domain.facts.push(Fact::Closing { session: kit.session, running: kit.jobs.len() });
+    domain.facts.push(FactKind::Closing { session: kit.session, running: kit.jobs.len() });
     for job in &kit.jobs {
         job::cancel(*job, out);
     }
@@ -172,7 +177,7 @@ pub(crate) fn finished(kits: &mut Slab<Kit>, facts: &mut Facts, id: Id<Kit>, job
 fn end(kits: &mut Slab<Kit>, facts: &mut Facts, id: Id<Kit>, out: &mut Queue<Request>) {
     let kit = kits.get_mut(id).expect("a kit lives until it is retired");
     kit.state = State::Closed;
-    facts.push(Fact::Closed { session: kit.session });
+    facts.push(FactKind::Closed { session: kit.session });
     out.push(Request::Closed { session: kit.session });
     kits.retire(id);
 }

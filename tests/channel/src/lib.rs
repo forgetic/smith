@@ -649,12 +649,12 @@ impl World {
     }
 
     /// Offer one content-free domain fact through the agent's bounded output.
-    pub fn agent_sends_fact(&mut self, fact: smith_domain::Fact, elapsed: skein_lib::Duration) -> bool {
+    pub fn agent_sends_fact(&mut self, fact: &smith_domain::Fact, started: skein_lib::Time) -> bool {
         if let Half::Agent(agent) = &mut self.agent.half {
             return agent
                 .send_fact(
                     fact,
-                    elapsed,
+                    started,
                     skein_lib::Token::new(30),
                     &mut self.agent.agent_events,
                     &mut self.agent.below,

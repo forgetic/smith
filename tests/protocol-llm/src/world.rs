@@ -1639,7 +1639,7 @@ impl World {
         let (mut opened, mut ended, mut answered) = (0_u32, 0_u32, 0_u32);
         for fact in &self.facts {
             match fact {
-                Fact::Session { fact: sf::Used { usage, .. } } => {
+                Fact::Session { fact: sf { kind: smith_domain::session::FactKind::Used { usage, .. }, .. } } => {
                     used = used
                         .accumulate(run::Spend {
                             units: 0,
@@ -1651,9 +1651,9 @@ impl World {
                         })
                         .expect("bounded observed usage");
                 }
-                Fact::Run { fact: rf::Fact::Opened { .. } } => opened += 1,
-                Fact::Run { fact: rf::Fact::Ended { .. } } => ended += 1,
-                Fact::Run { fact: rf::Fact::Answered { .. } } => answered += 1,
+                Fact::Run { fact: rf::Fact { kind: rf::FactKind::Opened { .. }, .. } } => opened += 1,
+                Fact::Run { fact: rf::Fact { kind: rf::FactKind::Ended { .. }, .. } } => ended += 1,
+                Fact::Run { fact: rf::Fact { kind: rf::FactKind::Answered { .. }, .. } } => answered += 1,
                 Fact::Run { .. } | Fact::Session { .. } => {}
             }
         }

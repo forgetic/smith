@@ -150,12 +150,16 @@ impl Peer {
             Some(held) if held <= limit && self.asks.len() < self.asks.capacity() => held,
             Some(_) | None => return sllm::Decoded::Invalid { problem: sllm::Problem::TooLarge },
         };
+        let source = match &ask {
+            Ask::Host { .. } => session::ToolSource::Host,
+            Ask::Wait | Ask::Finish { .. } | Ask::Deliver { .. } | Ask::SubAgent { .. } => session::ToolSource::Run,
+        };
         let effect = translate::effect(&ask);
         let ticket = self.ticket();
         let fresh = self.asks.insert(ticket, ask).expect("checked for room above");
         assert!(fresh.is_none(), "tickets are not reused");
         self.held = held;
-        sllm::Decoded::Delegated { ticket: Token::new(ticket), effect }
+        sllm::Decoded::Delegated { source, ticket: Token::new(ticket), effect }
     }
 
     /// The ask the session dispatches as `ticket`.

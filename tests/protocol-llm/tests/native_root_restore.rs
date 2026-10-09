@@ -265,7 +265,11 @@ fn recorded_corruptions(turn: &smith_domain::Turn, fixture: &Fixture) {
     assert!(!recorded_wait(&missing, fixture, true));
     let mut unresolved = turn.clone();
     let llm::Block::ToolCall { call, .. } = &mut unresolved.messages[1].content[1] else { panic!("actual historical") };
-    *call = llm::Decoded::Delegated { ticket: skein_lib::Token::new(99), effect: smith_domain::tools::Effect::Write };
+    *call = llm::Decoded::Delegated {
+        source: smith_domain::session::ToolSource::Run,
+        ticket: skein_lib::Token::new(99),
+        effect: smith_domain::tools::Effect::Write,
+    };
     assert!(!recorded_wait(&unresolved, fixture, true));
     if fixture.call_replay.is_some() {
         let mut missing = turn.clone();

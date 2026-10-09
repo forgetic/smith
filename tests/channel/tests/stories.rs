@@ -618,9 +618,12 @@ fn facts_are_dropped_under_pressure_and_waiting_still_passes() {
     let mut kept = 0_u64;
     for _ in 0..12 {
         let fact = smith_domain::Fact::Run {
-            fact: smith_domain::run::facts::Fact::Admitted { run: skein_lib::Token::new(1) },
+            fact: smith_domain::run::facts::Fact {
+                at: skein_lib::Time::from_nanos(7),
+                kind: smith_domain::run::facts::FactKind::Admitted { run: skein_lib::Token::new(1), resumed: false },
+            },
         };
-        if world.agent_sends_fact(fact, elapsed) {
+        if world.agent_sends_fact(&fact, skein_lib::Time::ZERO) {
             kept += 1;
         }
     }
@@ -951,5 +954,33 @@ fn a_delivery_keeps_fields_and_a_settled_landing_or_stale_terminal() {
     assert!(world.observations().contains(&Observation::AgentDelivered {
         owner: later,
         delivery: Box::new(smith_domain::run::Delivery::Stale),
+    }));
+}
+
+#[test]
+fn a_fact_projects_its_emission_time_relative_to_the_activation_start() {
+    let mut world = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    world.settle();
+    world.send_start(Box::from(
+        &include_bytes!("../../../crates/smith-charter/golden/v1/record_charter_smallest.bin")[..],
+    ));
+    world.settle();
+    world.agent_admits();
+    world.settle();
+    let fact = smith_domain::Fact::Run {
+        fact: smith_domain::run::facts::Fact {
+            at: skein_lib::Time::from_nanos(91),
+            kind: smith_domain::run::facts::FactKind::CheckStarted {
+                run: skein_lib::Token::new(1),
+                deadline: skein_lib::Time::from_nanos(101),
+            },
+        },
+    };
+    assert!(world.agent_sends_fact(&fact, skein_lib::Time::from_nanos(83)));
+    world.settle();
+    assert!(world.observations().contains(&Observation::HostFact {
+        kind: smith_channel::FactKind::CheckStarted,
+        elapsed: skein_lib::Duration::from_nanos(8),
+        count: 1,
     }));
 }
