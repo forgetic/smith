@@ -4,8 +4,8 @@
 //!
 //! Command: `smith agent CONFIG.json`.
 
-use smith::local_shell;
 use smith_agent_shell as agent_shell;
+use smith_local_shell::local_shell;
 
 use std::env;
 use std::path::Path;

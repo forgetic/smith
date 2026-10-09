@@ -139,7 +139,7 @@ impl Referee<Process> for Judge {
         }
         let authenticated = procs.iter().any(|p| matches!(p, Process::Script(Proc::Issuer(_))));
         if authenticated && !self.saved && procs.iter().any(|p| matches!(p, Process::Script(Proc::Peer(p)) if smith_local_process_world::llm::queries(p).next().is_some())) {
-            let store = smith::local_tokens::Tokens::new(&self.tokens, smith::local_host::token_limits()).expect("private tokens");
+            let store = smith_local_shell::local_tokens::Tokens::new(&self.tokens, smith_local_shell::local_host::token_limits()).expect("private tokens");
             assert_eq!(store.load(0).expect("token read").expect("saved before grant use").access_token.as_ref(), b"access-new");
             self.saved = true;
         }
@@ -211,9 +211,11 @@ pub fn start(arguments: Vec<std::ffi::OsString>, directory: &Path, mode: Mode) -
 pub fn settings(scratch: &Scratch, scenario: &Scenario) {
     let trust = scratch.path().join("root.der");
     if !scenario.launch.authenticated {
-        let tokens =
-            smith::local_tokens::Tokens::new(&scenario.launch.token_directory, smith::local_host::token_limits())
-                .expect("private tokens");
+        let tokens = smith_local_shell::local_tokens::Tokens::new(
+            &scenario.launch.token_directory,
+            smith_local_shell::local_host::token_limits(),
+        )
+        .expect("private tokens");
         let mut saved = tokens.load(0).expect("token load").expect("fixture token");
         let now = Clock::new().now().wall;
         if saved.expires_at <= Wall::from_nanos(now.as_nanos().saturating_add(Duration::from_secs(60).as_nanos())) {
@@ -223,7 +225,8 @@ pub fn settings(scratch: &Scratch, scenario: &Scenario) {
             tokens
                 .save(
                     0,
-                    &skein_oauth::encode_record(&saved, &smith::local_host::token_limits()).expect("token encoding"),
+                    &skein_oauth::encode_record(&saved, &smith_local_shell::local_host::token_limits())
+                        .expect("token encoding"),
                 )
                 .expect("fresh fixture grant");
         }

@@ -1,6 +1,7 @@
 # Profiles and lints follow programming-model.md, section 10.
 
 [workspace]
+default-members = [".", "crates/smith-agent-service", "crates/smith-agent-shell", "crates/smith-channel", "crates/smith-charter", "crates/smith-domain", "crates/smith-domain-run", "crates/smith-domain-session", "crates/smith-domain-tools", "crates/smith-host-domain", "crates/smith-host-protocol", "crates/smith-local-domain", "crates/smith-local-protocol", "crates/smith-local-service", "crates/smith-local-shell", "crates/smith-protocol-channel", "crates/smith-protocol-llm", "crates/smith-protocol-machine", "crates/smith-transcript", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine", "tests/channel", "tests/agent-process", "tests/hosts", "tests/local-process", "tests/real"]
 resolver = "3"
 members = ["crates/*", "tests/tools", "tests/session", "tests/run", "tests/agent", "tests/protocol-llm", "tests/host", "tests/local", "tests/codecs", "tests/machine", "tests/channel", "tests/agent-process", "tests/hosts", "tests/local-process", "tests/real"]
 
@@ -57,7 +58,7 @@ smith-local-service = { path = "crates/smith-local-service" }
 smith-agent-process-world = { path = "tests/agent-process" }
 smith-real-world = { path = "tests/real" }
 smith-local-process-world = { path = "tests/local-process" }
-smith = { path = "crates/smith" }
+smith-local-shell = { path = "crates/smith-local-shell" }
 smith-agent-shell = { path = "crates/smith-agent-shell" }
 smith-run-world = { path = "tests/run" }
 smith-session-world = { path = "tests/session" }
@@ -146,3 +147,89 @@ partial_pub_fields = "deny"           # a struct is plain data or opaque, not bo
 mod_module_files = "deny"
 tests_outside_test_module = "deny"
 iter_over_hash_type = "deny"
+
+[package]
+name = "smith"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+default-run = "smith"
+autobins = false
+autotests = false
+autobenches = false
+autoexamples = false
+
+[[bin]]
+name = "smith"
+path = "src/main.rs"
+
+[[test]]
+name = "end_to_end"
+path = "tests/end-to-end/end_to_end.rs"
+
+[[test]]
+name = "live"
+path = "tests/end-to-end/live.rs"
+
+[[test]]
+name = "live_configuration"
+path = "tests/end-to-end/live_configuration.rs"
+
+[dependencies]
+smith-agent-shell.workspace = true
+smith-local-shell.workspace = true
+
+[dev-dependencies]
+smith-agent-shell.workspace = true
+skein-world.workspace = true
+skein-lib.workspace = true
+skein-oauth.workspace = true
+libc = "0.2"
+skein-io.workspace = true
+skein-shell.workspace = true
+skein-channel.workspace = true
+skein-http.workspace = true
+skein-llm.workspace = true
+skein-llm-connection.workspace = true
+skein-tls.workspace = true
+smith-domain.workspace = true
+smith-agent-service.workspace = true
+smith-local-domain.workspace = true
+smith-local-protocol.workspace = true
+smith-local-service.workspace = true
+smith-host-domain.workspace = true
+smith-host-protocol.workspace = true
+smith-protocol-channel.workspace = true
+smith-protocol-llm.workspace = true
+smith-protocol-machine.workspace = true
+smith-channel.workspace = true
+smith-charter.workspace = true
+smith-transcript.workspace = true
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rustls-native-certs = "0.8"
+
+smith-real-world.workspace = true
+skein-fake-llm-domain.workspace = true
+skein-fake-peers.workspace = true
+skein-fake-channel.workspace = true
+smith-local-process-world.workspace = true
+skein-fake-oauth.workspace = true
+skein-sim.workspace = true
+skein-fake-machine.workspace = true
+skein-tls-world.workspace = true
+smith-agent-process-world.workspace = true
+smith-host-world.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+elided_lifetimes_in_paths = "deny"
+unused_must_use = "deny"
+
+[lints.clippy]
+# The shell parses operator configuration and reports startup errors in
+# ordinary Rust (programming-model.md, section 10.2).
+disallowed_types = "allow"
+disallowed_methods = "allow"
+disallowed_macros = "allow"

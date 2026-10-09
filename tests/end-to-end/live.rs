@@ -58,11 +58,12 @@ fn change(backend: &live::Backend, scratch: &Scratch, prompt: &str, extra: Optio
             .success(),
         "prescribed check passes independently"
     );
-    let tokens = smith::local_tokens::Tokens::new(&backend.tokens, smith::local_host::token_limits())
-        .expect("private test token store")
-        .load(0)
-        .expect("read test grant")
-        .expect("durable grant");
+    let tokens =
+        smith_local_shell::local_tokens::Tokens::new(&backend.tokens, smith_local_shell::local_host::token_limits())
+            .expect("private test token store")
+            .load(0)
+            .expect("read test grant")
+            .expect("durable grant");
     let trace = std::fs::read(scratch.path().join("agent-trace.jsonl")).expect("outside trace");
     for secret in [&tokens.access_token, &tokens.refresh_token] {
         assert!(
@@ -80,8 +81,11 @@ fn a_run_refreshes_its_grant_at_the_issuer() {
     let environment = live::Environment::load(false);
     for backend in environment.backends {
         eprintln!("live refresh provider={}", backend.name);
-        let store = smith::local_tokens::Tokens::new(&backend.tokens, smith::local_host::token_limits())
-            .expect("dedicated token store");
+        let store = smith_local_shell::local_tokens::Tokens::new(
+            &backend.tokens,
+            smith_local_shell::local_host::token_limits(),
+        )
+        .expect("dedicated token store");
         let mut saved = store.load(0).expect("read dedicated grant").expect("sign in by hand first");
         assert!(!saved.refresh_token.is_empty(), "dedicated test grant must support refresh");
         let generation = saved.generation;
@@ -89,7 +93,7 @@ fn a_run_refreshes_its_grant_at_the_issuer() {
         store
             .save(
                 0,
-                &skein_oauth::encode_record(&saved, &smith::local_host::token_limits())
+                &skein_oauth::encode_record(&saved, &smith_local_shell::local_host::token_limits())
                     .expect("dedicated expired record"),
             )
             .expect("force only the test-owned grant to refresh");

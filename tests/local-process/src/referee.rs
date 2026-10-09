@@ -385,8 +385,11 @@ impl skein_world::Referee<crate::process::Proc> for Run {
         assert!(crate::llm::queries(peer).count() <= 64, "bounded provider work");
         let authenticated = procs.iter().any(|p| matches!(p, Proc::Issuer(_)));
         if authenticated && !self.saved_before_query && crate::llm::queries(peer).next().is_some() {
-            let tokens = smith::local_tokens::Tokens::new(&self.token_directory, smith::local_host::token_limits())
-                .expect("private store");
+            let tokens = smith_local_shell::local_tokens::Tokens::new(
+                &self.token_directory,
+                smith_local_shell::local_host::token_limits(),
+            )
+            .expect("private store");
             assert_eq!(
                 tokens.load(0).expect("record").expect("saved before grant use").access_token.as_ref(),
                 b"access-new"

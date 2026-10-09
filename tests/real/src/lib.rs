@@ -239,7 +239,7 @@ impl World {
     /// Actual durable transcript loaded through the same outside store face.
     #[must_use]
     pub fn turns(&self) -> usize {
-        let store = smith::local_store::Store::new(
+        let store = smith_local_shell::local_store::Store::new(
             self.scenario.launch.state_directory.clone(),
             process::lower_configuration().channel_endpoints,
             1 << 20,

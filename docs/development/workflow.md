@@ -5,6 +5,10 @@ merging a branch that passed every check below, or that changes only
 documentation.
 
 For the executable's local mode, see [local-host settings and commands](local-host.md).
+The root package builds `src/main.rs`; its end-to-end and live targets live
+under `tests/end-to-end/`. Bare cargo commands include every workspace member.
+Run the local command with `cargo run -- local SETTINGS STATE [WS]`, or install
+the binary with `cargo install --path .`.
 
 ## 1. Before merging to main
 
@@ -449,7 +453,7 @@ shared TLS peers, with the shared scripted person on a controlling terminal.
 Idle `measure -j 1` on 2026-10-08 measured four end-to-end tests / 0.322 seconds:
 first sign-in plus a real tool/check/git commit, a second binary invocation
 resuming durable history, a basic terminal report, and startup refusals of both
-commands. The cases formerly in `crates/smith/tests/startup.rs` are now in
+commands. The cases formerly in `tests/end-to-end/startup.rs` are now in
 `end_to_end.rs`. The same scratch setup, narrow checkout observations and
 outside scenario policy are used as in the real-loop tier. Every invocation
 checks its expected durable outputs, a fresh agent trace, successful process

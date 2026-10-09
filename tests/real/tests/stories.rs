@@ -20,9 +20,11 @@ fn a_first_run_signs_in_and_keeps_its_token() {
     assert_eq!(oauth.posts, 1);
     assert_eq!(oauth.pages, 1);
     assert!(oauth.browser_replied && oauth.saved_before_query);
-    let tokens =
-        smith::local_tokens::Tokens::new(&world.scenario.launch.token_directory, smith::local_host::token_limits())
-            .expect("private token store");
+    let tokens = smith_local_shell::local_tokens::Tokens::new(
+        &world.scenario.launch.token_directory,
+        smith_local_shell::local_host::token_limits(),
+    )
+    .expect("private token store");
     let saved = tokens.load(0).expect("token load").expect("saved grant");
     assert_eq!(saved.access_token.as_ref(), b"access-new");
     assert_eq!(saved.refresh_token.as_ref(), b"refresh-new");

@@ -12,11 +12,11 @@ use skein_fake_oauth as fake_oauth;
 use skein_io::kernel;
 use skein_lib::{Duration, Queue, Time, Token, Wall};
 use skein_world::{Host, Inherited, StartupRoot};
-use smith::local_host::{Local, Resources, token_limits};
-use smith::local_settings;
 use smith_agent_service as agent;
 use smith_local_domain as local;
 use smith_local_service as service;
+use smith_local_shell::local_host::{Local, Resources, token_limits};
+use smith_local_shell::local_settings;
 use std::path::PathBuf;
 
 /// Immutable configuration sent by the terminal and passed to a spawned agent.

@@ -128,10 +128,13 @@ impl Environment {
                 "provider tokens must stay in the dedicated directory"
             );
             if !bootstrap {
-                let saved = smith::local_tokens::Tokens::new(&tokens, smith::local_host::token_limits())
-                    .expect("private test token store")
-                    .load(0)
-                    .expect("valid private token record");
+                let saved = smith_local_shell::local_tokens::Tokens::new(
+                    &tokens,
+                    smith_local_shell::local_host::token_limits(),
+                )
+                .expect("private test token store")
+                .load(0)
+                .expect("valid private token record");
                 assert!(saved.is_some(), "provider must be signed in by hand; missing dedicated 0.json record");
             }
             backends.push(Backend {

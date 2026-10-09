@@ -13,8 +13,8 @@ use skein_fake_machine::{How, Machine as Filesystem, Opened};
 use skein_io::kernel;
 use skein_lib::{Duration, Queue, Wall};
 use skein_world::{HostedProgram, Memory, Outcome};
-use smith::{local_host::token_limits, local_tokens};
 use smith_local_domain as local;
+use smith_local_shell::{local_host::token_limits, local_tokens};
 use smith_local_world::git::History;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -640,7 +640,7 @@ impl World {
     }
     #[must_use]
     pub fn turns(&mut self) -> usize {
-        let store = smith::local_store::Store::new(
+        let store = smith_local_shell::local_store::Store::new(
             self.scenario.launch.state_directory.clone(),
             process::lower_configuration().channel_endpoints,
             1 << 20,

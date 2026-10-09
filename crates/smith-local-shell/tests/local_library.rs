@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use skein_lib::{Duration, Wall};
 use skein_world::Host;
-use smith::local_host::{Local, Resources, token_limits};
-use smith::{local_settings, local_tokens};
 use smith_local_domain as local;
 use smith_local_service as service;
+use smith_local_shell::local_host::{Local, Resources, token_limits};
+use smith_local_shell::{local_settings, local_tokens};
 
 fn configuration(root: skein_io::kernel::Fd) -> (service::Config, smith_agent_service::Config) {
     let lower = smith_agent_process_world::configuration();
