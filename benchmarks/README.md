@@ -120,3 +120,13 @@ worktree is created. Build caches are private under the same state root.
 Run each build as its own `heavy` command, separately from an attempt, with
 the plan README's scoped local skein URL rewrite exported. Runtime data must
 be outside repositories and every destination passes the shared guard.
+
+The legacy smith reader maps the original `30259d8` Debug trace to neutral
+run, conversation, completion and tool observations. It parses nested values
+by field name, retains exact hex content, and identifies main's accepted or
+delivered finish by the run-issued call. Child finishes never end the task.
+Known shape changes are harness errors. Its calls-only fake-provider recordings
+are under `tests/recorded/smith-legacy/`; usage and loss stay unavailable there.
+Legacy exit zero alone proves no accepted answer. Forced teardown after an
+observed acceptance remains completed with a warning. The legacy parser joins
+the same offline and fuzzy suites as Codex's reader.

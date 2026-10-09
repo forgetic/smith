@@ -11,6 +11,8 @@ use crate::Refusal;
 
 pub mod codex;
 
+pub mod smith;
+
 /// The adapter selected by a suite author for each attempt.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "kebab-case")]

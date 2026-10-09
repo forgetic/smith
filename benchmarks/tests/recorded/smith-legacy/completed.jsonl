@@ -1,0 +1,20 @@
+{"at_ns":46933082183550,"fact":"Run { fact: Admitted { run: Token(0) } }","type":"fact"}
+{"at_ns":46933082183550,"fact":"Run { fact: Prepared { run: Token(0), guides: 0, checks: 0 } }","type":"fact"}
+{"at_ns":46933082183550,"fact":"Run { fact: Opened { run: Token(0), conversation: Token(0), child: false } }","type":"fact"}
+{"at_ns":46933082183550,"fact":"Session { fact: Opened { opener: Token(0) } }","type":"fact"}
+{"at_ns":46933082183550,"fact":"Session { fact: CompletionStarted { opener: Token(0), attempt: 0, messages: 1, max_tokens: 1024 } }","type":"fact"}
+{"at_ns":46933082183550,"fact":"Session { fact: Tools { opener: Token(0), fact: Opened { session: Token(0) } } }","type":"fact"}
+{"at_ns":46933096188771,"fact":"Run { fact: Called { run: Token(0), conversation: Token(0), call: Token(0), ask: Wait } }","type":"fact"}
+{"at_ns":46933096188771,"fact":"Run { fact: Returned { run: Token(0), call: Token(0), result: Waiting } }","type":"fact"}
+{"at_ns":46933096188771,"fact":"Session { fact: CompletionAnswered { opener: Token(0), stop: ToolUse, blocks: 1, calls: 1, invalid: 0 } }","type":"fact"}
+{"at_ns":46933096188771,"fact":"Session { fact: Used { opener: Token(0), usage: Usage { input_tokens: 130, output_tokens: 1, cache_read_tokens: 0, cache_write_tokens: 0 } } }","type":"fact"}
+{"at_ns":46933096188771,"fact":"Session { fact: DelegateStarted { opener: Token(0), block: 0 } }","type":"fact"}
+{"at_ns":46933096188771,"encoding":"hex","id":"63616c6c5f30303030303030303030303030303031","input":"7b7d","name":"77616974","owner":0,"type":"call"}
+{"at_ns":46933096819982,"fact":"Session { fact: DelegateAnswered { opener: Token(0), bytes: 7, error: false } }","type":"fact"}
+{"at_ns":46933096819982,"fact":"Session { fact: CompletionStarted { opener: Token(0), attempt: 0, messages: 3, max_tokens: 1024 } }","type":"fact"}
+{"at_ns":46933106619602,"fact":"Run { fact: Called { run: Token(0), conversation: Token(0), call: Token(1), ask: Finish } }","type":"fact"}
+{"at_ns":46933106619602,"fact":"Run { fact: Returned { run: Token(0), call: Token(1), result: Accepted } }","type":"fact"}
+{"at_ns":46933106619602,"fact":"Session { fact: CompletionAnswered { opener: Token(0), stop: ToolUse, blocks: 1, calls: 1, invalid: 0 } }","type":"fact"}
+{"at_ns":46933106619602,"fact":"Session { fact: Used { opener: Token(0), usage: Usage { input_tokens: 1, output_tokens: 1, cache_read_tokens: 132, cache_write_tokens: 0 } } }","type":"fact"}
+{"at_ns":46933106619602,"fact":"Session { fact: DelegateStarted { opener: Token(0), block: 0 } }","type":"fact"}
+{"at_ns":46933106619602,"encoding":"hex","id":"63616c6c5f30303030303030303030303030303032","input":"7b22666f726d223a227265706f7274222c2274657874223a22466972737420616e73776572222c226669656c6473223a7b7d7d","name":"66696e697368","owner":0,"type":"call"}

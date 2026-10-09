@@ -1,0 +1,59 @@
+{"at_ns":46974527204699,"fact":"Run { fact: Admitted { run: Token(0) } }","type":"fact"}
+{"at_ns":46974527967341,"fact":"Run { fact: Prepared { run: Token(0), guides: 0, checks: 1 } }","type":"fact"}
+{"at_ns":46974527967341,"fact":"Run { fact: Opened { run: Token(0), conversation: Token(0), child: false } }","type":"fact"}
+{"at_ns":46974527967341,"fact":"Session { fact: Opened { opener: Token(0) } }","type":"fact"}
+{"at_ns":46974527967341,"fact":"Session { fact: CompletionStarted { opener: Token(0), attempt: 0, messages: 1, max_tokens: 1024 } }","type":"fact"}
+{"at_ns":46974527967341,"fact":"Session { fact: Tools { opener: Token(0), fact: Opened { session: Token(0) } } }","type":"fact"}
+{"at_ns":46974561680060,"fact":"Run { fact: Called { run: Token(0), conversation: Token(0), call: Token(0), ask: Wait } }","type":"fact"}
+{"at_ns":46974561680060,"fact":"Run { fact: Returned { run: Token(0), call: Token(0), result: Waiting } }","type":"fact"}
+{"at_ns":46974561680060,"fact":"Session { fact: CompletionAnswered { opener: Token(0), stop: ToolUse, blocks: 1, calls: 1, invalid: 0 } }","type":"fact"}
+{"at_ns":46974561680060,"fact":"Session { fact: Used { opener: Token(0), usage: Usage { input_tokens: 240, output_tokens: 1, cache_read_tokens: 0, cache_write_tokens: 0 } } }","type":"fact"}
+{"at_ns":46974561680060,"fact":"Session { fact: DelegateStarted { opener: Token(0), block: 0 } }","type":"fact"}
+{"at_ns":46974561680060,"encoding":"hex","id":"63616c6c5f30303030303030303030303030303031","input":"7b7d","name":"77616974","owner":0,"type":"call"}
+{"at_ns":46974562143831,"fact":"Session { fact: DelegateAnswered { opener: Token(0), bytes: 7, error: false } }","type":"fact"}
+{"at_ns":46974562143831,"fact":"Session { fact: CompletionStarted { opener: Token(0), attempt: 0, messages: 3, max_tokens: 1024 } }","type":"fact"}
+{"at_ns":46974578909551,"fact":"Session { fact: CompletionAnswered { opener: Token(0), stop: ToolUse, blocks: 1, calls: 1, invalid: 0 } }","type":"fact"}
+{"at_ns":46974578909551,"fact":"Session { fact: Used { opener: Token(0), usage: Usage { input_tokens: 1, output_tokens: 1, cache_read_tokens: 241, cache_write_tokens: 0 } } }","type":"fact"}
+{"at_ns":46974578909551,"fact":"Session { fact: Tools { opener: Token(0), fact: Started { session: Token(0), tool: Read } } }","type":"fact"}
+{"at_ns":46974578909551,"encoding":"hex","id":"63616c6c5f30303030303030303030303030303032","input":"7b2270617468223a226f726967696e616c2e747874227d","name":"72656164","owner":0,"type":"call"}
+{"at_ns":46974579735213,"fact":"Session { fact: CompletionStarted { opener: Token(0), attempt: 0, messages: 5, max_tokens: 1024 } }","type":"fact"}
+{"at_ns":46974579735213,"fact":"Session { fact: Tools { opener: Token(0), fact: Answered { session: Token(0), tool: Read, verdict: Read, bytes: 9 } } }","type":"fact"}
+{"at_ns":46974579735213,"owner":0,"result_bytes":9,"type":"tool"}
+{"at_ns":46974609262790,"fact":"Session { fact: CompletionAnswered { opener: Token(0), stop: ToolUse, blocks: 1, calls: 1, invalid: 0 } }","type":"fact"}
+{"at_ns":46974609262790,"fact":"Session { fact: Used { opener: Token(0), usage: Usage { input_tokens: 9, output_tokens: 1, cache_read_tokens: 250, cache_write_tokens: 0 } } }","type":"fact"}
+{"at_ns":46974609262790,"fact":"Session { fact: Tools { opener: Token(0), fact: Started { session: Token(0), tool: Search } } }","type":"fact"}
+{"at_ns":46974609262790,"encoding":"hex","id":"63616c6c5f30303030303030303030303030303033","input":"7b227061747465726e223a226f726967696e616c222c2270617468223a226f726967696e616c2e747874227d","name":"736561726368","owner":0,"type":"call"}
+{"at_ns":46974623556022,"fact":"Session { fact: CompletionStarted { opener: Token(0), attempt: 0, messages: 7, max_tokens: 1024 } }","type":"fact"}
+{"at_ns":46974623556022,"fact":"Session { fact: Tools { opener: Token(0), fact: Answered { session: Token(0), tool: Search, verdict: Found, bytes: 20 } } }","type":"fact"}
+{"at_ns":46974623556022,"owner":1,"result_bytes":20,"type":"tool"}
+{"at_ns":46974643448971,"fact":"Session { fact: CompletionAnswered { opener: Token(0), stop: ToolUse, blocks: 1, calls: 1, invalid: 0 } }","type":"fact"}
+{"at_ns":46974643448971,"fact":"Session { fact: Used { opener: Token(0), usage: Usage { input_tokens: 6, output_tokens: 1, cache_read_tokens: 271, cache_write_tokens: 0 } } }","type":"fact"}
+{"at_ns":46974643448971,"fact":"Session { fact: Tools { opener: Token(0), fact: Started { session: Token(0), tool: Edit } } }","type":"fact"}
+{"at_ns":46974643448971,"encoding":"hex","id":"63616c6c5f30303030303030303030303030303034","input":"7b2270617468223a226f726967696e616c2e747874222c226f6c64223a226f726967696e616c222c226e6577223a22656469746564227d","name":"65646974","owner":0,"type":"call"}
+{"at_ns":46974644176402,"owner":2,"result_bytes":9,"type":"tool"}
+{"at_ns":46974644704494,"fact":"Session { fact: CompletionStarted { opener: Token(0), attempt: 0, messages: 9, max_tokens: 1024 } }","type":"fact"}
+{"at_ns":46974644704494,"fact":"Session { fact: Tools { opener: Token(0), fact: Answered { session: Token(0), tool: Edit, verdict: Edited { replaced: 1 }, bytes: 0 } } }","type":"fact"}
+{"at_ns":46974644704494,"owner":2,"result_bytes":0,"type":"tool"}
+{"at_ns":46974664412502,"fact":"Session { fact: CompletionAnswered { opener: Token(0), stop: ToolUse, blocks: 1, calls: 1, invalid: 0 } }","type":"fact"}
+{"at_ns":46974664412502,"fact":"Session { fact: Used { opener: Token(0), usage: Usage { input_tokens: 6, output_tokens: 1, cache_read_tokens: 292, cache_write_tokens: 0 } } }","type":"fact"}
+{"at_ns":46974664412502,"fact":"Session { fact: Tools { opener: Token(0), fact: Started { session: Token(0), tool: Write } } }","type":"fact"}
+{"at_ns":46974664412502,"encoding":"hex","id":"63616c6c5f30303030303030303030303030303035","input":"7b2270617468223a22726573756c742e747874222c22636f6e74656e74223a226e65775c6e227d","name":"7772697465","owner":0,"type":"call"}
+{"at_ns":46974665595655,"fact":"Session { fact: CompletionStarted { opener: Token(0), attempt: 0, messages: 11, max_tokens: 1024 } }","type":"fact"}
+{"at_ns":46974665595655,"fact":"Session { fact: Tools { opener: Token(0), fact: Answered { session: Token(0), tool: Write, verdict: Written { created: true }, bytes: 0 } } }","type":"fact"}
+{"at_ns":46974665595655,"owner":3,"result_bytes":0,"type":"tool"}
+{"at_ns":46974689371895,"fact":"Session { fact: CompletionAnswered { opener: Token(0), stop: ToolUse, blocks: 1, calls: 1, invalid: 0 } }","type":"fact"}
+{"at_ns":46974689371895,"fact":"Session { fact: Used { opener: Token(0), usage: Usage { input_tokens: 3, output_tokens: 1, cache_read_tokens: 309, cache_write_tokens: 0 } } }","type":"fact"}
+{"at_ns":46974689371895,"fact":"Session { fact: Tools { opener: Token(0), fact: Started { session: Token(0), tool: Shell } } }","type":"fact"}
+{"at_ns":46974689371895,"encoding":"hex","id":"63616c6c5f30303030303030303030303030303036","input":"7b22636f6d6d616e64223a227072696e7466202772616e5c6e27203e20636f6d6d616e642e747874227d","name":"7368656c6c","owner":0,"type":"call"}
+{"at_ns":46974692169443,"fact":"Session { fact: CompletionStarted { opener: Token(0), attempt: 0, messages: 13, max_tokens: 1024 } }","type":"fact"}
+{"at_ns":46974692169443,"fact":"Session { fact: Tools { opener: Token(0), fact: Answered { session: Token(0), tool: Shell, verdict: Exited { exit: Code { code: 0 } }, bytes: 0 } } }","type":"fact"}
+{"at_ns":46974692169443,"owner":4,"result_bytes":0,"type":"tool"}
+{"at_ns":46974711499261,"fact":"Run { fact: Called { run: Token(0), conversation: Token(0), call: Token(6), ask: Finish } }","type":"fact"}
+{"at_ns":46974711499261,"fact":"Run { fact: CheckStarted { run: Token(0), deadline: Time(47034527204699) } }","type":"fact"}
+{"at_ns":46974711499261,"fact":"Session { fact: CompletionAnswered { opener: Token(0), stop: ToolUse, blocks: 1, calls: 1, invalid: 0 } }","type":"fact"}
+{"at_ns":46974711499261,"fact":"Session { fact: Used { opener: Token(0), usage: Usage { input_tokens: 2, output_tokens: 1, cache_read_tokens: 324, cache_write_tokens: 0 } } }","type":"fact"}
+{"at_ns":46974711499261,"fact":"Session { fact: DelegateStarted { opener: Token(0), block: 0 } }","type":"fact"}
+{"at_ns":46974711499261,"encoding":"hex","id":"63616c6c5f30303030303030303030303030303037","input":"7b22666f726d223a226368616e6765222c2274657874223a22222c226669656c6473223a7b227469746c65223a225570646174656420726573756c74222c22626f6479223a22437265617465642074686520726573756c742066696c65227d7d","name":"66696e697368","owner":0,"type":"call"}
+{"at_ns":46974717865339,"fact":"Run { fact: CheckFinished { run: Token(0), exit: Code { code: 0 } } }","type":"fact"}
+{"at_ns":46974747175135,"fact":"Run { fact: Delivered { run: Token(0), status: Delivered } }","type":"fact"}
+{"at_ns":46974747175135,"fact":"Run { fact: Returned { run: Token(0), call: Token(6), result: Delivered } }","type":"fact"}

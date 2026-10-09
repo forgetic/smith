@@ -1,0 +1,28 @@
+{
+  "records": [
+    {
+      "file": "completed.jsonl",
+      "source_commit": "30259d89b88834ed3edaaa08b3f320d2252bbb9a",
+      "source_sha256": "ef137990e2d6541a7f1b5e15f58448eca6f5009fc7e2167b410d5637f8eeed36",
+      "retained_lines": "1-20",
+      "sha256": "ef137990e2d6541a7f1b5e15f58448eca6f5009fc7e2167b410d5637f8eeed36",
+      "heavy_task": "268",
+      "nextest_run": "b36effe5-a0f4-4775-9a20-364f1c95d81b",
+      "provenance": "recorded",
+      "capture": "calls",
+      "credential_scan": "No fake grants, bearer headers or credential field names occur. No real credential was read."
+    },
+    {
+      "file": "tools.jsonl",
+      "source_commit": "30259d89b88834ed3edaaa08b3f320d2252bbb9a",
+      "source_sha256": "602440a339b569408cd9e9611b1d30719a7d04e29d92b273f4c3303717640af6",
+      "retained_lines": "1-59",
+      "sha256": "602440a339b569408cd9e9611b1d30719a7d04e29d92b273f4c3303717640af6",
+      "heavy_task": "274",
+      "nextest_run": "300d79a2-5640-43ae-bba9-6b3b721c3a31",
+      "provenance": "recorded",
+      "capture": "calls",
+      "credential_scan": "No fake grants, bearer headers or credential field names occur. No real credential was read."
+    }
+  ]
+}

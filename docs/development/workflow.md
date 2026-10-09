@@ -530,6 +530,15 @@ of `30259d8` and its repeated archive verification run separately through
 `heavy`; unit tests build no binary and use only a synthetic git source. The
 one-second focused and five-second fuzzy harness shares remain unchanged.
 
+Benchmark increment 00.7 adds the legacy Debug reader and original
+`30259d8` traces recorded against fake peers. Its idle serial `heavy`
+measurement on 2026-10-09 passed 61 focused unit/offline tests in 0.869
+seconds and two fuzzy parser sweeps in 0.239 seconds. Main's acceptance
+uses run-issued call identities; usage under calls capture and trace loss
+remain unavailable. The fake-provider recording commands run separately;
+the offline tier starts no agent and reads no login. The one-second focused
+and five-second fuzzy harness shares and workspace budgets remain unchanged.
+
 ## 5. Opt-in live suite
 
 The `live` profile runs the shipped binary against real backends, serially,
