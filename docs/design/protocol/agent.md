@@ -124,6 +124,10 @@ machines. The local host writes its agent's from its own settings
   Credentials never appear in it.
 - **A trace never holds the run back.** When the file is behind, records are
   dropped and counted, as facts are.
+  After the answer and all lower effects have settled, process shutdown
+  gives the accepted writer queue up to 50 milliseconds to drain. A stalled
+  writer is left detached, its pending records counted as dropped; no thread
+  join or filesystem write can extend that shutdown grace.
 
 ## 6. The process
 

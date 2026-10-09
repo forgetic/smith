@@ -1,6 +1,7 @@
 //! Local best-effort JSONL capture. A bounded channel and nonblocking send
 //! keep filesystem latency outside the agent's service loop. The writer owns
-//! its file and never receives grants or other credential values.
+//! its file and never receives grants or other credential values. Once the
+//! run has settled, `finish` gives queued records one bounded drain period.
 //! Contract: protocol/agent.md, section 5.
 
 use std::fs::{File, OpenOptions};
@@ -8,8 +9,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::thread;
+use std::time::Duration;
 
 use serde_json::json;
 use smith_domain::{self as domain, tools};
@@ -18,6 +20,7 @@ const RECORDS: usize = 32;
 const CALL_BYTES: usize = 16_384;
 const TEXT_BYTES: usize = 65_536;
 const RECORD_BYTES: usize = 400_000;
+const SHUTDOWN_GRACE: Duration = Duration::from_millis(50);
 /// Reserved bytes for the writer's bounded line queue and one formatted line.
 pub const MEMORY_RESERVE: u64 = (RECORDS as u64 + 2) * RECORD_BYTES as u64;
 
@@ -34,7 +37,8 @@ pub struct TraceConfig {
 }
 
 pub struct Trace {
-    sender: SyncSender<String>,
+    sender: Option<SyncSender<String>>,
+    drained: Option<Receiver<()>>,
     capture: Capture,
     dropped: u64,
     pending: Arc<AtomicU64>,
@@ -49,15 +53,26 @@ impl Trace {
             .open(&config.path)
             .map_err(|error| format!("trace file {}: {error}", config.path.display()))?;
         let (sender, receiver) = sync_channel::<String>(RECORDS);
+        let (writer_done, drained) = sync_channel(1);
         let pending = Arc::new(AtomicU64::new(0));
         let write_failures = Arc::new(AtomicU64::new(0));
         let writer_pending = Arc::clone(&pending);
         let writer_failures = Arc::clone(&write_failures);
         thread::Builder::new()
             .name("smith-trace".into())
-            .spawn(move || write_records(file, receiver, &writer_pending, &writer_failures))
+            .spawn(move || {
+                write_records(file, receiver, &writer_pending, &writer_failures);
+                let _ = writer_done.send(());
+            })
             .map_err(|error| format!("trace writer cannot start: {error}"))?;
-        Ok(Trace { sender, capture: config.capture, dropped: 0, pending, write_failures })
+        Ok(Trace {
+            sender: Some(sender),
+            drained: Some(drained),
+            capture: config.capture,
+            dropped: 0,
+            pending,
+            write_failures,
+        })
     }
 
     fn offer(&mut self, record: String) {
@@ -65,8 +80,12 @@ impl Trace {
             self.dropped = self.dropped.saturating_add(1);
             return;
         }
+        let Some(sender) = &self.sender else {
+            self.dropped = self.dropped.saturating_add(1);
+            return;
+        };
         self.pending.fetch_add(1, Ordering::Relaxed);
-        match self.sender.try_send(record) {
+        match sender.try_send(record) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
                 self.pending.fetch_sub(1, Ordering::Relaxed);
@@ -142,6 +161,17 @@ impl Trace {
             .saturating_add(self.pending.load(Ordering::Relaxed))
             .saturating_add(self.write_failures.load(Ordering::Relaxed))
     }
+
+    /// Stop capture and drain accepted records for at most 50 milliseconds.
+    /// A stalled writer remains detached; pending records count as dropped.
+    /// Repeated calls do not wait again.
+    pub fn finish(&mut self) -> u64 {
+        drop(self.sender.take());
+        if let Some(drained) = self.drained.take() {
+            let _ = drained.recv_timeout(SHUTDOWN_GRACE);
+        }
+        self.dropped()
+    }
 }
 
 fn write_records(
@@ -199,7 +229,8 @@ mod tests {
         let (sender, receiver) = sync_channel(2);
         (
             Trace {
-                sender,
+                sender: Some(sender),
+                drained: None,
                 capture,
                 dropped: 0,
                 pending: Arc::new(AtomicU64::new(0)),
@@ -247,5 +278,65 @@ mod tests {
         let record = receiver.try_recv().expect("prompt record");
         assert!(record.contains("00ff41"));
         assert!(record.contains("\"encoding\":\"hex\""));
+    }
+
+    #[test]
+    fn finishing_a_fast_writer_drains_all_accepted_records_before_returning() {
+        let path = std::env::temp_dir().join(format!("smith-trace-drain-{}.jsonl", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut trace = Trace::open(TraceConfig { path: path.clone(), capture: Capture::Calls }).expect("trace writer");
+        for index in 0..RECORDS {
+            trace.content(
+                domain::Content::Call {
+                    owner: Token::new(u64::try_from(index).expect("bounded record count")),
+                    id: b"call".as_slice().into(),
+                    name: b"finish".as_slice().into(),
+                    input: b"{}".as_slice().into(),
+                },
+                5,
+            );
+        }
+        assert_eq!(trace.finish(), 0, "a fast writer loses no accepted records");
+        assert_eq!(trace.finish(), 0, "finish is idempotent");
+        let records = std::fs::read_to_string(&path).expect("drained file");
+        assert_eq!(records.lines().count(), RECORDS);
+        assert!(records.lines().all(|line| line.contains("66696e697368")));
+        std::fs::remove_file(path).expect("remove trace fixture");
+    }
+
+    #[test]
+    fn a_stalled_writer_has_one_bounded_shutdown_grace_and_reports_pending_loss() {
+        let path = std::env::temp_dir().join(format!("smith-trace-stall-{}.jsonl", std::process::id()));
+        let file = File::create(&path).expect("trace fixture");
+        let (sender, receiver) = sync_channel(RECORDS);
+        let (writer_done, drained) = sync_channel(1);
+        let (release, stalled) = sync_channel(1);
+        let pending = Arc::new(AtomicU64::new(0));
+        let write_failures = Arc::new(AtomicU64::new(0));
+        let writer_pending = Arc::clone(&pending);
+        let writer_failures = Arc::clone(&write_failures);
+        let writer = thread::spawn(move || {
+            stalled.recv().expect("the test releases the stalled writer");
+            write_records(file, receiver, &writer_pending, &writer_failures);
+            let _ = writer_done.send(());
+        });
+        let mut trace = Trace {
+            sender: Some(sender),
+            drained: Some(drained),
+            capture: Capture::Calls,
+            dropped: 0,
+            pending,
+            write_failures,
+        };
+        trace.offer("queued record".into());
+        let started = std::time::Instant::now();
+        assert_eq!(trace.finish(), 1, "the unwritten record is reported as lost at shutdown");
+        assert!(started.elapsed() < Duration::from_secs(1), "a stalled writer cannot hold process shutdown");
+        assert!(trace.drained.is_none(), "the grace is consumed once");
+        assert_eq!(trace.finish(), 1);
+        assert!(std::fs::read_to_string(&path).expect("stalled file").is_empty());
+        release.send(()).expect("release fixture writer after bounded finish returns");
+        writer.join().expect("released fixture writer settles");
+        std::fs::remove_file(path).expect("remove trace fixture");
     }
 }

@@ -89,7 +89,7 @@ impl Agent {
     }
 
     fn finish(&mut self, answered: bool) {
-        let trace_dropped = self.trace.as_ref().map_or(0, trace::Trace::dropped);
+        let trace_dropped = self.trace.as_mut().map_or(0, trace::Trace::finish);
         let lost = self
             .service
             .lost_channel_facts()

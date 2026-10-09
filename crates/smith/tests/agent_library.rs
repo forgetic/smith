@@ -170,21 +170,13 @@ fn the_shared_agent_pass_answers_the_host_and_writes_its_trace() {
     sim.assert_no_open_fds(pid);
     assert!(!errors.text().contains("could not answer"), "successful invocation logs no failure");
     drop(agent);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-    let records = loop {
-        let text = std::fs::read_to_string(&path).expect("trace file");
-        if text.lines().any(|line| line.contains("\"type\":\"prompt\""))
-            && text.lines().any(|line| line.contains("\"type\":\"fact\""))
-            && text.lines().any(|line| line.contains("\"type\":\"completion\""))
-        {
-            break text;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "shared trace writer records prompts, facts and completions: {text}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(1));
-    };
+    let records = std::fs::read_to_string(&path).expect("trace file");
+    assert!(
+        records.lines().any(|line| line.contains("\"type\":\"prompt\""))
+            && records.lines().any(|line| line.contains("\"type\":\"fact\""))
+            && records.lines().any(|line| line.contains("\"type\":\"completion\"")),
+        "settled agent drains the accepted trace before returning: {records}"
+    );
     assert!(!records.contains("acctoken"), "trace excludes credential values");
     assert!(!records.contains("616363746f6b656e"), "trace excludes hex credential values");
     std::fs::remove_file(path).expect("remove trace fixture");
