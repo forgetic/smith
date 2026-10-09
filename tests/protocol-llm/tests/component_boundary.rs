@@ -16,7 +16,13 @@ static HEAP: Counting = Counting;
 
 fn limits() -> ComponentLimits {
     let client = skein_llm_world::limits();
-    let adapter = adapter::Limits { client, tool_bytes: 32_768, rendered_result: client.dialect.string_bytes };
+    let adapter = adapter::Limits {
+        client,
+        tool_bytes: 32_768,
+        rendered_result: client.dialect.string_bytes,
+        shell_default: skein_lib::Duration::from_secs(120),
+        shell_maximum: skein_lib::Duration::from_secs(1200),
+    };
     let decoded_call_bytes = 4096;
     ComponentLimits {
         adapter,

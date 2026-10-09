@@ -262,7 +262,13 @@ fn wire_limits() -> adapter::Limits {
     client.dialect.string_bytes = 16_384;
     client.dialect.tokens = 4096;
     client.dialect.answer_bytes = 256;
-    adapter::Limits { client, tool_bytes: 16_384, rendered_result: client.dialect.string_bytes }
+    adapter::Limits {
+        client,
+        tool_bytes: 16_384,
+        rendered_result: client.dialect.string_bytes,
+        shell_default: skein_lib::Duration::from_secs(120),
+        shell_maximum: skein_lib::Duration::from_secs(1200),
+    }
 }
 
 struct Complete {

@@ -169,3 +169,53 @@ pub(crate) fn runs(limits: &Limits) -> Option<u32> {
 pub(crate) fn alarms(limits: &Limits) -> Option<u32> {
     limits.sessions.checked_mul(2)
 }
+
+/// Numeric declarations needed by this layer's transitional derivation.
+/// The service supplies only owned numbers and this domain's own child limits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Derivation {
+    pub conversations: u32,
+    pub calls_per_response: u32,
+    pub max_turns: u32,
+    pub max_spend: u64,
+    pub max_time: Duration,
+    pub tool_deadline: Duration,
+    pub tools: tools::Limits,
+}
+
+/// Derive this layer from declarations, refusing checked arithmetic overflow.
+/// Contract: protocol/limits.md, sections 2 and 3.
+#[must_use]
+pub fn derive(inputs: &Derivation) -> Option<Limits> {
+    if inputs.conversations == 0 || inputs.calls_per_response == 0 {
+        return None;
+    }
+    Some(Limits {
+        sessions: inputs.conversations,
+        spend: inputs.max_spend,
+        protocol_allowance: 0,
+        messages: 64,
+        session_bytes: 33_554_432,
+        completion_bytes: 4096,
+        completion_blocks: 16,
+        failure_bytes: 512,
+        delegated_result_bytes: 4_194_304,
+        budget: Budget {
+            turns: inputs.max_turns,
+            input: 1 << 24,
+            output: 1 << 24,
+            cache_read: 1 << 26,
+            cache_write: 1 << 24,
+            time: inputs.max_time,
+        },
+        max_tokens: 4096,
+        retries: 3,
+        backoff_base: Duration::from_millis(200),
+        backoff_max: Duration::from_secs(5),
+        call_timeout: Duration::from_secs(60),
+        tool_timeout: inputs.tool_deadline,
+        facts: 1024,
+        parallel_tools: inputs.calls_per_response.min(4),
+        tools: inputs.tools,
+    })
+}

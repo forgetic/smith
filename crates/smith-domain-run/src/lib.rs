@@ -64,7 +64,7 @@ pub use charter::{Brief, Charter, Conventions, Section};
 pub use domain::{
     Domain, MAX_OUT, completion_overflow, completion_permit, fire, owner, reserve, settle_reservation, step,
 };
-pub use limits::{Limits, worst_case};
+pub use limits::{Derivation, Limits, derive, worst_case};
 pub use workspace::{Directory, Workspace};
 
 pub use delivery::{

@@ -93,7 +93,13 @@ pub struct HostService {
 }
 
 fn host_limits() -> host::Limits {
-    let mut limits = smith_host_world::limits();
+    let mut profile = smith_agent_service::profile::standard();
+    profile.declared.conversations = 2;
+    profile.declared.calls_per_response = 8;
+    profile.declared.memory = Some(1_u64 << 40_u32);
+    profile.policy.inbox = 8;
+    profile.policy.unacknowledged = 8;
+    let mut limits = smith_local_service::profile::host_limits(&profile, 65_536);
     limits.accounts = 1;
     limits.charter_bytes = 65_536;
     limits.transcript_bytes = 65_536;

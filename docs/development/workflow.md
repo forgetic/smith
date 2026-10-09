@@ -670,3 +670,11 @@ policies, and the shared counting allocator checks each kind at its largest
 configured payload. Line and chunked readers refuse unsupported versions,
 retain unknown listed values, and skip unknown records and fields. Existing
 workspace budgets are unchanged.
+
+Reliability limits increment 4.2 was measured through the serial heavy queue
+on 2026-10-09 with `measure -j 1`: the affected startup, domain-run, machine,
+process-world, local-settings and binary packages passed 217 focused tests
+in 4.887 seconds, with no skips. New configuration refusals and declaration
+overrides use deterministic fixtures; the checked render-to-machine property
+retains 256 deterministic cases. All six shipped-binary stories passed.
+The workspace focused and fuzzy budgets remain unchanged.

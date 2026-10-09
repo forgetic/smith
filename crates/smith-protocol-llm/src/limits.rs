@@ -3,7 +3,7 @@
 
 use core::mem::size_of;
 
-use skein_lib::List;
+use skein_lib::{Duration, List};
 use skein_llm::{Block, Message, Tool, client};
 use smith_domain::{llm, session};
 
@@ -21,6 +21,12 @@ pub struct Limits {
 
     /// Maximum rendered tool result, including its cut marker, in bytes.
     pub rendered_result: u32,
+
+    /// Default command deadline stated by the tool description.
+    pub shell_default: Duration,
+
+    /// Maximum command deadline stated by the tool description.
+    pub shell_maximum: Duration,
 }
 
 /// Actual root Complete receiving contract, checked before preparing the Client.

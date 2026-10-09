@@ -37,8 +37,7 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
                 .map_err(|error| format!("delivery root {}: {error}", directory.path))?,
         );
     }
-    let agent_bytes =
-        serde_json::to_vec(&settings.agent).map_err(|error| format!("agent configuration JSON: {error}"))?;
+    let agent_bytes = local_settings::agent_document(&settings)?;
     let agent_config = config::parse(&agent_bytes)?;
     let endpoints = agent_config.service.channel_endpoints.clone();
     let prepared = local_settings::policy(&settings, &endpoints, agent_config.service.limits.domain)?;
@@ -63,7 +62,7 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
     let executable = std::env::current_exe().map_err(|error| format!("agent program path: {error}"))?;
     let largest_turn =
         smith_domain::max_turn_bytes(&agent_config.service.limits.domain).ok_or("agent turn bound overflows")?;
-    let host_limits = service::profile::host_limits(largest_turn);
+    let host_limits = service::profile::host_limits(&agent_config.profile, largest_turn);
     let queue = local::max_out(&prepared.limits).max(host::max_out(&host_limits)).max(256);
     let process_limits = service::ProcessLimits {
         io: agent_config.service.limits.io,

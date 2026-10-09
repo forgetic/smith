@@ -1963,7 +1963,13 @@ mod tests {
                 grants: 8,
             },
             llm: llm::ComponentLimits {
-                adapter: llm::Limits { client, tool_bytes: 32_768, rendered_result: client.dialect.string_bytes },
+                adapter: llm::Limits {
+                    client,
+                    tool_bytes: 32_768,
+                    rendered_result: client.dialect.string_bytes,
+                    shell_default: skein_lib::Duration::from_secs(120),
+                    shell_maximum: skein_lib::Duration::from_secs(1200),
+                },
                 connection: skein_llm_connection::Limits {
                     endpoints: 1,
                     connections: 2,

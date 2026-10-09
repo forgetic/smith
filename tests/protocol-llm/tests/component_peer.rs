@@ -21,7 +21,13 @@ fn limits() -> ComponentLimits {
     let client = skein_llm_world::limits();
     let decoded_call_bytes = 4096;
     ComponentLimits {
-        adapter: adapter::Limits { client, tool_bytes: 32768, rendered_result: client.dialect.string_bytes },
+        adapter: adapter::Limits {
+            client,
+            tool_bytes: 32768,
+            rendered_result: client.dialect.string_bytes,
+            shell_default: skein_lib::Duration::from_secs(120),
+            shell_maximum: skein_lib::Duration::from_secs(1200),
+        },
         connection: skein_llm_connection::Limits {
             endpoints: 1,
             connections: 1,

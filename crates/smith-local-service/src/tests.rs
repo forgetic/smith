@@ -386,9 +386,17 @@ fn colocated_config() -> (Config, smith_agent_service::Config) {
 
 #[test]
 fn the_local_start_window_admits_the_standard_agents_largest_turn() {
-    let agent = smith_agent_service::profile::standard_limits(u64::MAX).expect("standard agent");
+    let agent = smith_agent_service::profile::derive(
+        &{
+            let mut profile = smith_agent_service::profile::standard();
+            profile.declared.memory = Some(u64::MAX);
+            profile
+        },
+        &smith_agent_service::profile::Configuration { environment_bytes: 0, endpoints: Box::new([]) },
+    )
+    .expect("standard agent");
     let largest = smith_domain::max_turn_bytes(&agent.domain).expect("bounded turn");
-    let host = crate::profile::host_limits(largest);
+    let host = crate::profile::host_limits(&smith_agent_service::profile::standard(), largest);
     assert!(host.unacknowledged_bytes >= largest, "agent accepts only a window holding its largest turn");
     assert!(host.turn_bytes >= largest, "host can receive the turn it grants");
 }

@@ -73,8 +73,11 @@ pub struct Limits {
     /// Maximum bytes of their rendered text in that prompt.
     pub answered_bytes: u32,
 
-    /// Receiving ceiling for each relay timeout; caller and run expiry may be earlier.
+    /// Default host-relay allowance; a charter may declare another within the maximum.
     pub host_timeout: Duration,
+
+    /// Maximum host-relay allowance, also bounded by caller and run expiry.
+    pub host_timeout_max: Duration,
 
     /// Positive deterministic backoff between settled retryable relays.
     pub host_backoff: Duration,
@@ -158,4 +161,71 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let calls = Calls::worst_case(limits.calls)?.checked_add(u64::from(limits.calls).checked_mul(call)?)?;
     let facts = Queue::<Fact>::worst_case(limits.facts)?;
     runs.checked_add(conversations)?.checked_add(alarms)?.checked_add(held)?.checked_add(calls)?.checked_add(facts)
+}
+
+/// Numeric declarations needed by this layer's transitional derivation.
+/// The service supplies only owned numbers and this domain's own child limits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Derivation {
+    pub conversations: u32,
+    pub calls_per_response: u32,
+    pub inbox: u32,
+    pub max_waiting: Duration,
+    pub max_turns: u32,
+    pub max_spend: u64,
+    pub max_time: Duration,
+    pub sections: u32,
+    pub host_tools: u32,
+    pub verdicts: u32,
+    pub guide: u32,
+    pub shell_tail: u32,
+    pub tool_payload: u32,
+    pub tool_deadline: Duration,
+}
+
+/// Derive this layer from declarations, refusing checked arithmetic overflow.
+/// Contract: protocol/limits.md, sections 2 and 3.
+#[must_use]
+pub fn derive(inputs: &Derivation) -> Option<Limits> {
+    let message_bytes = 4096_u32;
+    let separators = inputs.inbox.checked_sub(1)?.checked_mul(2)?;
+    let offer_bytes = inputs.inbox.checked_mul(message_bytes)?.checked_add(separators)?;
+    Some(Limits {
+        runs: 1,
+        conversations: inputs.conversations,
+        run_bytes: 1 << 16,
+        brief_sections: inputs.sections,
+        directories: 2,
+        directory_name_bytes: 256,
+        conflicts: 64,
+        conflict_path_bytes: 4096,
+        host_tools: inputs.host_tools,
+        host_input_bytes: inputs.tool_payload,
+        host_reply_bytes: inputs.tool_payload,
+        answered_calls: 16,
+        answered_bytes: 4096,
+        host_timeout: Duration::from_secs(60),
+        host_timeout_max: inputs.tool_deadline,
+        host_backoff: Duration::from_millis(50),
+        verdicts: inputs.verdicts,
+        calls: inputs.calls_per_response,
+        budget: Budget { turns: inputs.max_turns, spend: inputs.max_spend, time: inputs.max_time },
+        max_tokens: 4096,
+        models: 2,
+        run_conversations: inputs.conversations,
+        answer_bytes: 1024,
+        nudges: 1,
+        guide_bytes: inputs.guide,
+        io_timeout: Duration::from_secs(5),
+        outcome_bytes: 4096,
+        delivery_timeout: Duration::from_secs(60),
+        check_timeout: Duration::from_secs(60),
+        check_tail: inputs.shell_tail,
+        facts: 1024,
+        messages: inputs.inbox,
+        message_bytes,
+        offer_messages: inputs.inbox,
+        offer_bytes,
+        waiting: inputs.max_waiting,
+    })
 }

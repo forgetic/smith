@@ -155,11 +155,11 @@ impl Backend {
             ("api.anthropic.com", "claude-code", headers.iter().map(|header| serde_json::json!({"name":String::from_utf8_lossy(&header.name),"value":String::from_utf8_lossy(&header.value)})).collect::<Vec<_>>())
         };
         let mut settings = serde_json::json!({
-            "agent":{"profile":"standard","memory_bytes":1_099_511_627_776_u64,"grace_ms":1000,
-                "endpoints":[{"name":self.name,"number":0,"dialect":0,"account":0,"provider":self.name,"address":format!("{host}:443"),"server_name":host,"transport":"tls","identity":identity,"headers":headers,"reasoning_effort":if self.name == "codex" { Some("low") } else { None }}],
+            "agent":{"profile":{"name":"standard","declared":{"memory":1_099_511_627_776_u64},"policy":{"group_stop":1000}},
+                "endpoints":[{"name":self.name,"number":0,"dialect":0,"account":0,"provider":self.name,"connect":10000,"handshake":10000,"address":format!("{host}:443"),"server_name":host,"transport":"tls","identity":identity,"headers":headers,"reasoning_effort":if self.name == "codex" { Some("low") } else { None }}],
                 "environment":[],"trace":{"path":directory.join("agent-trace.jsonl"),"capture":"calls"}},
             "chat":"chat","instructions":"@local-shell Follow the user's requested outcome exactly. Use the tools and call finish when done.",
-            "models":[{"endpoint":self.name,"name":self.model,"max_tokens":4096,"input_price":0,"cached_price":0,"output_price":0,"price_unit":1}],
+            "models":[{"endpoint":self.name,"name":self.model,"window":8192,"output":4096,"reasoning_item":2048,"head":60000,"idle":30000,"input_price":0,"cached_price":0,"output_price":0,"price_unit":1}],
             "budget":{"turns":12,"spend":1,"seconds":120},"waiting_seconds":30,
             "contract":{"form":"report","max":4096},"token_directory":self.tokens,"accounts":[self.account]
         });

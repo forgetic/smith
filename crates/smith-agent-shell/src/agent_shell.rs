@@ -150,7 +150,7 @@ fn prepare(configuration: config::Configuration, resources: &Resources) -> Resul
         .and_then(|bytes| bytes.checked_add(u64::try_from(root_count.checked_mul(size_of::<Fd>())?).ok()?))
         .ok_or("agent memory calculation overflowed")?;
     if worst > configuration.memory {
-        return Err("agent shell exceeds memory_bytes".into());
+        return Err("agent shell exceeds profile.declared.memory".into());
     }
     let trace = match configuration.trace {
         Some(config) => Some(trace::Trace::open(config)?),

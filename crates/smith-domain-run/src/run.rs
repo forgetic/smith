@@ -1830,7 +1830,7 @@ fn host_call(
                 out.push(Request::Return { spent: 0, call, result: Returned::HostRejected(HostProblem::Effect) });
                 return;
             }
-            timeout = Some(declaration.timeout.min(env.limits.host_timeout));
+            timeout = Some(declaration.timeout.min(env.limits.host_timeout_max));
         }
     }
     let Some(timeout) = timeout else {

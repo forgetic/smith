@@ -107,3 +107,44 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(environment)?
         .checked_add(scratch)
 }
+
+/// Numeric declarations needed by this layer's transitional derivation.
+/// The service supplies only owned numbers and this domain's own child limits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Derivation {
+    pub operations: u32,
+    pub roots: u32,
+    pub path_bytes: u32,
+    pub file_bytes: u32,
+    pub entries: u32,
+    pub entry_bytes: u64,
+    pub shell_head: u32,
+    pub shell_tail: u32,
+    pub search_hits: u32,
+    pub search_bytes: u32,
+    pub environment_bytes: u32,
+    pub group_stop: Duration,
+}
+
+/// Derive this layer from declarations, refusing checked arithmetic overflow.
+/// Contract: protocol/limits.md, sections 2 and 3.
+#[must_use]
+pub fn derive(inputs: &Derivation) -> Option<Limits> {
+    Some(Limits {
+        operations: inputs.operations,
+        roots: inputs.roots,
+        path_bytes: inputs.path_bytes,
+        file_bytes: inputs.file_bytes,
+        entries: inputs.entries,
+        entry_bytes: inputs.entry_bytes,
+        processes: inputs.operations.min(8),
+        output_bytes: inputs.shell_head.max(inputs.shell_tail).max(inputs.search_bytes),
+        search_hits: inputs.search_hits,
+        search_bytes: inputs.search_bytes,
+        // JSON escapes one text/path byte into at most six bytes. The fixed
+        // envelope includes match offsets, line number and routing keys.
+        search_line_bytes: inputs.search_bytes.checked_add(inputs.path_bytes)?.checked_mul(6)?.checked_add(256)?,
+        env_bytes: inputs.environment_bytes,
+        stop_grace: inputs.group_stop,
+    })
+}

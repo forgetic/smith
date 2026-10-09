@@ -5,7 +5,7 @@
 
 use alloc::boxed::Box;
 
-use skein_lib::List;
+use skein_lib::{Decimal, Duration, List, Writer};
 use skein_llm::Error;
 use smith_domain::run;
 use smith_domain::{llm, tools};
@@ -124,4 +124,45 @@ fn add(descriptors: &mut List<ToolSchema>, schema: ToolSchema) {
 
 fn descriptor(kind: ToolKind, name: &[u8], description: &[u8], schema: &[u8]) -> ToolSchema {
     ToolSchema { kind, name: name.into(), description: description.into(), schema: schema.into() }
+}
+
+/// State the deployment's effective command deadlines in its offered inventory.
+pub(crate) fn with_shell_deadlines(
+    mut inventory: Box<[ToolSchema]>,
+    default: Duration,
+    maximum: Duration,
+) -> Box<[ToolSchema]> {
+    for descriptor in &mut inventory {
+        match descriptor.kind {
+            ToolKind::Owned(tool) => match tool {
+                tools::Tool::Shell => descriptor.description = shell_description(default, maximum),
+                tools::Tool::Read
+                | tools::Tool::List
+                | tools::Tool::Search
+                | tools::Tool::Write
+                | tools::Tool::Edit => {}
+            },
+            ToolKind::Finish | ToolKind::Deliver | ToolKind::SubAgent | ToolKind::Wait => {}
+        }
+    }
+    inventory
+}
+
+fn shell_description(default: Duration, maximum: Duration) -> Box<[u8]> {
+    let opening = b"Run a command in the workspace. It may change files and runs alone. timeout is seconds; the default deadline is ";
+    let between = b" ms; the effective maximum is ";
+    let ending = b" ms, also bounded by this session's remaining time.";
+    let default = Decimal::of(default.as_nanos() / 1_000_000);
+    let maximum = Decimal::of(maximum.as_nanos() / 1_000_000);
+    let bytes = opening.len().checked_add(between.len()).expect("fixed words fit");
+    let bytes = bytes.checked_add(ending.len()).expect("fixed words fit");
+    let bytes = bytes.checked_add(default.as_bytes().len()).expect("one u64 decimal fits");
+    let bytes = bytes.checked_add(maximum.as_bytes().len()).expect("two u64 decimals fit");
+    let mut output = Writer::new(bytes);
+    output.put(opening).expect("description room");
+    output.put(default.as_bytes()).expect("description room");
+    output.put(between).expect("description room");
+    output.put(maximum.as_bytes()).expect("description room");
+    output.put(ending).expect("description room");
+    output.finish()
 }

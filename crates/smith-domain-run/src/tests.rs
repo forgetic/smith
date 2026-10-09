@@ -46,6 +46,7 @@ pub(crate) const LIMITS: Limits = Limits {
     answered_calls: 16,
     answered_bytes: 4096,
     host_timeout: Duration::from_secs(60),
+    host_timeout_max: Duration::from_secs(60),
     host_backoff: Duration::from_millis(50),
     verdicts: 2,
     calls: 2,
@@ -3181,5 +3182,21 @@ fn ordered_offers_end_each_message_read_or_unread_and_the_answer_keeps_the_last_
         for name in [8, 7, 6] {
             assert_eq!(terminals[&Token::new(name)], "unread", "offered and queued both end unread");
         }
+    }
+}
+
+#[test]
+fn a_charters_host_deadline_uses_the_tool_ceiling_and_preserves_the_default() {
+    let limits = Limits { host_timeout: Duration::from_secs(1), host_timeout_max: Duration::from_secs(7), ..LIMITS };
+    for seconds in [5_u64, 9] {
+        let mut policy = charter();
+        policy.grants.host_tools[0].timeout = Duration::from_secs(seconds);
+        let mut harness = Harness::new(limits);
+        let (_, conversation) = harness.running_on(71, 99, policy);
+        let caller = harness.env.now.saturating_add(Duration::from_secs(30));
+        let emitted = harness.step(host_ask(conversation, 41, caller));
+        let [Request::HostCall { deadline, .. }] = emitted.as_ref() else { panic!("one admitted relay") };
+        assert_eq!(*deadline, harness.env.now.saturating_add(Duration::from_secs(seconds.min(7))));
+        assert_eq!(harness.env.limits.host_timeout, Duration::from_secs(1));
     }
 }

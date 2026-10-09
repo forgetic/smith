@@ -329,6 +329,7 @@ pub(crate) const RESERVED_NAMES: [&[u8]; 10] =
 fn valid_host_tools(tools: &[HostTool], limits: &Limits) -> bool {
     if !tools.is_empty()
         && (limits.host_timeout == Duration::ZERO
+            || limits.host_timeout_max == Duration::ZERO
             || limits.host_backoff == Duration::ZERO
             || limits.host_input_bytes < 2
             || limits.host_input_bytes > u32::try_from(crate::HostInput::CAPACITY).expect("fixed input cap")

@@ -4,12 +4,11 @@
 
 use skein_channel::{Role, StreamMode, frame_writer};
 use skein_fake_channel::ScriptedPeer;
-use skein_io::{self as io, kernel};
+use skein_io::kernel;
 use skein_lib::{Duration, List, Writer};
 use smith_agent_service as agent;
 use smith_protocol_channel as channel;
 use smith_protocol_llm as llm;
-use smith_protocol_machine as machine;
 
 pub mod fake;
 
@@ -64,7 +63,13 @@ pub fn configured(
     errors: AgentErrors,
 ) -> smith_agent_shell::Agent {
     smith_agent_shell::Agent::new(
-        smith_agent_shell::config::Configuration { service: configuration, memory: u64::MAX, trace: None },
+        smith_agent_shell::config::Configuration {
+            service: configuration,
+            memory: u64::MAX,
+            trace: None,
+            profile: agent::profile::standard(),
+            declarations: agent::profile::Configuration { environment_bytes: 0, endpoints: Box::new([]) },
+        },
         smith_agent_shell::Resources {
             input: inherited.pipes.iter().find(|(child, _)| *child == 0).expect("stdin").1,
             output: inherited.pipes.iter().find(|(child, _)| *child == 1).expect("stdout").1,
@@ -81,102 +86,51 @@ pub fn configured(
 /// Bounded agent-process settings shared by its direct and hosted worlds.
 #[must_use]
 pub fn limits() -> agent::Limits {
+    let mut profile = agent::profile::standard();
+    profile.declared.conversations = smith_agent_world::LIMITS.run.conversations;
+    profile.declared.calls_per_response = smith_agent_world::LIMITS.run.calls;
+    profile.declared.tool_payload = 256;
+    profile.declared.read_window = 16;
+    profile.declared.shell_head = 64;
+    profile.declared.shell_tail = 64;
+    profile.declared.search_hits = 8;
+    profile.declared.search_bytes = 256;
+    profile.declared.list_entries = 2;
+    profile.declared.guide = 128;
+    profile.declared.memory = Some(1_u64 << 40_u32);
+    profile.policy.max_turns = 8;
+    profile.policy.max_time = Duration::from_secs(60);
+    profile.policy.inbox = 8;
+    profile.policy.unacknowledged = 8;
+    profile.policy.group_stop = Duration::from_millis(10);
+    let configuration = agent::profile::Configuration { environment_bytes: 0, endpoints: Box::new([]) };
+    let mut limits = agent::profile::derive(&profile, &configuration).expect("tiny profile derives");
+    // Worlds may lower or specialize a derived limit (protocol/limits.md2.2).
     let mut client = skein_llm_world::limits();
-    // The full answer allowance coexists with its provider document wrappers.
     client.dialect.document_bytes = 32_768;
     client.dialect.tokens = 4096;
     client.sse.line = 32_768;
     client.sse.event = 65_536;
     let completion = llm::completion_worst_case(&client, 4096).expect("receiving bound");
-    let mut domain = smith_agent_world::LIMITS;
-    domain.session.completion_bytes = completion;
-    let channel_bodies = smith_channel::CEILINGS;
-    let schema = smith_channel::schema(&channel_bodies).expect("bounded channel schema");
-    let version = schema.version(2).expect("version two");
-    let largest = version.kinds.iter().map(|kind| kind.largest).max().expect("kinds");
-    let llm_io = io::Limits {
-        sockets: 3,
-        refusals: 1,
-        intake: 19_000,
-        receive: 1024,
-        output: 19_000,
-        sends: 2,
-        accepts: 1,
-        backlog: 2,
-        close_timeout: Duration::from_secs(1),
-        retry: Duration::from_millis(10),
-    };
-    agent::Limits {
-        domain,
-        channel: channel::Limits {
-            bodies: channel_bodies,
-            charter: smith_charter::CEILINGS,
-            transcript: smith_transcript::CEILINGS,
-            channel: skein_channel::Limits {
-                chunk: 4096,
-                credential: 0,
-                skip: 4096,
-                output_bytes: largest.checked_add(8).expect("largest frame"),
-                output_frames: 4,
-                kinds: 18,
-            },
-            endpoints: 1,
-            calls: 8,
-            turns: 8,
-            fact_reserve_frames: 1,
-            fact_reserve_bytes: 128,
-            grants: 8,
-        },
-        llm: llm::ComponentLimits {
-            adapter: llm::Limits { client, tool_bytes: 32_768, rendered_result: client.dialect.string_bytes },
-            connection: skein_llm_connection::Limits {
-                endpoints: 1,
-                connections: 2,
-                calls: 2,
-                per_endpoint: 2,
-                idle_keep: Duration::from_secs(1),
-                io: llm_io,
-                tls: skein_tls::client::Limits { read: 4096, send: 4096, records: skein_tls::client::MAX_RECORD },
-            },
-            receiving: llm::Receiving {
-                max_completion_bytes: completion,
-                max_completion_blocks: client.dialect.parts,
-                decoded_call_bytes: 4096,
-                max_failure_bytes: smith_agent_world::LIMITS.session.failure_bytes,
-            },
-            contract_bytes: 4096,
-            accounts: 1,
-            grant_value_bytes: 128,
-            connect: Some(Duration::from_secs(1)),
-            handshake: Some(Duration::from_secs(1)),
-            head: Some(Duration::from_secs(2)),
-            idle: Some(Duration::from_secs(3)),
-        },
-        machine: machine::Limits {
-            operations: 2,
-            roots: 1,
-            path_bytes: 64,
-            file_bytes: 16,
-            entries: 2,
-            entry_bytes: 512,
-            processes: 2,
-            output_bytes: 64,
-            search_hits: 8,
-            search_bytes: 256,
-            search_line_bytes: 512,
-            env_bytes: 512,
-            stop_grace: Duration::from_millis(10),
-        },
-        io: io::Limits { sockets: 16, ..llm_io },
-        file_slots: 4,
-        file_read: 64,
-        file_entries: 2,
-        file_bytes: 512,
-        file_timeout: Duration::from_secs(1),
-        queue: smith_domain::max_out(&domain).max(256),
-        routes: 66,
-        memory: u64::MAX,
-    }
+    limits.domain.session.completion_bytes = completion;
+    limits.llm.adapter.client = client;
+    limits.llm.adapter.rendered_result = client.dialect.string_bytes;
+    limits.llm.connection.endpoints = 1;
+    limits.llm.connection.connections = 2;
+    limits.llm.connection.calls = 2;
+    limits.llm.connection.per_endpoint = 2;
+    limits.llm.receiving.max_completion_bytes = completion;
+    limits.llm.receiving.max_completion_blocks = client.dialect.parts;
+    limits.llm.accounts = 1;
+    limits.llm.grant_value_bytes = 128;
+    limits.llm.connect = Some(Duration::from_secs(1));
+    limits.llm.handshake = Some(Duration::from_secs(1));
+    limits.llm.head = Some(Duration::from_secs(2));
+    limits.llm.idle = Some(Duration::from_secs(3));
+    limits.machine.file_bytes = 16;
+    limits.file_timeout = Duration::from_secs(1);
+    limits.queue = smith_domain::max_out(&limits.domain).max(256);
+    limits
 }
 
 /// Build the same agent service for a direct or spawned process world.

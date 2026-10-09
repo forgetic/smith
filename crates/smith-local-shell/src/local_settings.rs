@@ -22,7 +22,12 @@ const SETTINGS_BYTES: u64 = 1 << 20;
 pub struct Model {
     pub endpoint: String,
     pub name: String,
-    pub max_tokens: u32,
+    pub window: u32,
+    pub output: u32,
+    pub reasoning_item: u32,
+    /// Progress durations in milliseconds.
+    pub head: u64,
+    pub idle: u64,
     pub input_price: u64,
     pub cached_price: u64,
     pub output_price: u64,
@@ -185,7 +190,7 @@ pub fn policy(
             account: endpoint.account,
             endpoint: run::charter::Endpoint(endpoint.number),
             model: model.name.as_bytes().into(),
-            max_tokens: model.max_tokens,
+            max_tokens: model.output,
         });
     }
     let mut paths = Vec::with_capacity(settings.directories.len());
@@ -457,10 +462,16 @@ pub fn read(global: &Path, workspace: Option<&Path>) -> Result<Settings, String>
         || settings.chat == ".."
         || settings.chat.contains(['/', '\\', '\0'])
         || settings.models.is_empty()
-        || settings
-            .models
-            .iter()
-            .any(|model| model.endpoint.is_empty() || model.name.is_empty() || model.price_unit == 0)
+        || settings.models.iter().any(|model| {
+            model.endpoint.is_empty()
+                || model.name.is_empty()
+                || model.price_unit == 0
+                || model.window == 0
+                || model.output == 0
+                || model.reasoning_item == 0
+                || model.head == 0
+                || model.idle == 0
+        })
         || settings.budget.turns == 0
         || settings.budget.seconds == 0
         || settings.waiting_seconds == 0
@@ -472,6 +483,39 @@ pub fn read(global: &Path, workspace: Option<&Path>) -> Result<Settings, String>
         return Err("local agent configuration must be an object".into());
     }
     Ok(settings)
+}
+
+/// Generate every served model declaration from the local host's priced models.
+/// Progress durations are milliseconds in this generated JSON.
+pub fn agent_document(settings: &Settings) -> Result<Vec<u8>, String> {
+    let mut agent = settings.agent.clone();
+    let endpoints = agent.get_mut("endpoints").and_then(Value::as_array_mut).ok_or("agent endpoints must be a list")?;
+    let mut declared = std::collections::BTreeSet::new();
+    for endpoint in endpoints {
+        let name = endpoint.get("name").and_then(Value::as_str).ok_or("agent endpoint name is required")?.to_owned();
+        let mut models = Vec::new();
+        for model in &settings.models {
+            if model.endpoint == name {
+                if !declared.insert((model.endpoint.clone(), model.name.clone())) {
+                    return Err("duplicate local model declaration".into());
+                }
+                models.push(serde_json::json!({"name":model.name,"window":model.window,"output":model.output,
+                    "reasoning_item":model.reasoning_item,"head":model.head,"idle":model.idle}));
+            }
+        }
+        if models.is_empty() {
+            return Err(format!("endpoint {name:?} has no declared local model"));
+        }
+        let object = endpoint.as_object_mut().ok_or("agent endpoint must be an object")?;
+        if object.contains_key("models") {
+            return Err("local agent endpoint models come from settings.models".into());
+        }
+        object.insert("models".into(), Value::Array(models));
+    }
+    if declared.len() != settings.models.len() {
+        return Err("local model names an undeclared endpoint".into());
+    }
+    serde_json::to_vec(&agent).map_err(|error| format!("generated agent configuration JSON: {error}"))
 }
 
 fn read_document(path: &Path) -> Result<Value, String> {
@@ -509,16 +553,19 @@ mod tests {
     #[test]
     fn workspace_replaces_only_its_named_settings_and_agent_fields() {
         let mut document = serde_json::json!({
-            "agent": {"profile":"standard", "memory_bytes":42, "environment":[]},
-            "chat":"one", "instructions":"global", "models":[{"endpoint":"main","name":"small","max_tokens":32,
+            "agent": {"profile":{"name":"standard", "declared":{"memory":42}}, "environment":[]},
+            "chat":"one", "instructions":"global", "models":[{"endpoint":"main","name":"small","window":8192,"output":32,"reasoning_item":2048,"head":60000,"idle":30000,
                 "input_price":1,"cached_price":1,"output_price":1,"price_unit":1}],
             "budget":{"turns":8,"spend":100,"seconds":60}, "waiting_seconds":30
         });
-        merge(&mut document, serde_json::json!({"instructions":"workspace", "agent":{"memory_bytes":99}}));
+        merge(
+            &mut document,
+            serde_json::json!({"instructions":"workspace", "agent":{"profile":{"declared":{"memory":99}}}}),
+        );
         let settings: Settings = serde_json::from_value(document).expect("merged settings");
         assert_eq!(settings.instructions, "workspace");
-        assert_eq!(settings.agent["profile"], "standard");
-        assert_eq!(settings.agent["memory_bytes"], 99);
+        assert_eq!(settings.agent["profile"]["name"], "standard");
+        assert_eq!(settings.agent["profile"]["declared"]["memory"], 99);
         assert_eq!(settings.models[0].name, "small");
     }
 
@@ -526,7 +573,7 @@ mod tests {
     fn invalid_model_and_zero_budget_are_refused_before_a_chat_opens() {
         let path = std::env::temp_dir().join(format!("smith-local-settings-{}", std::process::id()));
         let document = serde_json::json!({"agent":{},"chat":"one","instructions":"x",
-            "models":[{"endpoint":"","name":"small","max_tokens":32,"input_price":1,"cached_price":1,
+            "models":[{"endpoint":"","name":"small","window":8192,"output":32,"reasoning_item":2048,"head":60000,"idle":30000,"input_price":1,"cached_price":1,
                 "output_price":1,"price_unit":1}],"budget":{"turns":0,"spend":1,"seconds":60},"waiting_seconds":30});
         fs::write(&path, serde_json::to_vec(&document).expect("JSON")).expect("settings file");
         assert!(read(&path, None).is_err());
@@ -547,7 +594,11 @@ mod tests {
             models: vec![Model {
                 endpoint: "main".into(),
                 name: "small".into(),
-                max_tokens: 32,
+                window: 8192,
+                output: 32,
+                reasoning_item: 2048,
+                head: 60_000,
+                idle: 30_000,
                 input_price: 1,
                 cached_price: 1,
                 output_price: 1,
@@ -567,7 +618,21 @@ mod tests {
             accounts: vec![],
             push: None,
         };
-        let prepared = policy(&settings, &endpoints, smith_agent_service::profile::LIMITS).expect("bounded policy");
+        let prepared = policy(
+            &settings,
+            &endpoints,
+            smith_agent_service::profile::derive(
+                &{
+                    let mut profile = smith_agent_service::profile::standard();
+                    profile.declared.memory = Some(u64::MAX);
+                    profile
+                },
+                &smith_agent_service::profile::Configuration { environment_bytes: 0, endpoints: Box::new([]) },
+            )
+            .expect("profile derives")
+            .domain,
+        )
+        .expect("bounded policy");
         assert!(prepared.paths.is_empty());
         assert_eq!(prepared.limits.endpoints.as_ref(), &[run::charter::Endpoint(7)]);
         let encoded = charter(&prepared.config, &endpoints).expect("matching charter");

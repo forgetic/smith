@@ -84,7 +84,11 @@ Each model has this shape:
 {
   "endpoint": "codex",
   "name": "registered-model",
-  "max_tokens": 8192,
+  "window": 131072,
+  "output": 8192,
+  "reasoning_item": 65536,
+  "head": 60000,
+  "idle": 120000,
   "input_price": 10,
   "cached_price": 2,
   "output_price": 30,
@@ -93,10 +97,20 @@ Each model has this shape:
 ```
 
 `endpoint` names an endpoint in `agent.endpoints`; `name` is the provider's
-model name. The three prices are integer currency units per `price_unit`
+model name. `window` and `output` are tokens, `reasoning_item` is bytes, and
+`head` and `idle` are positive milliseconds. The generated agent configuration
+puts these declarations in each endpoint's `models`. Each endpoint also needs
+positive `connect` and `handshake` milliseconds. Local settings leave endpoint
+`models` out of `agent`; the local host generates them from this list. The three prices are integer currency units per `price_unit`
 tokens, which must be positive. These example names and prices are placeholders
 for the operator's model registration and prices. The settings do not discover
 models or prices from the provider.
+
+The agent profile is `{"name":"standard","declared":{"memory":N},"policy":{}}`;
+each declared quantity or policy can be overridden by name. `memory` remains
+required while memory-pool derivation is being introduced. Policy durations,
+including `group_stop`, are milliseconds. Raw derived limits and the former
+`memory_bytes` and `grace_ms` keys are refused.
 
 The agent configuration's `environment` is an array of `{ "name", "value" }`
 for agent commands. It is separate from the host's `delivery_environment`.

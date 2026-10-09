@@ -204,6 +204,7 @@ const fn calm_run_limits() -> run::Limits {
         answered_calls: 16,
         answered_bytes: 4096,
         host_timeout: Duration::from_secs(60),
+        host_timeout_max: Duration::from_secs(60),
         host_backoff: Duration::from_millis(50),
         verdicts: 4,
         calls: 16,

@@ -1,6 +1,6 @@
-//! The standard agent profile keeps fixed deployment and policy bounds and
+//! The agent profile keeps declared deployment quantities and policy ceilings and
 //! computes the service limits from them. It never knows endpoint destinations,
-//! credentials or a run's charter. `standard_limits` returns typed refusals.
+//! credentials or a run's charter. `derive` returns typed refusals.
 //! Contract: shell.md, section 2.1; protocol/agent.md, section 4.
 
 use skein_http as http;
@@ -15,6 +15,10 @@ use smith_protocol_llm as llm;
 use smith_protocol_machine as machine;
 
 use crate as service;
+
+mod quantities;
+
+pub use quantities::{Configuration, Declared, Endpoint, Fraction, Model, Name, Policy, Profile, standard};
 
 /// The number of configured destinations the standard profile admits.
 pub const ENDPOINTS: u32 = 3;
@@ -35,109 +39,19 @@ pub enum ProfileError {
     ChannelFrame,
     /// The IO route count cannot be represented.
     IoRoutes,
+    /// Process memory was not declared.
+    Memory,
+    /// A domain declaration cannot be represented.
+    Domain,
+    /// A machine declaration cannot be represented.
+    Machine,
 }
 
-/// The largest run budget under the standard profile.
-const BUDGET: run::Budget = run::Budget { turns: 64, spend: 1, time: Duration::from_secs(3600) };
-
-const CEILING: session::Budget = session::Budget {
-    turns: BUDGET.turns,
-    input: 1 << 24,
-    output: 1 << 24,
-    cache_read: 1 << 26,
-    cache_write: 1 << 24,
-    time: BUDGET.time,
-};
-
-/// One run with room for main and several child conversations.
-pub const LIMITS: domain::Limits = domain::Limits {
-    accounts: 4,
-    endpoints: 3,
-    decoded_call_bytes: 4096,
-    skew: Duration::ZERO,
-    run: run::Limits {
-        runs: 1,
-        conversations: 6,
-        run_bytes: 1 << 16,
-        brief_sections: 4,
-        directories: 2,
-        directory_name_bytes: 256,
-        conflicts: 64,
-        conflict_path_bytes: 4096,
-        host_tools: 2,
-        host_input_bytes: 65_536,
-        host_reply_bytes: 65_536,
-        answered_calls: 16,
-        answered_bytes: 4096,
-        host_timeout: Duration::from_secs(60),
-        host_backoff: Duration::from_millis(50),
-        verdicts: 2,
-        calls: 16,
-        budget: BUDGET,
-        max_tokens: 4096,
-        models: 2,
-        run_conversations: 6,
-        answer_bytes: 1024,
-        nudges: 1,
-        guide_bytes: 1024,
-        io_timeout: Duration::from_secs(5),
-        outcome_bytes: 4096,
-        delivery_timeout: Duration::from_secs(60),
-        check_timeout: Duration::from_secs(60),
-        check_tail: 512,
-        facts: 1024,
-        messages: 8,
-        message_bytes: 4096,
-        offer_messages: 8,
-        offer_bytes: 32_782,
-        waiting: Duration::from_secs(300),
-    },
-    session: session::Limits {
-        sessions: 6,
-        spend: 1,
-        protocol_allowance: 0,
-        messages: 64,
-        session_bytes: 33_554_432,
-        completion_bytes: 4096,
-        completion_blocks: 16,
-        failure_bytes: 512,
-        delegated_result_bytes: 4_194_304,
-        budget: CEILING,
-        max_tokens: 4096,
-        retries: 3,
-        backoff_base: Duration::from_millis(200),
-        backoff_max: Duration::from_secs(5),
-        call_timeout: Duration::from_secs(60),
-        tool_timeout: Duration::from_secs(60),
-        facts: 1024,
-        parallel_tools: 4,
-        tools: tools::Limits {
-            kits: 6,
-            calls: 4,
-            repos: 2,
-            path_bytes: 256,
-            known_files: 16,
-            file_bytes: 1 << 16,
-            read_bytes: 4096,
-            list_entries: 64,
-            list_bytes: 4096,
-            match_lines: 8,
-            file_timeout: Duration::from_secs(30),
-            env_bytes: 256,
-            shell_timeout: Duration::from_secs(30),
-            shell_timeout_max: Duration::from_secs(120),
-            shell_head: 256,
-            shell_tail: 256,
-            search_hits: 16,
-            search_bytes: 1024,
-            search_timeout: Duration::from_secs(30),
-            facts: 1024,
-        },
-    },
-};
-
-/// Build the standard agent deployment limits for the shell-selected memory ceiling.
-pub fn standard_limits(memory: u64) -> Result<service::Limits, ProfileError> {
+/// Compose layer limits from the selected profile and endpoint declarations.
+pub fn derive(profile: &Profile, configuration: &Configuration) -> Result<service::Limits, ProfileError> {
+    let declared = profile.declared;
+    let policy = profile.policy;
+    let memory = declared.memory.ok_or(ProfileError::Memory)?;
     let client = client_limits();
     let decoded_call_bytes = 4096;
     let completion = llm::completion_worst_case(&client, decoded_call_bytes).ok_or(ProfileError::Receiving)?;
@@ -152,10 +66,10 @@ pub fn standard_limits(memory: u64) -> Result<service::Limits, ProfileError> {
         sends: 8,
         accepts: 1,
         backlog: 2,
-        close_timeout: Duration::from_secs(5),
+        close_timeout: policy.close,
         retry: Duration::from_millis(10),
     };
-    let mut domain = LIMITS;
+    let mut domain = derive_domain(profile, configuration.environment_bytes)?;
     domain.session.completion_bytes = completion;
     // Before skein's derivation removes its sent-text cap, rendering takes the
     // smaller cap and marks oversized outcomes rather than refusing the call.
@@ -166,6 +80,17 @@ pub fn standard_limits(memory: u64) -> Result<service::Limits, ProfileError> {
     )
     .ok_or(ProfileError::Receiving)?
     .min(client.dialect.string_bytes);
+    let mut charter = smith_charter::CEILINGS;
+    charter.charter_brief = policy.sections;
+    charter.tools_host = policy.host_tools;
+    charter.contract_verdicts = policy.verdicts;
+    charter.run_result_items = policy.items;
+    charter.run_result_fields = policy.fields;
+    charter.item_fields = policy.fields;
+    charter.text_rule_fields = policy.fields;
+    charter.item_kind_fields = policy.fields;
+    charter.verdict_rule_fields = policy.fields;
+    charter.change_rule_fields = policy.fields;
     let queue = domain::max_out(&domain).max(256);
     let operations = io::operations(&io).ok_or(ProfileError::IoRoutes)?;
     let routes = operations.checked_add(64).ok_or(ProfileError::IoRoutes)?;
@@ -173,7 +98,7 @@ pub fn standard_limits(memory: u64) -> Result<service::Limits, ProfileError> {
         domain,
         channel: channel::Limits {
             bodies,
-            charter: smith_charter::CEILINGS,
+            charter,
             transcript: smith_transcript::CEILINGS,
             channel: skein_channel::Limits {
                 chunk: 4096,
@@ -184,52 +109,28 @@ pub fn standard_limits(memory: u64) -> Result<service::Limits, ProfileError> {
                 kinds: 18,
             },
             endpoints: ENDPOINTS,
-            calls: 16,
-            turns: 64,
+            calls: declared.calls_per_response,
+            turns: policy.unacknowledged,
             fact_reserve_frames: 1,
             fact_reserve_bytes: 128,
             grants: 8,
         },
-        llm: llm::ComponentLimits {
-            adapter: llm::Limits { client, tool_bytes: 32_768, rendered_result },
-            connection: connection::Limits {
-                endpoints: ENDPOINTS,
-                connections: 6,
-                calls: 6,
-                per_endpoint: 2,
-                idle_keep: Duration::from_secs(15),
-                io,
-                tls: tls_limits(),
-            },
-            receiving: llm::Receiving {
-                max_completion_bytes: completion,
-                max_completion_blocks: client.dialect.parts,
-                decoded_call_bytes,
-                max_failure_bytes: domain.session.failure_bytes,
-            },
-            contract_bytes: 4096,
-            accounts: ACCOUNTS,
-            grant_value_bytes: 2048,
-            connect: Some(Duration::from_secs(10)),
-            handshake: Some(Duration::from_secs(10)),
-            head: Some(Duration::from_secs(60)),
-            idle: Some(Duration::from_secs(30)),
-        },
-        machine: machine::Limits {
-            operations: 16,
-            roots: 2,
-            path_bytes: 4096,
-            file_bytes: 65_536,
-            entries: 64,
-            entry_bytes: 4096,
-            processes: 8,
-            output_bytes: 1024,
-            search_hits: 16,
-            search_bytes: 1024,
-            search_line_bytes: 4096,
-            env_bytes: 8192,
-            stop_grace: Duration::from_millis(250),
-        },
+        llm: component_limits(profile, configuration, client, io, &domain, rendered_result),
+        machine: machine::derive(&machine::Derivation {
+            operations: domain.run.calls,
+            roots: domain.session.tools.repos,
+            path_bytes: domain.run.conflict_path_bytes.max(domain.session.tools.path_bytes),
+            file_bytes: domain.session.tools.file_bytes,
+            entries: domain.session.tools.list_entries,
+            entry_bytes: domain.session.tools.list_bytes,
+            shell_head: domain.session.tools.shell_head,
+            shell_tail: domain.session.tools.shell_tail,
+            search_hits: domain.session.tools.search_hits,
+            search_bytes: domain.session.tools.search_bytes,
+            environment_bytes: configuration.environment_bytes,
+            group_stop: policy.group_stop,
+        })
+        .ok_or(ProfileError::Machine)?,
         io,
         file_slots: 32,
         file_read: 65_536,
@@ -279,4 +180,116 @@ fn channel_output(bodies: &smith_channel::Limits) -> Result<u32, ProfileError> {
         largest = largest.max(kind.largest);
     }
     largest.checked_add(8).ok_or(ProfileError::ChannelFrame)
+}
+
+fn max_connect(configuration: &Configuration) -> Duration {
+    let mut longest = Duration::ZERO;
+    for endpoint in &configuration.endpoints {
+        longest = longest.max(endpoint.connect);
+    }
+    longest.max(Duration::from_millis(1))
+}
+
+fn max_handshake(configuration: &Configuration) -> Duration {
+    let mut longest = Duration::ZERO;
+    for endpoint in &configuration.endpoints {
+        longest = longest.max(endpoint.handshake);
+    }
+    longest.max(Duration::from_millis(1))
+}
+
+fn derive_domain(profile: &Profile, environment_bytes: u32) -> Result<domain::Limits, ProfileError> {
+    let declared = profile.declared;
+    let policy = profile.policy;
+    let tools = tools::derive(&tools::Derivation {
+        conversations: declared.conversations,
+        calls_per_response: declared.calls_per_response,
+        tool_payload: declared.tool_payload,
+        read_window: declared.read_window,
+        shell_head: declared.shell_head,
+        shell_tail: declared.shell_tail,
+        search_hits: declared.search_hits,
+        search_bytes: declared.search_bytes,
+        list_entries: declared.list_entries,
+        environment_bytes,
+        tool_deadline: policy.tool_deadline,
+        shell_timeout: policy.shell_timeout,
+    })
+    .ok_or(ProfileError::Domain)?;
+    let run = run::derive(&run::Derivation {
+        conversations: declared.conversations,
+        calls_per_response: declared.calls_per_response,
+        inbox: policy.inbox,
+        max_waiting: policy.max_waiting,
+        max_turns: policy.max_turns,
+        max_spend: policy.max_spend,
+        max_time: policy.max_time,
+        sections: policy.sections,
+        host_tools: policy.host_tools,
+        verdicts: policy.verdicts,
+        guide: declared.guide,
+        shell_tail: declared.shell_tail,
+        tool_payload: declared.tool_payload,
+        tool_deadline: policy.tool_deadline,
+    })
+    .ok_or(ProfileError::Domain)?;
+    let session = session::derive(&session::Derivation {
+        conversations: declared.conversations,
+        calls_per_response: declared.calls_per_response,
+        max_turns: policy.max_turns,
+        max_spend: policy.max_spend,
+        max_time: policy.max_time,
+        tool_deadline: policy.tool_deadline,
+        tools,
+    })
+    .ok_or(ProfileError::Domain)?;
+    Ok(domain::Limits {
+        accounts: ACCOUNTS,
+        endpoints: ENDPOINTS,
+        decoded_call_bytes: 4096,
+        skew: Duration::ZERO,
+        run,
+        session,
+    })
+}
+
+fn component_limits(
+    profile: &Profile,
+    configuration: &Configuration,
+    client: shared::client::Limits,
+    io: io::Limits,
+    domain: &domain::Limits,
+    rendered_result: u32,
+) -> llm::ComponentLimits {
+    llm::ComponentLimits {
+        adapter: llm::Limits {
+            client,
+            tool_bytes: 32_768,
+            rendered_result,
+            shell_default: profile.policy.shell_timeout,
+            shell_maximum: profile.policy.tool_deadline,
+        },
+        connection: connection::Limits {
+            endpoints: ENDPOINTS,
+            connections: profile.declared.conversations,
+            calls: profile.declared.conversations,
+            per_endpoint: 2,
+            idle_keep: profile.policy.connection_keep,
+            io,
+            tls: tls_limits(),
+        },
+        receiving: llm::Receiving {
+            max_completion_bytes: domain.session.completion_bytes,
+            max_completion_blocks: client.dialect.parts,
+            decoded_call_bytes: domain.decoded_call_bytes,
+            max_failure_bytes: domain.session.failure_bytes,
+        },
+        contract_bytes: 4096,
+        accounts: ACCOUNTS,
+        grant_value_bytes: 2048,
+        connect: Some(max_connect(configuration)),
+        handshake: Some(max_handshake(configuration)),
+        head: Some(Duration::from_secs(60)),
+        idle: Some(Duration::from_secs(30)),
+    }
 }

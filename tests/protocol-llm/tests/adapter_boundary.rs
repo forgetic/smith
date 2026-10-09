@@ -22,6 +22,8 @@ fn limits() -> Limits {
         client: skein_llm_world::limits(),
         tool_bytes: 32_768,
         rendered_result: skein_llm_world::limits().dialect.string_bytes,
+        shell_default: skein_lib::Duration::from_secs(120),
+        shell_maximum: skein_lib::Duration::from_secs(1200),
     }
 }
 

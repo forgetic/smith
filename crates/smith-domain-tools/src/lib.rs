@@ -57,5 +57,5 @@ pub use boundary::{Done, Event, Expect, Op, Refusal, Request, Root, Version};
 pub use call::{Call, Effect, Entry, Exit, Fault, Hit, Kind, Outcome, Tool, effect, tool};
 pub use domain::{Domain, max_out, step};
 pub use facts::{Fact, Verdict};
-pub use limits::{Limits, result_worst_case, worst_case};
+pub use limits::{Derivation, Limits, derive, result_worst_case, worst_case};
 pub use path::{Name, Part, Path, Place};
