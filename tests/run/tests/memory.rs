@@ -317,6 +317,7 @@ fn fill_selected(limits: Limits, selected: Option<&smith_domain_run::Conventions
             window: smith_domain_run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
             charter: selected_charter(limits.run_bytes, selected),
             transcript: None,
+            resumed: false,
         };
         let [Asked::Other, Asked::Read { owner }] = step(start)[..] else {
             panic!("a charter of exactly the byte limit is admitted");
@@ -391,6 +392,7 @@ fn refuse_oversized_charter(limits: Limits, env: &Env<Limits>, out: &mut Queue<R
         window: smith_domain_run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
         charter: charter(limits.run_bytes + 1),
         transcript: None,
+        resumed: false,
     };
     smith_domain_run::step(&mut domain, env, start, out);
     let Some(Request::Answer { to: _, answer, read: _ }) = out.pop() else { panic!("expected an answer") };
@@ -541,6 +543,7 @@ fn full_receipt_delivery_settles_before_a_cancelled_answer() {
             window: smith_domain_run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
             charter,
             transcript: None,
+            resumed: false,
         },
     );
     let run = owner.expect("preparation read");
@@ -747,6 +750,7 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
             window: smith_domain_run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
             charter,
             transcript: None,
+            resumed: false,
         }),
     );
     let run = run.expect("admitted run reads");

@@ -100,6 +100,8 @@ pub enum Event {
         workspace: Option<crate::Workspace>,
         /// Root-owned restore binding, consumed by main once; never decoded here.
         transcript: Option<Token>,
+        /// The root selected a concrete transcript for main, independently of its binding.
+        resumed: bool,
     },
 
     /// Parent-labelled live message; names, including zero, are opaque and

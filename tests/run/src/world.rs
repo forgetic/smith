@@ -1567,6 +1567,7 @@ impl World {
             charter,
             workspace,
             transcript: None,
+            resumed: false,
         });
     }
 

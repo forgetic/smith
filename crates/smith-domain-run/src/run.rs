@@ -243,10 +243,12 @@ pub(crate) struct Start {
 
     /// Optional opaque history handle.
     pub(crate) transcript: Option<Token>,
+    /// Concrete history selected by the parent, independent of the opaque binding.
+    pub(crate) resumed: bool,
 }
 
 pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &mut Queue<Request>) {
-    let Start { reply_to, host_run, activation, window, messages, charter, workspace, transcript } = start;
+    let Start { reply_to, host_run, activation, window, messages, charter, workspace, transcript, resumed } = start;
     let Domain { runs, conversations, calls: _, alarms, facts } = domain;
     // A charter that can never fit is invalid, room or not: busy invites a
     // retry.
@@ -302,7 +304,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         deadline,
         state: State::Closed,
         transcript,
-        resumed: transcript.is_some(),
+        resumed,
         inbox: Queue::with_capacity(env.limits.messages),
         offered: Queue::with_capacity(env.limits.messages),
         read: None,

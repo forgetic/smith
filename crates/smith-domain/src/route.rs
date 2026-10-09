@@ -275,6 +275,7 @@ fn start(
     } else {
         (None, Box::default(), None)
     };
+    let resumed = transcript.is_some();
     let context = StartContext { reply_to: Some(reply_to), transcript, answered, refused };
     let id = domain.starts.insert(context).expect("reserved original parent right before work");
     run_step(
@@ -289,6 +290,7 @@ fn start(
             charter,
             workspace,
             transcript: Some(id.token()),
+            resumed,
         },
     );
 }

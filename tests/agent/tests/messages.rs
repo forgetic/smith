@@ -33,6 +33,36 @@ fn history(world: &World) -> smith_domain::Transcript {
     }
 }
 
+#[test]
+fn admission_records_actual_history_independently_of_the_restore_binding() {
+    fn resumed(world: &World) -> bool {
+        let mut values = Vec::new();
+        for fact in world.facts() {
+            if let smith_domain::Fact::Run {
+                fact: run::facts::Fact { kind: run::facts::FactKind::Admitted { resumed, .. }, .. },
+            } = fact
+            {
+                values.push(*resumed);
+            }
+        }
+        assert_eq!(values.len(), 1, "one native admission");
+        values[0]
+    }
+
+    let mut first = World::new(waiting(960));
+    first.run(2000);
+    assert!(!resumed(&first), "fresh main has an opaque restore binding but no history");
+    let saved = history(&first);
+    for (resume, transcript, expected) in
+        [(true, None, false), (true, Some(saved.clone()), true), (false, Some(saved), false)]
+    {
+        let mut next = World::with_history(Settings { resume, ..waiting(961) }, transcript);
+        next.run(2000);
+        assert_eq!(resumed(&next), expected, "only selected concrete history resumes main");
+        assert!(matches!(next.answer(), run::Answer::Parked { .. }));
+    }
+}
+
 fn text_seen(world: &World, expected: &[u8]) -> bool {
     world.prompts().iter().flat_map(|query| &query.messages).flat_map(|message| &message.parts).any(|part| match part {
         Part::Text { text } => text.as_ref() == expected,

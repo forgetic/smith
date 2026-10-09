@@ -432,6 +432,7 @@ impl Host {
                     charter,
                     workspace,
                     transcript: None,
+                    resumed: false,
                 });
                 self.set(job, State::Starting);
             }

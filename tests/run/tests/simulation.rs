@@ -53,6 +53,7 @@ impl CrashHost {
             charter: run::Charter { resume: true, ..charter },
             workspace,
             transcript: None,
+            resumed: false,
         }
     }
 

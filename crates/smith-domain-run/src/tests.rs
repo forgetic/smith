@@ -168,6 +168,7 @@ impl Harness {
             charter,
             workspace,
             transcript: None,
+            resumed: false,
         })
     }
 
@@ -617,6 +618,7 @@ fn zero_activation_has_its_own_refusal_before_admission() {
         charter: charter(),
         workspace: Some(workspace()),
         transcript: None,
+        resumed: false,
     });
     assert_eq!(answered(emitted), (81, Answer::Refused(Refusal::Invalid(Invalid::Activation))));
     assert_eq!((harness.domain.runs(), harness.domain.conversations()), (0, 0));
@@ -3222,6 +3224,7 @@ fn delayed_facts_keep_activation_history_and_child_parentage() {
             charter: agents(),
             workspace: Some(workspace()),
             transcript,
+            resumed: transcript.is_some(),
         });
         let [Request::Admitted { run, .. }, Request::Read { .. }] = &*started else { panic!("run admitted") };
         let run = *run;
@@ -3267,6 +3270,7 @@ fn carried_start(charter: Charter, messages: Box<[crate::Message]>, workspace: O
         charter,
         workspace,
         transcript: None,
+        resumed: false,
     }
 }
 

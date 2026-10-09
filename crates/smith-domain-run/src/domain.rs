@@ -112,11 +112,21 @@ pub fn step(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queu
 fn take(domain: &mut Domain, env: &Env<Limits>, event: Event, out: &mut Queue<Request>) {
     match event {
         Event::HostReturned { relay, reply } => run::host_returned(domain, env, relay, reply, out),
-        Event::Start { reply_to, host_run, activation, window, messages, charter, workspace, transcript } => {
+        Event::Start { reply_to, host_run, activation, window, messages, charter, workspace, transcript, resumed } => {
             run::start(
                 domain,
                 env,
-                run::Start { reply_to, host_run, activation, window, messages, charter, workspace, transcript },
+                run::Start {
+                    reply_to,
+                    host_run,
+                    activation,
+                    window,
+                    messages,
+                    charter,
+                    workspace,
+                    transcript,
+                    resumed,
+                },
                 out,
             );
         }
