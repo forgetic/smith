@@ -1939,7 +1939,7 @@ mod tests {
                 grants: 8,
             },
             llm: llm::ComponentLimits {
-                adapter: llm::Limits { client, tool_bytes: 32_768, result_bytes: 32_768 },
+                adapter: llm::Limits { client, tool_bytes: 32_768, rendered_result: client.dialect.string_bytes },
                 connection: skein_llm_connection::Limits {
                     endpoints: 1,
                     connections: 2,

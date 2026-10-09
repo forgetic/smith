@@ -3,11 +3,15 @@
 use skein_fake_llm_domain::api::{Finish, Line, Script, Turn};
 use skein_lib::Token;
 use smith_domain::{llm, run};
-use smith_protocol_llm::{self as adapter, Limits};
+use smith_protocol_llm_world::adapter::{self as adapter, Limits};
 use smith_protocol_llm_world::wire;
 
 fn limits() -> Limits {
-    Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 }
+    Limits {
+        client: skein_llm_world::limits(),
+        tool_bytes: 32768,
+        rendered_result: skein_llm_world::limits().dialect.string_bytes,
+    }
 }
 
 fn field(name: &[u8], max: u32) -> run::outcome::FieldRule {
@@ -140,7 +144,6 @@ fn contract_schemas_reach_the_scripted_byte_peer_in_both_dialects() {
                     account_id: configuration.credential.account_id.clone(),
                 },
                 application: Box::new([]),
-                results: Box::new([]),
                 receiving,
             },
             &rules,

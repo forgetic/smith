@@ -9,7 +9,7 @@ use skein_fake_llm_domain::api::{Finish, Line, Message, Part, Query, Role, Scrip
 use skein_lib::{Duration, Token};
 use skein_world::domain::Span;
 use smith_domain::{Transcript, run, session::llm, tools};
-use smith_protocol_llm::{self as adapter, Limits};
+use smith_protocol_llm_world::adapter::{self as adapter, Limits};
 use smith_protocol_llm_world::{
     Boundary, Job, Settings, World,
     wire::{self, Observed},
@@ -503,7 +503,11 @@ fn recorded_wait(turn: &smith_domain::Turn, resumed: bool) {
 #[test]
 fn structured_brief_native_wait_park_and_genuine_transcript_restore_in_both_wire_forms() {
     for index in 0..2 {
-        let mut bounds = Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 };
+        let mut bounds = Limits {
+            client: skein_llm_world::limits(),
+            tool_bytes: 32768,
+            rendered_result: skein_llm_world::limits().dialect.string_bytes,
+        };
         bounds.client.http.request = 16384;
         bounds.client.dialect.request_bytes = 16384;
         let mut settings = Settings {

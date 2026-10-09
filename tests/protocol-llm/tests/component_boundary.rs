@@ -7,7 +7,7 @@ use skein_lib::{Duration, Env, Queue, Time, Token, Wall};
 use skein_llm::{self as shared, Credential};
 use skein_world::domain::heap::{Counting, Meter};
 use smith_domain::{GrantName, llm, run, tools};
-use smith_protocol_llm::{
+use smith_protocol_llm_world::adapter::{
     self as adapter, Component, ComponentLimits, ConfiguredEndpoint, Endpoints, FromDomain, Receiving, ToDomain,
 };
 
@@ -16,7 +16,7 @@ static HEAP: Counting = Counting;
 
 fn limits() -> ComponentLimits {
     let client = skein_llm_world::limits();
-    let adapter = adapter::Limits { client, tool_bytes: 32_768, result_bytes: 32_768 };
+    let adapter = adapter::Limits { client, tool_bytes: 32_768, rendered_result: client.dialect.string_bytes };
     let decoded_call_bytes = 4096;
     ComponentLimits {
         adapter,
@@ -217,7 +217,6 @@ fn every_shared_failure_class_keeps_each_evidence_and_detail() {
                 endpoint: shared::Endpoint::codex(),
                 credential: credential(b"secret"),
                 application: Box::new([]),
-                results: Box::new([]),
                 receiving: limits.receiving,
             };
             let prepared = adapter::prepare(input, &limits.adapter).expect("bounded preparation");

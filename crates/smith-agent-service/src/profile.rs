@@ -155,6 +155,15 @@ pub fn standard_limits(memory: u64) -> Result<service::Limits, ProfileError> {
     };
     let mut domain = LIMITS;
     domain.session.completion_bytes = completion;
+    // Before skein's derivation removes its sent-text cap, rendering takes the
+    // smaller cap and marks oversized outcomes rather than refusing the call.
+    let rendered_result = llm::render_worst_case(
+        &domain.session.tools,
+        domain.run.host_reply_bytes.max(domain.run.message_bytes),
+        domain.session.delegated_result_bytes,
+    )
+    .ok_or(ProfileError::Receiving)?
+    .min(client.dialect.string_bytes);
     let queue = domain::max_out(&domain).max(256);
     let operations = io::operations(&io).ok_or(ProfileError::IoRoutes)?;
     let routes = operations.checked_add(64).ok_or(ProfileError::IoRoutes)?;
@@ -180,7 +189,7 @@ pub fn standard_limits(memory: u64) -> Result<service::Limits, ProfileError> {
             grants: 8,
         },
         llm: llm::ComponentLimits {
-            adapter: llm::Limits { client, tool_bytes: 32_768, result_bytes: 32_768 },
+            adapter: llm::Limits { client, tool_bytes: 32_768, rendered_result },
             connection: connection::Limits {
                 endpoints: ENDPOINTS,
                 connections: 6,

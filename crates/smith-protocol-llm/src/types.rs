@@ -4,7 +4,6 @@
 use alloc::boxed::Box;
 
 use skein_lib::Token;
-use skein_llm::{Credential, Endpoint, client};
 use smith_domain::{llm, tools};
 
 use crate::{Limits, Receiving};
@@ -54,26 +53,6 @@ pub struct ToolSchema {
     pub schema: Box<[u8]>,
 }
 
-/// Explicit application rendering for one owned checkout result in a prompt.
-/// Position and exact provider ID prevent ambiguous pairing of repeated IDs in different turns.
-#[derive(PartialEq, Eq, Hash, Debug)]
-pub struct ResultText {
-    /// Zero-based message position in the actual supplied prompt.
-    pub message: u32,
-
-    /// Zero-based block position in that message.
-    pub block: u32,
-
-    /// Exact provider ID of the result being rendered.
-    pub id: Box<[u8]>,
-
-    /// Complete bounded application result text, with no provider-specific prefix.
-    pub text: Box<[u8]>,
-
-    /// Application success/error classification; wire representation belongs to Skein.
-    pub error: bool,
-}
-
 /// Caller-decoded non-host input for one actual completion block.
 /// The adapter checks its descriptor and cannot accept a caller-supplied host operation.
 #[derive(PartialEq, Eq, Hash, Debug)]
@@ -91,47 +70,6 @@ pub struct ResolvedCall {
 
     /// Typed application outcome, checked against the exact offered descriptor.
     pub call: llm::Decoded,
-}
-
-/// All owned input to one preparation. Caller credentials are consumed as a grant;
-/// acquisition and refresh remain outside Smith.
-#[expect(missing_debug_implementations, reason = "input owns caller credential bytes")]
-pub struct Input {
-    /// Root completion callback owner, echoed exactly by its actual terminal.
-    pub owner: Token,
-
-    /// Actual root prompt, consumed without retained borrowed application data.
-    pub prompt: llm::Prompt,
-
-    /// Caller-configured neutral endpoint identity; must equal the prompt's identity.
-    pub endpoint_name: llm::Endpoint,
-
-    /// Shared Client endpoint configuration, passed unchanged without provider branches.
-    pub endpoint: Endpoint,
-
-    /// Actual caller-provided credential; Smith owns no exchange or refresh client.
-    pub credential: Credential,
-
-    /// Exact bounded application schema inventory; retained until actual terminal translation.
-    pub application: Box<[ToolSchema]>,
-
-    /// Exact bounded application-owned checkout result renderings for this prompt only.
-    /// Canonical run feedback and concrete V2 results do not need these entries.
-    pub results: Box<[ResultText]>,
-
-    /// Receiving metadata of the root's actual Complete request.
-    pub receiving: Receiving,
-}
-
-/// One prepared shared Client and its retained application translation context.
-/// The caller drives the Client itself; no second client or protocol state machine is created.
-#[expect(missing_debug_implementations, reason = "the actual Client holds credential-bearing HTTP state")]
-pub struct Prepared {
-    /// Actual shared Client, retained through real Reusable or Close/Closed settlement.
-    pub client: client::Client,
-
-    /// Owned declarations and receiving contract, consumed by exactly one actual terminal translation.
-    pub context: Context,
 }
 
 /// Immutable context for the actual call. No provider schema or application policy is interpreted.

@@ -8,7 +8,7 @@ use skein_fake_llm_domain::api::{Finish, Line, Part, Query, Script, Turn};
 use skein_lib::{Time, Wall};
 use skein_world::domain::Span;
 use smith_domain::{run, session::llm};
-use smith_protocol_llm::{self as adapter, Limits};
+use smith_protocol_llm_world::adapter::{self as adapter, Limits};
 use smith_protocol_llm_world::{
     Job, Settings, World,
     wire::{self, Configuration, Observed},
@@ -114,7 +114,11 @@ fn retired_boundary(world: &World, tool_name: &[u8]) {
 
 fn root_story(configuration: Configuration, tool_name: &'static [u8]) {
     let expected_arguments = configuration.continuation_arguments.clone();
-    let mut bounds = Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 };
+    let mut bounds = Limits {
+        client: skein_llm_world::limits(),
+        tool_bytes: 32768,
+        rendered_result: skein_llm_world::limits().dialect.string_bytes,
+    };
     bounds.client.http.request = 16384;
     bounds.client.dialect.request_bytes = 16384;
     let mut settings =

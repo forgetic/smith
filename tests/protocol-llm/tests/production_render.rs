@@ -1,10 +1,14 @@
 //! Production rendering of typed workspace outcomes in live and saved prompts.
 
 use smith_domain::{llm, tools};
-use smith_protocol_llm::{self as adapter, Limits};
+use smith_protocol_llm_world::adapter::{self as adapter, Limits};
 
 fn limits() -> Limits {
-    Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 }
+    Limits {
+        client: skein_llm_world::limits(),
+        tool_bytes: 32768,
+        rendered_result: skein_llm_world::limits().dialect.string_bytes,
+    }
 }
 
 #[test]
@@ -98,7 +102,6 @@ fn workspace_failures_and_invalid_bytes_stay_visible_and_bounded() {
         assert!(error, "{outcome:?}");
         assert!(!text.is_empty());
         assert!(text.iter().all(u8::is_ascii), "{text:?}");
-        assert!(matches!(adapter::render_outcome(&outcome, 1), Err(adapter::Error::Limit)));
     }
 }
 
@@ -122,7 +125,7 @@ fn the_same_typed_result_renders_after_a_saved_turn_is_replayed() {
         }]),
         max_tokens: 32,
     };
-    let translated = adapter::prompt(history, &[], &[], &limits()).expect("saved typed result translated");
+    let translated = adapter::prompt(history, &[], &limits()).expect("saved typed result translated");
     let [message] = translated.messages.as_ref() else { panic!("one saved message") };
     let [skein_llm::Block::ToolResult { id, text, is_error }] = message.content.as_ref() else {
         panic!("one saved result");
@@ -159,7 +162,7 @@ fn written_text_and_mechanical_feedback_keep_their_error_flags() {
         }]),
         max_tokens: 32,
     };
-    let translated = adapter::prompt(history, &[], &[], &limits()).expect("bounded feedback translated");
+    let translated = adapter::prompt(history, &[], &limits()).expect("bounded feedback translated");
     let [message] = translated.messages.as_ref() else { panic!("one message") };
     let [first, second, third, fourth] = message.content.as_ref() else { panic!("four result blocks") };
     let skein_llm::Block::ToolResult { text, is_error, .. } = first else { panic!("text result") };

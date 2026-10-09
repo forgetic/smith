@@ -12,7 +12,7 @@ use skein_lib::{Duration, Env, Intake, Queue, Time, Token};
 use skein_llm::{Credential, Provider};
 use skein_tls_world::{drive::Wire, pki, server::Server};
 use smith_domain::{GrantName, llm, run, tools};
-use smith_protocol_llm::{
+use smith_protocol_llm_world::adapter::{
     self as adapter, Component, ComponentLimits, ConfiguredEndpoint, Endpoints, FromDomain, MAX_OUT, Receiving,
     ToDomain,
 };
@@ -21,7 +21,7 @@ fn limits() -> ComponentLimits {
     let client = skein_llm_world::limits();
     let decoded_call_bytes = 4096;
     ComponentLimits {
-        adapter: adapter::Limits { client, tool_bytes: 32768, result_bytes: 32768 },
+        adapter: adapter::Limits { client, tool_bytes: 32768, rendered_result: client.dialect.string_bytes },
         connection: skein_llm_connection::Limits {
             endpoints: 1,
             connections: 1,

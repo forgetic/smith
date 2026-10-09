@@ -6,9 +6,9 @@
 //! call IDs and diagnostic bytes, allowing the provider to check transcript
 //! pairing and the tests to inspect feedback on subsequent requests.
 
+use crate::adapter;
 use skein_fake_llm_domain::api as provider;
 use smith_domain::{llm as agent, run, tools};
-use smith_protocol_llm as adapter;
 
 pub(crate) fn query(prompt: agent::Prompt) -> provider::Query {
     let mut tools = Vec::new();
@@ -175,7 +175,11 @@ pub(crate) fn decode(name: &[u8], arguments: &[u8], grants: tools::Grants, serve
             ask: run::Ask::SubAgent { brief, families, llm: field(arguments, b"llm"), share: None },
         };
     }
-    let limits = adapter::Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 };
+    let limits = adapter::Limits {
+        client: skein_llm_world::limits(),
+        tool_bytes: 32768,
+        rendered_result: skein_llm_world::limits().dialect.string_bytes,
+    };
     adapter::decode(name, arguments, grants, served, &limits)
 }
 

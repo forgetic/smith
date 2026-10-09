@@ -2,10 +2,14 @@
 //! scripted provider's finite fixture language.
 
 use smith_domain::{llm, run, tools};
-use smith_protocol_llm::{self as adapter, Limits, ToolKind};
+use smith_protocol_llm_world::adapter::{self as adapter, Limits, ToolKind};
 
 fn limits() -> Limits {
-    Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 }
+    Limits {
+        client: skein_llm_world::limits(),
+        tool_bytes: 32768,
+        rendered_result: skein_llm_world::limits().dialect.string_bytes,
+    }
 }
 
 fn grants() -> tools::Grants {

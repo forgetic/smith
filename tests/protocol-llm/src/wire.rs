@@ -9,11 +9,11 @@
 
 use std::collections::BTreeMap;
 
+use crate::adapter::{self as adapter, Context, Limits, Receiving, ResolvedCall};
 use skein_lib::{Time, Token, Wall};
 use skein_llm::{self as shared, client};
 use skein_llm_world::fake::Exchange;
 use smith_domain::{Event, llm};
-use smith_protocol_llm::{self as adapter, Context, Limits, Receiving, ResolvedCall};
 
 pub use smith_protocol_llm::schemas;
 
@@ -345,16 +345,7 @@ impl Wire {
             account_id: credential.account_id.clone(),
         };
         let adapter::Prepared { client, context } = adapter::prepare(
-            adapter::Input {
-                owner,
-                prompt,
-                endpoint_name,
-                endpoint,
-                credential,
-                application,
-                results: Box::new([]),
-                receiving,
-            },
+            adapter::Input { owner, prompt, endpoint_name, endpoint, credential, application, receiving },
             limits,
         )?;
         let peer = Exchange::prepared(client, peer_endpoint, peer_credential, limits.client, scripts);

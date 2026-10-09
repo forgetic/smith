@@ -10,7 +10,7 @@ use skein_fake_llm_domain::api::{Finish, Line, Message, Part, Query, Role, Scrip
 use skein_lib::{Duration, Token};
 use skein_world::domain::Span;
 use smith_domain::{Transcript, run, session::llm, tools};
-use smith_protocol_llm::{self as adapter, Limits};
+use smith_protocol_llm_world::adapter::{self as adapter, Limits};
 use smith_protocol_llm_world::{
     Boundary, CompletionObservation, CompletionTerminal, Job, Settings, World,
     wire::{self, Configuration, Observed},
@@ -219,7 +219,11 @@ fn typed_world(settings: &Settings, cue: &[u8], rates: &[Rate], scripts: Box<[Sc
 }
 
 fn bounds(settings: &mut Settings) -> Limits {
-    let mut bounds = Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 };
+    let mut bounds = Limits {
+        client: skein_llm_world::limits(),
+        tool_bytes: 32768,
+        rendered_result: skein_llm_world::limits().dialect.string_bytes,
+    };
     bounds.client.http.request = 16384;
     bounds.client.dialect.request_bytes = 16384;
     settings.limits.session.completion_bytes =

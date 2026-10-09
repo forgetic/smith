@@ -7,7 +7,7 @@ use skein_lib::List;
 use skein_llm::{Block, Message, Tool, client};
 use smith_domain::{llm, session};
 
-use crate::types::{Context, ResolvedCall, ResultText, ToolSchema};
+use crate::types::{Context, ResolvedCall, ToolSchema};
 
 /// Immutable protocol bounds for application translation and the shared Client.
 /// The caller supplies these at startup, independently from application scheduling limits.
@@ -19,8 +19,8 @@ pub struct Limits {
     /// Aggregate retained served/application declaration wrappers and all owned fields.
     pub tool_bytes: u64,
 
-    /// Aggregate caller-supplied result rendering wrappers, IDs and text for one prompt.
-    pub result_bytes: u64,
+    /// Maximum rendered tool result, including its cut marker, in bytes.
+    pub rendered_result: u32,
 }
 
 /// Actual root Complete receiving contract, checked before preparing the Client.
@@ -70,6 +70,9 @@ pub fn completion_worst_case(client_limits: &client::Limits, decoded_call_bytes:
 /// receiving incompatibility or arithmetic overflow; no Client is prepared.
 #[must_use]
 pub fn worst_case(limits: &Limits, receiving: &Receiving) -> Option<u64> {
+    if limits.rendered_result < crate::CUT_MARKER_BYTES || limits.rendered_result > limits.client.dialect.string_bytes {
+        return None;
+    }
     let completion = completion_worst_case(&limits.client, receiving.decoded_call_bytes)?;
     if completion > receiving.max_completion_bytes
         || limits.client.dialect.parts > receiving.max_completion_blocks
@@ -89,12 +92,10 @@ pub fn worst_case(limits: &Limits, receiving: &Receiving) -> Option<u64> {
         .checked_add(List::<Message>::worst_case(parts)?)?
         .checked_add(List::<Block>::worst_case(parts)?)?
         .checked_add(List::<ToolSchema>::worst_case(parts)?)?
-        .checked_add(List::<ResultText>::worst_case(parts)?)?
         .checked_add(List::<Option<ResolvedCall>>::worst_case(parts)?)?;
     client::worst_case(&limits.client)?
         .checked_add(u64::try_from(size_of::<Context>()).ok()?)?
         .checked_add(limits.tool_bytes.checked_mul(2)?)?
-        .checked_add(limits.result_bytes)?
         .checked_add(slots.checked_mul(2)?)?
         .checked_add(schema_tokens.checked_mul(4)?)?
         .checked_add(u64::from(parts).checked_mul(u64::from(limits.client.dialect.document_bytes))?.checked_mul(4)?)?
@@ -103,4 +104,29 @@ pub fn worst_case(limits: &Limits, receiving: &Receiving) -> Option<u64> {
         .checked_add(skein_llm::replay_worst_case(&limits.client.dialect)?)?
         .checked_add(completion.checked_mul(2)?)?
         .checked_add(u64::from(receiving.max_failure_bytes))
+}
+
+/// Derive one result's rendering from the workspace caps and host/delegated text.
+/// Every invalid byte expands to four visible escape bytes; a read's every
+/// byte may be a line, with a ten-digit number, colon and space. Fixed room
+/// holds counts, separators, status words and the explicit omitted-byte marker.
+/// Contract: protocol/limits.md, section 3.4; protocol/llm.md, section 5.
+#[must_use]
+pub fn render_worst_case(tools: &smith_domain::tools::Limits, host_answer: u32, delegated_answer: u64) -> Option<u32> {
+    let read = u64::from(tools.read_bytes).checked_mul(16)?.checked_add(96)?;
+    let listed = tools
+        .list_bytes
+        .checked_mul(4)?
+        .checked_add(u64::from(tools.list_entries).checked_mul(11)?)?
+        .checked_add(64)?;
+    let search = u64::from(tools.search_bytes)
+        .checked_mul(4)?
+        .checked_add(u64::from(tools.search_hits).checked_mul(14)?)?
+        .checked_add(64)?;
+    let shell =
+        u64::from(tools.shell_head).checked_add(u64::from(tools.shell_tail))?.checked_mul(4)?.checked_add(96)?;
+    let ambiguity = u64::from(tools.match_lines).checked_mul(12)?.checked_add(64)?;
+    let host = u64::from(host_answer).checked_add(7)?;
+    let largest = read.max(listed).max(search).max(shell).max(ambiguity).max(host).max(delegated_answer).max(128);
+    u32::try_from(largest.checked_add(u64::from(crate::render::CUT_MARKER_BYTES))?).ok()
 }

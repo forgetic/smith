@@ -9,8 +9,7 @@
 //! [`Component::reclaim`] after settlement. A Complete returns exactly one
 //! Completed, Failed or Cancelled; streaming text crosses as a byte count.
 //! The typed tools, their schemas, decoding and rendering live here. The pure
-//! preparation and terminal translation functions remain available to callers
-//! that drive a skein Client directly.
+//! prompt and terminal translation functions also serve protocol worlds.
 //! Contract: protocol/llm.md, sections 1 to 10;
 //! programming-model.md, sections 4.4 and 6.3.
 
@@ -41,9 +40,12 @@ pub use decode::decode;
 pub use endpoints::{ConfiguredEndpoint, EndpointError, EndpointOptions, Endpoints, IdentityProfile};
 pub use failure::{cancelled, failed, refusal};
 pub use grants::{GrantError, Grants};
-pub use limits::{Limits, Receiving, completion_worst_case, worst_case};
-pub use prompt::{prepare, prepare_for_contract, prompt};
-pub use render::render_outcome;
+pub use limits::{Limits, Receiving, completion_worst_case, render_worst_case, worst_case};
+pub use prompt::{prepare_prompt, prompt};
+pub use render::{CUT_MARKER_BYTES, render_outcome};
 pub use skein_llm::Error;
 pub use tools::{schemas, schemas_for_contract};
-pub use types::{Context, Input, Prepared, ResolvedCall, ResultText, ToolKind, ToolSchema};
+pub use types::{Context, ResolvedCall, ToolKind, ToolSchema};
+
+#[cfg(test)]
+mod tests;

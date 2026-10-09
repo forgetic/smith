@@ -12,7 +12,7 @@ use skein_llm::{self as shared, client};
 use skein_llm_world::{World as RawWorld, events, response, text_response};
 use skein_world::domain::Span;
 use smith_domain::{Event, llm, run, session::llm as recorded, tools};
-use smith_protocol_llm::{self as adapter, Context, Input, Limits, Receiving};
+use smith_protocol_llm_world::adapter::{self as adapter, Context, Input, Limits, Receiving};
 use smith_protocol_llm_world::{
     Job, Settings, World,
     wire::{self, Configuration, Observed},
@@ -77,7 +77,11 @@ const CODEX_HISTORY: &[u8] = br#""input":[{"id":"rs_c","type":"reasoning","encry
 const ANTHROPIC_HISTORY: &[u8] = br#""messages":[{"role":"assistant","content":[{"type":"thinking","future":{"proof":[1,true,null]},"thinking":"Plan carefully","signature":"signed-opaque"},{"type":"redacted_thinking","data":"hidden-opaque"},{"type":"text","text":"Answer"}]},{"role":"user","content":[{"type":"text","text":"Continue."}]}]"#;
 
 fn limits() -> Limits {
-    Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 }
+    Limits {
+        client: skein_llm_world::limits(),
+        tool_bytes: 32768,
+        rendered_result: skein_llm_world::limits().dialect.string_bytes,
+    }
 }
 
 fn receiving(bounds: &Limits) -> Receiving {
@@ -123,7 +127,6 @@ fn adopt(
                 account_id: configuration.credential.account_id.clone(),
             },
             application: Box::new([]),
-            results: Box::new([]),
             receiving: receiving(&bounds),
         },
         &bounds,

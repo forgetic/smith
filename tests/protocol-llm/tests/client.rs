@@ -6,7 +6,7 @@
 use skein_fake_llm_domain::api::{Finish, Line, Part, Script, Turn};
 use skein_lib::{Duration, Token};
 use smith_domain::{Event, llm, run, tools};
-use smith_protocol_llm::{self as adapter, Limits, Receiving};
+use smith_protocol_llm_world::adapter::{self as adapter, Limits, Receiving};
 use smith_protocol_llm_world::wire::{self, Configuration, Observed, Wire};
 
 const BODY: &[u8] = br#"{ "opaque" : {"future":[1,true,null]}, "extra":"unchanged" }"#;
@@ -14,7 +14,11 @@ const SCHEMA: &[u8] = br#"{"type":"object","properties":{"opaque":{"type":"objec
 const FEEDBACK: &[u8] = b"exact host receipt\nsecond line";
 
 fn limits() -> Limits {
-    Limits { client: skein_llm_world::limits(), tool_bytes: 32768, result_bytes: 32768 }
+    Limits {
+        client: skein_llm_world::limits(),
+        tool_bytes: 32768,
+        rendered_result: skein_llm_world::limits().dialect.string_bytes,
+    }
 }
 
 fn receiving(bounds: &Limits) -> Receiving {
@@ -360,7 +364,6 @@ fn two_calls(
                 account_id: credential.account_id.clone(),
             },
             application,
-            results: Box::new([]),
             receiving,
         },
         bounds,

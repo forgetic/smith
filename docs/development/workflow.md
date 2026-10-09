@@ -651,3 +651,10 @@ in section 1 runs an agent, and no benchmark result blocks or permits a merge.
 - **Every fix names the probe that guards it,** and its commit body records that
   probe failing on the fix's parent and passing on the fix. A fix without a
   probe adds one in the same change (`docs/design/benchmarks.md`, section 4.2).
+
+Reliability limits increment 4.1 was measured through the serialized heavy
+queue with `measure -j 1`: the protocol LLM packages passed 62 focused tests
+in 2.279 seconds. The new cut-result byte-peer story took 0.017 seconds;
+random rendering-cap properties took 0.662 seconds. The result is cut and
+marked without a larger allocation, and both provider dialects accept its
+request. Workspace budgets are unchanged.

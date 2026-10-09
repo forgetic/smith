@@ -8,8 +8,8 @@ use skein_lib::{Env, Queue, Time, Token, Wall};
 use skein_llm::{self as shared, client};
 use skein_llm_world::fake::Exchange;
 use smith_domain::{Event, llm, run, tools};
-use smith_protocol_llm::{
-    self as adapter, Context, Input, Limits, Receiving, ResolvedCall, ResultText, ToolKind, ToolSchema,
+use smith_protocol_llm_world::adapter::{
+    self as adapter, Context, Input, Limits, Receiving, ResolvedCall, ToolKind, ToolSchema,
 };
 use smith_protocol_llm_world::wire::{self, Configuration};
 
@@ -18,7 +18,11 @@ const OTHER: Token = Token::new(72);
 const WAIT_SCHEMA: &[u8] = br#"{"type":"object","properties":{},"additionalProperties":false}"#;
 
 fn limits() -> Limits {
-    Limits { client: skein_llm_world::limits(), tool_bytes: 32_768, result_bytes: 32_768 }
+    Limits {
+        client: skein_llm_world::limits(),
+        tool_bytes: 32_768,
+        rendered_result: skein_llm_world::limits().dialect.string_bytes,
+    }
 }
 
 fn prompt() -> llm::Prompt {
@@ -58,7 +62,6 @@ fn input(configuration: &Configuration) -> Input {
             account_id: configuration.credential.account_id.clone(),
         },
         application: Box::new([schema(ToolKind::Wait, b"wait")]),
-        results: Box::new([]),
         receiving: Receiving {
             max_completion_bytes: adapter::completion_worst_case(&bounds.client, decoded_call_bytes)
                 .expect("compatible full completion receiving allowance"),
@@ -329,73 +332,24 @@ fn result_input(configuration: &Configuration) -> Input {
             }]),
         },
     ]);
-    input.results = Box::new([result_text()]);
     input
 }
 
-fn result_text() -> ResultText {
-    ResultText {
-        message: 1,
-        block: 0,
-        id: b"prior-shell".as_slice().into(),
-        text: b"caller rendered result unchanged".as_slice().into(),
-        error: false,
-    }
-}
-
 #[test]
-fn owned_result_renderings_admit_first_then_refuse_missing_duplicate_unused_or_mispaired_entries() {
+fn owned_results_use_the_production_renderer_before_the_request_goes() {
     for configuration in &wire::configurations() {
         let (context, mut peer) = adopt(result_input(configuration), false);
         peer.start();
         peer.run();
-        let [query] = peer.queries.as_slice() else { panic!("one actual restored-result query") };
-        let [_, user] = query.messages.as_ref() else { panic!("original ordered caller history") };
-        let [api::Part::ToolOutput { id, output, is_error }] = user.parts.as_ref() else {
-            panic!("actual owned result crossed the byte peer");
-        };
+        let [query] = peer.queries.as_slice() else { panic!("one query") };
+        let [_, user] = query.messages.as_ref() else { panic!("ordered history") };
+        let [api::Part::ToolOutput { id, output, is_error }] = user.parts.as_ref() else { panic!("result") };
         assert_eq!(id.as_ref(), b"prior-shell");
-        assert_eq!(output.as_ref(), b"caller rendered result unchanged");
-        assert!(!*is_error);
-        let client::Event::Completed { owner, completion } = take_terminal(&mut peer) else {
-            panic!("positive actual restored-history completion");
-        };
-        assert!(matches!(adapter::completion(context, owner, completion, Box::new([])), Ok(Event::Completed { .. })));
-        close_won(&mut peer);
-
-        let mut missing = result_input(configuration);
-        missing.results = Box::new([]);
-        let rendered = adapter::prepare(missing, &limits()).expect("production renderer handles owned history");
-        let mut rendered_peer = Exchange::prepared(
-            rendered.client,
-            configuration.endpoint.clone(),
-            shared::Credential {
-                access_token: configuration.credential.access_token.clone(),
-                account_id: configuration.credential.account_id.clone(),
-            },
-            limits().client,
-            scripts(false),
-        );
-        rendered_peer.start();
-        rendered_peer.run();
-        let [query] = rendered_peer.queries.as_slice() else { panic!("one rendered history query") };
-        let [_, user] = query.messages.as_ref() else { panic!("original ordered history") };
-        let [api::Part::ToolOutput { output, is_error, .. }] = user.parts.as_ref() else {
-            panic!("production rendered result crossed the byte peer");
-        };
         assert!(output.starts_with(b"exit code 0\nprior"));
         assert!(!*is_error);
-        let mut duplicate = result_input(configuration);
-        duplicate.results = Box::new([result_text(), result_text()]);
-        assert!(matches!(adapter::prepare(duplicate, &limits()), Err(adapter::Error::Invalid)));
-        let mut unused = result_input(configuration);
-        let mut extra = result_text();
-        extra.message = 0;
-        unused.results = Box::new([result_text(), extra]);
-        assert!(matches!(adapter::prepare(unused, &limits()), Err(adapter::Error::Invalid)));
-        let mut mispaired = result_input(configuration);
-        mispaired.results[0].id = b"other-result-id".as_slice().into();
-        assert!(matches!(adapter::prepare(mispaired, &limits()), Err(adapter::Error::Invalid)));
+        let client::Event::Completed { owner, completion } = take_terminal(&mut peer) else { panic!("completion") };
+        assert!(matches!(adapter::completion(context, owner, completion, Box::new([])), Ok(Event::Completed { .. })));
+        close_won(&mut peer);
     }
 }
 
@@ -504,5 +458,46 @@ fn call_attestation_checks_position_name_literal_input_kind_uniqueness_and_consu
             }
             close_won(&mut peer);
         }
+    }
+}
+
+#[test]
+fn a_result_past_its_bound_is_cut_with_its_marker_and_the_request_goes() {
+    for configuration in &wire::configurations() {
+        let mut input = result_input(configuration);
+        let byte_count = usize::try_from(limits().rendered_result).expect("u32 fits usize") * 2;
+        input.prompt.messages[1].content[0] = llm::Block::ToolResult {
+            id: b"prior-shell".as_slice().into(),
+            result: llm::Returned::Owned {
+                outcome: tools::Outcome::Exited {
+                    exit: tools::Exit::Code { code: 0 },
+                    head: vec![b'x'; byte_count].into(),
+                    tail: Box::new([]),
+                    dropped: 0,
+                },
+            },
+        };
+        let (context, mut peer) = adopt(input, false);
+        peer.start();
+        peer.run();
+        let [query] = peer.queries.as_slice() else { panic!("one request reached the peer") };
+        let [_, user] = query.messages.as_ref() else { panic!("ordered history") };
+        let [api::Part::ToolOutput { id, output, is_error }] = user.parts.as_ref() else { panic!("one result") };
+        assert_eq!(id.as_ref(), b"prior-shell");
+        assert!(!*is_error);
+        assert!(output.ends_with(b" bytes omitted]"));
+        assert!(output.len() <= usize::try_from(limits().rendered_result).expect("u32 fits usize"));
+        let marker = output.windows(2).position(|bytes| bytes == b"\n[").expect("cut marker");
+        let omitted = std::str::from_utf8(&output[marker + 2..])
+            .expect("ASCII marker")
+            .split(' ')
+            .next()
+            .expect("byte count")
+            .parse::<usize>()
+            .expect("decimal omitted count");
+        assert_eq!(omitted + marker, byte_count + b"exit code 0\n".len());
+        let client::Event::Completed { owner, completion } = take_terminal(&mut peer) else { panic!("completion") };
+        assert!(matches!(adapter::completion(context, owner, completion, Box::new([])), Ok(Event::Completed { .. })));
+        close_won(&mut peer);
     }
 }
