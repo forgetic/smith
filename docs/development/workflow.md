@@ -514,6 +514,15 @@ turn aggregates never stand in for non-root usage or provider response counts.
 The harness remains within its one-second focused and five-second fuzzy shares;
 no agent, network or login is used by these tests.
 
+Benchmark increment 00.9 merges before 00.6 so every persistent arm/build
+write can use the shared credential guard. Its idle serial `heavy` measurement
+on 2026-10-09 passed 54 focused unit/offline tests in 0.702 seconds and one
+fuzzy parser sweep in 0.156 seconds. The moved guard cases use a synthetic
+home and cover resolved tool aliases, XDG directories and refresh-token
+refusals without reading a login. The live tier shares the guard and its
+small-model choices; no live provider runs at the gate. Both harness shares
+and the workspace suite budgets remain unchanged.
+
 ## 5. Opt-in live suite
 
 The `live` profile runs the shipped binary against real backends, serially,

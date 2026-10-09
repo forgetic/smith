@@ -27,29 +27,12 @@ pub struct Backend {
     pub tokens: PathBuf,
 }
 
-#[must_use]
-pub fn safe_directory(path: &Path) -> PathBuf {
-    assert!(path.is_absolute(), "SMITH_TEST_LIVE_TOKEN_DIR must be absolute");
-    assert!(
-        path.components().all(|part| !matches!(part, std::path::Component::ParentDir)),
-        "token directory cannot contain .."
-    );
-    let mut existing = path;
-    let mut suffix = Vec::new();
-    while !existing.exists() {
-        suffix.push(existing.file_name().expect("token directory component").to_owned());
-        existing = existing.parent().expect("absolute token directory ancestor");
-    }
-    let mut resolved = existing.canonicalize().expect("resolve token directory ancestor");
-    for name in suffix.into_iter().rev() {
-        resolved.push(name);
-    }
-    let home = PathBuf::from(required("HOME")).canonicalize().expect("resolve home");
-    for protected in [home.join(".claude"), home.join(".codex"), home.join(".config/smith/tokens")] {
-        let protected = protected.canonicalize().unwrap_or(protected);
-        assert!(!resolved.starts_with(protected), "live tokens cannot use the user's tool token directories");
-    }
-    resolved
+fn small_model(provider_name: &str) -> String {
+    let models_file = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/agents/models.toml");
+    let models = smith_bench::read_model_tiers(&models_file).expect("pinned live models");
+    let provider =
+        if provider_name == "codex" { smith_bench::Provider::Codex } else { smith_bench::Provider::Anthropic };
+    models.lookup(&models_file, "small", provider).expect("small live model").model.clone().expect("resolved model")
 }
 
 /// Public endpoint choices and a token directory belonging only to these tests.
@@ -60,7 +43,8 @@ pub struct Environment {
 
 impl Environment {
     pub fn load(bootstrap: bool) -> Self {
-        let root = safe_directory(Path::new(&required("SMITH_TEST_LIVE_TOKEN_DIR")));
+        let root = smith_bench::guard::write_path(Path::new(&required("SMITH_TEST_LIVE_TOKEN_DIR")))
+            .expect("guarded live token directory");
         if bootstrap {
             std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&root).expect("create private test tokens");
         }
@@ -70,7 +54,7 @@ impl Environment {
             metadata.is_dir() && metadata.permissions().mode().trailing_zeros() >= 6,
             "live token directory must be private (0700)"
         );
-        let marker = root.join(".smith-live-test-tokens");
+        let marker = smith_bench::guard::write_path(&root.join(".smith-live-test-tokens")).expect("guarded marker");
         if bootstrap {
             std::fs::write(&marker, b"Dedicated Smith live-test token directory\n").expect("mark test-only directory");
         }
@@ -118,8 +102,10 @@ impl Environment {
                 ),
                 "public OAuth registration cannot contain credentials or unknown fields"
             );
+            smith_bench::guard::check_credential_record(&account)
+                .expect("public registration cannot copy refresh tokens");
             account.as_object_mut().expect("account object").insert("number".into(), serde_json::json!(0));
-            let tokens = root.join(name);
+            let tokens = smith_bench::guard::write_path(&root.join(name)).expect("guarded provider directory");
             if bootstrap {
                 std::fs::DirBuilder::new()
                     .mode(0o700)
@@ -145,8 +131,7 @@ impl Environment {
             }
             backends.push(Backend {
                 name: name.into(),
-                model: setting(&format!("{prefix}_MODEL"))
-                    .unwrap_or_else(|| if name == "codex" { "gpt-5.5".into() } else { "claude-haiku-4-5".into() }),
+                model: setting(&format!("{prefix}_MODEL")).unwrap_or_else(|| small_model(name)),
                 account,
                 tokens,
             });
@@ -210,7 +195,7 @@ impl Backend {
             );
         }
         std::fs::write(
-            scratch.path().join("settings.json"),
+            smith_bench::guard::write_path(&scratch.path().join("settings.json")).expect("guarded live settings"),
             serde_json::to_vec(&settings).expect("live settings JSON"),
         )
         .expect("live settings");
@@ -220,14 +205,6 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tool_login_directories_are_refused_before_any_write() {
-        let home = PathBuf::from(required("HOME"));
-        for name in [".claude", ".codex", ".config/smith/tokens"] {
-            assert!(std::panic::catch_unwind(|| safe_directory(&home.join(name).join("nested"))).is_err());
-        }
-    }
 
     #[test]
     fn both_provider_settings_use_machine_verified_tls_and_their_identity() {

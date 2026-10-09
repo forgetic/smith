@@ -13,15 +13,16 @@ fn bootstrap_settings() {
     let Some(directory) = live::setting("SMITH_TEST_LIVE_BOOTSTRAP_DIR") else {
         return;
     };
-    let directory = live::safe_directory(std::path::Path::new(&directory));
+    let directory =
+        smith_bench::guard::write_path(std::path::Path::new(&directory)).expect("guarded bootstrap directory");
     assert!(directory.is_absolute(), "SMITH_TEST_LIVE_BOOTSTRAP_DIR must be absolute");
     let environment = live::Environment::load(true);
     std::fs::create_dir_all(&directory).expect("bootstrap settings directory");
     for backend in environment.backends {
-        let state = directory.join(&backend.name);
+        let state = smith_bench::guard::write_path(&directory.join(&backend.name)).expect("guarded bootstrap state");
         std::fs::create_dir_all(&state).expect("bootstrap state directory");
         std::fs::write(
-            state.join("settings.json"),
+            smith_bench::guard::write_path(&state.join("settings.json")).expect("guarded bootstrap settings"),
             serde_json::to_vec_pretty(&backend.settings(&state, false)).expect("bootstrap JSON"),
         )
         .expect("bootstrap settings");

@@ -95,3 +95,13 @@ retained lines and SHA-256 hashes. Completed and children are archived;
 failed and repeated are explicitly synthetic derivatives awaiting the first
 live recordings. The fuzzy parser sweep is `cargo nextest run -p smith-bench
 --profile fuzzy`. These tests read no login and run no agent.
+
+The shared `smith_bench::guard` checks every runtime write destination after
+resolving existing ancestors and links. It protects the user's Codex and Claude
+homes, `.claude.json`, and smith's XDG configuration and state directories,
+including custom tool homes. Relative paths, parent traversal, dangling links
+and aliases into those locations are refused before writes. The live tier uses
+the same guard and reads its default models from `agents/models.toml`.
+Credential conversion refuses refresh-token fields; a pre-borrow binary can
+receive only the guard's explicit unusable sentinel, alongside the access token
+and account id. The guard reads no login and never reports credential values.

@@ -608,6 +608,7 @@ dependencies = [
  "smith-agent-process-world",
  "smith-agent-service",
  "smith-agent-shell",
+ "smith-bench",
  "smith-channel",
  "smith-charter",
  "smith-domain",

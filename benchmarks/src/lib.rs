@@ -17,6 +17,8 @@ mod tokens;
 
 pub mod agent;
 
+pub mod guard;
+
 pub use agent::{Agent, Configuration, PinnedConfiguration, Provider, read_configuration};
 pub use models::{ModelChoice, ModelTiers, read_model_tiers};
 pub use result::{
