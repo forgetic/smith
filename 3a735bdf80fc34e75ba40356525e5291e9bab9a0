@@ -1,0 +1,48 @@
+Reliability events increment 02.4: final evidence
+
+Merged implementation: domain facts are reserved step output, with max_facts
+and facts_room at every child and the root. The root composes the same bounded
+causal handoff count as its request output and gathers each child entrance's
+facts before another entrance. Agent service and scripted parents hold work
+when room is unavailable. The retained local in-process owner drains native
+agent facts and counts them as not written pending inline sinks.
+
+Design: domain/run.md section 11; protocol/agent.md section 5;
+protocol/events.md section 5.1; programming-model.md sections 3 and 10.2.
+Binding interface follows smith/02-events.md 2.4. Merged local placement stays
+until session 03 replaces it. Optional captured content retains its separately
+named content_lost counter; native facts have no loss counter. No design
+changes, API sketch departure, or unresolved question.
+
+Final stable rebased tip: 3a735bdf80fc34e75ba40356525e5291e9bab9a0
+Parent/main checked: 478fe6edb1172e71774ee07041f05fe6686fd4eb
+Heavy task 971, serialized queue, one build job, debug info disabled:
+- cargo fmt --check: passed.
+- cargo clippy --workspace --all-targets -- -D warnings: passed (58.50s build).
+- cargo nextest run --workspace: 1598 passed, 0 skipped, 3.346s;
+  run c14999cf-f648-4e5c-a6d9-97491fd90494.
+- cargo nextest run --workspace --profile fuzzy: 23 passed, 0 skipped, 4.028s;
+  run 5a696486-daae-4e04-94cf-0e48f2c9e89b.
+Focused 15s and fuzzy 60s budgets unchanged. Preliminary affected serial
+measurement: 521 focused tests / 10.391s. New tests observe actual native
+fact-pressure holds, maximum immediate tool batch room, a cancelled operation
+using the entire tools fact reserve, and silent-owner counts equal to retained
+facts. Existing world memory and replay checks use the new queues' bounds.
+
+Rebase integration fixed the optional-usage unit test to read its harness's
+preserved observation history, rather than bypass that history by reading only
+the current domain queue. Production main was unaffected. Earlier moving-tip
+checks were repeated on the stable final tip above.
+
+Evidence pending: smoke-tools (runtime smoke), for session 00 back-fill.
+No credentialed probe was run; these gates run deterministic fake peers.
+
+Graph verification: exact project home-free-src-rust-smith-rel-02; full
+index generation 2026-10-09T15:20:29Z, 14633 nodes, no recorded partial,
+unusable or skipped source; all 48 changed source paths checked over 20+20+8
+pages with metadata_match/no_recorded_issue. Source was verified directly;
+graph signals remain best effort. 512 binary goldens are excluded by design.
+
+Remaining dependency wait: 02.5 needs Skein01.8 resource usage and merged
+Smith00.20 events face. 02.6 needs 02.5. Neither remaining increment is
+independently eligible; Debug trace stays until 02.5.
