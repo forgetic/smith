@@ -15,7 +15,7 @@ use smith_domain::{Turn, llm, session};
 #[derive(Clone, Debug)]
 pub enum Seen {
     /// Literal Start work observed before admission, for the first opening only.
-    Started { brief: bool },
+    Started { brief: bool, wait: bool, time: Duration },
 
     /// Actual root admission, separately from physical Started. Contract: domain/host.md, section 3.
     Admitted,
@@ -77,6 +77,9 @@ pub enum Seen {
 #[derive(Debug)]
 pub struct Meeting {
     opening_brief: Option<bool>,
+    work: Option<bool>,
+    time: Option<Duration>,
+    deadline: Option<Time>,
     queued: VecDeque<(Token, Box<[u8]>)>,
     offered: Option<(Vec<Token>, Box<[u8]>)>,
     read: Option<Token>,
@@ -99,6 +102,9 @@ impl Meeting {
     pub fn new(sequence: u32, idle: Duration) -> Self {
         Self {
             opening_brief: None,
+            work: None,
+            time: None,
+            deadline: None,
             queued: VecDeque::new(),
             offered: None,
             read: None,
@@ -117,6 +123,7 @@ impl Meeting {
     fn prompt(&mut self, query: &Query, judge: &mut Judge<&'static str, ()>) {
         judge
             .check(!self.calling && self.expected.is_none(), "a new provider request follows its previous actual turn");
+        judge.check(self.work != Some(false), "no provider request precedes actual work");
         self.calling = true;
         let last = query.messages.last().and_then(|message| {
             if message.role != Role::User {
@@ -238,9 +245,16 @@ impl Expectations for Meeting {
         }
         judge.check(!self.answered, "no chat output or input follows its final answer");
         match seen {
-            Seen::Admitted => {}
-            Seen::Started { brief } => self.opening_brief = Some(brief),
-            Seen::Input { name, text } => self.queued.push_back((name, text)),
+            Seen::Admitted => self.deadline = self.time.map(|time| judge.now().saturating_add(time)),
+            Seen::Started { brief, wait, time } => {
+                self.opening_brief = Some(brief);
+                self.work = Some(brief || !wait);
+                self.time = Some(time);
+            }
+            Seen::Input { name, text } => {
+                self.work = Some(true);
+                self.queued.push_back((name, text));
+            }
             Seen::Prompt { query } => self.prompt(&query, judge),
             Seen::Completed { parts } => {
                 judge.check(self.calling && self.expected.is_none(), "provider terminal belongs to its actual request");
@@ -258,9 +272,9 @@ impl Expectations for Meeting {
                         && self.expected.is_none()
                         && self.queued.is_empty()
                         && self.offered.is_none()
-                        && self.wait_result
+                        && (self.wait_result || (self.count == 0 && self.work == Some(false)))
                         && read == self.read,
-                    "Waiting follows settled wait, turns and an empty inbox",
+                    "Waiting follows preparation or settled wait with an empty inbox",
                 );
                 self.waiting = Some(judge.now());
                 judge.rearm("idle park", self.idle.saturating_add(Duration::from_secs(1)));
@@ -274,8 +288,9 @@ impl Expectations for Meeting {
                     judge.check(
                         self.queued.is_empty()
                             && self.offered.is_none()
-                            && self.waiting.is_some_and(|at| judge.now() >= at.saturating_add(self.idle)),
-                        "Parked follows the actual empty-inbox waiting deadline",
+                            && (self.waiting.is_some_and(|at| judge.now() >= at.saturating_add(self.idle))
+                                || self.deadline.is_some_and(|at| judge.now() >= at)),
+                        "Parked follows the actual empty-inbox idle or wall deadline",
                     );
                 }
                 let met = judge.meet(&"chat answer");

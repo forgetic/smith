@@ -3359,3 +3359,135 @@ fn a_start_refuses_all_carried_messages_atomically_at_its_count_byte_and_name_bo
         assert!(opening.prompt.ends_with(b"person: a"));
     }
 }
+
+fn message_driven_charter() -> Charter {
+    Charter { brief: crate::Brief { sections: Box::default() }, ..charter() }
+}
+
+#[test]
+fn prepared_empty_brief_awaits_first_message_without_opening_main() {
+    let mut harness = Harness::new(LIMITS);
+    let emitted = harness.start_workspace(80, message_driven_charter(), None);
+    let [Request::Admitted { run, .. }, Request::Waiting { host_run, read }] = emitted.as_ref() else {
+        panic!("prepared main awaits without a session: {emitted:?}")
+    };
+    let run = *run;
+    assert_eq!((*host_run, *read), (Token::new(80), None));
+    assert_eq!((harness.domain.runs(), harness.domain.conversations(), harness.domain.calls()), (1, 1, 0));
+    assert_eq!(harness.domain.next_deadline(), Some(Time::ZERO.saturating_add(message_driven_charter().waiting)));
+    harness.after(Duration::from_secs(1));
+    let emitted =
+        harness.step(Event::Message { run, name: Token::new(0), label: bytes(b"person"), text: bytes(b"real task") });
+    let [Request::Open { conversation, opening }] = emitted.as_ref() else {
+        panic!("first message opens main: {emitted:?}")
+    };
+    assert_eq!(opening.prompt.as_ref(), b"person: real task");
+    let conversation = *conversation;
+    assert!(harness.step(Event::Started { conversation, peer: Token::new(81) }).is_empty());
+    let emitted = harness.step(Event::Turn { conversation, record: Token::new(82), sequence: 1 });
+    let [Request::Turn { read, number, spent, .. }] = emitted.as_ref() else { panic!("actual first turn") };
+    assert_eq!((*read, *number, *spent), (Some(Token::new(0)), 1, Spend::ZERO));
+    let facts = observed_facts(&mut harness);
+    let mut prepared = 0_u32;
+    for fact in &facts {
+        if let Fact::Prepared { .. } = fact.kind {
+            prepared += 1;
+            assert_eq!(fact.at, Time::ZERO, "prepared time precedes later work");
+        }
+    }
+    assert_eq!(prepared, 1, "one preparation even when its opening comes later");
+}
+
+#[test]
+fn a_message_before_preparation_opens_directly_and_one_after_preparation_wakes_once() {
+    for before in [true, false] {
+        let mut harness = Harness::new(LIMITS);
+        let emitted = harness.start(83, message_driven_charter());
+        let [Request::Admitted { run, .. }, Request::Read { .. }] = emitted.as_ref() else { panic!("preparation") };
+        let run = *run;
+        if before {
+            assert!(
+                harness
+                    .step(Event::Message { run, name: Token::new(1), label: bytes(b"person"), text: bytes(b"task") })
+                    .is_empty()
+            );
+        }
+        let emitted = harness.step(Event::Read { owner: run, read: Read::Missing });
+        let emitted = if before {
+            emitted
+        } else {
+            assert_eq!(emitted.as_ref(), [Request::Waiting { host_run: Token::new(83), read: None }]);
+            harness.step(Event::Message { run, name: Token::new(1), label: bytes(b"person"), text: bytes(b"task") })
+        };
+        let [Request::Open { opening, .. }] = emitted.as_ref() else { panic!("one task opening") };
+        assert_eq!(opening.prompt.as_ref(), b"person: task");
+    }
+}
+
+#[test]
+fn awaiting_cancellation_retires_unopened_main_and_answers_once() {
+    let mut harness = Harness::new(LIMITS);
+    let emitted = harness.start_workspace(84, message_driven_charter(), None);
+    let [Request::Admitted { run, .. }, Request::Waiting { .. }] = emitted.as_ref() else { panic!("awaiting") };
+    let run = *run;
+    assert_eq!(answered(harness.step(Event::Cancel { run })), (84, failed(Failure::Cancelled, Spend::ZERO)));
+    assert!(harness.step(Event::Cancel { run }).is_empty());
+    assert_eq!(harness.domain.next_deadline(), None);
+    harness.domain.reclaim();
+    assert_eq!((harness.domain.runs(), harness.domain.conversations(), harness.domain.calls()), (0, 0, 0));
+}
+
+#[test]
+fn awaiting_idle_wall_and_zero_waiting_deadlines_park_without_usage_or_session() {
+    for (waiting, time) in [(7, 30), (30, 7), (0, 30)] {
+        let mut harness = Harness::new(LIMITS);
+        let charter = Charter {
+            waiting: Duration::from_secs(waiting),
+            budget: Budget { time: Duration::from_secs(time), ..BUDGET },
+            ..message_driven_charter()
+        };
+        let emitted = harness.start_workspace(85, charter, None);
+        if waiting == 0 {
+            let [
+                Request::Admitted { .. },
+                Request::Waiting { read: None, .. },
+                Request::Answer { answer, read: None, .. },
+            ] = emitted.as_ref()
+            else {
+                panic!("immediate awaiting park: {emitted:?}")
+            };
+            assert_eq!(*answer, Answer::Parked { spent: Spend::ZERO, turns: 0 });
+        } else {
+            let [Request::Admitted { .. }, Request::Waiting { read: None, .. }] = emitted.as_ref() else {
+                panic!("awaiting")
+            };
+            harness.after(Duration::from_secs(waiting.min(time)));
+            assert_eq!(answered(harness.fire()), (85, Answer::Parked { spent: Spend::ZERO, turns: 0 }));
+        }
+        assert_eq!(harness.domain.next_deadline(), None);
+        harness.domain.reclaim();
+        assert_eq!((harness.domain.runs(), harness.domain.conversations(), harness.domain.calls()), (0, 0, 0));
+    }
+}
+
+#[test]
+fn awaiting_keeps_resume_binding_until_first_message_opens_main() {
+    let mut harness = Harness::new(LIMITS);
+    let mut event = carried_start(Charter { resume: true, ..message_driven_charter() }, Box::default(), None);
+    if let Event::Start { transcript, activation, .. } = &mut event {
+        *transcript = Some(Token::new(900));
+        *activation = 2;
+    }
+    let emitted = harness.step(event);
+    let [Request::Admitted { run, .. }, Request::Waiting { .. }] = emitted.as_ref() else { panic!("awaiting") };
+    let emitted = harness.step(Event::Message {
+        run: *run,
+        name: Token::new(1),
+        label: bytes(b"person"),
+        text: bytes(b"new task"),
+    });
+    let [Request::Open { opening, .. }] = emitted.as_ref() else { panic!("restored main opens") };
+    assert_eq!(opening.transcript, Some(Token::new(900)));
+    assert_eq!(opening.activation, 2);
+    assert_eq!(opening.prompt.as_ref(), b"person: new task");
+}

@@ -183,3 +183,34 @@ fn turn_fields(seen: &mut Seen) -> (&mut u32, &mut Option<Token>, &mut smith_dom
         }
     }
 }
+
+#[test]
+fn awaiting_before_the_first_turn_is_valid_and_a_provider_request_before_work_is_rejected() {
+    let settings = Settings {
+        job: Job::Waiting,
+        waiting: Duration::from_secs(1),
+        network: Span::millis(0, 0),
+        ..Settings::calm(921)
+    };
+    let mut world = World::with_empty_brief(settings);
+    world.message_at(
+        Time::from_nanos(500_000_000),
+        Token::new(0),
+        b"person".as_slice().into(),
+        b"first".as_slice().into(),
+    );
+    world.run(2000);
+    let good = world.messages_seen().to_vec();
+    assert_eq!(judge(&good), Verdict::Passed);
+    let waiting = good
+        .iter()
+        .position(|(_, seen)| matches!(seen, Seen::Waiting { read: None }))
+        .expect("awaiting notice without fence");
+    let input = good.iter().position(|(_, seen)| matches!(seen, Seen::Input { .. })).expect("actual first work");
+    let prompt =
+        good.iter().position(|(_, seen)| matches!(seen, Seen::Prompt { .. })).expect("actual first provider request");
+    assert!(waiting < input && input < prompt);
+    let mut bad = good.clone();
+    bad.insert(waiting + 1, (good[waiting].0, good[prompt].1.clone()));
+    assert!(matches!(judge(&bad), Verdict::Failed(_)));
+}

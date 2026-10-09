@@ -686,7 +686,7 @@ fn host_memory_take(
             Request::Return { result: smith_domain_run::Returned::HostAnswered(answer), .. } => {
                 assert_eq!(answer.text().len(), usize::try_from(env.limits.host_reply_bytes).expect("cap fits"));
             }
-            Request::Read { owner, .. } => token = Some(owner),
+            Request::Read { owner, .. } | Request::Probe { owner, .. } => token = Some(owner),
             Request::Open { conversation, opening } => {
                 assert_eq!(opening.host_tools.len(), 1);
                 token = Some(conversation);
@@ -700,7 +700,6 @@ fn host_memory_take(
             | Request::Answer { .. } => {}
             unexpected @ (Request::Return { .. }
             | Request::Say { .. }
-            | Request::Probe { .. }
             | Request::Abort { .. }
             | Request::Check { .. }
             | Request::Checking { .. }
@@ -736,6 +735,7 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
     tool.schema = bytes(size(tool.schema.len()) + retired_context + retired_bytes);
     charter.instructions = Box::new([]);
     charter.brief = smith_domain_run::Brief { sections: Box::new([]) };
+    charter.grants.wait = false;
     let (run, _) = host_memory_take(
         &mut domain,
         &env,
@@ -819,4 +819,49 @@ fn maximum_selected_read_probe_and_check_paths_attain_the_full_run_ownership_bou
         checks: vec![b'c'; capacity].into_boxed_slice(),
     };
     fill_selected(Limits { run_bytes: 16_384, ..LIMITS }, Some(&selected));
+}
+
+#[test]
+fn an_awaiting_run_retains_its_full_charter_without_allocating_a_session() {
+    let limits = LIMITS;
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut out = Queue::with_capacity(MAX_OUT);
+    let meter = Meter::new();
+    let mut domain = Domain::new(&limits);
+    let mut charter = charter(limits.run_bytes);
+    let context = context_bytes(&charter);
+    charter.instructions = bytes(context);
+    charter.brief.sections = Box::default();
+    let (run, _) = host_memory_take(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Some(Event::Start {
+            resumed: false,
+            messages: Box::default(),
+            workspace: Some(workspace()),
+            reply_to: ReplyTo::new(Token::new(88)),
+            host_run: Token::new(91),
+            activation: 1,
+            window: smith_domain_run::Window { turns: u32::MAX, bytes: u64::MAX, largest_turn: 1 },
+            charter,
+            transcript: None,
+        }),
+    );
+    let run = run.expect("preparation read");
+    let (owner, _) =
+        host_memory_take(&mut domain, &env, &mut out, &meter, Some(Event::Read { owner: run, read: Read::Missing }));
+    let (opened, _) = host_memory_take(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Some(Event::Probed { owner: owner.expect("preparation check probe"), executable: false }),
+    );
+    assert_eq!(opened, None, "preparation awaits without a session opening");
+    assert!(meter.held() >= limits.run_bytes, "the full charter remains owned while awaiting");
+    host_memory_take(&mut domain, &env, &mut out, &meter, Some(Event::Cancel { run }));
+    domain.reclaim();
+    assert_eq!((domain.runs(), domain.conversations(), domain.calls()), (0, 0, 0));
 }

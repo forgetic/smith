@@ -19,7 +19,7 @@ use smith_domain::run;
 const SEEDS: [u64; 16] = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987];
 const CLASSES: [&str; 16] = [
     "Parked",
-    "Budget(Time)",
+    "wall Parked",
     "Cancelled",
     "read zero",
     "descending99→7",
@@ -221,8 +221,31 @@ fn observations(world: &World, seed: u64, idle: Duration) -> [u64; 16] {
     referee.assert_passed(seed);
     assert!(stimuli.is_empty(), "existing message oracle chooses no alternate schedule");
     match world.answer() {
-        run::Answer::Parked { .. } => counts[0] += 1,
-        run::Answer::Failed { failure: run::Failure::Budget(run::Exhausted::Time), .. } => counts[1] += 1,
+        run::Answer::Parked { .. } => {
+            counts[0] += 1;
+            let time = world
+                .messages_seen()
+                .iter()
+                .find_map(|(_, seen)| match seen {
+                    Seen::Started { time, .. } => Some(*time),
+                    Seen::Admitted
+                    | Seen::Input { .. }
+                    | Seen::Prompt { .. }
+                    | Seen::Completed { .. }
+                    | Seen::CompletionEnded
+                    | Seen::Turn { .. }
+                    | Seen::Waiting { .. }
+                    | Seen::Answer { .. } => None,
+                })
+                .expect("actual host wall allowance");
+            let admitted = world
+                .messages_seen()
+                .iter()
+                .find_map(|(at, seen)| matches!(seen, Seen::Admitted).then_some(*at))
+                .expect("actual admission");
+            counts[1] += u64::from(world.answered_at() >= admitted.saturating_add(time));
+        }
+        run::Answer::Failed { failure: run::Failure::Budget(run::Exhausted::Time), .. } => {}
         run::Answer::Failed { failure: run::Failure::Cancelled, .. } => counts[2] += 1,
         answer @ (run::Answer::Refused(_) | run::Answer::Accepted { .. } | run::Answer::Failed { .. }) => {
             panic!("seed {seed}: unexpected actual message ending {answer:?}")
@@ -281,5 +304,44 @@ fn bounded_message_schedules_replay_with_every_required_class() {
     eprintln!("actual message classes {CLASSES:?}: {observed:?}");
     for (name, count) in CLASSES.iter().zip(observed) {
         assert!(count > 0, "required actual {name} class did not occur: {observed:?}");
+    }
+}
+
+#[test]
+fn empty_brief_jobs_replay_first_work_before_or_after_preparation_and_idle_or_wall_parking() {
+    for seed in SEEDS {
+        for work in [false, true] {
+            let trace = assert_replays(seed, seed ^ 0x819b, |seed| {
+                let mut rng = Rng::new(seed ^ 0x729b);
+                let wall = seed.is_multiple_of(2);
+                let mut settings = settings(seed, Fixture::Idle);
+                settings.waiting = Duration::from_secs(if wall { 10 } else { 1 });
+                settings.budget.time = Duration::from_secs(if wall { 2 } else { 60 });
+                let mut world = World::with_empty_brief(settings);
+                if work {
+                    world.message_at(
+                        Time::ZERO.saturating_add(Duration::from_millis(rng.below(800))),
+                        Token::new(0),
+                        b"person".as_slice().into(),
+                        b"first".as_slice().into(),
+                    );
+                }
+                world.run(2000);
+                let mut referee = Referee::new(Meeting::new(0, settings.waiting));
+                for (at, seen) in world.messages_seen() {
+                    referee.observe(*at, seen.clone(), &mut Vec::new());
+                    referee.assert_holding(seed);
+                }
+                referee.assert_passed(seed);
+                if !work {
+                    assert!(world.prompts().is_empty());
+                    assert!(
+                        matches!(world.answer(), run::Answer::Parked { turns: 0, spent } if *spent == run::Spend::ZERO)
+                    );
+                }
+                (world.trace().into(), format!("{:?}", world.answer()))
+            });
+            assert!(!trace.is_empty());
+        }
     }
 }

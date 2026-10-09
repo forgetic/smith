@@ -314,3 +314,69 @@ fn configuration() -> agent::Config {
         }]),
     }
 }
+
+#[test]
+#[expect(clippy::wildcard_enum_match_arm, reason = "the story rejects every request outside the awaiting path")]
+fn an_empty_start_waits_without_a_fence_and_the_first_wire_message_opens_main() {
+    let mut charter = composed_charter().into_value();
+    charter.grants.wait = true;
+    charter.waiting = Duration::from_secs(10);
+    let mut start = smith_host_world::start();
+    start.charter = host::Charter::new(charter, 1_000_000).expect("bounded typed charter");
+    start.transcript = None;
+    start.answered = Box::default();
+    start.grants = Box::new([host::Grant { account: 0, generation: 1, valid: Duration::from_secs(7200) }]);
+    let mut wire = World::new(CEILINGS, CEILINGS, StreamMode::Two);
+    wire.settle();
+    wire.send_domain_start(
+        start,
+        host::channel::Window { turns: 100, bytes: 1_000_000_000 },
+        smith_host_protocol::Values { paths: Box::default(), credentials: Box::new([b"synthetic".as_slice().into()]) },
+    );
+    wire.settle();
+    let decoded = wire.take_agent_start().expect("wire Start");
+    let limits = smith_agent_world::LIMITS;
+    let env = Env { now: Time::ZERO, wall: Wall::EPOCH, limits };
+    let mut domain = agent::Domain::new(&limits, configuration(), 7);
+    let mut out = Queue::with_capacity(agent::max_out(&limits));
+    agent::step(
+        &mut domain,
+        &env,
+        AgentEvent::Start {
+            messages: decoded.messages,
+            reply_to: ReplyTo::new(Token::new(1)),
+            host_run: Token::new(7),
+            activation: decoded.activation,
+            window: decoded.window,
+            charter: decoded.charter,
+            workspace: None,
+            transcript: decoded.transcript,
+            answered: decoded.answered,
+            grants: decoded.grants.iter().map(|grant| agent::Grant { name: grant.name, valid: grant.valid }).collect(),
+        },
+        &mut out,
+    );
+    let AgentRequest::Admitted { run, .. } = out.pop().expect("admission") else { panic!("admission first") };
+    wire.agent_admits();
+    assert!(matches!(out.pop(), Some(AgentRequest::Waiting { read: None, .. })));
+    assert!(out.pop().is_none(), "no provider request before work");
+    wire.agent_waits(None);
+    wire.settle();
+    assert!(wire.observations().contains(&Observation::HostWaiting { read: None }));
+    wire.send_message(Token::new(0), b"person".as_slice().into(), b"first".as_slice().into());
+    wire.settle();
+    let (label, text) = wire
+        .observations()
+        .iter()
+        .rev()
+        .find_map(|seen| match seen {
+            Observation::AgentMessage { name, label, text } if *name == Token::new(0) => {
+                Some((label.clone(), text.clone()))
+            }
+            _ => None,
+        })
+        .expect("actual decoded message");
+    agent::step(&mut domain, &env, AgentEvent::Message { run, name: Token::new(0), label, text }, &mut out);
+    assert!(matches!(out.pop(), Some(AgentRequest::Complete { .. })), "first wire work opens the provider");
+    assert!(out.pop().is_none());
+}

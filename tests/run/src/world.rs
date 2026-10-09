@@ -578,6 +578,8 @@ pub struct World {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     facts: BTreeMap<&'static str, u32>,
     empty_brief_wait: Option<bool>,
+    waiting_time: Option<Duration>,
+    awaiting_message: Option<run::Message>,
     carried_messages: Box<[run::Message]>,
     opening_prompts: Vec<Box<[u8]>>,
     message_chance: u32,
@@ -647,6 +649,8 @@ impl World {
             cancel_cells: BTreeMap::new(),
             facts: BTreeMap::new(),
             empty_brief_wait: None,
+            waiting_time: None,
+            awaiting_message: None,
             carried_messages: Box::default(),
             opening_prompts: Vec::new(),
             message_chance: 0,
@@ -667,6 +671,17 @@ impl World {
     /// Give each host Start an empty brief and this explicit waiting authority.
     pub fn empty_brief(&mut self, wait: bool) {
         self.empty_brief_wait = Some(wait);
+    }
+
+    /// Use this host-selected idle deadline in every actual Start.
+    pub fn waiting_time(&mut self, waiting: Duration) {
+        self.waiting_time = Some(waiting);
+    }
+
+    /// Relay one scripted first message only after the actual awaiting notice.
+    pub fn message_when_awaiting(&mut self, message: run::Message) {
+        self.awaiting_message = Some(message);
+        self.partner.tell_turns();
     }
 
     /// Carry this ordered batch in each host Start and observe actual told turns.
@@ -877,18 +892,7 @@ impl World {
             }
             run::Request::MessageRefused { .. } => {}
             run::Request::Waiting { host_run, read } => {
-                let run = self.run_of_owner[&host_run];
-                let view = self.views.get_mut(&run).expect("admitted run");
-                assert_eq!(read, view.read, "Waiting carries the actual last Turn fence");
-                assert!(view.started && view.answered.is_none(), "only an admitted main waits before its answer");
-                assert!(
-                    self.calls
-                        .values()
-                        .all(|call| { self.run_of_conversation[&call.conversation] != run || call.returned }),
-                    "Waiting follows actual settlement of every call"
-                );
-                view.waiting = true;
-                current = Some(run);
+                current = Some(self.observed_waiting(host_run, read));
             }
             request @ run::Request::HostCall { .. } => {
                 self.host_call(request);
@@ -1032,6 +1036,34 @@ impl World {
         self.run_of_owner.insert(host_run, run);
     }
 
+    /// Observe waiting after preparation or the settlement of an actual turn.
+    fn observed_waiting(&mut self, host_run: Token, read: Option<Token>) -> Token {
+        let run = self.run_of_owner[&host_run];
+        let view = self.views.get_mut(&run).expect("admitted run");
+        assert_eq!(read, view.read, "Waiting carries the actual last Turn fence");
+        assert!(
+            (view.started || (view.main.is_none() && view.turns == 0 && view.read.is_none()))
+                && view.answered.is_none(),
+            "Waiting follows preparation or an actual started main"
+        );
+        assert!(
+            self.calls.values().all(|call| { self.run_of_conversation[&call.conversation] != run || call.returned }),
+            "Waiting follows actual settlement of every call"
+        );
+        view.waiting = true;
+        if view.main.is_none()
+            && let Some(message) = self.awaiting_message.take()
+        {
+            self.run_stage.push(run::Event::Message {
+                run,
+                name: message.name,
+                label: message.label,
+                text: message.text,
+            });
+        }
+        run
+    }
+
     /// Count only actual main output; this component neighbour owns opaque records.
     /// Contract: domain/run.md, sections 6 and 13.
     fn observed_turn(&mut self, host_run: Token, number: u32, read: Option<Token>, spent: run::Spend) -> Token {
@@ -1160,7 +1192,7 @@ impl World {
             run::Event::Cancel { run } => {
                 let cell = self.cell(*run);
                 let view = self.views.get_mut(run).expect("looked up above");
-                if matches!(cell, "preparing" | "opening" | "working" | "landing" | "over") {
+                if matches!(cell, "awaiting" | "preparing" | "opening" | "working" | "landing" | "over") {
                     view.decided = true;
                 }
                 return Some((*run, cell));
@@ -1191,6 +1223,7 @@ impl World {
             Some(at) if at < self.iteration => "gone",
             Some(_) => "answered",
             None if view.main.is_none() && view.decided => "stopping",
+            None if view.main.is_none() && view.waiting => "awaiting",
             None if view.main.is_none() => "preparing",
             None if view.decided => "winding",
             None if !view.started => "opening",
@@ -1547,6 +1580,9 @@ impl World {
         if let Some(wait) = self.empty_brief_wait {
             charter.brief.sections = Box::default();
             charter.grants.wait = wait;
+        }
+        if let Some(waiting) = self.waiting_time {
+            charter.waiting = waiting;
         }
         self.checkout(workspace.as_ref().map_or(&[][..], |workspace| &workspace.directories));
         let wants = charter.outcome.change.is_some() || charter.grants.deliver.is_some();

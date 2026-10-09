@@ -102,3 +102,49 @@ fn an_empty_brief_without_wait_opens_on_its_instructions() {
     world.run(100_000);
     assert_eq!(world.opening_prompts()[0].as_ref(), b"Begin the work your instructions describe.");
 }
+
+#[test]
+fn an_empty_brief_parks_at_idle_wall_or_zero_waiting_without_opening() {
+    use skein_lib::Duration;
+    use skein_world::domain::Span;
+    for (idle, wall) in [(7, 30), (30, 7), (0, 30)] {
+        let mut settings = Settings::calm(920 + idle);
+        settings.host.jobs = 1;
+        settings.host.time = Span { min: Duration::from_secs(wall), max: Duration::from_secs(wall) };
+        settings.network = Span::millis(0, 0);
+        settings.hop = Span::millis(0, 0);
+        settings.checkout.io = Span::millis(0, 0);
+        let mut world = World::new(settings);
+        world.empty_brief(true);
+        world.waiting_time(Duration::from_secs(idle));
+        world.run(100_000);
+        assert!(world.opening_prompts().is_empty());
+        let answers: Vec<_> = world.answers().map(|answer| answer.expect("one terminal")).collect();
+        assert!(
+            matches!(answers.as_slice(), [smith_domain_run::Answer::Parked { spent, turns: 0 }] if *spent == smith_domain_run::Spend::ZERO)
+        );
+    }
+}
+
+#[test]
+fn an_empty_brief_opens_on_the_first_message_after_its_actual_awaiting_notice() {
+    let mut settings = Settings::calm(921);
+    settings.host.jobs = 1;
+    settings.host.turns_min = 8;
+    settings.host.turns_max = 8;
+    settings.partner.yields = 1000;
+    let mut world = World::new(settings);
+    world.empty_brief(true);
+    world.message_when_awaiting(smith_domain_run::Message {
+        name: Token::new(0),
+        label: b"person".as_slice().into(),
+        text: b"first work".as_slice().into(),
+    });
+    world.run(100_000);
+    assert_eq!(world.opening_prompts()[0].as_ref(), b"person: first work");
+    assert_eq!(world.stats().opens, 1);
+    assert!(
+        world.message_seen().iter().any(|(_, _, seen)| matches!(seen, Seen::Read { name } if *name == Token::new(0)))
+    );
+    assert!(judge(world.message_seen()).iter().all(|verdict| *verdict == Verdict::Passed));
+}

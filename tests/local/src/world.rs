@@ -578,7 +578,14 @@ impl World {
         let config = local::Config {
             chat: b"main".as_slice().into(),
             instructions: instructions.into(),
-            brief: run::charter::Brief { sections: Box::new([]) },
+            // This persistence fixture asks for a greeting before waiting.
+            // Its charter therefore supplies actual initial work.
+            brief: run::charter::Brief {
+                sections: Box::new([run::charter::Section {
+                    title: Box::default(),
+                    text: b"Greet the person, then wait for their questions.".as_slice().into(),
+                }]),
+            },
             models: Box::new([run::charter::Llm {
                 prices: run::Prices { input: 0, cached: 0, output: 0, unit: 1 },
                 dialect: 1,

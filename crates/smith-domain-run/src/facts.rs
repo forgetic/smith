@@ -240,12 +240,7 @@ pub(crate) fn tell(
                 FactKind::Admitted { run: *run, resumed: run::resumed(runs, *run) }
             }
             Request::Open { conversation, opening: _ } => {
-                let run::OpeningFact { child, parent, call, prepared } =
-                    run::opened(runs, conversations, calls, *conversation);
-                // Main opens once its run has prepared.
-                if let Some((guides, checks)) = prepared {
-                    facts.push(FactKind::Prepared { run, guides, checks });
-                }
+                let run::OpeningFact { child, parent, call } = run::opened(conversations, calls, *conversation);
                 FactKind::Opened { run, conversation: *conversation, child, parent, call }
             }
             Request::Return { call, result, .. } => FactKind::Returned { run, call: *call, result: result_of(result) },

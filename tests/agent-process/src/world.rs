@@ -434,7 +434,9 @@ impl skein_world::Referee<Proc> for Referee {
                 assert!(parent.admitted(), "the host observed admission");
             }
             let peer = procs.iter().find_map(|p| if let Proc::Peer(p) = p { Some(p) } else { None }).expect("peer");
-            if !self.cancel && !matches!(self.tracing, Some((TraceCase::Refused, _))) {
+            if matches!(self.tracing, Some((TraceCase::Parked, _))) {
+                assert_eq!(fake::queries(peer).count(), 0, "empty zero-waiting work parks without a provider request");
+            } else if !self.cancel && !matches!(self.tracing, Some((TraceCase::Refused, _))) {
                 assert!(fake::replied(peer), "provider answered before agent exit");
             }
         }

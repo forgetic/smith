@@ -1917,3 +1917,117 @@ fn each_main_or_child_model_quantity_is_checked_before_admission() {
         }
     }
 }
+
+fn awaiting_start(transcript: Option<session::record::Transcript>, answered: Box<[crate::AnsweredCall]>) -> Event {
+    Event::Start {
+        messages: Box::default(),
+        window: crate::Window { turns: u32::MAX, bytes: u64::MAX },
+        reply_to: ReplyTo::new(Token::new(91)),
+        host_run: Token::new(91),
+        activation: 2,
+        charter: Charter { brief: smith_domain_run::Brief { sections: Box::new([]) }, resume: true, ..charter() },
+        workspace: None,
+        transcript,
+        answered,
+        grants: Box::new([crate::Grant {
+            name: crate::GrantName { account: 0, generation: 0 },
+            valid: Duration::from_secs(100_000),
+        }]),
+    }
+}
+
+#[test]
+fn root_awaiting_opens_no_session_or_provider_call_until_the_first_message() {
+    let mut harness = Harness::new();
+    let emitted = harness.step(awaiting_start(None, Box::default()));
+    let [Request::Admitted { run, .. }, Request::Waiting { host_run, read }] = emitted.as_ref() else {
+        panic!("awaiting root emits no completion: {emitted:?}");
+    };
+    let run = *run;
+    assert_eq!((*host_run, *read), (Token::new(91), None));
+    assert_eq!((harness.domain.starts.len(), harness.domain.peers.len(), harness.domain.sessions.len()), (1, 0, 0));
+    assert!(harness.next().is_empty());
+    let emitted = harness.step(Event::Message {
+        run,
+        name: Token::new(1),
+        label: bytes(b"person"),
+        text: bytes(b"real coding task"),
+    });
+    let [Request::Complete { prompt, .. }] = emitted.as_ref() else {
+        panic!("one direct provider completion: {emitted:?}")
+    };
+    assert_eq!(prompt.messages.len(), 1);
+    assert_eq!(
+        prompt.messages[0].content.as_ref(),
+        [Block::Text { text: bytes(b"person: real coding task"), replay: None }]
+    );
+    assert_eq!(harness.turns.len(), 0);
+}
+
+#[test]
+fn root_cancel_while_awaiting_releases_unused_restore_context_without_a_session_terminal() {
+    let mut harness = Harness::new();
+    let emitted = harness.step(awaiting_start(None, Box::default()));
+    let [Request::Admitted { run, .. }, Request::Waiting { .. }] = emitted.as_ref() else {
+        panic!("awaiting: {emitted:?}")
+    };
+    let emitted = harness.step(Event::Cancel { run: *run });
+    let [Request::Answer { answer, .. }] = emitted.as_ref() else { panic!("direct cancelled answer: {emitted:?}") };
+    assert_eq!(answer, &run::Answer::Failed { failure: run::Failure::Cancelled, spent: run::Spend::ZERO, turns: 0 });
+    assert!(harness.next().is_empty());
+    assert_eq!((harness.domain.starts.len(), harness.domain.peers.len(), harness.domain.sessions.len()), (0, 0, 0));
+    assert_eq!((harness.domain.run.runs(), harness.domain.run.conversations()), (0, 0));
+}
+
+#[test]
+fn first_message_after_awaiting_restores_history_and_absent_host_answers_once() {
+    let mut harness = Harness::new();
+    let transcript = session::record::Transcript {
+        version: session::record::VERSION,
+        endpoint: session::llm::Endpoint(1),
+        dialect: 1,
+        turns: Box::new([session::record::Turn {
+            version: session::record::VERSION,
+            endpoint: session::llm::Endpoint(1),
+            dialect: 1,
+            sequence: 1,
+            usage: Usage::ZERO,
+            spent: 0,
+            messages: Box::new([
+                session::llm::Message {
+                    role: Role::User,
+                    content: Box::new([session::llm::Block::Text { text: bytes(b"old task"), replay: None }]),
+                },
+                session::llm::Message {
+                    role: Role::Assistant,
+                    content: Box::new([session::llm::Block::Text { text: bytes(b"old response"), replay: None }]),
+                },
+            ]),
+        }]),
+    };
+    let answered = Box::new([crate::AnsweredCall {
+        name: run::CallName { activation: 1, completion: 1, position: 0 },
+        tool: bytes(b"check"),
+        answer: crate::Answered::TooLarge,
+    }]);
+    let emitted = harness.step(awaiting_start(Some(transcript), answered));
+    let [Request::Admitted { run, .. }, Request::Waiting { .. }] = emitted.as_ref() else {
+        panic!("awaiting: {emitted:?}")
+    };
+    let run = *run;
+    let emitted = harness.step(Event::Message {
+        run,
+        name: Token::new(2),
+        label: bytes(b"person"),
+        text: bytes(b"new coding task"),
+    });
+    let [Request::Complete { prompt, .. }] = emitted.as_ref() else { panic!("restored completion: {emitted:?}") };
+    assert_eq!(prompt.messages.len(), 3);
+    assert_eq!(prompt.messages[0].content.as_ref(), [Block::Text { text: bytes(b"old task"), replay: None }]);
+    assert_eq!(prompt.messages[1].content.as_ref(), [Block::Text { text: bytes(b"old response"), replay: None }]);
+    let [Block::Text { text, .. }] = prompt.messages[2].content.as_ref() else { panic!("waking text") };
+    assert!(text.starts_with(b"Earlier host answers absent from the saved transcript:"));
+    assert!(text.ends_with(b"person: new coding task"));
+    assert_eq!(harness.domain.starts.len(), 1);
+    assert_eq!(harness.turns.len(), 0, "restored history is not retold as an activation turn");
+}

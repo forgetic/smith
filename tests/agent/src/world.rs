@@ -519,6 +519,31 @@ impl World {
         )
     }
 
+    /// Start before any work arrives, with the host's waiting authority.
+    #[must_use]
+    pub fn with_empty_brief(settings: Settings) -> World {
+        let mut charter = charter(&settings);
+        charter.brief.sections = Box::default();
+        charter.instructions = script::cue(settings.job).unwrap_or(b"Look into the code.").into();
+        charter.grants.wait = true;
+        let start = Event::Start {
+            messages: Box::default(),
+            reply_to: ReplyTo::new(Token::new(1)),
+            host_run: Token::new(1),
+            activation: 1,
+            window: agent::Window { turns: 100, bytes: u64::MAX },
+            charter,
+            workspace: None,
+            transcript: None,
+            answered: Box::default(),
+            grants: Box::new([Grant {
+                name: GrantName { account: 0, generation: 1 },
+                valid: Duration::from_secs(7200),
+            }]),
+        };
+        Self::with_start(settings, start)
+    }
+
     /// Start a scripted run with the host's specified acknowledgement credit.
     #[must_use]
     pub fn with_window(settings: Settings, window: agent::Window) -> World {
@@ -2042,6 +2067,8 @@ fn opening_observations(
         Time::ZERO,
         crate::messages_referee::Seen::Started {
             brief: charter.brief.sections.iter().any(|section| !section.title.is_empty() || !section.text.is_empty()),
+            wait: charter.grants.wait,
+            time: charter.budget.time,
         },
     )];
     for message in messages {

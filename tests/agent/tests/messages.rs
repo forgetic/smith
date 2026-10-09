@@ -128,10 +128,7 @@ fn bounded_message_keeps_the_zero_name_and_wall_time_runs_while_waiting() {
     });
     wall.run(2000);
     assert_eq!(wall.waiting().len(), 1);
-    assert!(matches!(
-        wall.answer(),
-        run::Answer::Failed { failure: run::Failure::Budget(run::Exhausted::Time), turns: 2, .. }
-    ));
+    assert!(matches!(wall.answer(), run::Answer::Parked { turns: 2, .. }));
 }
 
 #[test]
