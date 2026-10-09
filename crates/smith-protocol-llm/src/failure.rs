@@ -4,10 +4,10 @@
 use alloc::boxed::Box;
 
 use skein_lib::{Token, Writer, bytes};
-use skein_llm::{self as shared, Error, client};
+use skein_llm::{self as shared, client};
 use smith_domain::{Event, llm};
 
-use crate::Context;
+use crate::{Context, Error};
 
 /// Moves one actual shared Failed terminal into the root boundary unchanged in meaning.
 /// Detail is exact under the secured receiving cap; the policy consumes/drops it
@@ -36,14 +36,14 @@ pub fn failed(
         shared::Failure::Invalid => llm::Failure::Invalid,
         shared::Failure::Unauthorized => llm::Failure::Unauthorized,
         shared::Failure::Exhausted { retry_after } => llm::Failure::Exhausted { retry_after },
-        shared::Failure::Limit => llm::Failure::Limit,
+        shared::Failure::Limit { which: _, bound: _ } => llm::Failure::Limit,
         shared::Failure::Protocol => llm::Failure::Protocol,
         shared::Failure::Cancelled => llm::Failure::Cancelled,
     };
     let evidence = match evidence {
         client::Evidence::Unsent => llm::Evidence::Unsent,
         client::Evidence::Unknown => llm::Evidence::Unknown,
-        client::Evidence::Response => llm::Evidence::Response,
+        client::Evidence::Response { status: _ } => llm::Evidence::Response,
     };
     Ok(Event::Failed { owner, failure, evidence, detail })
 }

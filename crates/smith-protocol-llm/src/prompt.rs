@@ -5,11 +5,11 @@ use alloc::boxed::Box;
 
 use skein_json::Token;
 use skein_lib::{List, bytes};
-use skein_llm::{self as shared, Error};
+use skein_llm as shared;
 use smith_domain::{llm, run, tools};
 
 use crate::types::{Context, ToolKind, ToolSchema};
-use crate::{Limits, worst_case};
+use crate::{Error, Limits, worst_case};
 
 /// Translate an admitted prompt and retain its declarations for one terminal.
 /// The component and protocol worlds use this same preparation before skein
@@ -97,6 +97,7 @@ fn translate(
             model,
             instructions: system,
             tools: offered.into_boxed(),
+            choice: shared::ToolChoice::Auto,
             messages: translated.into_boxed(),
             reasoning_effort: None,
             cache_key: None,
@@ -285,7 +286,11 @@ fn translate_block(block: llm::Block, limits: &Limits) -> Result<shared::Block, 
             Ok(shared::Block::Refusal { text, replay: replay_value(replay, limits)? })
         }
         llm::Block::Opaque { bytes } => {
-            Ok(shared::Block::Reasoning { replay: shared::Replay::from_bytes(&bytes, &limits.client.dialect)? })
+            let replay = match shared::Replay::from_bytes(&bytes, &limits.client.dialect) {
+                Ok(replay) => replay,
+                Err(error) => return Err(Error::from_shared(error)),
+            };
+            Ok(shared::Block::Reasoning { replay })
         }
         llm::Block::ToolCall { id, name, input, replay } => {
             Ok(shared::Block::ToolCall { id, name, arguments: input, replay: replay_value(replay, limits)? })
@@ -322,7 +327,10 @@ fn result_text(result: llm::Returned, limits: &Limits) -> Result<(Box<[u8]>, boo
 
 fn replay_value(replay: Option<llm::Replay>, limits: &Limits) -> Result<Option<shared::Replay>, Error> {
     match replay {
-        Some(replay) => Ok(Some(shared::Replay::from_bytes(&replay.bytes, &limits.client.dialect)?)),
+        Some(replay) => match shared::Replay::from_bytes(&replay.bytes, &limits.client.dialect) {
+            Ok(replay) => Ok(Some(replay)),
+            Err(error) => Err(Error::from_shared(error)),
+        },
         None => Ok(None),
     }
 }
@@ -330,7 +338,7 @@ fn replay_value(replay: Option<llm::Replay>, limits: &Limits) -> Result<Option<s
 pub(crate) fn object(data: &[u8], limits: &Limits) -> Result<shared::Json, Error> {
     let value = match shared::Json::from_bytes(data, &limits.client.dialect) {
         Ok(value) => value,
-        Err(error) => return Err(shared::document_error(error)),
+        Err(error) => return Err(Error::from_shared(shared::document_error(error))),
     };
     if value.as_tokens().first() != Some(&Token::ObjectStart) {
         return Err(Error::Invalid);

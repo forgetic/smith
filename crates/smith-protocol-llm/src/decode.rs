@@ -35,7 +35,7 @@ pub fn decode(
     };
     let document = match Json::from_bytes(input, &limits.client.dialect) {
         Ok(document) => document,
-        Err(DocumentError::TooLarge) => return invalid(llm::Problem::TooLarge),
+        Err(DocumentError::TooLarge { which: _, bound: _ }) => return invalid(llm::Problem::TooLarge),
         Err(DocumentError::Malformed | DocumentError::Missing | DocumentError::WrongType) => {
             return invalid(llm::Problem::NotAnObject);
         }

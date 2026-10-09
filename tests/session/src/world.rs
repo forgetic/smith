@@ -225,6 +225,7 @@ impl Settings {
                 unauthorized: 0,
                 refused: 0,
                 no_calls: 0,
+                outside_choice: 0,
                 answer_tokens: 1,
                 calls_per_answer: 1,
                 malformed: 0,
@@ -835,11 +836,17 @@ impl World {
     /// World contract: domain/session.md, sections 10 and 12; testing-strategy.md, section 2.2.
     #[must_use]
     pub fn new(settings: Settings) -> World {
+        Self::with_scripts(settings, Box::new([]))
+    }
+
+    /// Construct the same world with explicit application tool turns for focused stories.
+    #[must_use]
+    pub fn with_scripts(settings: Settings, scripts: Box<[provider::api::Script]>) -> World {
         assert!(agent::worst_case(&settings.agent).is_some(), "the shell refuses limits it cannot provision");
         let mut rng = Rng::new(settings.seed);
         let agent = agent::Domain::new(&settings.agent, rng.next_u64());
         let provider =
-            provider::Domain::configured(&settings.provider, rng.next_u64(), Box::new([]), crate::provider::menu())
+            provider::Domain::configured(&settings.provider, rng.next_u64(), scripts, crate::provider::menu())
                 .expect("application menu obeys provider admission");
         let max_out = agent::max_out(&settings.agent);
         let mut checkout = Checkout::new();

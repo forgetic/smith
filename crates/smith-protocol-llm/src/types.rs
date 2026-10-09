@@ -8,6 +8,33 @@ use smith_domain::{llm, tools};
 
 use crate::{Limits, Receiving};
 
+/// A preparation refusal reported by the protocol adapter to its caller.
+/// Contract: protocol/llm.md, sections 3 and 4.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Error {
+    /// The caller supplied an invalid application value; no call starts.
+    Invalid,
+
+    /// A local application or shared-client bound refused the value; no call starts.
+    Limit,
+
+    /// The shared dialect cannot represent the value; no call starts.
+    Unsupported,
+}
+
+impl Error {
+    /// Preserve the adapter's existing refusal class at the shared boundary.
+    /// Application ownership limits are distinct from the shared Client's caps.
+    #[must_use]
+    pub const fn from_shared(error: skein_llm::Error) -> Self {
+        match error {
+            skein_llm::Error::Invalid => Self::Invalid,
+            skein_llm::Error::Limit { which: _, bound: _ } => Self::Limit,
+            skein_llm::Error::Unsupported => Self::Unsupported,
+        }
+    }
+}
+
 /// Semantic descriptor supplied by the application codec, never inferred from JSON Schema.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ToolKind {

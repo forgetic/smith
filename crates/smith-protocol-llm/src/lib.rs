@@ -43,9 +43,8 @@ pub use grants::{GrantError, Grants};
 pub use limits::{Limits, Receiving, completion_worst_case, render_worst_case, worst_case};
 pub use prompt::{prepare_prompt, prompt};
 pub use render::{CUT_MARKER_BYTES, render_outcome};
-pub use skein_llm::Error;
 pub use tools::{schemas, schemas_for_contract};
-pub use types::{Context, ResolvedCall, ToolKind, ToolSchema};
+pub use types::{Context, Error, ResolvedCall, ToolKind, ToolSchema};
 
 #[cfg(test)]
 mod tests;

@@ -32,6 +32,14 @@ fn budgeted(budget: Budget) -> Spec {
     Spec { budget, ..spec(b"fix the build") }
 }
 
+/// Only shell operations use this world's delayed tool span. Timeout stories
+/// grant that operation explicitly instead of depending on a random menu pick.
+fn shell_only() -> Spec {
+    let spec = spec(b"fix the build");
+    let grants = Grants { inspect: false, modify: false, shell: true };
+    Spec { authority: Authority { grants, ..spec.authority }, ..spec }
+}
+
 fn out_of(spent: Dimension) -> End {
     End::Budget { spent }
 }
@@ -84,13 +92,26 @@ fn malformed_calls_are_answered_with_their_problem_and_the_conversation_goes_on(
 /// the limits allow, a write alone, and the results back in call order.
 #[test]
 fn reads_in_one_answer_run_side_by_side_and_writes_alone() {
+    use skein_fake_llm_domain::api::{Finish, Line, Script, Turn};
+
     let calm = Settings::calm(19);
     let settings = Settings {
         agent: Limits { parallel_tools: 3, ..calm.agent },
         provider: Config { calls_per_answer: 6, tool_rounds: 4, ..calm.provider },
         ..calm
     };
-    let mut world = World::new(settings);
+    let scripted_call = |name: &[u8], arguments: &[u8]| Line::Call { name: name.into(), arguments: arguments.into() };
+    let lines = [
+        scripted_call(b"read", br#"{"path":"src/lib.rs"}"#),
+        scripted_call(b"read", br#"{"path":"README.md"}"#),
+        scripted_call(b"list", br#"{"path":"docs"}"#),
+        scripted_call(b"write", br#"{"path":"src/lib.rs","content":"src/lib.rs: rewritten"}"#),
+        scripted_call(b"read", br#"{"path":"src/lib.rs"}"#),
+        scripted_call(b"write", br#"{"path":"README.md","content":"README.md: rewritten"}"#),
+    ];
+    let turn = Turn { lines: lines.into(), finish: Finish::ToolCalls, tokens: 48 };
+    let script = Script { cue: b"You are a coding agent.".as_slice().into(), turns: vec![turn; 4].into() };
+    let mut world = World::with_scripts(settings, Box::new([script]));
     let openers: Vec<u64> = (0..4).map(|_| world.submit(Time::ZERO, spec(b"fix the build"))).collect();
     world.run(ITERATIONS);
 
@@ -205,7 +226,8 @@ fn a_session_out_of_time_cancels_its_call_in_flight() {
 fn a_session_out_of_time_cancels_its_tool_in_flight() {
     let calm = Settings::calm(9);
     let mut world = World::new(Settings { tool: Span::millis(60_000, 60_000), ..calm });
-    let opener = world.submit(Time::ZERO, budgeted(Budget { time: Duration::from_secs(10), ..BUDGET }));
+    let request = Spec { budget: Budget { time: Duration::from_secs(10), ..BUDGET }, ..shell_only() };
+    let opener = world.submit(Time::ZERO, request);
     world.run(ITERATIONS);
 
     assert_eq!((end(&world, opener), turns(&world, opener)), (out_of(Dimension::Time), 1));
@@ -249,7 +271,7 @@ fn an_opener_that_closes_a_tooling_session_has_its_tool_cancelled() {
         ..calm
     };
     let mut world = World::new(settings);
-    let opener = world.submit(Time::ZERO, spec(b"fix the build"));
+    let opener = world.submit(Time::ZERO, shell_only());
     world.run(ITERATIONS);
 
     assert_eq!((end(&world, opener), turns(&world, opener)), (End::Closed, 1));
@@ -265,7 +287,7 @@ fn a_tool_call_that_runs_out_of_time_goes_back_to_the_llm_and_the_conversation_g
         ..calm
     };
     let mut world = World::new(settings);
-    let opener = world.submit(Time::ZERO, spec(b"fix the build"));
+    let opener = world.submit(Time::ZERO, shell_only());
     world.run(ITERATIONS);
 
     assert_eq!(yields(&world, opener), [(Yield::Done, &b"done"[..])]);
@@ -300,7 +322,7 @@ fn a_tool_run_that_wins_its_race_with_a_cancel_still_ends_the_session() {
         ..calm
     };
     let mut world = World::new(settings);
-    let opener = world.submit(Time::ZERO, spec(b"fix the build"));
+    let opener = world.submit(Time::ZERO, shell_only());
     world.run(ITERATIONS);
 
     assert_eq!((end(&world, opener), turns(&world, opener)), (End::Closed, 1));

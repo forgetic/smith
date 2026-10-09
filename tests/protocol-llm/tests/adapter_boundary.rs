@@ -218,7 +218,7 @@ fn failed(configuration: &Configuration) -> (Context, Exchange, client::Event) {
         client::Event::Failed {
             owner,
             failure: shared::Failure::Overloaded,
-            evidence: client::Evidence::Response,
+            evidence: client::Evidence::Response { status: 503 },
             detail
         } if *owner == OWNER && detail.as_ref() == b"overloaded_error"
     ));

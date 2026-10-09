@@ -54,7 +54,7 @@ pub fn query(prompt: agent::Prompt, tickets: &Tickets) -> provider::Query {
         });
     }
     let messages = messages.into_iter().map(translate_message).collect();
-    provider::Query { model, system, tools: offered.into(), messages, max_tokens }
+    provider::Query { model, system, tools: offered.into(), choice: provider::ToolChoice::Auto, messages, max_tokens }
 }
 
 /// The agent's terminal event for the provider's answer to the call of `owner`,

@@ -12,13 +12,13 @@ use core::fmt;
 
 use skein_io::{Event as IoEvent, Request as IoRequest};
 use skein_lib::{Duration, Env, List, Map, Queue, Set, Time, Token, bytes};
-use skein_llm::{self as shared, Credential, Error};
+use skein_llm::{self as shared, Credential};
 use skein_llm_connection as connection;
 use smith_domain::{Event as DomainEvent, GrantName, llm, run};
 
 use crate::IdentityProfile;
 use crate::boundary::{FromDomain, ToDomain};
-use crate::{Context, EndpointOptions, Endpoints, GrantError, Grants, Receiving};
+use crate::{Context, EndpointOptions, Endpoints, Error, GrantError, Grants, Receiving};
 
 /// Startup bounds and phase deadlines for the LLM component.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -281,13 +281,13 @@ impl Component {
             IdentityProfile::ClaudeCode => match shared::anthropic::identity::instructions(&translated.instructions) {
                 Ok(instructions) => translated.instructions = instructions,
                 Err(error) => {
-                    Self::refusal(owner, error, bounds.max_failure_bytes, to_domain);
+                    Self::refusal(owner, Error::from_shared(error), bounds.max_failure_bytes, to_domain);
                     return;
                 }
             },
         }
         if let Err(error) = translated.output_ceiling(options.provider, translated.max_output_tokens.unwrap_or(0)) {
-            Self::refusal(owner, error, bounds.max_failure_bytes, to_domain);
+            Self::refusal(owner, Error::from_shared(error), bounds.max_failure_bytes, to_domain);
             return;
         }
         let index = options.index;
@@ -334,7 +334,7 @@ impl Component {
                     let error = match why {
                         connection::Refusal::Endpoint => Error::Invalid,
                         connection::Refusal::Calls { bound: _ } | connection::Refusal::Closed => Error::Limit,
-                        connection::Refusal::Client(error) => error,
+                        connection::Refusal::Client(error) => Error::from_shared(error),
                     };
                     Self::refusal(call, error, maximum, to_domain);
                 }

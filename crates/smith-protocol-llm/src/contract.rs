@@ -9,10 +9,10 @@ use alloc::boxed::Box;
 use skein_json::Token;
 use skein_json::writer::{self, Encoder};
 use skein_lib::List;
-use skein_llm::{DocumentError, Error, Json};
+use skein_llm::{DocumentError, Json};
 use smith_domain::{llm, run};
 
-use crate::Limits;
+use crate::{Error, Limits};
 
 /// A JSON Schema for each final form the admitted charter allows.
 /// Host labels, item kinds and required fields are byte-exact.
@@ -246,7 +246,7 @@ pub fn decode_deliver(input: &[u8], _change: &run::outcome::ChangeSpec, limits: 
 fn object(input: &[u8], limits: &Limits) -> Result<Json, llm::Problem> {
     let document = match Json::from_bytes(input, &limits.client.dialect) {
         Ok(document) => document,
-        Err(DocumentError::TooLarge) => return Err(llm::Problem::TooLarge),
+        Err(DocumentError::TooLarge { which: _, bound: _ }) => return Err(llm::Problem::TooLarge),
         Err(DocumentError::Malformed | DocumentError::Missing | DocumentError::WrongType) => {
             return Err(llm::Problem::NotAnObject);
         }

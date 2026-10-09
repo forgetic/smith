@@ -7,8 +7,9 @@
 use alloc::boxed::Box;
 
 use skein_lib::{Decimal, Writer};
-use skein_llm::Error;
 use smith_domain::tools::{self, Outcome};
+
+use crate::Error;
 
 /// Room for a newline, brackets, a u64 byte count and the cut's words.
 /// Derived result bounds always hold this marker (protocol/limits.md, section 6).

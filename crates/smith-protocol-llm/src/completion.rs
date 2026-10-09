@@ -5,10 +5,12 @@ use alloc::boxed::Box;
 use core::mem::size_of;
 
 use skein_lib::{List, Token, bytes};
-use skein_llm::{self as shared, Error};
+use skein_llm as shared;
 use smith_domain::{Event, llm, run, tools};
 
 use crate::types::{Context, ResolvedCall, ToolKind};
+
+use crate::Error;
 
 /// Consumes one actual shared completed value under its retained receiving contract.
 /// Full original fields, optional replay, stop and u64 usage survive. Host input
@@ -103,7 +105,11 @@ fn block_value(
             Ok(llm::Said::Refusal { text, replay: encode_replay(replay, context)? })
         }
         shared::Block::Reasoning { replay } => {
-            Ok(llm::Said::Opaque { bytes: replay.to_bytes(&context.limits.client.dialect)? })
+            let bytes = match replay.to_bytes(&context.limits.client.dialect) {
+                Ok(bytes) => bytes,
+                Err(error) => return Err(Error::from_shared(error)),
+            };
+            Ok(llm::Said::Opaque { bytes })
         }
         shared::Block::ToolCall { id, name, arguments, replay } => {
             let call = decode(position, &name, &arguments, context, resolved, *decoded_bytes)?;
@@ -116,7 +122,10 @@ fn block_value(
 
 fn encode_replay(value: Option<shared::Replay>, context: &Context) -> Result<Option<llm::Replay>, Error> {
     match value {
-        Some(replay) => Ok(Some(llm::Replay { bytes: replay.to_bytes(&context.limits.client.dialect)? })),
+        Some(replay) => match replay.to_bytes(&context.limits.client.dialect) {
+            Ok(bytes) => Ok(Some(llm::Replay { bytes })),
+            Err(error) => Err(Error::from_shared(error)),
+        },
         None => Ok(None),
     }
 }

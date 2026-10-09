@@ -60,9 +60,10 @@ pub fn prepare(input: Input, limits: &Limits) -> Result<Prepared, Error> {
     }
     let ceiling = prompt.max_tokens;
     let (mut translated, context) = smith_protocol_llm::prepare_prompt(owner, prompt, application, receiving, limits)?;
-    translated.output_ceiling(endpoint.provider, ceiling)?;
+    translated.output_ceiling(endpoint.provider, ceiling).map_err(Error::from_shared)?;
     let client =
-        client::Client::prepare(skein_llm::Call { owner, endpoint, credential, prompt: translated }, &limits.client)?;
+        client::Client::prepare(skein_llm::Call { owner, endpoint, credential, prompt: translated }, &limits.client)
+            .map_err(Error::from_shared)?;
     Ok(Prepared { client, context })
 }
 

@@ -62,6 +62,7 @@ fn commit_fields_and_files_are_checked_through_the_checkout_interface() {
             model: b"fake".as_slice().into(),
             system: b"@local-shell".as_slice().into(),
             tools: Box::new([]),
+            choice: skein_fake_llm_domain::api::ToolChoice::Auto,
             messages: Box::new([]),
             max_tokens: 1,
         }],

@@ -209,7 +209,7 @@ fn every_shared_failure_class_keeps_each_evidence_and_detail() {
         (shared::Failure::Unavailable, llm::Failure::Unavailable),
         (shared::Failure::ContextTooLong, llm::Failure::ContextTooLong),
         (shared::Failure::Invalid, llm::Failure::Invalid),
-        (shared::Failure::Limit, llm::Failure::Limit),
+        (shared::Failure::Limit { which: shared::Cap::Answer, bound: 512 }, llm::Failure::Limit),
         (shared::Failure::Protocol, llm::Failure::Protocol),
         (shared::Failure::Cancelled, llm::Failure::Cancelled),
         (shared::Failure::TimedOut, llm::Failure::TimedOut),
@@ -217,7 +217,7 @@ fn every_shared_failure_class_keeps_each_evidence_and_detail() {
     let evidence = [
         (shared::client::Evidence::Unsent, llm::Evidence::Unsent),
         (shared::client::Evidence::Unknown, llm::Evidence::Unknown),
-        (shared::client::Evidence::Response, llm::Evidence::Response),
+        (shared::client::Evidence::Response { status: 429 }, llm::Evidence::Response),
     ];
     for (source, expected) in cases {
         for (sent, expected_sent) in evidence {

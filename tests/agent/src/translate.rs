@@ -56,6 +56,7 @@ pub fn query(prompt: agent::Prompt) -> provider::Query {
         model: prompt.model,
         system: prompt.system,
         tools: tools.into(),
+        choice: provider::ToolChoice::Auto,
         messages,
         max_tokens: prompt.max_tokens,
     }

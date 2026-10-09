@@ -6,11 +6,10 @@
 use alloc::boxed::Box;
 
 use skein_lib::{Decimal, Duration, List, Writer};
-use skein_llm::Error;
 use smith_domain::run;
 use smith_domain::{llm, tools};
 
-use crate::{ToolKind, ToolSchema};
+use crate::{Error, ToolKind, ToolSchema};
 
 /// The bounded inventory of Smith tools offered for this prompt.
 /// Host tools are supplied separately by the charter and retain their bytes.
