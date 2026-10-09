@@ -375,6 +375,9 @@ fn terminal(agent: &mut Domain, env: &Env<Limits>, handle: Token, completion: Be
 
 /// Fire one due root or wall alarm with enough room for its complete fanout.
 pub fn fire(agent: &mut Domain, env: &Env<Limits>, out: &mut Queue<Output>) {
+    if agent.facts_room() < crate::max_facts() {
+        return;
+    }
     let mut due = None;
     for (_, id) in &agent.clients {
         let slot = agent.slots.get(*id).expect("retained slot");
@@ -416,6 +419,9 @@ pub fn fire(agent: &mut Domain, env: &Env<Limits>, out: &mut Queue<Output>) {
 
 /// Resume one deferred root handoff with room reserved for its complete fanout.
 pub fn resume(agent: &mut Domain, env: &Env<Limits>, out: &mut Queue<Output>) {
+    if agent.facts_room() < crate::max_facts() {
+        return;
+    }
     let mut ready = None;
     for (_, id) in &agent.clients {
         let slot = agent.slots.get(*id).expect("retained slot");

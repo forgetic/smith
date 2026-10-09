@@ -229,3 +229,56 @@ fn a_full_parent_reply_is_a_typed_too_large_terminal() {
     let reply = host::Reply::Host { error: false, body: body.into_boxed() };
     assert_eq!(translate::host_reply(reply), Some(run::HostReply::TooLarge));
 }
+
+#[test]
+fn native_fact_backpressure_holds_one_slot_until_its_owner_drains_it() {
+    let env = env();
+    let mut domain = Domain::new(&env.limits, configuration(), 5);
+    let mut out = Queue::with_capacity(crate::max_out(&env.limits));
+    let mut handles = [Token::new(0); 2];
+    for client in 1_u32..=2 {
+        step(
+            &mut domain,
+            &env,
+            Input::Parent(parent::Event::Spawn { client: Token::new(u64::from(client)), start: start() }),
+            &mut out,
+        );
+        let Some(Output::Parent(parent::Request::Started { agent, .. })) = out.pop() else {
+            panic!("actual slot handle")
+        };
+        handles[usize::try_from(client - 1).expect("two slots")] = agent;
+        while out.pop().is_some() {}
+    }
+    let mut blocked = false;
+    for name in 1_u64..5000 {
+        let input = Input::Parent(parent::Event::Message {
+            agent: handles[0],
+            name: Token::new(name),
+            label: Box::default(),
+            text: b"held".as_slice().into(),
+        });
+        if !domain.takes(&input) {
+            blocked = true;
+            break;
+        }
+        step(&mut domain, &env, input, &mut out);
+        while out.pop().is_some() {}
+    }
+    assert!(blocked, "the real native fact queue eventually holds its producer");
+    let input = Input::Parent(parent::Event::Message {
+        agent: handles[1],
+        name: Token::new(9000),
+        label: Box::default(),
+        text: b"independent".as_slice().into(),
+    });
+    assert!(domain.takes(&input), "a different slot retains its own native fact room");
+    step(&mut domain, &env, input, &mut out);
+    while domain.pop_fact(Token::new(1)).is_some() {}
+    let input = Input::Parent(parent::Event::Message {
+        agent: handles[0],
+        name: Token::new(9001),
+        label: Box::default(),
+        text: b"drained".as_slice().into(),
+    });
+    assert!(domain.takes(&input), "draining restores the target root reservation");
+}
