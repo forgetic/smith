@@ -31,7 +31,7 @@ startup with a reason on standard error.
 
 The `standard` profile fixes the domain, channel, LLM, machine, IO and queue
 limits. `memory_bytes` is the checked process ceiling. The profile currently
-has a conservative bound of roughly 354 GB; the example ceiling permits that
+has a conservative bound of roughly 360 GB; the example ceiling permits that
 bound and does not eagerly allocate it. Reducing retained limits or tightening
 the bound remains later work. `grace_ms` is the duration of each process stop
 step. Children use Skein's plain process mechanism until contained trees are
@@ -48,6 +48,26 @@ The local host carries the same inline endpoint settings into its child's
 configuration. Addresses are resolved before the channel opens. The file contains no bearer
 tokens; the host sends grant values over the channel.
 
+For the `codex` provider, the existing endpoint fields can carry a stable
+request cache identifier:
+
+```json
+{
+  "cache_key": "65a8c9b4-2d7a-4f0c-9681-faa2089f537d",
+  "headers": [
+    { "name": "session-id", "value": "65a8c9b4-2d7a-4f0c-9681-faa2089f537d" }
+  ]
+}
+```
+
+These fields extend an endpoint object. Generate an opaque identifier once
+for the chat and preserve it across turns and resumes. Native Codex uses its
+stable session identifier for ChatGPT request affinity
+([client source](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/client.rs#L575)).
+The [coding benchmark](../../docs/development/benchmarks/smith-codex-2026-10-08.md)
+observed more cached input with these optional settings; cache availability,
+model plans and completion time still vary.
+
 The optional trace appends JSON lines on a bounded writer thread. `none`
 records content-free facts, `calls` also records tool-call names and inputs and
 tool-result byte counts, and `everything` additionally records typed prompts,
@@ -55,6 +75,10 @@ completion text and usage. Prompt and call bytes use hex encoding so opaque byte
 survive. A prompt above 64 KiB or a call field above 16 KiB is dropped as a
 whole. A full writer queue drops records and increments the count reported on
 standard error when the run ends.
+The ending diagnostic separates domain observation loss, channel delivery
+loss, local fact and prompt loss, and writer loss. Channel delivery loss alone
+does not establish loss from the local trace. Final domain facts remain
+available to local capture after the terminal channel answer.
 The trace never receives grant values.
 
 Run an interactive host with
