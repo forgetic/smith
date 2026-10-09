@@ -485,7 +485,8 @@ reserve against the budget.
   components together, its LLM connections, its machine's roots and its
   channel, and then its event stream, after `session.ended` (agent.md,
   section 6): two `close` deadlines in turn, and the moment its cancels
-  take to settle. That is its **teardown bound**, from which a host
+  take to settle, which io's close deadlines already bound and which adds
+  nothing to them. That is its **teardown bound**, from which a host
   derives `exit_grace` (section 4).
 
 ## 8. A limit that fires

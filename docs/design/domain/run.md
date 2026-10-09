@@ -666,8 +666,10 @@ the last message it read (section 6).
   (9.1);
 - **parked,** with its turn count and what it spent;
 - **failed,** typed so the host can act without reading prose: the model
-  (a provider's failure past its retries, with its class, an account
-  exhausted, or a limit that fired, naming the limit and its bound), the
+  (a provider's failure past its retries, with its class, the endpoint
+  and model of the last completion and how many attempts it made; an
+  account exhausted; or a limit that fired, naming the limit and its
+  bound), the
   budget (naming what ran out), policy (a call or result the run refused
   to make), cancelled, stale, or a transcript it could not resume; each
   with what it spent.

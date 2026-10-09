@@ -53,6 +53,9 @@ file is the same stream. Its records, their writer and their reader are
   stream of the run its inline agent composes (hosts.md, section 5.6). A
   host that spawns an agent hears its facts on the channel (channel.md,
   section 8), which carries them in its own codec, not as this stream.
+  The product's stream is the local service's. It holds the run's
+  records whichever kind of agent the local host runs, and the host's
+  own notices, such as a spawned agent's forced exit.
 - **Where it goes.** To standard output under `smith exec --json`, and to
   a trace file when the configuration names one (agent.md, section 4;
   `docs/design/shell.md`). A process writing both writes the same records
@@ -344,8 +347,9 @@ when it is about one; and the kind's fields.
   the provider's text or the limit's words, as the session kept it
   (limits.md, 3.2): content, so only under `calls` and `everything`
   (llm.md, section 6).
-- **answer failure:** `class`, one of `model` (with `completion`, a
-  completion failure, or `account`), `budget` (with `which`: `turns`,
+- **answer failure:** `class`, one of `model` (with `endpoint` and
+  `model`, the last completion's, `attempts`, how many it made, and
+  `completion`, a completion failure, or `account`), `budget` (with `which`: `turns`,
   `spend` or `time`), `policy`, `cancelled`, `stale`, `transcript` (with
   `reason`) for a failed run; `busy` or `invalid` (with `which`, what was
   beyond the limits, and `bound`) for a refused one.
@@ -380,7 +384,7 @@ when it is about one; and the kind's fields.
 |---|---|
 | `session.started` | the shell: the wall clock, the process id, the build; the configuration: profile, capture and delivery; the service's effective limits (limits.md, section 9); the machine's containment |
 | `run.started` | the run's fact that it was admitted (domain/run.md, section 11), with the charter's main model, budget, reserve, tools and contract |
-| `run.completed` | the run's answer (domain/run.md, section 10) as the service sends it: status, typed failure, result, turns, spend and the final fence; the run's usage totals; a refusal at the entrance |
+| `run.completed` | the run's answer (domain/run.md, section 10), where the stream's writer meets it: the agent service as it sends it, or the local service as its local domain receives it from its agent: status, typed failure, result, turns, spend and the final fence; the run's usage totals; a refusal at the entrance |
 | `conversation.opened`, `.closed` | the run's facts that a conversation opened or closed, with its parent, a child's effective share and clamp reasons; the session's end, with its turns and usage |
 | `response.started` | the session's fact that a completion started (its attempt, messages and output); the domain's content under capture |
 | `response.completed` | the session's facts that a completion answered, failed, was cancelled or will be retried, and its usage and charge; the LLM component's measures of the encoded request, its first byte and its largest gap (llm.md, section 6); the domain's content under capture |
@@ -534,6 +538,6 @@ The vocabulary is pre-release, like every format (README.md, section 8).
 
 - **A published schema:** a JSON Schema of the records for consumers
   outside Rust, generated from `smith-events`' records.
-- **A host's stream:** whether a host that spawns agents writes its own
-  stream, with its agents' projected facts and their exits.
+- **A host's stream** beyond the product's: whether a host other than the
+  local host (temper's worker, say) writes one.
 - **Traces kept:** rotation, and how long trace files are kept.
