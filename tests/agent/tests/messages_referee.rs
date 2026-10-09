@@ -92,7 +92,7 @@ fn chat_positive_and_omitted_reordered_or_corrupted_turns() {
 #[test]
 fn premature_waiting_wrong_wake_text_and_wrong_final_count_or_park_time_are_rejected() {
     let good = observed();
-    for corruption in 0..5 {
+    for corruption in 0..6 {
         let mut bad = good.clone();
         match corruption {
             0 => {
@@ -150,7 +150,17 @@ fn premature_waiting_wrong_wake_text_and_wrong_final_count_or_park_time_are_reje
                     | smith_domain::session::llm::Block::ToolCall { .. } => panic!("selected result"),
                 }
             }
-            _ => unreachable!("five changes"),
+            5 => match &mut bad.last_mut().expect("actual final word").1 {
+                Seen::Answer { read, .. } => *read = Some(Token::new(0)),
+                Seen::Admitted
+                | Seen::Input { .. }
+                | Seen::Prompt { .. }
+                | Seen::Completed { .. }
+                | Seen::CompletionEnded
+                | Seen::Turn { .. }
+                | Seen::Waiting { .. } => panic!("actual final answer"),
+            },
+            _ => unreachable!("six changes"),
         }
         assert!(matches!(judge(&bad), Verdict::Failed(_)), "chronology corruption {corruption} rejected");
     }

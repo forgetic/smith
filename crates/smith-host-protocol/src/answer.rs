@@ -11,6 +11,7 @@ use smith_host_domain::channel as host;
 
 use crate::Error;
 
+#[expect(clippy::manual_map, reason = "the protocol subset keeps option projection exhaustive")]
 pub(crate) fn decode_answer(record: &wire::Answer) -> Result<host::Answer, Error> {
     let result = match record.result() {
         wire::RunResult::Refused(refused) => {
@@ -24,7 +25,15 @@ pub(crate) fn decode_answer(record: &wire::Answer) -> Result<host::Answer, Error
         wire::RunResult::Parked => host::RunResult::Parked,
         wire::RunResult::Failed(failed) => host::RunResult::Failed { failure: failure(failed.reason())? },
     };
-    Ok(host::Answer { turns: record.turns(), spent: record.spent(), result })
+    Ok(host::Answer {
+        read: match record.last_read() {
+            Some(name) => Some(skein_lib::Token::new(*name)),
+            None => None,
+        },
+        turns: record.turns(),
+        spent: record.spent(),
+        result,
+    })
 }
 
 fn invalid_start(invalid: &wire::InvalidStart) -> host::RunInvalid {

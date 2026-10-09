@@ -42,7 +42,8 @@ fn reply(world: &mut World, callback: u64, response: Reply) {
     }));
 }
 fn last(world: &mut World, result: RunResult, turns: u32, spent: u64) {
-    world.up(Up::Answer { answer: Answer { turns, spent, result } });
+    let read = world.seen.read;
+    world.up(Up::Answer { answer: Answer { read, turns, spent, result } });
 }
 fn finish(world: &mut World) {
     last(world, RunResult::Parked, 0, 0);
@@ -364,6 +365,7 @@ fn payloads_beyond_the_limits_break_the_rules() {
         },
         Up::Answer {
             answer: Answer {
+                read: None,
                 turns: 0,
                 spent: 0,
 
@@ -1065,7 +1067,7 @@ fn cancelled_and_draining_paths_keep_work_and_drop_answers_only_after_a_reported
     world.live();
     world.at(10);
     assert_eq!(world.seen.fault, Some(Fault::NoProgress));
-    world.up(Up::Answer { answer: Answer { turns: 0, spent: 10, result: RunResult::Parked } });
+    world.up(Up::Answer { answer: Answer { read: None, turns: 0, spent: 10, result: RunResult::Parked } });
     assert!(world.seen.answer.is_none());
     world.at(12);
     world.up(Up::Fact { body: Box::new([]) });

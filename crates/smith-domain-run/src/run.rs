@@ -83,7 +83,7 @@ use crate::call::{self, Call, Calls, Withdrawal, Work};
 use crate::charter::{self, Charter, Families, count};
 use crate::delivery::{CallName, Delivery};
 use crate::domain::Domain;
-use crate::facts::{Asked, Fact};
+use crate::facts::{Asked, Fact, Facts};
 use crate::host::{Relay as HostRelay, Stage as HostStage};
 use crate::land::{self, Settled};
 use crate::limits::Limits;
@@ -124,8 +124,8 @@ pub(crate) struct Run {
     transcript: Option<Token>,
     /// Bounded host messages accepted but not yet given to main.
     inbox: Queue<Message>,
-    /// Message sent to main and awaiting its next told turn.
-    offered: Option<Token>,
+    /// Ordered names offered to main and awaiting its next told turn.
+    offered: Queue<Token>,
     /// Latest host message acknowledged by a told turn.
     read: Option<Token>,
     /// A Wait call has returned; the next main yield must park if the inbox is empty.
@@ -249,19 +249,27 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
     // A charter that can never fit is invalid, room or not: busy invites a
     // retry.
     if activation == 0 {
-        out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(Invalid::Activation)) });
+        out.push(Request::Answer {
+            to: reply_to,
+            answer: Answer::Refused(Refusal::Invalid(Invalid::Activation)),
+            read: None,
+        });
         return;
     }
     if window.turns == 0 || window.largest_turn == 0 || window.bytes < window.largest_turn {
-        out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(Invalid::Window)) });
+        out.push(Request::Answer {
+            to: reply_to,
+            answer: Answer::Refused(Refusal::Invalid(Invalid::Window)),
+            read: None,
+        });
         return;
     }
     if let Err(invalid) = charter::check(&charter, workspace.as_ref(), &env.limits) {
-        out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(invalid)) });
+        out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Invalid(invalid)), read: None });
         return;
     }
     if runs.is_full() || conversations.is_full() {
-        out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Busy) });
+        out.push(Request::Answer { to: reply_to, answer: Answer::Refused(Refusal::Busy), read: None });
         return;
     }
     let deadline = env.now.saturating_add(charter.budget.time);
@@ -285,7 +293,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         state: State::Closed,
         transcript,
         inbox: Queue::with_capacity(env.limits.messages),
-        offered: None,
+        offered: Queue::with_capacity(env.limits.messages),
         read: None,
         wait_requested: false,
         turns: 0,
@@ -312,7 +320,7 @@ pub(crate) fn start(domain: &mut Domain, env: &Env<Limits>, start: Start, out: &
         Some(step) => look(run, id, reply_to, main, step, env, out),
         None => open(run, conversations, reply_to, main, env.now, out),
     };
-    follow(runs, alarms, id);
+    follow(runs, alarms, facts, id);
 }
 
 /// Admit a named, labelled host message or emit its typed refusal.
@@ -346,13 +354,18 @@ pub(crate) fn message(
         Some(bytes) => u64::try_from(bytes).expect("owned lengths fit") > u64::from(env.limits.message_bytes),
         None => true,
     };
-    let mut named = run.offered == Some(name) || run.read == Some(name);
+    let mut named = run.read == Some(name);
+    for offered in &run.offered {
+        if *offered == name {
+            named = true;
+        }
+    }
     for queued in &run.inbox {
         if queued.name == name {
             named = true;
         }
     }
-    let held = run.inbox.len().saturating_add(u32::from(run.offered.is_some()));
+    let held = run.inbox.len().saturating_add(run.offered.len());
     let reason = if ending {
         Some(crate::MessageRefusal::Ending)
     } else if too_large {
@@ -388,29 +401,65 @@ pub(crate) fn message(
                     unreachable!("waiting requires an actual yielded running main")
                 }
             };
-            let message = run.inbox.pop().expect("admitted one message above");
-            continue_message(run, reply_to, main, peer, message, out)
+            continue_messages(run, reply_to, main, peer, &env.limits, out)
         }
         state @ (State::Preparing { .. } | State::Working { .. }) => state,
         State::Stopping { .. } | State::Over { .. } | State::Winding { .. } | State::Closed => {
             unreachable!("checked active run")
         }
     };
-    follow(&mut domain.runs, &mut domain.alarms, id);
+    follow(&mut domain.runs, &mut domain.alarms, &mut domain.facts, id);
 }
 
-fn continue_message(
+/// Build one ordered offer and retain each name until an actual told turn.
+fn offer(run: &mut Run, limits: &Limits) -> Option<Box<[u8]>> {
+    assert!(run.offered.is_empty(), "a previous offer ends at its told turn");
+    let mut length = 0_usize;
+    let mut count = 0_u32;
+    for message in &run.inbox {
+        if count >= limits.offer_messages {
+            break;
+        }
+        let separator = if count == 0 { 0 } else { 2 };
+        let next = match length.checked_add(separator) {
+            Some(bytes) => match bytes.checked_add(message.text.len()) {
+                Some(bytes) => bytes,
+                None => break,
+            },
+            None => break,
+        };
+        if next > usize::try_from(limits.offer_bytes).expect("receiving cap fits") {
+            break;
+        }
+        length = next;
+        count = count.checked_add(1).expect("bounded inbox count");
+    }
+    if count == 0 {
+        return None;
+    }
+    let mut writer = skein_lib::Writer::new(length);
+    for at in 0..count {
+        let message = run.inbox.pop().expect("measured ordered prefix");
+        if at > 0 {
+            writer.put(b"\n\n").expect("measured separators");
+        }
+        writer.put(&message.text).expect("measured payload");
+        run.offered.push(message.name);
+    }
+    Some(writer.finish())
+}
+
+fn continue_messages(
     run: &mut Run,
     reply_to: ReplyTo,
     main: Id<Conversation>,
     peer: Token,
-    message: Message,
+    limits: &Limits,
     out: &mut Queue<Request>,
 ) -> State {
-    assert!(run.offered.is_none(), "the previous continuation has produced its actual turn");
-    run.offered = Some(message.name);
+    let text = offer(run, limits).expect("an admitted message fits an offer");
     run.wait_requested = false;
-    say(reply_to, main, peer, message.text, out)
+    say(reply_to, main, peer, text, out)
 }
 
 /// Root calls this only for main; child bodies are discarded at its routing seam.
@@ -425,10 +474,14 @@ pub(crate) fn turn(domain: &mut Domain, conversation: Token, record: Token, sequ
     }
     run.sequence = Some(sequence);
     run.turns = run.turns.checked_add(1).expect("activation count is bounded by historical sequence");
-    if let Some(name) = run.offered.take() {
-        run.read = Some(name);
-    }
     domain.facts.about(conversation.run.token());
+    let offered = run.offered.len();
+    for _ in 0..offered {
+        let name = run.offered.pop().expect("bounded offered prefix");
+        run.read = Some(name);
+        domain.facts.push(Fact::MessageRead { run: conversation.run.token(), name, turn: run.turns });
+    }
+    domain.facts.push(Fact::MessageFence { run: conversation.run.token(), turn: run.turns, read: run.read });
     out.push(Request::Turn {
         host_run: run.host_name,
         record,
@@ -467,7 +520,7 @@ pub(crate) fn park(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request>) {
             unreachable!("idle alarm belongs only to settled Waiting")
         }
     };
-    follow(&mut domain.runs, &mut domain.alarms, id);
+    follow(&mut domain.runs, &mut domain.alarms, &mut domain.facts, id);
 }
 
 pub(crate) fn read(domain: &mut Domain, env: &Env<Limits>, owner: Token, read: Read, out: &mut Queue<Request>) {
@@ -486,7 +539,7 @@ pub(crate) fn read(domain: &mut Domain, env: &Env<Limits>, owner: Token, read: R
             unreachable!("a run reads only while it prepares")
         }
     };
-    follow(runs, alarms, id);
+    follow(runs, alarms, facts, id);
 }
 
 pub(crate) fn probed(domain: &mut Domain, env: &Env<Limits>, owner: Token, executable: bool, out: &mut Queue<Request>) {
@@ -505,7 +558,7 @@ pub(crate) fn probed(domain: &mut Domain, env: &Env<Limits>, owner: Token, execu
             unreachable!("a run probes only while it prepares")
         }
     };
-    follow(runs, alarms, id);
+    follow(runs, alarms, facts, id);
 }
 
 pub(crate) fn cancel(domain: &mut Domain, run: Token, out: &mut Queue<Request>) {
@@ -529,7 +582,7 @@ pub(crate) fn cancel(domain: &mut Domain, run: Token, out: &mut Queue<Request>) 
         // It answered in this iteration, and is retired already.
         State::Closed => return,
     };
-    follow(runs, alarms, id);
+    follow(runs, alarms, facts, id);
 }
 
 pub(crate) fn started(domain: &mut Domain, conversation: Token, peer: Token, out: &mut Queue<Request>) {
@@ -585,9 +638,9 @@ pub(crate) fn yielded(
         State::Working { reply_to, main } => {
             assert!(main == id, "a conversation with no asker is main");
             assert!(conversation.calls == 0, "a main yield follows every actual call terminal");
-            match run.inbox.pop() {
-                Some(message) => continue_message(run, reply_to, main, peer, message, out),
-                None if run.wait_requested => {
+            match run.inbox.is_empty() {
+                false => continue_messages(run, reply_to, main, peer, &env.limits, out),
+                true if run.wait_requested => {
                     run.wait_requested = false;
                     out.push(Request::Waiting { host_run: run.host_name, read: run.read });
                     if run.charter.waiting == Duration::ZERO {
@@ -596,7 +649,7 @@ pub(crate) fn yielded(
                         State::Waiting { reply_to, main, until: env.now.saturating_add(run.charter.waiting) }
                     }
                 }
-                None => match nudge(run, stop, &env.limits) {
+                true => match nudge(run, stop, &env.limits) {
                     Ok(()) => say(reply_to, main, peer, prompt::nudge(stop, run.nudges, env.limits.nudges), out),
                     Err(failure) => wind_down(conversations, reply_to, main, Ending::Failed(failure), out),
                 },
@@ -613,7 +666,7 @@ pub(crate) fn yielded(
             unreachable!("main yields only while its run works: it is closed when the run winds down")
         }
     };
-    follow(runs, alarms, run_id);
+    follow(runs, alarms, facts, run_id);
 }
 
 /// Session own prices are monotonic activation totals. Stale names are inert;
@@ -662,14 +715,14 @@ pub(crate) fn priced(domain: &mut Domain, conversation: Token, own: u64, subtree
             Failure::Budget(Exhausted::Overflow(crate::Overflow::Spend)),
             out,
         );
-        follow(&mut domain.runs, &mut domain.alarms, run_id);
+        follow(&mut domain.runs, &mut domain.alarms, &mut domain.facts, run_id);
         return;
     };
     conversation.spent.units = own;
     conversation.subtree_spent = subtree;
     run.spent = total;
     account_state(run);
-    follow(&mut domain.runs, &mut domain.alarms, run_id);
+    follow(&mut domain.runs, &mut domain.alarms, &mut domain.facts, run_id);
 }
 
 pub(crate) fn used(domain: &mut Domain, conversation: Token, spend: Spend, out: &mut Queue<Request>) {
@@ -696,13 +749,13 @@ pub(crate) fn used(domain: &mut Domain, conversation: Token, spend: Spend, out: 
             Failure::Budget(Exhausted::Overflow(crate::Overflow::Usage)),
             out,
         );
-        follow(&mut domain.runs, &mut domain.alarms, run_id);
+        follow(&mut domain.runs, &mut domain.alarms, &mut domain.facts, run_id);
         return;
     };
     conversation.spent = conversation_total;
     run.spent = run_total;
     account_state(run);
-    follow(&mut domain.runs, &mut domain.alarms, run_id);
+    follow(&mut domain.runs, &mut domain.alarms, &mut domain.facts, run_id);
 }
 
 fn account_state(run: &mut Run) {
@@ -891,7 +944,7 @@ pub(crate) fn delegated(
         }
     };
     domain.runs.get_mut(run_id).expect("the served call retains its run").state = next;
-    follow(&mut domain.runs, &mut domain.alarms, run_id);
+    follow(&mut domain.runs, &mut domain.alarms, &mut domain.facts, run_id);
 }
 
 /// Current completion-local call context; scalar crossing keeps these calls
@@ -1079,20 +1132,20 @@ pub(crate) fn ended(domain: &mut Domain, conversation: Token, end: End, spend: S
         | State::Waiting { reply_to, main, until: _ }
         | State::Over { reply_to, main, exhausted: _ } => {
             assert!(main == id, "a conversation with no asker is main");
-            answer(reply_to, ending(end, run.spent, run.turns), out)
+            answer(reply_to, ending(end, run.spent, run.turns), run.read, out)
         }
         State::Winding { reply_to, ending } => {
             let ending = match failure {
                 Some(failure) => Ending::Failed(failure),
                 None => ending,
             };
-            answer(reply_to, finished(ending, run.spent, run.turns), out)
+            answer(reply_to, finished(ending, run.spent, run.turns), run.read, out)
         }
         State::Preparing { .. } | State::Stopping { .. } | State::Closed => {
             unreachable!("a run's conversation ends only once the run has opened it")
         }
     };
-    follow(runs, alarms, run_id);
+    follow(runs, alarms, facts, run_id);
 }
 
 pub(crate) fn deadline(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request>) {
@@ -1114,7 +1167,7 @@ pub(crate) fn deadline(domain: &mut Domain, id: Id<Run>, out: &mut Queue<Request
             unreachable!("the deadline alarm runs only while a run prepares or works")
         }
     };
-    follow(runs, alarms, id);
+    follow(runs, alarms, facts, id);
 }
 
 /// Whether `conversation` is a child, and for main what its run
@@ -1135,8 +1188,8 @@ pub(crate) fn opened(
 
 /// What a run's state implies, applied after every transition: whether its
 /// deadline alarm runs, and whether it is retired.
-fn follow(runs: &mut Slab<Run>, alarms: &mut Deadlines<Alarm>, id: Id<Run>) {
-    let run = runs.get(id).expect("a run lives until it is retired");
+fn follow(runs: &mut Slab<Run>, alarms: &mut Deadlines<Alarm>, facts: &mut Facts, id: Id<Run>) {
+    let run = runs.get_mut(id).expect("a run lives until it is retired");
     let (deadline, closed) = match &run.state {
         State::Preparing { .. } | State::Working { .. } | State::Waiting { .. } | State::Over { .. } => {
             (Some(run.deadline), false)
@@ -1144,6 +1197,18 @@ fn follow(runs: &mut Slab<Run>, alarms: &mut Deadlines<Alarm>, id: Id<Run>) {
         State::Stopping { .. } | State::Winding { .. } => (None, false),
         State::Closed => (None, true),
     };
+    if closed {
+        let offered = run.offered.len();
+        for _ in 0..offered {
+            let name = run.offered.pop().expect("retained offered prefix");
+            facts.push(Fact::MessageUnread { run: id.token(), name });
+        }
+        let queued = run.inbox.len();
+        for _ in 0..queued {
+            let message = run.inbox.pop().expect("retained inbox prefix");
+            facts.push(Fact::MessageUnread { run: id.token(), name: message.name });
+        }
+    }
     let alarm = Alarm::Deadline { run: id };
     if let Some(at) = deadline {
         alarms.arm(alarm, at).expect("the alarm table has room for an alarm per run and per call");
@@ -1185,7 +1250,7 @@ fn may_finish(state: &State) -> bool {
 /// The landing of the call `id` has settled, as `settled` says: the run goes
 /// on, or finishes.
 fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<Request>) {
-    let Domain { runs, conversations, calls, alarms, facts: _ } = domain;
+    let Domain { runs, conversations, calls, alarms, facts } = domain;
     if settled == Settled::Going {
         return;
     }
@@ -1239,7 +1304,7 @@ fn settle(domain: &mut Domain, id: Id<Call>, settled: Settled, out: &mut Queue<R
         },
         Settled::Going | Settled::Cancelled => state,
     };
-    follow(runs, alarms, run_id);
+    follow(runs, alarms, facts, run_id);
 }
 
 // Cell handlers: each takes the source state's data by value and returns the
@@ -1326,7 +1391,7 @@ fn stop(
         }
     }
     conversations.retire(main);
-    answer(reply_to, Answer::Failed { failure, spent: run.spent, turns: run.turns }, out)
+    answer(reply_to, Answer::Failed { failure, spent: run.spent, turns: run.turns }, run.read, out)
 }
 
 /// Working, or over the budget's `over` part: main called `finish` as
@@ -1637,8 +1702,8 @@ fn closing(peer: Token, out: &mut Queue<Request>) -> Phase {
 }
 
 /// Answers the host: the run is done.
-fn answer(reply_to: ReplyTo, answer: Answer, out: &mut Queue<Request>) -> State {
-    out.push(Request::Answer { to: reply_to, answer });
+fn answer(reply_to: ReplyTo, answer: Answer, read: Option<Token>, out: &mut Queue<Request>) -> State {
+    out.push(Request::Answer { to: reply_to, answer, read });
     State::Closed
 }
 

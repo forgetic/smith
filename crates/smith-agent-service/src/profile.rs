@@ -88,6 +88,8 @@ pub const LIMITS: domain::Limits = domain::Limits {
         facts: 1024,
         messages: 8,
         message_bytes: 4096,
+        offer_messages: 8,
+        offer_bytes: 32_782,
         waiting: Duration::from_secs(300),
     },
     session: session::Limits {

@@ -85,6 +85,8 @@ const LIMITS: Limits = Limits {
     facts: 16,
     messages: 8,
     message_bytes: 4096,
+    offer_messages: 8,
+    offer_bytes: 32_782,
     waiting: skein_lib::Duration::from_secs(300),
 };
 
@@ -231,7 +233,7 @@ fn observed_request(request: Request, selected: Option<&smith_domain_run::Conven
             }
             Asked::Check { owner }
         }
-        Request::Answer { answer, to: _ } => Asked::Answer { answer },
+        Request::Answer { answer, to: _, read: _ } => Asked::Answer { answer },
         Request::HostCall { .. }
         | Request::WithdrawHost { .. }
         | Request::Turn { .. }
@@ -386,7 +388,7 @@ fn refuse_oversized_charter(limits: Limits, env: &Env<Limits>, out: &mut Queue<R
         transcript: None,
     };
     smith_domain_run::step(&mut domain, env, start, out);
-    let Some(Request::Answer { to: _, answer }) = out.pop() else { panic!("expected an answer") };
+    let Some(Request::Answer { to: _, answer, read: _ }) = out.pop() else { panic!("expected an answer") };
     assert_eq!(answer, Answer::Refused(Refusal::Invalid(Invalid::TooLarge)));
 }
 

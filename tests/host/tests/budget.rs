@@ -17,6 +17,7 @@ fn recorded(number: u32, spent: u64) -> Up {
 fn ended(turns: u32, spent: u64) -> Up {
     Up::Answer {
         answer: Answer {
+            read: None,
             turns,
             spent,
             result: RunResult::Failed {

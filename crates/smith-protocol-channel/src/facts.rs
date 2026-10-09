@@ -17,7 +17,10 @@ pub(crate) fn project(fact: domain::Fact) -> Option<(FactKind, u64)> {
             run::facts::Fact::Returned { .. } => Some((FactKind::ToolFinished, 1)),
             run::facts::Fact::CheckStarted { .. } => Some((FactKind::CheckStarted, 1)),
             run::facts::Fact::CheckFinished { .. } => Some((FactKind::CheckFinished, 1)),
-            run::facts::Fact::MessageReceived { .. }
+            run::facts::Fact::MessageRead { .. }
+            | run::facts::Fact::MessageFence { .. }
+            | run::facts::Fact::MessageUnread { .. }
+            | run::facts::Fact::MessageReceived { .. }
             | run::facts::Fact::MessageRefused { .. }
             | run::facts::Fact::Prepared { .. }
             | run::facts::Fact::Opened { .. }

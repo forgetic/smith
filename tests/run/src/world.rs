@@ -222,6 +222,8 @@ const fn calm_run_limits() -> run::Limits {
         facts: 64,
         messages: 8,
         message_bytes: 4096,
+        offer_messages: 8,
+        offer_bytes: 32_782,
         waiting: skein_lib::Duration::from_secs(300),
     }
 }
@@ -574,6 +576,11 @@ pub struct World {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     facts: BTreeMap<&'static str, u32>,
+    message_chance: u32,
+    message_name: u64,
+    message_cells: BTreeMap<&'static str, u32>,
+    message_seen: Vec<(Time, Token, crate::messages_referee::Seen)>,
+    message_answers: Vec<(Token, Option<Token>)>,
     deadline_cells: BTreeMap<&'static str, u32>,
     iteration: u64,
     /// The run the last request answered, for the iteration's attribution;
@@ -635,6 +642,11 @@ impl World {
             landing: BTreeSet::new(),
             cancel_cells: BTreeMap::new(),
             facts: BTreeMap::new(),
+            message_chance: 0,
+            message_name: 0,
+            message_cells: BTreeMap::new(),
+            message_seen: Vec::new(),
+            message_answers: Vec::new(),
             deadline_cells: BTreeMap::new(),
             iteration: 0,
             just_answered: None,
@@ -643,6 +655,24 @@ impl World {
             stats: Stats::default(),
             trace: Trace::default(),
         }
+    }
+
+    /// Inject named person messages before or after actual callbacks, in per mille.
+    pub fn inject_messages(&mut self, chance: u32) {
+        self.message_chance = chance;
+        self.partner.tell_turns();
+    }
+
+    /// Actual received/read/unread facts and final fences, for replay and mutation.
+    #[must_use]
+    pub fn message_seen(&self) -> &[(Time, Token, crate::messages_referee::Seen)] {
+        &self.message_seen
+    }
+
+    /// Externally observed callback cells where a person message arrived.
+    #[must_use]
+    pub fn message_cells(&self) -> &BTreeMap<&'static str, u32> {
+        &self.message_cells
     }
 
     /// Current injected monotonic time in this world.
@@ -797,6 +827,10 @@ impl World {
             self.fact(&fact);
         }
 
+        for (run, read) in std::mem::take(&mut self.message_answers) {
+            self.message_seen.push((self.now, run, crate::messages_referee::Seen::Answer { read }));
+        }
+
         // The reclaim point.
         self.run.reclaim();
         assert!(self.run.runs() <= self.settings.run.runs, "runs stay within their slots");
@@ -843,9 +877,11 @@ impl World {
                 current = Some(run);
                 self.send(Lane::Host, Delivery::Admitted { host_run, run });
             }
-            run::Request::Answer { to, answer } => {
+            run::Request::Answer { to, answer, read } => {
                 let owner = self.answer(to, answer);
                 if let Some(&run) = self.run_of_owner.get(&owner) {
+                    assert_eq!(read, self.views[&run].read, "Answer keeps the last actual told fence");
+                    self.message_answers.push((run, read));
                     // What its landings that did not push had passed.
                     self.passed.retain(|call, _| self.run_of_call.get(call) != Some(&run));
                     self.views.get_mut(&run).expect("a view per admitted run").answered = Some(self.iteration);
@@ -1425,6 +1461,12 @@ impl World {
                     self.completion_usage(conversation, own_spent, subtree_spent, usage);
                 }
                 Delivery::Event(event) => {
+                    if let run::Event::Turn { conversation, .. } = &event {
+                        let owner = self.run_of_conversation[conversation];
+                        if self.views[&owner].main != Some(*conversation) {
+                            continue;
+                        }
+                    }
                     self.check_conversation(&event);
                     self.hand(event);
                 }
@@ -1516,6 +1558,9 @@ impl World {
     fn fact(&mut self, fact: &run::facts::Fact) {
         use run::facts::Fact;
         let (Fact::Admitted { run }
+        | Fact::MessageRead { run, .. }
+        | Fact::MessageFence { run, .. }
+        | Fact::MessageUnread { run, .. }
         | Fact::MessageReceived { run, .. }
         | Fact::MessageRefused { run, .. }
         | Fact::Prepared { run, .. }
@@ -1530,6 +1575,26 @@ impl World {
         assert!(self.views.contains_key(run), "a fact is of a run that was admitted");
         if let Fact::Opened { conversation, .. } | Fact::Ended { conversation, .. } = fact {
             assert!(self.opens.contains_key(conversation), "a fact is of a conversation that was opened");
+        }
+        let message = match fact {
+            Fact::MessageReceived { name, .. } => Some(crate::messages_referee::Seen::Received { name: *name }),
+            Fact::MessageRead { name, .. } => Some(crate::messages_referee::Seen::Read { name: *name }),
+            Fact::MessageUnread { name, .. } => Some(crate::messages_referee::Seen::Unread { name: *name }),
+            Fact::MessageFence { read, .. } => Some(crate::messages_referee::Seen::Fence { read: *read }),
+            Fact::MessageRefused { .. }
+            | Fact::Admitted { .. }
+            | Fact::Prepared { .. }
+            | Fact::Opened { .. }
+            | Fact::Ended { .. }
+            | Fact::Called { .. }
+            | Fact::Returned { .. }
+            | Fact::CheckStarted { .. }
+            | Fact::CheckFinished { .. }
+            | Fact::Delivered { .. }
+            | Fact::Answered { .. } => None,
+        };
+        if let Some(message) = message {
+            self.message_seen.push((self.now, *run, message));
         }
         *self.facts.entry(kind(fact)).or_insert(0) += 1;
     }
@@ -1560,6 +1625,13 @@ impl World {
             None => false,
         };
         let before = inject && self.rng.chance(500);
+        let message_run = run
+            .filter(|run| self.views[run].answered.is_none())
+            .filter(|_| self.message_chance > 0 && self.rng.chance(self.message_chance));
+        let message_before = message_run.is_some() && self.rng.chance(500);
+        if let Some(run) = message_run.filter(|_| message_before) {
+            self.person_message(run);
+        }
         if let Some(run) = run.filter(|_| before) {
             self.run_stage.push(run::Event::Cancel { run });
         }
@@ -1567,9 +1639,25 @@ impl World {
             self.run_stage.push(price);
         }
         self.run_stage.push(event);
+        if let Some(run) = message_run.filter(|_| !message_before) {
+            self.person_message(run);
+        }
         if let Some(run) = run.filter(|_| inject && !before) {
             self.run_stage.push(run::Event::Cancel { run });
         }
+    }
+
+    fn person_message(&mut self, run: Token) {
+        *self.message_cells.entry(self.cell(run)).or_insert(0) += 1;
+        // Deliberately opaque, decreasing names include zero; arrival order is external.
+        let name = Token::new(u64::MAX.wrapping_sub(self.message_name));
+        self.message_name += 1;
+        self.run_stage.push(run::Event::Message {
+            run,
+            name,
+            label: b"person".as_slice().into(),
+            text: b"follow up".as_slice().into(),
+        });
     }
 
     /// What the partner asked for: events on their way to the run, and wakes.
@@ -1745,6 +1833,9 @@ impl World {
 fn kind(fact: &run::facts::Fact) -> &'static str {
     use run::facts::Fact;
     match fact {
+        Fact::MessageRead { .. } => "message_read",
+        Fact::MessageFence { .. } => "message_fence",
+        Fact::MessageUnread { .. } => "message_unread",
         Fact::MessageReceived { .. } => "message_received",
         Fact::MessageRefused { .. } => "message_refused",
         Fact::Admitted { .. } => "admitted",

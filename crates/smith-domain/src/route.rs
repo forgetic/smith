@@ -39,6 +39,7 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
         Event::Start { reply_to, host_run, activation, window, charter, workspace, grants, transcript, answered } => {
             if !endpoints_known(domain, &charter) {
                 domain.notices.push(Request::Answer {
+                    read: None,
                     to: reply_to,
                     answer: run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Endpoint)),
                 });
@@ -46,6 +47,7 @@ pub(crate) fn event(domain: &mut Domain, env: &Env<Limits>, event: Event) {
             }
             if !takes_grants(domain, &grants, env.limits.accounts) {
                 domain.notices.push(Request::Answer {
+                    read: None,
                     to: reply_to,
                     answer: run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Grants)),
                 });
@@ -228,13 +230,18 @@ fn start(
     let largest_turn = limits::max_turn_bytes(&env.limits).expect("representable turn cap");
     if window.turns == 0 || window.bytes < largest_turn {
         domain.notices.push(Request::Answer {
+            read: None,
             to: reply_to,
             answer: run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Window)),
         });
         return;
     }
     if domain.starts.is_full() {
-        domain.notices.push(Request::Answer { to: reply_to, answer: run::Answer::Refused(run::Refusal::Busy) });
+        domain.notices.push(Request::Answer {
+            read: None,
+            to: reply_to,
+            answer: run::Answer::Refused(run::Refusal::Busy),
+        });
         return;
     }
     let compatible = match crate::feedback_worst_case(&env.limits.run) {
@@ -246,6 +253,7 @@ fn start(
         || env.limits.run.directory_name_bytes > env.limits.session.tools.path_bytes
     {
         domain.notices.push(Request::Answer {
+            read: None,
             to: reply_to,
             answer: run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Conversation)),
         });
@@ -475,14 +483,14 @@ fn from_run(domain: &mut Domain, env: &Env<Limits>, request: run::Request, out: 
             return out.push(Request::MessageRefused { host_run, name, reason });
         }
         run::Request::Admitted { host_run, run } => return out.push(Request::Admitted { host_run, run }),
-        run::Request::Answer { to, answer } => {
+        run::Request::Answer { to, answer, read } => {
             let id = Id::<StartContext>::from_token(to.into_token());
             let context = domain.starts.get_mut(id).expect("root issued the start reply binding");
             let to = context.reply_to.take().expect("one actual terminal consumes the parent right");
             context.transcript = None;
             context.answered = Box::default();
             domain.starts.retire(id);
-            return out.push(Request::Answer { to, answer });
+            return out.push(Request::Answer { to, answer, read });
         }
         run::Request::Waiting { host_run, read } => return out.push(Request::Waiting { host_run, read }),
         run::Request::Turn { host_run, record, number, position, read, spent } => {

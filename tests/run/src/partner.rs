@@ -337,6 +337,7 @@ pub struct Partner {
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     spent: Spend,
     tally: Tally,
+    tell_turns: bool,
 }
 
 /// A started conversation.
@@ -364,6 +365,7 @@ struct Talk {
     ///
     /// Scripted-world contract: domain/run.md, sections 13 and 14; testing-strategy.md, section 2.2.
     wake: u64,
+    told: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -414,7 +416,13 @@ impl Partner {
             serial: 0,
             spent: Spend::ZERO,
             tally: Tally::default(),
+            tell_turns: false,
         }
+    }
+
+    /// Enable opaque settled Turn records for message-fence component stories.
+    pub fn tell_turns(&mut self) {
+        self.tell_turns = true;
     }
 
     /// Conversations started and not ended, and finishes in flight.
@@ -476,6 +484,7 @@ impl Partner {
             subtree_spent: 0,
             phase: Phase::Requesting,
             wake: 0,
+            told: 0,
         };
         self.talks.insert(peer, talk);
         out.push(Out::Event(Event::Started { conversation, peer }));
@@ -568,11 +577,17 @@ impl Partner {
         if *result == Returned::TimedOut {
             assert!(now >= expires, "a call times out only once its deadline has passed");
         }
-        match talk.phase {
+        let phase = talk.phase;
+        if matches!(phase, Phase::Calling { pending: 1, .. } | Phase::Withdrawn { pending: 1 }) {
+            self.tell(peer, out);
+        }
+        match phase {
             Phase::Calling { pending, over } if pending > 1 => {
-                talk.phase = Phase::Calling { pending: pending - 1, over }
+                self.talks.get_mut(&peer).expect("a pending talk").phase = Phase::Calling { pending: pending - 1, over }
             }
-            Phase::Withdrawn { pending } if pending > 1 => talk.phase = Phase::Withdrawn { pending: pending - 1 },
+            Phase::Withdrawn { pending } if pending > 1 => {
+                self.talks.get_mut(&peer).expect("a pending talk").phase = Phase::Withdrawn { pending: pending - 1 }
+            }
             // Its last call in flight returned.
             Phase::Calling { pending: _, over } => match over {
                 Some(exhausted) => self.end(peer, End::Budget(exhausted), out),
@@ -675,6 +690,7 @@ impl Partner {
             } else {
                 Stop::EndTurn
             };
+            self.tell(peer, out);
             let talk = self.talks.get_mut(&peer).expect("a turn is of a live conversation");
             talk.phase = Phase::Yielded;
             let (conversation, expires) = (talk.conversation, talk.expires);
@@ -921,6 +937,22 @@ impl Partner {
             subtree_spent: talk.subtree_spent,
         }));
         out.push(Out::Event(Event::Used { conversation: talk.conversation, spend }));
+    }
+
+    fn tell(&mut self, peer: Token, out: &mut Vec<Out>) {
+        if !self.tell_turns {
+            return;
+        }
+        let talk = self.talks.get_mut(&peer).expect("a settled live talk");
+        if talk.told >= talk.spent.turns {
+            return;
+        }
+        talk.told += 1;
+        out.push(Out::Event(Event::Turn {
+            conversation: talk.conversation,
+            record: Token::new(u64::from(talk.told)),
+            sequence: talk.told,
+        }));
     }
 
     fn end(&mut self, peer: Token, end: End, out: &mut Vec<Out>) {

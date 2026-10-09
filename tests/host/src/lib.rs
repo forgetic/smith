@@ -58,6 +58,8 @@ pub struct Seen {
     pub calls: BTreeSet<Token>,
     /// Turn payload bytes owned by the parent until its exact ACK.
     pub turns: BTreeMap<u32, Box<[u8]>>,
+    /// Last read fence observed in an actual parent Turn or Waiting notice.
+    pub read: Option<Token>,
     /// Actual parent Turn metadata: sequence, scalar prefix and independent
     /// currency/raw overflow attestations. ACK never erases these observations.
     /// Contract: domain/host.md, section 6; testing-strategy.md, sections 6 and 7.
@@ -363,6 +365,7 @@ impl World {
                     assert!(self.seen.withdrawals.insert(call));
                 }
                 Output::Parent(parent::Request::Turn { turn, .. }) => {
+                    self.seen.read = turn.read;
                     self.seen.turn_metadata.push((turn.number, turn.spent));
                     assert!(self.seen.turns.insert(turn.number, turn.body).is_none());
                 }
@@ -407,11 +410,9 @@ impl World {
                     self.seen.rejected.push((account, generation));
                 }
                 Output::Parent(parent::Request::Told { .. }) => self.seen.told += 1,
+                Output::Parent(parent::Request::Waiting { read, .. }) => self.seen.read = read,
                 Output::Parent(
-                    parent::Request::Waiting { .. }
-                    | parent::Request::Long { .. }
-                    | parent::Request::LongDone { .. }
-                    | parent::Request::Exhausted { .. },
+                    parent::Request::Long { .. } | parent::Request::LongDone { .. } | parent::Request::Exhausted { .. },
                 ) => {}
             }
         }

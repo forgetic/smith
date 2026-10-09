@@ -218,6 +218,7 @@ impl Component {
     pub fn send_answer(
         &mut self,
         answer: run::Answer,
+        read: Option<Token>,
         token: Token,
         to_service: &mut Queue<OpenEvent>,
         below: &mut Queue<Lower>,
@@ -231,7 +232,7 @@ impl Component {
         if !permitted {
             return Err(Error::Order);
         }
-        let record = answer_record(answer, &self.bodies, &self.charter)?;
+        let record = answer_record(answer, read, &self.bodies, &self.charter)?;
         let Ok(length) = usize::try_from(record.measure()) else {
             return Err(Error::ResultCapacity);
         };
@@ -895,6 +896,7 @@ impl Component {
         let answered = match admitted {
             Ok(()) => self.send_answer(
                 run::Answer::Failed { failure: run::Failure::Transcript(reason), spent: run::Spend::ZERO, turns: 0 },
+                None,
                 Token::new(0),
                 to_service,
                 below,
@@ -917,7 +919,12 @@ fn invalid_answer(limits: &smith_channel::Limits, invalid: smith_channel::Invali
     .ok()?;
     let record = smith_channel::Answer::new(
         limits,
-        smith_channel::AnswerParts { turns: 0, spent: 0, result: smith_channel::RunResult::Refused(refused) },
+        smith_channel::AnswerParts {
+            turns: 0,
+            spent: 0,
+            last_read: None,
+            result: smith_channel::RunResult::Refused(refused),
+        },
     )
     .ok()?;
     let body_len = usize::try_from(record.measure()).ok()?;

@@ -292,6 +292,8 @@ pub enum Request {
         to: ReplyTo,
         /// Single terminal value returned to the caller.
         answer: run::Answer,
+        /// Last message covered by an actual told main turn; none before any read.
+        read: Option<Token>,
     },
     /// To the host: checks of the run it names `host_run` are running until
     /// `deadline` at the latest, so its watchdog waits that long.

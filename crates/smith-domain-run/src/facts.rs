@@ -24,6 +24,12 @@ use crate::run::{self, Conversation, Run};
 /// `Admitted` gives it).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Fact {
+    /// Each host message covered by an actual told main turn.
+    MessageRead { run: Token, name: Token, turn: u32 },
+    /// The final ordered read fence of one actual told main turn.
+    MessageFence { run: Token, turn: u32, read: Option<Token> },
+    /// An accepted host message ended unread at the run answer.
+    MessageUnread { run: Token, name: Token },
     /// A host message entered the bounded inbox, counted as rendered bytes.
     MessageReceived { run: Token, name: Token, bytes: u64 },
     /// A host message ended refused before retention, counted as rendered bytes.
@@ -228,7 +234,7 @@ pub(crate) fn tell(
             Request::Check { owner: _, program: _, deadline, tail: _ } => {
                 Fact::CheckStarted { run, deadline: *deadline }
             }
-            Request::Answer { to: _, answer } => Fact::Answered { run, answer: answered(answer) },
+            Request::Answer { to: _, answer, read: _ } => Fact::Answered { run, answer: answered(answer) },
             Request::MessageRefused { .. }
             | Request::Waiting { .. }
             | Request::Turn { .. }

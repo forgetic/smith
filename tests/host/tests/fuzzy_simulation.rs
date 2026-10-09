@@ -87,7 +87,7 @@ fn random_worlds_settle_and_reach_every_ending() {
 }
 
 fn last(world: &mut World, result: RunResult, spent: u64) {
-    world.up(Up::Answer { answer: Answer { turns: 0, spent, result } });
+    world.up(Up::Answer { answer: Answer { read: None, turns: 0, spent, result } });
 }
 
 fn assert_ending(world: &World, fate: u64, seed: u64) {

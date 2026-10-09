@@ -1135,7 +1135,7 @@ fn valid_answer(agent: &Agent, answer: &crate::Answer, limits: &Limits) -> bool 
             }
         }
     }
-    if answer.turns != agent.number || !valid_spend(agent, answer.spent) {
+    if answer.read != agent.read || answer.turns != agent.number || !valid_spend(agent, answer.spent) {
         return false;
     }
     match &answer.result {

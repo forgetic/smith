@@ -182,6 +182,7 @@ fn final_answer(agent: &Agent) -> host::Answer {
             if id.as_ref() == ID && text.as_ref() == FEEDBACK)
     }), "the concrete Turn keeps paired opaque receipt feedback");
     host::Answer {
+        read: None,
         turns: *turns,
         spent: spent.units,
         result: RunResult::Failed { failure: host::RunFailure::Cancelled },

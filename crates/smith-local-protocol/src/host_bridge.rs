@@ -313,10 +313,12 @@ mod tests {
 
     #[test]
     fn a_spawned_last_word_keeps_its_local_display_class() {
-        let final_word = answer_to_local(host::Answer { turns: 3, spent: 29, result: host::RunResult::Parked })
-            .expect("parked word");
+        let final_word =
+            answer_to_local(host::Answer { read: None, turns: 3, spent: 29, result: host::RunResult::Parked })
+                .expect("parked word");
         let smith_local_domain::ExternalFinal::Parked = final_word else { panic!("parked local chat") };
         let final_word = answer_to_local(host::Answer {
+            read: None,
             turns: 1,
             spent: 7,
             result: host::RunResult::Failed { failure: host::RunFailure::Cancelled },

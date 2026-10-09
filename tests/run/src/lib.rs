@@ -20,6 +20,7 @@
 //! answer).
 
 pub mod host;
+pub mod messages_referee;
 mod noisy;
 pub mod partner;
 mod world;

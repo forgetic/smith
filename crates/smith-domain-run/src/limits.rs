@@ -21,6 +21,12 @@ pub struct Limits {
     /// Maximum attested labelled text bytes retained per queued message.
     pub message_bytes: u32,
 
+    /// Maximum messages offered together at one main yield.
+    pub offer_messages: u32,
+
+    /// Rendered bytes in one offer, including the two-byte separators between messages.
+    pub offer_bytes: u32,
+
     /// Maximum positive charter idle interval; it never pauses the wall budget.
     pub waiting: Duration,
 
@@ -118,6 +124,9 @@ pub struct Limits {
 /// what it receives and only passes on (a check's output) is the sender's.
 #[must_use]
 pub fn worst_case(limits: &Limits) -> Option<u64> {
+    if limits.offer_messages == 0 || limits.offer_bytes < limits.message_bytes {
+        return None;
+    }
     if limits.conflict_path_bytes > u32::try_from(crate::Marker::CAPACITY).ok()? {
         return None;
     }
@@ -136,6 +145,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
     let run = limits
         .run_bytes
         .checked_add(Queue::<crate::run::Message>::worst_case(limits.messages)?)?
+        .checked_add(Queue::<skein_lib::Token>::worst_case(limits.messages)?)?
+        .checked_add(u64::from(limits.offer_bytes))?
         .checked_add(u64::from(limits.messages).checked_mul(u64::from(limits.message_bytes))?)?
         .checked_add(guides)?
         .checked_add(checks)?

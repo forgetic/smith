@@ -64,6 +64,8 @@ pub(crate) const LIMITS: Limits = Limits {
     facts: 64,
     messages: 8,
     message_bytes: 4096,
+    offer_messages: 8,
+    offer_bytes: 32_782,
     waiting: Duration::from_secs(300),
 };
 
@@ -305,7 +307,7 @@ fn answered(emitted: Box<[Request]>) -> (u64, Answer) {
     let Ok(one) = Box::<[Request; 1]>::try_from(emitted) else {
         panic!("expected one request");
     };
-    let [Request::Answer { to, answer }] = *one else {
+    let [Request::Answer { to, answer, read: _ }] = *one else {
         panic!("expected an answer");
     };
     (to.into_token().raw(), answer)
@@ -1708,6 +1710,9 @@ fn failed_push_reason_and_diagnostics_return_to_the_finish_caller() {
             Fact::Delivered { status: push, .. } => pushed = Some(push),
             Fact::MessageReceived { .. }
             | Fact::MessageRefused { .. }
+            | Fact::MessageRead { .. }
+            | Fact::MessageFence { .. }
+            | Fact::MessageUnread { .. }
             | Fact::Admitted { .. }
             | Fact::Prepared { .. }
             | Fact::Opened { .. }
@@ -2421,9 +2426,7 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_main_turn() {
                 .is_empty()
         );
     }
-    for (sequence, read, next) in
-        [(2, 0, Some(b"person: second".as_slice())), (3, 99, Some(b"person: third".as_slice())), (4, 7, None)]
-    {
+    for (sequence, read, next) in [(2, 0, Some(b"person: second\n\nperson: third".as_slice())), (3, 7, None)] {
         assert_eq!(
             &*h.step(Event::Turn { conversation, record: Token::new(u64::from(sequence)), sequence }),
             &[Request::Turn {
@@ -2458,7 +2461,7 @@ fn opaque_fifo_wakes_waiting_and_read_advances_only_on_main_turn() {
     assert_eq!(&*h.fire(), &[Request::Close { peer: Token::new(9) }]);
     assert_eq!(
         answered(h.step(Event::Ended { conversation, end: End::Closed, spend: Spend::ZERO })),
-        (1, Answer::Parked { spent: Spend::ZERO, turns: 4 })
+        (1, Answer::Parked { spent: Spend::ZERO, turns: 3 })
     );
     assert_eq!(
         &*h.step(Event::Message { label: Box::from(&b"host"[..]), run, name: Token::new(8), text: bytes(b"late") }),
@@ -2568,6 +2571,7 @@ fn bounded_message_and_input_at_idle_deadline_preserve_existing_fifo() {
         &[Request::Answer {
             to: ReplyTo::new(Token::new(1)),
             answer: Answer::Failed { failure: Failure::Cancelled, spent: Spend::ZERO, turns: 1 },
+            read: Some(Token::new(5)),
         }]
     );
     h.domain.reclaim();
@@ -3114,6 +3118,68 @@ fn messages_during_stopping_over_winding_and_closed_each_have_an_ending_terminal
             }
             23 => {}
             _ => unreachable!("three known phases"),
+        }
+    }
+}
+
+#[test]
+fn ordered_offers_end_each_message_read_or_unread_and_the_answer_keeps_the_last_told_fence() {
+    for (offer_messages, offer_bytes) in [(2, 128), (5, 20)] {
+        let mut harness = Harness::new(Limits { messages: 5, message_bytes: 9, offer_messages, offer_bytes, ..LIMITS });
+        let (run, main) = harness.running(1, 9);
+        for name in [99, 0, 8, 7, 6] {
+            assert!(
+                harness
+                    .step(Event::Message { run, name: Token::new(name), label: bytes(b"peer"), text: bytes(b"aaa") })
+                    .is_empty()
+            );
+        }
+        assert_eq!(
+            &*harness.step(end_turn(main)),
+            &[Request::Say { peer: Token::new(9), text: bytes(b"peer: aaa\n\npeer: aaa") }]
+        );
+        let told = harness.step(Event::Turn { conversation: main, record: Token::new(40), sequence: 1 });
+        let [Request::Turn { read, .. }] = &*told else { panic!("one actual told turn") };
+        assert_eq!(*read, Some(Token::new(0)), "names are opaque, including a fence of zero");
+        assert_eq!(
+            &*harness.step(end_turn(main)),
+            &[Request::Say { peer: Token::new(9), text: bytes(b"peer: aaa\n\npeer: aaa") }]
+        );
+        harness.step(Event::Cancel { run });
+        let terminal = harness.step(Event::Ended { conversation: main, end: End::Closed, spend: Spend::ZERO });
+        let [Request::Answer { read, .. }] = &*terminal else { panic!("one run terminal") };
+        assert_eq!(*read, Some(Token::new(0)), "an untold offer cannot move the final fence");
+        let mut terminals = alloc::collections::BTreeMap::new();
+        while let Some(fact) = harness.domain.pop_fact() {
+            match fact {
+                Fact::MessageRead { name, turn, .. } => {
+                    assert_eq!(turn, 1);
+                    assert!(terminals.insert(name, "read").is_none(), "each message ends once");
+                }
+                Fact::MessageUnread { name, .. } => {
+                    assert!(terminals.insert(name, "unread").is_none(), "each message ends once");
+                }
+                Fact::MessageFence { .. }
+                | Fact::MessageReceived { .. }
+                | Fact::MessageRefused { .. }
+                | Fact::Admitted { .. }
+                | Fact::Prepared { .. }
+                | Fact::Opened { .. }
+                | Fact::Ended { .. }
+                | Fact::Called { .. }
+                | Fact::Returned { .. }
+                | Fact::CheckStarted { .. }
+                | Fact::CheckFinished { .. }
+                | Fact::Delivered { .. }
+                | Fact::Answered { .. } => {}
+            }
+        }
+        assert_eq!(terminals.len(), 5, "each accepted message ends");
+        for name in [99, 0] {
+            assert_eq!(terminals[&Token::new(name)], "read");
+        }
+        for name in [8, 7, 6] {
+            assert_eq!(terminals[&Token::new(name)], "unread", "offered and queued both end unread");
         }
     }
 }

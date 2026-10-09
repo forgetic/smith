@@ -554,6 +554,7 @@ impl World {
             agent
                 .send_answer(
                     smith_domain::run::Answer::Parked { spent: smith_domain::run::Spend::ZERO, turns: 0 },
+                    None,
                     skein_lib::Token::new(4),
                     &mut self.agent.agent_events,
                     &mut self.agent.below,
@@ -569,9 +570,20 @@ impl World {
 
     /// Send one actual typed domain answer through the agent half.
     pub fn agent_answers(&mut self, answer: smith_domain::run::Answer) {
+        self.agent_answers_with_fence(answer, None);
+    }
+
+    /// Send the final fence with its one actual domain terminal.
+    pub fn agent_answers_with_fence(&mut self, answer: smith_domain::run::Answer, read: Option<Token>) {
         if let Half::Agent(agent) = &mut self.agent.half {
             agent
-                .send_answer(answer, skein_lib::Token::new(33), &mut self.agent.agent_events, &mut self.agent.below)
+                .send_answer(
+                    answer,
+                    read,
+                    skein_lib::Token::new(33),
+                    &mut self.agent.agent_events,
+                    &mut self.agent.below,
+                )
                 .expect("bounded parked answer");
         }
     }

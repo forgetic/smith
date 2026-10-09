@@ -6,7 +6,7 @@
 //! returns either owned domain policy or a typed invalid-start reason.
 
 use alloc::boxed::Box;
-use skein_lib::{List, Reader, Writer};
+use skein_lib::{List, Reader, Token, Writer};
 use smith_channel as channel;
 use smith_charter as wire;
 use smith_domain::run;
@@ -458,8 +458,10 @@ fn copy_fields(
 }
 
 /// Translate the domain's single Start terminal into the channel's last word.
+#[expect(clippy::manual_map, reason = "the protocol subset keeps option projection exhaustive")]
 pub fn answer_record(
     answer: run::Answer,
+    read: Option<Token>,
     bodies: &channel::Limits,
     charter: &wire::v1::Limits,
 ) -> Result<channel::Answer, Error> {
@@ -490,7 +492,11 @@ pub fn answer_record(
             (turns, spent.units, channel::RunResult::Failed(failed))
         }
     };
-    Ok(channel::Answer::new(bodies, channel::AnswerParts { turns, spent, result })?)
+    let last_read = match read {
+        Some(name) => Some(name.raw()),
+        None => None,
+    };
+    Ok(channel::Answer::new(bodies, channel::AnswerParts { turns, spent, last_read, result })?)
 }
 
 pub(crate) fn invalid_start(invalid: run::Invalid) -> channel::InvalidStart {

@@ -57,6 +57,7 @@ fn a_charter_in_an_unread_version_is_refused_as_invalid_with_no_turns() {
     assert_eq!(
         world.take_host_answer(),
         Some(smith_host_domain::channel::Answer {
+            read: None,
             turns: 0,
             spent: 0,
             result: smith_host_domain::channel::RunResult::Refused {
@@ -220,6 +221,7 @@ fn a_run_goes_from_start_to_answer() {
     assert_eq!(
         world.take_host_answer(),
         Some(smith_host_domain::channel::Answer {
+            read: None,
             turns: 0,
             spent: 0,
             result: smith_host_domain::channel::RunResult::Parked
@@ -239,8 +241,8 @@ fn a_model_failure_keeps_transport_evidence_and_cooldown() {
         spent: smith_domain::run::Spend::ZERO,
         turns: 2,
     };
-    let record =
-        smith_protocol_channel::answer_record(answer, &CEILINGS, &smith_charter::CEILINGS).expect("bounded failure");
+    let record = smith_protocol_channel::answer_record(answer, None, &CEILINGS, &smith_charter::CEILINGS)
+        .expect("bounded failure");
     assert_eq!(record.turns(), 2);
     let smith_channel::RunResult::Failed(failed) = record.result() else {
         panic!("expected failure");
@@ -279,6 +281,7 @@ fn a_model_failure_reaches_the_host_domain_in_its_typed_vocabulary() {
     assert_eq!(
         world.take_host_answer(),
         Some(smith_host_domain::channel::Answer {
+            read: None,
             turns: 0,
             spent: 0,
             result: smith_host_domain::channel::RunResult::Failed {
@@ -418,7 +421,7 @@ fn a_run_parked_resumed_and_parked_again_numbers_turns_per_activation() {
     one.settle();
     one.agent_admits();
     one.settle();
-    one.agent_tells_turn(1, None, &first);
+    one.agent_tells_turn(1, Some(skein_lib::Token::new(99)), &first);
     one.settle();
     let saved = one
         .observations()
@@ -432,9 +435,13 @@ fn a_run_parked_resumed_and_parked_again_numbers_turns_per_activation() {
     one.settle();
     let mut spent = smith_domain::run::Spend::ZERO;
     spent.units = 3;
-    one.agent_answers(smith_domain::run::Answer::Parked { spent, turns: 1 });
+    one.agent_answers_with_fence(
+        smith_domain::run::Answer::Parked { spent, turns: 1 },
+        Some(skein_lib::Token::new(99)),
+    );
     one.settle();
     assert!(one.observations().contains(&Observation::HostParked { turns: 1, spent: 3 }));
+    assert_eq!(one.take_host_answer().expect("decoded final fence").read, Some(skein_lib::Token::new(99)));
 
     let mut two = World::new(CEILINGS, CEILINGS, StreamMode::Two);
     two.settle();

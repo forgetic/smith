@@ -129,4 +129,4 @@ record Accepted { result: bytes 67108864 }
 record Failed { reason: RunFailure }
 record Refused { reason: StartRefusal }
 enum RunResult { accepted: Accepted, parked, failed: Failed, refused: Refused }
-record Answer { turns: u32 spent: u64 result: RunResult }
+record Answer { turns: u32 spent: u64 last_read: option u64 result: RunResult }

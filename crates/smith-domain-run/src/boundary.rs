@@ -300,6 +300,8 @@ pub enum Request {
         to: ReplyTo,
         /// Single terminal value returned to the caller.
         answer: Answer,
+        /// Last message covered by an actual told main turn; none before any read.
+        read: Option<Token>,
     },
     /// Open a conversation, which every event about it names `conversation`.
     Open {

@@ -55,9 +55,9 @@ fn bridge(host: &mut Host, agent: &mut Agent, seen: &(Time, Seen), woke: &mut bo
                 host.sent();
             }
         }
-        Seen::Answer { turns, parked, spent } => {
+        Seen::Answer { turns, parked, spent, read } => {
             assert!(*parked, "this actual agent finishes by idle parking");
-            host.up(Up::Answer { answer: final_accounting(*turns, *spent, RunResult::Parked) });
+            host.up(Up::Answer { answer: final_accounting(*turns, *spent, RunResult::Parked, *read) });
         }
         Seen::Input { .. } | Seen::Prompt { .. } | Seen::Completed { .. } | Seen::CompletionEnded => {}
     }
@@ -150,8 +150,8 @@ fn assert_accounting(answer: &host::Answer, turns: u32, spent: run::Spend) {
 
 /// Translate the actual root final `Spend` without session usage or `Turn` metadata.
 /// Contract: domain/host.md, sections 6 and 9; domain/run.md, section 9.
-fn final_accounting(turns: u32, spent: run::Spend, result: RunResult) -> host::Answer {
-    host::Answer { turns, spent: spent.units, result }
+fn final_accounting(turns: u32, spent: run::Spend, result: RunResult, read: Option<Token>) -> host::Answer {
+    host::Answer { turns, spent: spent.units, result, read }
 }
 
 #[test]
@@ -202,10 +202,10 @@ fn child_completions_and_raw_usage_cross_the_host_final_answer_once() {
                 host.event(Input::Parent(parent::Event::Acknowledge { agent: host.agent(), turn: *number }));
                 host.sent();
             }
-            Seen::Answer { turns: observed, spent: actual, parked } => {
+            Seen::Answer { turns: observed, spent: actual, parked, .. } => {
                 assert_eq!((*observed, *actual, *parked), (turns, spent, false));
                 let result = RunResult::Failed { failure: host::RunFailure::Budget(host::Exhausted::Turns) };
-                host.up(Up::Answer { answer: final_accounting(turns, spent, result) });
+                host.up(Up::Answer { answer: final_accounting(turns, spent, result, host.seen.read) });
             }
             Seen::Waiting { read } => host.up(Up::Waiting { read: *read }),
             Seen::Input { .. } | Seen::Prompt { .. } | Seen::Completed { .. } | Seen::CompletionEnded => {}

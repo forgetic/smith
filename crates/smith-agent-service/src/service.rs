@@ -605,11 +605,12 @@ impl Service {
         self.pending_start = None;
         let token = self.next_send();
         let answer = run::Answer::Refused(run::Refusal::Invalid(run::Invalid::Workspace));
+        let read = None;
         if self
             .channel
             .as_mut()
             .expect("framed agent owns its channel")
-            .send_answer(answer, token, &mut self.channel_events, &mut self.channel_below)
+            .send_answer(answer, read, token, &mut self.channel_events, &mut self.channel_below)
             .is_err()
         {
             self.mark_failed(Failure::Send);
@@ -1461,14 +1462,14 @@ fn domain_request(service: &mut Service, request: domain::Request) {
                 service.mark_failed(Failure::Send);
             }
         }
-        domain::Request::Answer { to, answer } => {
+        domain::Request::Answer { to, answer, read } => {
             assert!(to.into_token() == Token::new(1), "one Start reply right per process");
             let token = service.next_send();
             if service
                 .channel
                 .as_mut()
                 .expect("framed agent owns its channel")
-                .send_answer(answer, token, &mut service.channel_events, &mut service.channel_below)
+                .send_answer(answer, read, token, &mut service.channel_events, &mut service.channel_below)
                 .is_err()
             {
                 service.mark_failed(Failure::Send);

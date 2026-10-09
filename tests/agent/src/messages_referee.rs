@@ -54,6 +54,8 @@ pub enum Seen {
     /// Observed final root count and parking classification, never an input answer.
     /// Contract: domain/run.md, sections 6 and 13.
     Answer {
+        /// Last actual told message fence, retained in the run terminal.
+        read: Option<Token>,
         /// Actual settled main record count. Contract: domain/run.md, section 13.
         turns: u32,
 
@@ -72,7 +74,7 @@ pub enum Seen {
 #[derive(Debug)]
 pub struct Meeting {
     queued: VecDeque<(Token, Box<[u8]>)>,
-    offered: Option<(Token, Box<[u8]>)>,
+    offered: Option<(Vec<Token>, Box<[u8]>)>,
     read: Option<Token>,
     expected: Option<Vec<Part>>,
     calling: bool,
@@ -120,10 +122,23 @@ impl Meeting {
                 [] | [Part::Opaque { .. } | Part::ToolCall { .. } | Part::ToolOutput { .. }] | [_, _, ..] => None,
             }
         });
-        if let Some((name, text)) = self.queued.front() {
-            if last == Some(text.as_ref()) {
-                judge.check(self.offered.is_none(), "only one person input is offered before its actual turn");
-                self.offered = self.queued.pop_front();
+        if !self.queued.is_empty() {
+            let mut joined = Vec::new();
+            let mut count = 0;
+            for (at, (_, text)) in self.queued.iter().enumerate() {
+                if at > 0 {
+                    joined.extend_from_slice(b"\n\n");
+                }
+                joined.extend_from_slice(text);
+                if last == Some(joined.as_slice()) {
+                    count = at + 1;
+                    break;
+                }
+            }
+            if count > 0 {
+                judge.check(self.offered.is_none(), "only one person offer precedes its actual turn");
+                let names = self.queued.drain(..count).map(|(name, _)| name).collect::<Vec<_>>();
+                self.offered = Some((names, joined.into_boxed_slice()));
                 self.waiting = None;
                 judge.withdraw(&"idle park");
                 self.wait_result = false;
@@ -131,7 +146,6 @@ impl Meeting {
                 let later = self.queued.iter().skip(1).any(|(_, text)| last == Some(text.as_ref()));
                 judge.check(!later, "person prompts preserve actual FIFO arrival order");
                 judge.check(self.waiting.is_none(), "waiting wakes with the oldest exact person bytes");
-                let _ = name;
             }
         }
     }
@@ -143,7 +157,7 @@ impl Meeting {
         );
         self.count = number;
         self.sequence = turn.sequence;
-        let expected_read = self.offered.as_ref().map_or(self.read, |(name, _)| Some(*name));
+        let expected_read = self.offered.as_ref().map_or(self.read, |(names, _)| names.last().copied());
         judge.check(read == expected_read, "read advances only for the exact offered person input");
         let expected = self.expected.take();
         judge.check(expected.is_some() && !self.calling, "a concrete turn follows an actual provider terminal");
@@ -157,7 +171,7 @@ impl Meeting {
             assistant.len() == 1 && assistant.first() == expected.as_ref(),
             "concrete turn preserves the actual assistant bytes and provider call identities",
         );
-        if let Some((name, text)) = self.offered.take() {
+        if let Some((names, text)) = self.offered.take() {
             judge.check(
                 turn.messages.iter().any(|message| {
                     message.role == llm::Role::User
@@ -166,7 +180,7 @@ impl Meeting {
                 }),
                 "offered person text is recorded unchanged before its assistant",
             );
-            self.read = Some(name);
+            self.read = names.last().copied();
         }
         if let Some(parts) = expected {
             for part in parts {
@@ -239,9 +253,9 @@ impl Expectations for Meeting {
                 self.waiting = Some(judge.now());
                 judge.rearm("idle park", self.idle.saturating_add(Duration::from_secs(1)));
             }
-            Seen::Answer { turns, parked, .. } => {
+            Seen::Answer { turns, parked, read, .. } => {
                 judge.check(
-                    turns == self.count && !self.calling && self.expected.is_none(),
+                    turns == self.count && read == self.read && !self.calling && self.expected.is_none(),
                     "final answer follows every actual turn and provider terminal",
                 );
                 if parked {

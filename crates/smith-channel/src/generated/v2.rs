@@ -373,6 +373,8 @@ pub enum Path {
     AnswerTurns,
     /// The `spent` field of `Answer`.
     AnswerSpent,
+    /// The `last_read` field of `Answer`.
+    AnswerLastRead,
     /// The `result` field of `Answer`.
     AnswerResult,
     /// Bytes after `Answer`.
@@ -4692,6 +4694,8 @@ pub struct AnswerParts {
     pub turns: u32,
     /// The `spent` field.
     pub spent: u64,
+    /// The `last_read` field.
+    pub last_read: Option<u64>,
     /// The `result` field.
     pub result: RunResult,
 }
@@ -4701,14 +4705,15 @@ pub struct AnswerParts {
 pub struct Answer {
     turns: u32,
     spent: u64,
+    last_read: Option<u64>,
     result: RunResult,
 }
 
 impl Answer {
     /// Makes a value within the given limits.
     pub fn new(limits: &Limits, parts: AnswerParts) -> Result<Self, Problem> {
-        let AnswerParts { turns, spent, result } = parts;
-        let value = Self { turns, spent, result };
+        let AnswerParts { turns, spent, last_read, result } = parts;
+        let value = Self { turns, spent, last_read, result };
         value.check(limits)?;
         Ok(value)
     }
@@ -4721,13 +4726,17 @@ impl Answer {
     #[must_use]
     pub fn spent(&self) -> u64 { self.spent }
 
+    /// Reads the `last_read` field.
+    #[must_use]
+    pub fn last_read(&self) -> &Option<u64> { &self.last_read }
+
     /// Reads the `result` field.
     #[must_use]
     pub fn result(&self) -> &RunResult { &self.result }
 
     /// Moves the fields out without copying.
     #[must_use]
-    pub fn into_parts(self) -> AnswerParts { AnswerParts { turns: self.turns, spent: self.spent, result: self.result } }
+    pub fn into_parts(self) -> AnswerParts { AnswerParts { turns: self.turns, spent: self.spent, last_read: self.last_read, result: self.result } }
 
     fn check(&self, limits: &Limits) -> Result<(), Problem> {
         if limits.directory_name > CEILINGS.directory_name { return Err(Problem { path: Path::DirectoryName, reason: skein_codec::Reason::Bound }); }
@@ -7248,6 +7257,11 @@ impl Answer {
         let mut size = 0_u32;
         size = size.checked_add(4).expect("schema ceilings fit u32");
         size = size.checked_add(8).expect("schema ceilings fit u32");
+        let field_last_read = &self.last_read;
+        size = size.checked_add(1).expect("schema ceilings fit u32");
+        if field_last_read.is_some() {
+        size = size.checked_add(8).expect("schema ceilings fit u32");
+        }
         let field_result = &self.result;
         size = size.checked_add(field_result.measure()).expect("schema ceilings fit u32");
         size
@@ -7259,6 +7273,14 @@ impl Answer {
         writer.put(&field_turns.to_be_bytes())?;
         let field_spent = &self.spent;
         writer.put(&field_spent.to_be_bytes())?;
+        let field_last_read = &self.last_read;
+        match field_last_read {
+            Some(some_0) => {
+                writer.put(&[1_u8])?;
+        writer.put(&some_0.to_be_bytes())?;
+            }
+            None => writer.put(&[0_u8])?,
+        }
         let field_result = &self.result;
         field_result.encode(writer)?;
         Ok(())
@@ -7274,8 +7296,9 @@ impl Answer {
     fn decode_from(limits: &Limits, reader: &mut skein_lib::Reader<'_>) -> Result<Self, Problem> {
         let decoded_turns = reader.u32().ok_or(Problem { path: Path::AnswerTurns, reason: skein_codec::Reason::Short })?;
         let decoded_spent = reader.u64().ok_or(Problem { path: Path::AnswerSpent, reason: skein_codec::Reason::Short })?;
+        let decoded_last_read = match reader.u8().ok_or(Problem { path: Path::AnswerLastRead, reason: skein_codec::Reason::Short })? { 0 => None, 1 => Some(reader.u64().ok_or(Problem { path: Path::AnswerLastRead, reason: skein_codec::Reason::Short })?), _ => return Err(Problem { path: Path::AnswerLastRead, reason: skein_codec::Reason::Tag }) };
         let decoded_result = RunResult::decode_from(limits, reader)?;
-        Self::new(limits, AnswerParts { turns: decoded_turns, spent: decoded_spent, result: decoded_result })
+        Self::new(limits, AnswerParts { turns: decoded_turns, spent: decoded_spent, last_read: decoded_last_read, result: decoded_result })
     }
 }
 
@@ -8655,6 +8678,7 @@ impl Answer {
         let mut size = 0_u64;
         size = size.checked_add(4_u64)?;
         size = size.checked_add(8_u64)?;
+        size = size.checked_add(1_u64.checked_add(8_u64)?)?;
         size = size.checked_add(RunResult::worst_case_bytes(limits)?)?;
         Some(size)
     }
@@ -8664,6 +8688,7 @@ impl Answer {
     pub fn worst_case_heap(limits: &Limits) -> Option<u64> {
         if !limits_valid(limits) { return None; }
         let mut heap = 0_u64;
+        heap = heap.checked_add(0_u64)?;
         heap = heap.checked_add(0_u64)?;
         heap = heap.checked_add(0_u64)?;
         heap = heap.checked_add(RunResult::worst_case_heap(limits)?)?;
@@ -11824,8 +11849,8 @@ mod golden_tests {
 
     #[test]
     fn record_answer_smallest() {
-        let value = Answer::new(&CEILINGS, AnswerParts { turns: 0_u32, spent: 0_u64, result: RunResult::Accepted(Accepted::new(&CEILINGS, AcceptedParts { result: Box::from([].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings");
-        let golden: &[u8] = &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let value = Answer::new(&CEILINGS, AnswerParts { turns: 0_u32, spent: 0_u64, last_read: None, result: RunResult::Accepted(Accepted::new(&CEILINGS, AcceptedParts { result: Box::from([].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings");
+        let golden: &[u8] = &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);
@@ -11834,8 +11859,8 @@ mod golden_tests {
 
     #[test]
     fn record_answer_full() {
-        let value = Answer::new(&CEILINGS, AnswerParts { turns: u32::MAX, spent: u64::MAX, result: RunResult::Accepted(Accepted::new(&CEILINGS, AcceptedParts { result: Box::from([0_u8, 127_u8, 255_u8].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings");
-        let golden: &[u8] = &[255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 3, 0, 127, 255];
+        let value = Answer::new(&CEILINGS, AnswerParts { turns: u32::MAX, spent: u64::MAX, last_read: Some(u64::MAX), result: RunResult::Accepted(Accepted::new(&CEILINGS, AcceptedParts { result: Box::from([0_u8, 127_u8, 255_u8].as_slice()) }).expect("golden within ceilings")) }).expect("golden within ceilings");
+        let golden: &[u8] = &[255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 1, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 3, 0, 127, 255];
         let mut writer = skein_lib::Writer::new(usize::try_from(value.measure()).expect("size fits usize"));
         value.encode(&mut writer).expect("measured room");
         assert_eq!(writer.finish().as_ref(), golden);

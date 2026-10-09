@@ -429,6 +429,9 @@ pub enum RunResult {
 /// Agent final word forwarded once; process still owes Gone.
 #[derive(PartialEq, Eq, Debug)]
 pub struct Answer {
+    /// Last message covered by an actual told turn, echoed at the terminal.
+    pub read: Option<Token>,
+
     /// Exactly the observed numbered turn count.
     pub turns: u32,
 

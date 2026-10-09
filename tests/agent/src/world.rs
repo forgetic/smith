@@ -1092,7 +1092,7 @@ impl World {
                 assert!(self.admitted.replace(run).is_none(), "a start is admitted at most once");
                 self.messages_seen.push((self.now, crate::messages_referee::Seen::Admitted));
             }
-            Request::Answer { to, answer } => {
+            Request::Answer { to, answer, read } => {
                 if matches!(&answer, run::Answer::Failed { .. }) {
                     self.host_history.shutdown(self.now);
                 }
@@ -1113,7 +1113,8 @@ impl World {
                     | run::Answer::Failed { spent, .. } => *spent,
                 };
                 assert!(self.answer.replace(answer).is_none(), "one answer per host start");
-                self.messages_seen.push((self.now, crate::messages_referee::Seen::Answer { turns, parked, spent }));
+                self.messages_seen
+                    .push((self.now, crate::messages_referee::Seen::Answer { turns, parked, spent, read }));
                 self.answered = Some(self.now);
             }
             Request::Checking { host_run, .. } => {
