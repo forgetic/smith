@@ -423,6 +423,11 @@ fn validate_fact(domain: &str, fact: &Value) -> Result<(), ParseError> {
     let name = fact.name().ok_or_else(|| bad("fact", "expected named fact"))?;
     let fields: &[&str] = match (domain, name) {
         ("Run", "Admitted") => &["run"],
+        ("Run", "MessageReceived") => &["run", "name", "bytes"],
+        ("Run", "MessageRefused") => &["run", "name", "bytes", "reason"],
+        ("Run", "MessageRead") => &["run", "name", "turn"],
+        ("Run", "MessageFence") => &["run", "turn", "read"],
+        ("Run", "MessageUnread") => &["run", "name"],
         ("Run", "Prepared") => &["run", "guides", "checks"],
         ("Run", "Opened") => &["run", "conversation", "child"],
         ("Run", "Ended") => &["run", "conversation", "end"],
@@ -453,13 +458,21 @@ fn validate_fact(domain: &str, fact: &Value) -> Result<(), ParseError> {
     fact.fields(fields)?;
     for field in fields {
         match *field {
-            "run" | "conversation" | "call" | "opener" | "session" => {
+            "run" | "conversation" | "call" | "opener" | "session" | "name" => {
                 fact.token(field)?;
             }
             "guides" | "checks" | "attempt" | "messages" | "max_tokens" | "blocks" | "calls" | "invalid" | "block"
             | "bytes" | "turns" | "running" => {
                 fact.field(field)?.number(field)?;
             }
+            "turn" => {
+                let turn = fact.field(field)?.number(field)?;
+                if turn == 0 || u32::try_from(turn).is_err() {
+                    return Err(bad(field, "expected positive u32 turn"));
+                }
+            }
+            "read" => validate_read(fact.field(field)?)?,
+            "reason" => unit(fact.field(field)?, field, &["TooLarge", "Full", "NameInUse", "Ending"])?,
             "child" | "error" => {
                 if !matches!(fact.field(field)?, Value::Name(value) if value == "true" || value == "false") {
                     return Err(bad(field, "expected boolean"));
@@ -503,6 +516,32 @@ fn validate_fact(domain: &str, fact: &Value) -> Result<(), ParseError> {
         }
     }
     Ok(())
+}
+
+fn validate_read(value: &Value) -> Result<(), ParseError> {
+    match value {
+        Value::Name(name) if name == "None" => Ok(()),
+        Value::Tuple { name, values } if name == "Some" && values.len() == 1 => match &values[0] {
+            Value::Tuple { name, values } if name == "Token" && values.len() == 1 => {
+                values[0].number("read")?;
+                Ok(())
+            }
+            Value::Name(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::Bytes(_)
+            | Value::Sequence(_)
+            | Value::Tuple { .. }
+            | Value::Struct { .. } => Err(bad("read", "expected Some(Token(integer))")),
+        },
+        Value::Name(_)
+        | Value::Number(_)
+        | Value::String(_)
+        | Value::Bytes(_)
+        | Value::Sequence(_)
+        | Value::Tuple { .. }
+        | Value::Struct { .. } => Err(bad("read", "expected optional Token")),
+    }
 }
 
 fn validate_usage(usage: &Value) -> Result<(), ParseError> {

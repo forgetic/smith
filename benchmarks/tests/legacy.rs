@@ -141,3 +141,48 @@ fn everything_content_preserves_bytes_and_legacy_exit_uses_observed_terminals() 
     assert_eq!(Observer::default().classify(Exit::Signal(9), Forced::Killed).end, End::Timeout);
     assert!(matches!(Observer::default().classify(Exit::Code(1), Forced::No).end, End::Failed { .. }));
 }
+
+#[test]
+fn message_facts_keep_opaque_names_and_fences_without_changing_run_classification() {
+    // Explicit synthetic renderings of the current run fact variants; the frozen
+    // baseline recordings remain untouched.
+    for text in [
+        "MessageReceived { run: Token(1), name: Token(99), bytes: 18 }",
+        "MessageRead { run: Token(1), name: Token(99), turn: 1 }",
+        "MessageFence { run: Token(1), turn: 1, read: Some(Token(99)) }",
+        "MessageReceived { run: Token(1), name: Token(0), bytes: 16 }",
+        "MessageUnread { run: Token(1), name: Token(0) }",
+        "MessageFence { run: Token(1), turn: 2, read: None }",
+        "MessageRefused { run: Token(1), name: Token(7), bytes: 4194304, reason: TooLarge }",
+        "MessageRefused { run: Token(1), name: Token(7), bytes: 16, reason: Full }",
+        "MessageRefused { run: Token(1), name: Token(7), bytes: 16, reason: NameInUse }",
+        "MessageRefused { run: Token(1), name: Token(7), bytes: 16, reason: Ending }",
+    ] {
+        let mut observer = observed(COMPLETED).0;
+        let event = observer.observe_line(&fact(&format!("Run {{ fact: {text} }}"))).expect("known message fact");
+        assert!(matches!(event, Some(Observation::Fact { event: Event::Other { domain, value }, .. })
+            if domain == "Run" && value == parse_debug(text).expect("exact neutral payload")));
+        assert_eq!(observer.classify(Exit::Code(0), Forced::No).end, End::Completed);
+    }
+}
+
+#[test]
+fn malformed_message_facts_poison_the_legacy_observer() {
+    for text in [
+        "MessageReceived { run: Token(1), name: 0, bytes: 16 }",
+        "MessageReceived { run: Token(1), name: Token(0), bytes: Many }",
+        "MessageReceived { run: Token(1), name: Token(0), bytes: 16, text: 4 }",
+        "MessageRead { run: Token(1), name: Token(0), turn: 0 }",
+        "MessageRead { run: Token(1), name: Token(0), turn: 4294967296 }",
+        "MessageUnread { run: Token(1) }",
+        "MessageFence { run: Token(1), turn: 1, read: Some(0) }",
+        "MessageFence { run: Token(1), turn: 1, read: Some(Token(0), Token(1)) }",
+        "MessageRefused { run: Token(1), name: Token(0), bytes: 16, reason: Future }",
+        "MessageRefused { run: Token(1), name: Token(0), bytes: 16, reason: Full(0) }",
+        "MessageLost { run: Token(1), name: Token(0) }",
+    ] {
+        let mut observer = observed(COMPLETED).0;
+        assert!(observer.observe_line(&fact(&format!("Run {{ fact: {text} }}"))).is_err(), "{text}");
+        assert!(matches!(observer.classify(Exit::Code(0), Forced::No).end, End::HarnessError { .. }));
+    }
+}
