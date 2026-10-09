@@ -107,9 +107,10 @@ pub fn review(observations: &[Observation]) -> Referee<Meeting> {
     referee
 }
 
-/// Until skein 02 bridges the hosted writer to its simulated pipe, compare
-/// the observed writer's terminal words directly (testing.md, section 2.1).
-pub fn review_agent_errors(errors: &[u8], answered: bool) {
+/// Compare the host's actual Gone tail with the shipped agent's diagnostic
+/// writer (testing.md, section 2.1).
+pub fn review_agent_errors(errors: &[u8], tail: &[u8], answered: bool) {
+    assert_eq!(tail, errors, "Gone retains exactly the agent's written diagnostic bytes");
     let text = core::str::from_utf8(errors).expect("agent diagnostic UTF-8");
     assert!(text.starts_with("smith: agent started; worst case "), "the shipped adapter supplied startup");
     if answered {

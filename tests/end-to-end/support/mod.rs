@@ -4,9 +4,9 @@
 
 use skein_io::kernel::{Complete, Exit, Submit};
 use skein_lib::{Duration, Queue, Time, Wall};
-use skein_shell::Clock;
+use skein_shell::{Clock, Host};
 use skein_world::{
-    Host, Referee,
+    Referee,
     end_to_end::{Binary, Command, Mode, Streams},
     real,
 };
@@ -23,24 +23,28 @@ use smith_real_world::{
 use std::path::Path;
 
 pub enum Process {
-    Binary(Binary),
+    Binary(Box<Binary>),
     Script(Proc),
 }
 impl Process {
     fn host(&self) -> &dyn Host {
         match self {
-            Self::Binary(p) => p,
+            Self::Binary(p) => p.as_ref(),
             Self::Script(p) => p,
         }
     }
     fn host_mut(&mut self) -> &mut dyn Host {
         match self {
-            Self::Binary(p) => p,
+            Self::Binary(p) => p.as_mut(),
             Self::Script(p) => p,
         }
     }
 }
 impl Host for Process {
+    fn drain(&mut self) {
+        self.host_mut().drain();
+    }
+
     fn iterate(&mut self, now: Time, wall: Wall) {
         self.host_mut().iterate(now, wall);
     }
@@ -145,11 +149,24 @@ impl Referee<Process> for Judge {
             assert_eq!(store.load(0).expect("token read").expect("saved before grant use").access_token.as_ref(), b"access-new", "token persists before provider query");
             self.saved = true;
         }
+        let shown = procs
+            .iter()
+            .find_map(|proc| match proc {
+                Process::Script(Proc::Terminal(person)) => Some(person.shown()),
+                Process::Binary(_) | Process::Script(_) => None,
+            })
+            .unwrap_or_default();
         for proc in procs {
             if let Process::Binary(p) = proc
                 && let Some(exit) = p.exit_status()
             {
-                assert_eq!(exit, Exit::Code(0), "shipped local failed: {}", String::from_utf8_lossy(p.stderr()));
+                assert_eq!(
+                    exit,
+                    Exit::Code(0),
+                    "shipped local failed: {}\nterminal: {}",
+                    String::from_utf8_lossy(p.stderr()),
+                    String::from_utf8_lossy(shown)
+                );
             }
         }
         if !self.reviewed && procs.iter().all(Host::is_empty) {
@@ -291,7 +308,7 @@ pub fn run(scratch: &Scratch, mut scenario: Scenario) -> Seen {
         seed: scenario.launch.seed,
         reviewed: false,
     });
-    world.spawn_with_fds(binary.descriptors(), || Process::Binary(binary));
+    world.spawn_with_fds(binary.descriptors(), || Process::Binary(Box::new(binary)));
     world.spawn_with_fds(descriptors, || {
         Process::Script(Proc::Terminal(Box::new(Terminal::attached(stream, scenario.commands.clone()))))
     });
@@ -364,7 +381,7 @@ pub fn refusal_program(program: &Path, scratch: &Scratch, arguments: Vec<std::ff
     let descriptors = streams.descriptors();
     let Streams::Terminal { stream } = streams else { unreachable!("startup on terminal") };
     let mut world = real::World::new(Refusal { now, deadline: now.saturating_add(Duration::from_secs(1)) });
-    world.spawn_with_fds(binary.descriptors(), || Process::Binary(binary));
+    world.spawn_with_fds(binary.descriptors(), || Process::Binary(Box::new(binary)));
     world.spawn_with_fds(descriptors, || {
         Process::Script(Proc::Terminal(Box::new(Terminal::attached(
             stream,

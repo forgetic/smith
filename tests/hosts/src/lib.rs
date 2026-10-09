@@ -140,8 +140,9 @@ fn start() -> host::Start {
 impl HostService {
     /// Construct one host slot and queue a parent Spawn.
     #[must_use]
-    pub fn new(root: kernel::Fd, now: Time, wall: Wall) -> HostService {
-        let domain_limits = host_limits();
+    pub fn new(root: kernel::Fd, now: Time, wall: Wall, detail_bytes: u32) -> HostService {
+        let mut domain_limits = host_limits();
+        domain_limits.detail_bytes = detail_bytes;
         let io_limits = io_limits();
         let agent_limits = agent_fixture::limits();
         let mut service = HostService {

@@ -4,9 +4,9 @@
 use super::{Process, start};
 use skein_io::kernel::Exit;
 use skein_lib::{Duration, Time};
-use skein_shell::Clock;
+use skein_shell::{Clock, Host};
 use skein_world::{
-    Host, Referee,
+    Referee,
     end_to_end::{Mode, Streams},
     real,
 };
@@ -191,7 +191,7 @@ fn run_with_peer(
         trace_prefix: std::fs::read(scratch.path().join("agent-trace.jsonl")).unwrap_or_default(),
         reviewed: false,
     });
-    world.spawn_with_fds(binary.descriptors(), || Process::Binary(binary));
+    world.spawn_with_fds(binary.descriptors(), || Process::Binary(Box::new(binary)));
     world.spawn_with_fds(descriptors, || {
         Process::Script(Proc::Terminal(Box::new(Terminal::attached(
             stream,

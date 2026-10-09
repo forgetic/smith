@@ -6,7 +6,8 @@
 use crate::fake;
 use skein_io::kernel::{self, Done, Fd, Op, Pipe, Spawn, Way};
 use skein_lib::{Duration, Queue, Time, Token, Wall, bytes};
-use skein_world::{Host, HostedProgram, Inherited, Memory, Outcome};
+use skein_shell::Host;
+use skein_world::{HostedProgram, Inherited, Memory, Outcome};
 
 #[expect(clippy::struct_excessive_bools, reason = "independent kernel operations each own an in-flight bit")]
 struct Parent {
@@ -25,6 +26,7 @@ struct Parent {
     signal: bool,
     signalled: bool,
     hang_up: bool,
+    errors: Vec<u8>,
     closing: u32,
     next: u64,
 }
@@ -51,6 +53,7 @@ impl Parent {
             signal: false,
             signalled: false,
             hang_up,
+            errors: Vec::new(),
             closing: 0,
             next: 0,
         };
@@ -101,13 +104,18 @@ impl Parent {
                 }
                 self.output = spawn.pipes[1].parent;
                 self.error = spawn.pipes[2].parent;
-                self.submit(Op::Wait { pidfd });
+                self.submit(Op::Wait { pidfd, reap: false });
             }
-            Op::Wait { .. } => {
+            Op::Wait { pidfd, reap } => {
                 let Ok(Done::Exit(status)) = complete.result else { panic!("agent wait failed") };
-                self.status = Some(status);
-                let pidfd = self.pidfd.take().expect("live child pidfd");
-                self.close(pidfd);
+                if reap {
+                    assert_eq!(self.status, Some(status), "reap preserves observed exit");
+                    let pidfd = self.pidfd.take().expect("live child pidfd");
+                    self.close(pidfd);
+                } else {
+                    self.status = Some(status);
+                    self.submit(Op::Wait { pidfd, reap: true });
+                }
             }
             Op::PipeRead { fd, buf } => {
                 let error = self.error == Some(fd);
@@ -125,8 +133,12 @@ impl Parent {
                     }
                     self.close(fd);
                 } else {
-                    assert!(!error, "agent wrote unexpected stderr");
-                    self.peer.feed(&buf[..usize::try_from(count).expect("read count")]).expect("valid channel");
+                    let bytes = &buf[..usize::try_from(count).expect("read count")];
+                    if error {
+                        self.errors.extend_from_slice(bytes);
+                    } else {
+                        self.peer.feed(bytes).expect("valid channel");
+                    }
                 }
             }
             Op::PipeWrite { bytes, from, .. } => {
@@ -152,6 +164,7 @@ impl Parent {
             | Op::Send { .. }
             | Op::Shutdown { .. }
             | Op::Open { .. }
+            | Op::Append { .. }
             | Op::Read { .. }
             | Op::Write { .. }
             | Op::Sync { .. }
@@ -161,6 +174,7 @@ impl Parent {
             | Op::MakeDirectory { .. }
             | Op::List { .. }
             | Op::ReadSignal { .. }
+            | Op::Usage
             | Op::Cancel { .. } => unreachable!("scripted parent owns only process pipes"),
         }
     }
@@ -173,7 +187,11 @@ impl Host for Parent {
         }
         if self.signal && !self.signalled {
             self.signalled = true;
-            self.submit(Op::Signal { pidfd: self.pidfd.expect("admitted child"), signal: kernel::Signal::Terminate });
+            self.submit(Op::Signal {
+                pidfd: self.pidfd.expect("admitted child"),
+                to: kernel::Target::Child,
+                signal: kernel::Signal::Terminate,
+            });
         }
         if !self.reading
             && let Some(fd) = self.output
@@ -241,7 +259,7 @@ impl Host for Parent {
 
 enum Proc {
     Parent(Box<Parent>),
-    Agent(Box<smith_agent_shell::Agent>, crate::AgentErrors),
+    Agent(Box<skein_world::PipeHost<smith_agent_shell::Agent>>, crate::AgentErrors),
     Peer(Box<skein_fake_peers::llm::Peer>),
 }
 impl Proc {
@@ -261,6 +279,10 @@ impl Proc {
     }
 }
 impl Host for Proc {
+    fn drain(&mut self) {
+        self.host_mut().drain();
+    }
+
     fn iterate(&mut self, now: Time, wall: Wall) {
         self.host_mut().iterate(now, wall);
     }
@@ -294,8 +316,10 @@ impl Host for Proc {
     }
 }
 fn make(_spawn: &Spawn, inherited: &Inherited) -> Proc {
-    let errors = crate::AgentErrors::default();
-    Proc::Agent(Box::new(crate::configured(crate::configuration(), 7, inherited, errors.clone())), errors)
+    let fd = inherited.pipes.iter().find(|(child, _)| *child == 2).expect("stderr").1;
+    let (errors, capture) = crate::AgentErrors::pipe(fd);
+    let agent = crate::configured(crate::configuration(), 7, inherited, errors.clone());
+    Proc::Agent(Box::new(capture.host(agent)), errors)
 }
 
 fn unused_roots(_spawn: &Spawn) -> Vec<skein_world::StartupRoot> {
@@ -415,6 +439,14 @@ impl skein_world::Referee<Proc> for Referee {
                 }
             }
         }
+        if parent.is_empty() {
+            for proc in procs {
+                if let Proc::Agent(agent, errors) = proc {
+                    assert!(agent.failure().is_none(), "diagnostic pipe succeeds");
+                    assert_eq!(parent.errors, errors.bytes(), "the parent receives exactly the shipped writer's bytes");
+                }
+            }
+        }
         self.reviewed = parent.peer.observed().len();
         assert!(self.admitted_facts <= 1 && self.answer_facts <= 1, "one fact terminal per activation");
         if !self.hang_up && parent.status.is_some() {
@@ -496,7 +528,7 @@ impl World {
                 program: b"smith".as_slice().into(),
                 make,
                 instances: 1,
-                operations: crate::limits().routes.checked_add(3).expect("routes and inherited closes"),
+                operations: crate::limits().routes.checked_add(4).expect("routes, inherited closes and stderr write"),
             },
             unused_roots,
         );
@@ -647,16 +679,10 @@ impl World {
         self.parent().status
     }
 
-    /// Diagnostic bytes observed from the caller-supplied writer.
+    /// Diagnostic bytes actually read from the child's standard-error pipe.
     #[must_use]
     pub fn errors(&self) -> Vec<u8> {
-        self.outcome
-            .as_ref()
-            .expect("settled world")
-            .procs
-            .iter()
-            .find_map(|proc| if let Proc::Agent(_, errors) = proc { Some(errors.bytes()) } else { None })
-            .expect("agent writer")
+        self.parent().errors.clone()
     }
 
     /// Whether the scripted host sent a termination signal.

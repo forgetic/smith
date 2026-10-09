@@ -48,7 +48,7 @@ pub struct ComponentLimits {
 /// A startup configuration problem.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ComponentError {
-    /// The adapter and connection child disagree on the client bounds.
+    /// A configured endpoint and the adapter disagree on client bounds.
     ClientLimits,
     /// A finite bound or worst case is invalid.
     Limits,
@@ -97,14 +97,15 @@ pub struct MaxOut {
 /// A fire pass may issue one pending Next and advance one child phase.
 pub const MAX_OUT: MaxOut = MaxOut { above: 128, below: 128 };
 
-/// Checked retained pool, grant, context, and event-queue ownership.
+/// Checked retained pool, grant, context, and event-queue ownership, using
+/// configured endpoints to count their request heads and credential bounds.
 #[must_use]
-pub fn component_worst_case(limits: &ComponentLimits) -> Option<u64> {
+pub fn component_worst_case(limits: &ComponentLimits, endpoints: &Endpoints) -> Option<u64> {
     if limits.accounts == 0 || limits.connection.connections == 0 {
         return None;
     }
     let per_call = crate::worst_case(&limits.adapter, &limits.receiving)?;
-    let base = connection::worst_case(&limits.connection)?
+    let base = connection::worst_case(&limits.connection, endpoints.destinations())?
         .checked_add(Grants::worst_case(limits.accounts, limits.grant_value_bytes)?)?
         .checked_add(Map::<u32, EndpointOptions>::worst_case(limits.connection.endpoints)?)?
         .checked_add(Map::<Token, Active>::worst_case(limits.connection.connections)?)?
@@ -118,10 +119,12 @@ pub fn component_worst_case(limits: &ComponentLimits) -> Option<u64> {
 impl Component {
     /// Validate the configured endpoint and pool bounds before the loop.
     pub fn new(limits: &ComponentLimits, endpoints: Endpoints) -> Result<Component, ComponentError> {
-        if limits.adapter.client != limits.connection.llm {
-            return Err(ComponentError::ClientLimits);
+        for endpoint in endpoints.destinations() {
+            if endpoint.limits != limits.adapter.client {
+                return Err(ComponentError::ClientLimits);
+            }
         }
-        component_worst_case(limits).ok_or(ComponentError::Limits)?;
+        component_worst_case(limits, &endpoints).ok_or(ComponentError::Limits)?;
         let grants = match Grants::new(limits.accounts, limits.grant_value_bytes) {
             Ok(grants) => grants,
             Err(error) => return Err(ComponentError::Grants(error)),
@@ -320,6 +323,7 @@ impl Component {
                 None => break,
             };
             match event {
+                connection::Event::Closed => {}
                 connection::Event::Refused { call, why } => {
                     self.next.remove(&call);
                     let active = self.active.remove(&call);
@@ -329,7 +333,7 @@ impl Component {
                     };
                     let error = match why {
                         connection::Refusal::Endpoint => Error::Invalid,
-                        connection::Refusal::Pool => Error::Limit,
+                        connection::Refusal::Calls { bound: _ } | connection::Refusal::Closed => Error::Limit,
                         connection::Refusal::Client(error) => error,
                     };
                     Self::refusal(call, error, maximum, to_domain);

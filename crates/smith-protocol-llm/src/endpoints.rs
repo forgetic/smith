@@ -136,6 +136,12 @@ impl Endpoints {
         Ok(options.index)
     }
 
+    /// Borrow configured destination limits and credential ceilings for startup accounting.
+    #[must_use]
+    pub fn destinations(&self) -> &List<connection::Endpoint> {
+        &self.destinations
+    }
+
     /// Split names from resolved destinations for the owning component.
     #[must_use]
     pub fn into_parts(self) -> (List<connection::Endpoint>, Map<u32, EndpointOptions>) {

@@ -124,7 +124,13 @@ impl Expectations for Meeting {
                     if matches!(self.ending, Ending::Unavailable) { queries == 0 } else { queries > 0 },
                     "provider work matches account availability",
                 );
-                judge.check(errors.is_empty(), "no startup error output");
+                let start = b"smith: local host started; worst case ";
+                let expected_diagnostic = errors.is_empty()
+                    || errors
+                        .strip_prefix(start)
+                        .and_then(|tail| tail.strip_suffix(b" bytes\n"))
+                        .is_some_and(|count| !count.is_empty() && count.iter().all(u8::is_ascii_digit));
+                judge.check(expected_diagnostic, "only the local operator start line, no startup refusal");
                 judge.check(shown.windows(expected.len()).any(|part| part == expected), "expected terminal text");
                 judge.check(
                     !shown.windows(7).any(|part| part == b"refresh") && !shown.windows(5).any(|part| part == b"token"),

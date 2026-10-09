@@ -314,6 +314,9 @@ fn parse(input: &[u8]) -> Option<tools::Hit> {
                 tokenizer::Event::Token(token) => found.token(token)?,
                 tokenizer::Event::Done => return found.finish(),
                 tokenizer::Event::Failed(_) | tokenizer::Event::Closed => return None,
+                tokenizer::Event::Long(_) | tokenizer::Event::Skipped(_) => {
+                    unreachable!("the search decoder requests only Next tokens")
+                }
             }
         }
     }

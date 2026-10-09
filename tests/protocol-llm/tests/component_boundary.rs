@@ -23,6 +23,7 @@ fn limits() -> ComponentLimits {
         connection: skein_llm_connection::Limits {
             endpoints: 1,
             connections: 2,
+            calls: 2,
             per_endpoint: 2,
             idle_keep: Duration::from_secs(1),
             io: skein_io::Limits {
@@ -38,7 +39,6 @@ fn limits() -> ComponentLimits {
                 retry: Duration::from_millis(10),
             },
             tls: skein_tls::client::Limits { read: 4096, send: 4096, records: skein_tls::client::MAX_RECORD },
-            llm: client,
         },
         receiving: Receiving {
             max_completion_bytes: adapter::completion_worst_case(&client, decoded_call_bytes).expect("receiving bound"),
@@ -63,6 +63,11 @@ fn endpoints() -> Endpoints {
         Box::new([ConfiguredEndpoint {
             name: llm::Endpoint(42),
             destination: skein_llm_connection::Endpoint {
+                limits: limits().adapter.client,
+                credential: skein_llm::client::CredentialLimits {
+                    access_token: limits().grant_value_bytes,
+                    account_id: limits().grant_value_bytes,
+                },
                 address: SocketAddr::from(([127, 0, 0, 1], 443)),
                 transport: skein_llm_connection::Transport::Tls {
                     server_name: skein_tls::Name::new("example.test").expect("server name"),
@@ -239,6 +244,7 @@ fn every_shared_failure_class_keeps_each_evidence_and_detail() {
 fn a_full_connection_pool_and_two_grant_generations_fit_the_component_bound() {
     let limits = limits();
     let destinations = endpoints();
+    let component_bound = adapter::component_worst_case(&limits, &destinations).expect("component worst case");
     let first = complete(7, 1, limits.receiving);
     let second = complete(8, 2, limits.receiving);
     let first_credential = credential(b"first");
@@ -258,7 +264,7 @@ fn a_full_connection_pool_and_two_grant_generations_fit_the_component_bound() {
     component.from_domain(&env(2, &limits), second, &mut up, &mut io);
     let measured = meter.end();
     assert_eq!(io.len(), 2, "the pool holds two concurrent connections");
-    let bound = adapter::component_worst_case(&limits).expect("component worst case")
+    let bound = component_bound
         + Queue::<ToDomain>::worst_case(adapter::MAX_OUT.above).expect("domain queue")
         + Queue::<IoRequest>::worst_case(adapter::MAX_OUT.below).expect("io queue");
     assert!(measured.peak() <= bound, "component peak {} exceeds {bound}", measured.peak());

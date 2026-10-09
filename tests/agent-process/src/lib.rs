@@ -15,26 +15,43 @@ pub mod fake;
 
 /// The bounded diagnostic writer observed outside each hosted agent.
 #[derive(Clone, Default)]
-pub struct AgentErrors(std::rc::Rc<std::cell::RefCell<Vec<u8>>>);
+pub struct AgentErrors {
+    observed: std::rc::Rc<std::cell::RefCell<Vec<u8>>>,
+    pipe: Option<skein_world::PipeWriter>,
+}
 
 impl AgentErrors {
+    /// Observe the bytes accepted by skein's shared diagnostic pipe writer.
+    #[must_use]
+    pub fn pipe(fd: kernel::Fd) -> (Self, skein_world::PipeCapture) {
+        let (writer, capture) = skein_world::PipeWriter::new(fd, 4096);
+        (Self { observed: std::rc::Rc::default(), pipe: Some(writer) }, capture)
+    }
+
     /// Snapshot the agent's words without reading its service state.
     #[must_use]
     pub fn bytes(&self) -> Vec<u8> {
-        self.0.borrow().clone()
+        self.observed.borrow().clone()
     }
 }
 
 impl std::io::Write for AgentErrors {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        let mut output = self.0.borrow_mut();
-        assert!(output.len().checked_add(bytes.len()).is_some_and(|size| size <= 4096), "finite agent diagnostics");
-        output.extend_from_slice(bytes);
-        Ok(bytes.len())
+        let count = match &mut self.pipe {
+            Some(pipe) => std::io::Write::write(pipe, bytes)?,
+            None => bytes.len(),
+        };
+        let mut output = self.observed.borrow_mut();
+        assert!(output.len().checked_add(count).is_some_and(|size| size <= 4096), "finite agent diagnostics");
+        output.extend_from_slice(bytes.get(..count).expect("accepted diagnostic prefix"));
+        Ok(count)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+        match &mut self.pipe {
+            Some(pipe) => std::io::Write::flush(pipe),
+            None => Ok(()),
+        }
     }
 }
 
@@ -115,11 +132,11 @@ pub fn limits() -> agent::Limits {
             connection: skein_llm_connection::Limits {
                 endpoints: 1,
                 connections: 2,
+                calls: 2,
                 per_endpoint: 2,
                 idle_keep: Duration::from_secs(1),
                 io: llm_io,
                 tls: skein_tls::client::Limits { read: 4096, send: 4096, records: skein_tls::client::MAX_RECORD },
-                llm: client,
             },
             receiving: llm::Receiving {
                 max_completion_bytes: completion,
@@ -179,6 +196,11 @@ pub fn configuration() -> agent::Config {
         Box::new([llm::ConfiguredEndpoint {
             name: smith_domain::llm::Endpoint(0),
             destination: skein_llm_connection::Endpoint {
+                limits: limits().llm.adapter.client,
+                credential: skein_llm::client::CredentialLimits {
+                    access_token: limits().llm.grant_value_bytes,
+                    account_id: limits().llm.grant_value_bytes,
+                },
                 address: kernel::Addr::from((std::net::Ipv4Addr::LOCALHOST, 443)),
                 transport: skein_llm_connection::Transport::Plaintext,
                 llm: skein_llm_world::call(7).endpoint,
@@ -315,7 +337,7 @@ mod memory {
 
     #[test]
     fn composed_service_start_fits_the_checked_bound() {
-        let bound = agent::worst_case(&limits()).expect("checked service bound");
+        let bound = agent::worst_case(&limits(), &super::configuration().llm_endpoints).expect("checked service bound");
         let meter = Meter::new();
         meter.start();
         let agent = service(7);

@@ -139,10 +139,18 @@ impl Process {
         match self.stop {
             Stop::None => {}
             Stop::Terminating { .. } => {
-                below.push(Below::Process(io::Request::Signal { child, signal: kernel::Signal::Terminate }));
+                below.push(Below::Process(io::Request::Signal {
+                    child,
+                    to: kernel::Target::Child,
+                    signal: kernel::Signal::Terminate,
+                }));
             }
             Stop::Killing { .. } => {
-                below.push(Below::Process(io::Request::Signal { child, signal: kernel::Signal::Kill }));
+                below.push(Below::Process(io::Request::Signal {
+                    child,
+                    to: kernel::Target::Child,
+                    signal: kernel::Signal::Kill,
+                }));
             }
         }
     }
@@ -184,7 +192,11 @@ impl Process {
                 }
                 self.stop = Stop::Terminating { kill_at: now.saturating_add(grace), cancelled };
                 if let Some(child) = self.child {
-                    below.push(Below::Process(io::Request::Signal { child, signal: kernel::Signal::Terminate }));
+                    below.push(Below::Process(io::Request::Signal {
+                        child,
+                        to: kernel::Target::Child,
+                        signal: kernel::Signal::Terminate,
+                    }));
                 }
             }
             Stop::Terminating { .. } | Stop::Killing { .. } => {}
@@ -203,7 +215,11 @@ impl Process {
             Stop::Terminating { cancelled, .. } => {
                 self.stop = Stop::Killing { cancelled };
                 if let Some(child) = self.child {
-                    below.push(Below::Process(io::Request::Signal { child, signal: kernel::Signal::Kill }));
+                    below.push(Below::Process(io::Request::Signal {
+                        child,
+                        to: kernel::Target::Child,
+                        signal: kernel::Signal::Kill,
+                    }));
                 }
             }
             Stop::None | Stop::Killing { .. } => {}

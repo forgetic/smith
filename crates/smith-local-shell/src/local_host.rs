@@ -4,12 +4,13 @@
 //! and terminal descriptors; `Host::iterate` performs the service and shell
 //! passes. Every store acknowledgement follows file and directory sync.
 
+use std::io::Write;
 use std::path::PathBuf;
 
 use skein_io::{self as io, kernel};
 use skein_lib::stream::{OutputDown, OutputOutcome, OutputUp};
 use skein_lib::{Env, Map, Queue, Time, Token, Wall};
-use skein_world::Host;
+use skein_shell::Host;
 use smith_agent_service as agent;
 use smith_local_domain as domain;
 use smith_local_service as service;
@@ -26,6 +27,13 @@ enum Route {
     Service(Token),
     Writer(Token),
     Launch,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Announcement {
+    BeforeStart,
+    Running,
+    Ended,
 }
 
 /// Paths and inherited descriptors owned by one invocation's shared shell.
@@ -68,6 +76,8 @@ pub struct Local {
     exit: Option<domain::ExitStatus>,
     closing: bool,
     error: Option<String>,
+    errors: Box<dyn Write>,
+    announcement: Announcement,
     worst: u64,
     operations: u32,
 }
@@ -75,9 +85,14 @@ pub struct Local {
 impl Local {
     /// Compose either placement with the same file and terminal shell pass.
     #[expect(clippy::too_many_lines, reason = "03-inline-agent removes the two-placement startup composition")]
-    pub fn new(config: service::Config, lower: Option<agent::Config>, resources: Resources) -> Result<Self, String> {
+    pub fn new(
+        config: service::Config,
+        lower: Option<agent::Config>,
+        resources: Resources,
+        errors: Box<dyn Write>,
+    ) -> Result<Self, String> {
         let mut worst = match &lower {
-            Some(lower) => service::in_process_worst_case(&config.limits, &lower.limits),
+            Some(lower) => service::in_process_worst_case(&config.limits, lower),
             None => service::worst_case(&config.limits),
         }
         .ok_or("local memory calculation overflowed")?;
@@ -171,6 +186,8 @@ impl Local {
             exit: None,
             closing: false,
             error: None,
+            errors,
+            announcement: Announcement::BeforeStart,
             worst,
             operations,
         };
@@ -420,6 +437,7 @@ impl Local {
             | kernel::Op::Shutdown { .. }
             | kernel::Op::Close { .. }
             | kernel::Op::Open { .. }
+            | kernel::Op::Append { .. }
             | kernel::Op::Read { .. }
             | kernel::Op::Write { .. }
             | kernel::Op::Sync { .. }
@@ -433,7 +451,8 @@ impl Local {
             | kernel::Op::Signal { .. }
             | kernel::Op::ReadSignal { .. }
             | kernel::Op::PipeRead { .. }
-            | kernel::Op::PipeWrite { .. }) => other,
+            | kernel::Op::PipeWrite { .. }
+            | kernel::Op::Usage) => other,
         };
         let op = Token::new(self.operation);
         self.operation = self.operation.checked_add(1).expect("shell operation names remain representable");
@@ -443,6 +462,24 @@ impl Local {
 }
 
 impl Host for Local {
+    fn drain(&mut self) {
+        if self.announcement == Announcement::BeforeStart {
+            self.announcement = Announcement::Running;
+            drop(writeln!(self.errors, "smith: local host started; worst case {} bytes", self.worst));
+        }
+        if self.is_empty() && self.announcement != Announcement::Ended {
+            self.announcement = Announcement::Ended;
+            let failure = match self.result() {
+                Some(Err(why)) => Some(why.to_owned()),
+                Some(Ok(domain::ExitStatus::Failed)) => Some("local chat ended with a failure".into()),
+                Some(Ok(domain::ExitStatus::Success)) | None => None,
+            };
+            if let Some(why) = failure {
+                drop(writeln!(self.errors, "smith: {why}"));
+            }
+        }
+    }
+
     fn iterate(&mut self, now: Time, wall: Wall) {
         self.env.now = now;
         self.env.wall = wall;
@@ -517,6 +554,10 @@ impl Host for Local {
             && self.events.is_empty()
             && self.requests.is_empty()
     }
+    fn exit(&self) -> Option<kernel::Exit> {
+        self.result().map(|result| kernel::Exit::Code(u8::from(!matches!(result, Ok(domain::ExitStatus::Success)))))
+    }
+
     fn worst_case(&self) -> u64 {
         self.worst
     }

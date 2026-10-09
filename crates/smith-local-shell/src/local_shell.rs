@@ -8,9 +8,8 @@ use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use skein_io::kernel::Fd;
-use skein_shell::{Clock, Config as KernelConfig, Kernel, Now, Wait};
-use skein_world::Host;
+use skein_io::kernel::{Exit, Fd};
+use skein_shell::{Clock, Config as KernelConfig, Host, Kernel, drive};
 use smith_host_domain as host;
 use smith_host_protocol as protocol;
 use smith_local_domain as local;
@@ -23,8 +22,7 @@ use crate::{
     local_settings,
 };
 
-#[expect(clippy::too_many_lines, reason = "10-product replaces spawned JSON startup with resolved product commands")]
-pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&Path>) -> Result<(), String> {
+pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&Path>) -> Result<Exit, String> {
     let settings = local_settings::read(settings_path, workspace_settings)?;
     if settings.delivery_environment.len() > 64
         || settings.delivery_environment.iter().map(String::len).sum::<usize>() > 4096
@@ -117,33 +115,11 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
             seed,
             oauth_entropy,
         },
+        Box::new(std::io::stderr()),
     )?;
-    let worst = local_service.worst_case();
-    let operations = local_service.operations();
-    let mut kernel = Kernel::open(KernelConfig { operations }).map_err(|error| format!("local kernel: {error}"))?;
-    let clock = Clock::new();
-    eprintln!("smith: local host started; worst case {worst} bytes");
-    loop {
-        kernel.reap(local_service.completions());
-        let Now { now, wall } = clock.now();
-        local_service.iterate(now, wall);
-        if let Some(exit) = local_service.result() {
-            let exit = exit.map_err(str::to_owned)?;
-            return match exit {
-                local::ExitStatus::Success => Ok(()),
-                local::ExitStatus::Failed => Err("local chat ended with a failure".into()),
-            };
-        }
-        let wait = if local_service.work_pending(now) {
-            Wait::No
-        } else {
-            match local_service.next_deadline() {
-                Some(deadline) => Wait::Until(deadline),
-                None => Wait::Forever,
-            }
-        };
-        kernel.submit(local_service.submissions(), wait);
-    }
+    let mut kernel = Kernel::open(KernelConfig { operations: local_service.operations() })
+        .map_err(|error| format!("local kernel: {error}"))?;
+    Ok(drive(&mut kernel, &Clock::new(), &mut local_service))
 }
 
 #[expect(

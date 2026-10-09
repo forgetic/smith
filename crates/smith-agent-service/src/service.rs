@@ -179,7 +179,8 @@ impl Effects {
     /// Build the shared lower stages, retaining neither a root domain nor a channel.
     pub fn new(config: Config, seed: u64) -> Result<Self, ConfigError> {
         let accounts = config.limits.llm.accounts;
-        if effects_worst_case(&config.limits).ok_or(ConfigError::Memory)? > config.limits.memory {
+        if effects_worst_case(&config.limits, &config.llm_endpoints).ok_or(ConfigError::Memory)? > config.limits.memory
+        {
             return Err(ConfigError::MemoryCeiling);
         }
         let mut service = Service::new(config, seed)?;
@@ -330,18 +331,20 @@ impl Effects {
     }
 }
 
-/// Construction peak and retained bound for the host-owned effects adapter.
+/// Construction peak and retained bound for the host-owned effects adapter
+/// with its configured endpoint request heads.
 #[must_use]
-pub fn effects_worst_case(limits: &Limits) -> Option<u64> {
-    worst_case(limits)?
+pub fn effects_worst_case(limits: &Limits, endpoints: &llm::Endpoints) -> Option<u64> {
+    worst_case(limits, endpoints)?
         .checked_add(Map::<u32, domain::GrantName>::worst_case(limits.llm.accounts)?)?
         .checked_add(u64::try_from(size_of::<Effects>()).ok()?)
 }
 
 /// Checked maximum of every owned layer and inter-layer queue. The file
-/// driver's transient buffers are counted by its own bound.
+/// driver's transient buffers are counted by its own bound; configured
+/// endpoints supply the request-head and credential bounds.
 #[must_use]
-pub fn worst_case(limits: &Limits) -> Option<u64> {
+pub fn worst_case(limits: &Limits, endpoints: &llm::Endpoints) -> Option<u64> {
     let queue = limits.queue;
     let stages = Queue::<channel::OpenEvent>::worst_case(queue)?
         .checked_add(Queue::<domain::Fact>::worst_case(queue)?)?
@@ -365,7 +368,7 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
         .checked_add(List::<Token>::worst_case(limits.machine.roots)?)?;
     domain::worst_case(&limits.domain)?
         .checked_add(channel::worst_case(&limits.channel)?)?
-        .checked_add(llm::component_worst_case(&limits.llm)?)?
+        .checked_add(llm::component_worst_case(&limits.llm, endpoints)?)?
         .checked_add(machine::worst_case(&limits.machine)?)?
         .checked_add(io::worst_case(&limits.io)?)?
         .checked_add(file_layer::FileIo::worst_case(
@@ -400,7 +403,7 @@ impl Service {
         if limits.queue < room || limits.routes < lower_routes {
             return Err(ConfigError::Queue);
         }
-        let memory = worst_case(&limits).ok_or(ConfigError::Memory)?;
+        let memory = worst_case(&limits, &config.llm_endpoints).ok_or(ConfigError::Memory)?;
         if memory > limits.memory {
             return Err(ConfigError::MemoryCeiling);
         }
@@ -1963,11 +1966,11 @@ mod tests {
                 connection: skein_llm_connection::Limits {
                     endpoints: 1,
                     connections: 2,
+                    calls: 2,
                     per_endpoint: 2,
                     idle_keep: Duration::from_secs(1),
                     io: llm_io,
                     tls: skein_tls::client::Limits { read: 4096, send: 4096, records: skein_tls::client::MAX_RECORD },
-                    llm: client,
                 },
                 receiving: llm::Receiving {
                     max_completion_bytes: llm::completion_worst_case(&client, decoded_call_bytes)
@@ -2060,13 +2063,13 @@ mod tests {
     #[test]
     fn startup_counts_file_driver_and_rejects_missing_route_room() {
         let mut limits = limits();
+        let llm_endpoints = llm::Endpoints::new(Box::new([]), 1, 1).expect("empty endpoint table");
         assert!(
-            worst_case(&limits).expect("checked memory")
+            worst_case(&limits, &llm_endpoints).expect("checked memory")
                 > file_layer::FileIo::worst_case(4, 64, 2, 512).expect("file bound")
         );
-        limits.memory = worst_case(&limits).expect("bound") - 1;
+        limits.memory = worst_case(&limits, &llm_endpoints).expect("bound") - 1;
         let channel_endpoints = channel::Endpoints::new(List::with_capacity(1));
-        let llm_endpoints = llm::Endpoints::new(Box::new([]), 1, 1).expect("empty endpoint table");
         let result = Service::new(
             Config {
                 limits,

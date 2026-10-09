@@ -377,7 +377,11 @@ impl Host for Terminal {
             && let Some(child) = self.child
         {
             self.interrupt = false;
-            self.requests.push(io::Request::Signal { child, signal: kernel::Signal::Terminate });
+            self.requests.push(io::Request::Signal {
+                child,
+                to: kernel::Target::Child,
+                signal: kernel::Signal::Terminate,
+            });
         }
         while self.io.takes() {
             let Some(request) = self.requests.pop() else { break };

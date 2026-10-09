@@ -145,7 +145,7 @@ fn build(document: Document) -> Result<Configuration, String> {
     };
     let mut limits = service::profile::standard_limits(document.memory_bytes).map_err(profile_refusal)?;
     limits.machine.stop_grace = Duration::from_millis(document.grace_ms);
-    let endpoints = build_endpoints(document.endpoints)?;
+    let endpoints = build_endpoints(document.endpoints, &limits.llm)?;
     let mut environment = Vec::with_capacity(document.environment.len());
     let mut environment_bytes = 0_u64;
     for variable in document.environment {
@@ -183,7 +183,7 @@ fn build(document: Document) -> Result<Configuration, String> {
         },
     };
     let reserve = if trace.is_some() { crate::trace::MEMORY_RESERVE } else { 0 };
-    let complete = service::worst_case(&config.limits)
+    let complete = service::worst_case(&config.limits, &config.llm_endpoints)
         .and_then(|bytes| bytes.checked_add(reserve))
         .ok_or("agent plus trace memory calculation overflowed")?;
     if complete > document.memory_bytes {
@@ -198,7 +198,7 @@ struct PreparedEndpoints {
     llm: Box<[llm::ConfiguredEndpoint]>,
 }
 
-fn build_endpoints(endpoints: Vec<Endpoint>) -> Result<PreparedEndpoints, String> {
+fn build_endpoints(endpoints: Vec<Endpoint>, limits: &llm::ComponentLimits) -> Result<PreparedEndpoints, String> {
     let mut domain_endpoints = Vec::with_capacity(endpoints.len());
     let mut channel_endpoints = List::with_capacity(ENDPOINTS);
     let mut llm_endpoints = Vec::with_capacity(endpoints.len());
@@ -279,7 +279,13 @@ fn build_endpoints(endpoints: Vec<Endpoint>) -> Result<PreparedEndpoints, String
             .map_err(|_| "too many channel endpoints")?;
         llm_endpoints.push(llm::ConfiguredEndpoint {
             name: domain::llm::Endpoint(endpoint.number),
-            destination: connection::Endpoint { address, transport, llm: llm_endpoint },
+            destination: connection::Endpoint {
+                address,
+                transport,
+                llm: llm_endpoint,
+                limits: limits.adapter.client,
+                credential: credential_limits(limits),
+            },
             account: endpoint.account,
             reasoning_effort: endpoint.reasoning_effort.map(|value| value.into_bytes().into()),
             cache_key: endpoint.cache_key.map(|value| value.into_bytes().into()),
@@ -291,6 +297,10 @@ fn build_endpoints(endpoints: Vec<Endpoint>) -> Result<PreparedEndpoints, String
         channel: channel::Endpoints::new(channel_endpoints),
         llm: llm_endpoints.into_boxed_slice(),
     })
+}
+
+fn credential_limits(limits: &llm::ComponentLimits) -> shared::client::CredentialLimits {
+    shared::client::CredentialLimits { access_token: limits.grant_value_bytes, account_id: limits.grant_value_bytes }
 }
 
 fn tls_transport() -> String {

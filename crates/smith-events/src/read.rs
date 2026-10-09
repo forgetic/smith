@@ -157,6 +157,9 @@ fn tokenize(input: &[u8], limits: &Limits) -> Result<List<Token>, Error> {
                     Ok(()) => {}
                     Err(_) => return Err(Error::Limits),
                 },
+                tokenizer::Event::Long(_) | tokenizer::Event::Skipped(_) => {
+                    unreachable!("the event reader requests only Next tokens")
+                }
                 tokenizer::Event::Done => return Ok(tokens),
                 tokenizer::Event::Failed(_) | tokenizer::Event::Closed => return Err(Error::Malformed),
             }

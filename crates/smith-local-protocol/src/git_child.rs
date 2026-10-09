@@ -233,7 +233,7 @@ impl GitChild {
 
     fn stop(&self, below: &mut Queue<io::Request>) {
         if let Some(child) = self.child {
-            below.push(io::Request::Signal { child, signal: kernel::Signal::Kill });
+            below.push(io::Request::Signal { child, to: kernel::Target::Child, signal: kernel::Signal::Kill });
         }
         for pipe in self.pipes.into_iter().flatten() {
             below.push(io::Request::Abort { entity: pipe });
@@ -436,7 +436,9 @@ mod tests {
         );
         while below.pop().is_some() {}
         child.fire(Time::from_nanos(100), &mut below);
-        let Some(io::Request::Signal { child: CHILD, signal: kernel::Signal::Kill }) = below.pop() else {
+        let Some(io::Request::Signal { child: CHILD, to: kernel::Target::Child, signal: kernel::Signal::Kill }) =
+            below.pop()
+        else {
             panic!("deadline signals git child");
         };
         assert!(above.is_empty());

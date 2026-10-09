@@ -7,8 +7,8 @@ pub mod settled;
 
 use skein_fake_checkout::git::Tree;
 use skein_lib::Duration;
-use skein_shell::Clock;
-use skein_world::{Host, HostedProgram, real};
+use skein_shell::{Clock, Host};
+use skein_world::{HostedProgram, real};
 use smith_local_process_world::{
     Files, Placement, World as Simulated,
     process::{self, Proc},
@@ -195,7 +195,7 @@ impl World {
                 program: b"smith-agent".as_slice().into(),
                 make: process::make_agent,
                 instances: 8,
-                operations: process::lower_configuration().limits.routes + 2,
+                operations: process::lower_configuration().limits.routes + 3,
             },
             process::agent_roots,
         );

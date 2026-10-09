@@ -25,6 +25,7 @@ fn limits() -> ComponentLimits {
         connection: skein_llm_connection::Limits {
             endpoints: 1,
             connections: 1,
+            calls: 1,
             per_endpoint: 1,
             idle_keep: Duration::from_secs(10),
             io: skein_io::Limits {
@@ -40,7 +41,6 @@ fn limits() -> ComponentLimits {
                 retry: Duration::from_millis(10),
             },
             tls: skein_tls::client::Limits { read: 4096, send: 4096, records: skein_tls::client::MAX_RECORD },
-            llm: client,
         },
         receiving: Receiving {
             max_completion_bytes: adapter::completion_worst_case(&client, decoded_call_bytes).expect("receiving bound"),
@@ -108,6 +108,11 @@ fn run(dialect: Provider, calls: bool) {
         Box::new([ConfiguredEndpoint {
             name: llm::Endpoint(1),
             destination: skein_llm_connection::Endpoint {
+                limits: limits().adapter.client,
+                credential: skein_llm::client::CredentialLimits {
+                    access_token: limits().grant_value_bytes,
+                    account_id: limits().grant_value_bytes,
+                },
                 address: Addr::from((Ipv4Addr::LOCALHOST, 443)),
                 transport: skein_llm_connection::Transport::Tls {
                     server_name: skein_tls::Name::new("skein.test").expect("test name"),

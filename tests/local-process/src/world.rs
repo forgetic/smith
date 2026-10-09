@@ -517,7 +517,7 @@ impl World {
                 program: b"smith-agent".as_slice().into(),
                 make: process::make_agent,
                 instances: 8,
-                operations: process::lower_configuration().limits.routes + 2,
+                operations: process::lower_configuration().limits.routes + 3,
             },
             process::agent_roots,
         );

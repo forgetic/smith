@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use skein_lib::{Duration, Wall};
-use skein_world::Host;
+use skein_shell::Host;
 use smith_local_domain as local;
 use smith_local_service as service;
 use smith_local_shell::local_host::{Local, Resources, token_limits};
@@ -114,6 +114,7 @@ impl Invocation {
                 seed,
                 oauth_entropy: [17; 32],
             },
+            Box::new(std::io::sink()),
         )
         .expect("shared local shell");
         Self {
@@ -137,6 +138,7 @@ impl Invocation {
         self.sim.submit(self.peer_pid, self.peer.submissions());
         self.sim.reap(self.pid, self.local.completions());
         self.local.iterate(self.sim.now(), self.sim.wall());
+        self.local.drain();
         self.sim.submit(self.pid, self.local.submissions());
         skein_fake_machine::serve(&mut self.machine, &mut self.sim);
         self.seen.extend(self.sim.peer_drain(self.pid, self.output, 4096));

@@ -257,6 +257,9 @@ fn host_stop_signals_keep_the_child_identity() {
     below.pop();
     process.signal(kernel::Signal::Terminate, &mut below);
     process.signal(kernel::Signal::Kill, &mut below);
-    assert_eq!(below.pop(), Some(IoRequest::Signal { child, signal: kernel::Signal::Terminate }));
-    assert_eq!(below.pop(), Some(IoRequest::Signal { child, signal: kernel::Signal::Kill }));
+    assert_eq!(
+        below.pop(),
+        Some(IoRequest::Signal { child, to: kernel::Target::Child, signal: kernel::Signal::Terminate })
+    );
+    assert_eq!(below.pop(), Some(IoRequest::Signal { child, to: kernel::Target::Child, signal: kernel::Signal::Kill }));
 }

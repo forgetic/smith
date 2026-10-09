@@ -4,6 +4,7 @@
 //!
 //! Command: `smith agent CONFIG.json`.
 
+use skein_io::kernel::Exit;
 use smith_agent_shell as agent_shell;
 use smith_local_shell::local_shell;
 
@@ -20,8 +21,8 @@ fn main() -> ExitCode {
             Path::new(args.get(2).expect("configuration or settings argument counted")),
             Box::new(std::io::stderr()),
         ) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(_) => ExitCode::FAILURE,
+            Ok(Exit::Code(code)) => ExitCode::from(code),
+            Ok(Exit::Signal(_)) | Err(_) => ExitCode::FAILURE,
         };
     } else if (args.len() == 4 || args.len() == 5) && args.get(1).is_some_and(|command| command == "local") {
         local_shell::run(
@@ -34,7 +35,8 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(Exit::Code(code)) => ExitCode::from(code),
+        Ok(Exit::Signal(_)) => ExitCode::FAILURE,
         Err(why) => {
             eprintln!("smith: {why}");
             ExitCode::FAILURE

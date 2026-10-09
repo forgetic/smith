@@ -182,6 +182,7 @@ name = "live_configuration"
 path = "tests/end-to-end/live_configuration.rs"
 
 [dependencies]
+skein-io.workspace = true
 smith-agent-shell.workspace = true
 smith-local-shell.workspace = true
 

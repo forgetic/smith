@@ -78,8 +78,8 @@ pub fn worst_case(limits: &Limits) -> Option<u64> {
 
 /// Bound for local policy, its terminal/delivery IO and the colocated agent effects.
 #[must_use]
-pub fn in_process_worst_case(limits: &Limits, effects: &agent_service::Limits) -> Option<u64> {
-    worst_case(limits)?.checked_add(agent_service::effects_worst_case(effects)?)
+pub fn in_process_worst_case(limits: &Limits, effects: &agent_service::Config) -> Option<u64> {
+    worst_case(limits)?.checked_add(agent_service::effects_worst_case(&effects.limits, &effects.llm_endpoints)?)
 }
 
 #[derive(Debug)]
@@ -152,7 +152,7 @@ impl Service {
                 return Err(Error::Process);
             }
         }
-        in_process_worst_case(&config.limits, &lower.limits).ok_or(Error::Memory)?;
+        in_process_worst_case(&config.limits, &lower).ok_or(Error::Memory)?;
         let Ok(mut effects) = agent_service::Effects::new(lower, seed) else { return Err(Error::Process) };
         effects.contract(local::charter(&config.local).outcome);
         config.local.workspace = match config.local.workspace.take() {

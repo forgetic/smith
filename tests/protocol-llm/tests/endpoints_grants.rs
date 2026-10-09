@@ -19,6 +19,8 @@ fn destination(name: u32, account: u32, provider: shared::Provider) -> Configure
     ConfiguredEndpoint {
         name: llm::Endpoint(name),
         destination: skein_llm_connection::Endpoint {
+            limits: skein_llm_world::limits(),
+            credential: skein_llm::client::CredentialLimits { access_token: 64, account_id: 64 },
             address: SocketAddr::from(([127, 0, 0, 1], 443)),
             transport: skein_llm_connection::Transport::Tls {
                 server_name: skein_tls::Name::new("example.test").expect("server name"),

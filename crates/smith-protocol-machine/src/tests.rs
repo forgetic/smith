@@ -436,13 +436,21 @@ fn deadline_sends_term_then_kill_and_answers_after_reap() {
     component.fire(&later, &mut to_domain, &mut below);
     assert_eq!(
         below.pop(),
-        Some(Below::Process(skein_io::Request::Signal { child: Token::new(45), signal: kernel::Signal::Terminate }))
+        Some(Below::Process(skein_io::Request::Signal {
+            child: Token::new(45),
+            to: kernel::Target::Child,
+            signal: kernel::Signal::Terminate
+        }))
     );
     later.now = Time::from_nanos(10_000_102);
     component.fire(&later, &mut to_domain, &mut below);
     assert_eq!(
         below.pop(),
-        Some(Below::Process(skein_io::Request::Signal { child: Token::new(45), signal: kernel::Signal::Kill }))
+        Some(Below::Process(skein_io::Request::Signal {
+            child: Token::new(45),
+            to: kernel::Target::Child,
+            signal: kernel::Signal::Kill
+        }))
     );
     component.from_below(
         &later,

@@ -10,8 +10,7 @@ use std::path::Path;
 
 use skein_io::kernel::{Complete, Exit, Fd, Op, Submit};
 use skein_lib::{Queue, Time, Token, Wall};
-use skein_shell::{Clock, Config as KernelConfig, Kernel, Now, Wait};
-use skein_world::Host;
+use skein_shell::{Clock, Config as KernelConfig, Host, Kernel, drive};
 use smith_agent_service as service;
 
 use crate::{config, trace};
@@ -41,6 +40,9 @@ pub struct Agent {
     submissions: Queue<Submit>,
     closing: u32,
     result: Option<Result<(), String>>,
+    memory: u64,
+    started: bool,
+    reported: bool,
     worst: u64,
     operations: u32,
 }
@@ -61,7 +63,7 @@ impl Agent {
         Self::new(configuration, resources, errors)
     }
 
-    /// Build a configured service, adopt its streams and announce startup.
+    /// Build a configured service and adopt its streams; `drain` announces startup.
     /// Worlds inject their clock through `iterate` and deterministic resource seeds.
     pub fn new(
         configuration: config::Configuration,
@@ -76,10 +78,6 @@ impl Agent {
                 return Err(why);
             }
         };
-        diagnostic(
-            errors.as_mut(),
-            &format!("agent started; worst case {} of {memory} configured bytes", prepared.worst),
-        );
         Ok(Self {
             service: prepared.service,
             trace: prepared.trace,
@@ -90,6 +88,9 @@ impl Agent {
             submissions: Queue::with_capacity(prepared.queue),
             closing: 0,
             result: None,
+            memory,
+            started: false,
+            reported: false,
             worst: prepared.worst,
             operations: prepared.operations,
         })
@@ -114,21 +115,10 @@ impl Agent {
     }
 
     fn finish(&mut self, answered: bool) {
-        let trace_dropped = self.trace.as_ref().map_or(0, trace::Trace::dropped);
-        let lost = self
-            .service
-            .lost_channel_facts()
-            .saturating_add(self.service.lost_trace_facts())
-            .saturating_add(self.service.lost_trace_prompts())
-            .saturating_add(trace_dropped);
-        if lost > 0 {
-            diagnostic(self.errors.as_mut(), &format!("{lost} observations were dropped"));
-        }
         self.result = Some(if answered {
             Ok(())
         } else {
             let why = format!("the run could not answer: {:?}", service::failure(&self.service));
-            diagnostic(self.errors.as_mut(), &why);
             Err(why)
         });
     }
@@ -152,7 +142,7 @@ fn prepare(configuration: config::Configuration, resources: &Resources) -> Resul
         .checked_add(extra_operations)
         .ok_or("agent operations calculation overflowed")?;
     let reserve = if configuration.trace.is_some() { trace::MEMORY_RESERVE } else { 0 };
-    let worst = service::worst_case(&configuration.service.limits)
+    let worst = service::worst_case(&configuration.service.limits, &configuration.service.llm_endpoints)
         .and_then(|bytes| bytes.checked_add(reserve))
         .and_then(|bytes| bytes.checked_add(Queue::<Complete>::worst_case(queue)?))
         .and_then(|bytes| bytes.checked_add(Queue::<Submit>::worst_case(queue)?))
@@ -175,6 +165,32 @@ fn prepare(configuration: config::Configuration, resources: &Resources) -> Resul
 }
 
 impl Host for Agent {
+    fn drain(&mut self) {
+        if !self.started {
+            self.started = true;
+            diagnostic(
+                self.errors.as_mut(),
+                &format!("agent started; worst case {} of {} configured bytes", self.worst, self.memory),
+            );
+        }
+        if self.result.is_some() && !self.reported {
+            self.reported = true;
+            let trace_dropped = self.trace.as_ref().map_or(0, trace::Trace::dropped);
+            let lost = self
+                .service
+                .lost_channel_facts()
+                .saturating_add(self.service.lost_trace_facts())
+                .saturating_add(self.service.lost_trace_prompts())
+                .saturating_add(trace_dropped);
+            if lost > 0 {
+                diagnostic(self.errors.as_mut(), &format!("{lost} observations were dropped"));
+            }
+            if let Some(Err(why)) = &self.result {
+                diagnostic(self.errors.as_mut(), why);
+            }
+        }
+    }
+
     fn iterate(&mut self, now: Time, wall: Wall) {
         while let Some(complete) = self.completions.pop() {
             if complete.op.raw() >= u64::MAX.saturating_sub(u64::from(self.operations)) {
@@ -273,7 +289,7 @@ fn diagnostic(errors: &mut dyn Write, line: &str) {
 }
 
 /// Run the shipped agent command; startup and final failures are already logged.
-pub fn run(path: &Path, mut errors: Box<dyn Write>) -> Result<(), String> {
+pub fn run(path: &Path, mut errors: Box<dyn Write>) -> Result<Exit, String> {
     let configuration = read_configuration(path, errors.as_mut())?;
     let seed = skein_shell::seed()
         .map_err(|errno| format!("kernel seed failed (errno {errno})"))
@@ -289,22 +305,5 @@ pub fn run(path: &Path, mut errors: Box<dyn Write>) -> Result<(), String> {
     let mut kernel = Kernel::open(KernelConfig { operations: agent.operations() })
         .map_err(|error| format!("agent kernel cannot open: {error}"))
         .inspect_err(|why| diagnostic(agent.errors.as_mut(), why))?;
-    let clock = Clock::new();
-    loop {
-        kernel.reap(agent.completions());
-        let Now { now, wall } = clock.now();
-        agent.iterate(now, wall);
-        if let Some(result) = agent.result() {
-            return result.map_err(str::to_owned);
-        }
-        let wait = if agent.work_pending(now) {
-            Wait::No
-        } else {
-            match agent.next_deadline() {
-                Some(deadline) => Wait::Until(deadline),
-                None => Wait::Forever,
-            }
-        };
-        kernel.submit(agent.submissions(), wait);
-    }
+    Ok(drive(&mut kernel, &Clock::new(), &mut agent))
 }

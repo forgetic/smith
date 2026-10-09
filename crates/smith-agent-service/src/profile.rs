@@ -193,11 +193,11 @@ pub fn standard_limits(memory: u64) -> Result<service::Limits, ProfileError> {
             connection: connection::Limits {
                 endpoints: ENDPOINTS,
                 connections: 6,
+                calls: 6,
                 per_endpoint: 2,
                 idle_keep: Duration::from_secs(15),
                 io,
-                tls: tls::client::Limits { read: 4096, send: 4096, records: tls::client::MAX_RECORD },
-                llm: client,
+                tls: tls_limits(),
             },
             receiving: llm::Receiving {
                 max_completion_bytes: completion,
@@ -238,6 +238,12 @@ pub fn standard_limits(memory: u64) -> Result<service::Limits, ProfileError> {
         routes,
         memory,
     })
+}
+
+// Endpoint-derived request heads include both credential ceilings and fit one
+// native TLS plaintext piece (skein's llm-connection.md, section 7).
+fn tls_limits() -> tls::client::Limits {
+    tls::client::Limits { read: 4096, send: tls::client::MAX_PLAINTEXT, records: tls::client::MAX_RECORD }
 }
 
 fn client_limits() -> shared::client::Limits {

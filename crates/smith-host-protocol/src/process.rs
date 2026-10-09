@@ -241,7 +241,7 @@ impl Process {
     /// Send a domain stop to io's child and acknowledge its accepted request.
     pub fn signal(&self, signal: kernel::Signal, below: &mut Queue<IoRequest>) {
         let child = self.child.expect("a signal names a spawned child");
-        below.push(IoRequest::Signal { child, signal });
+        below.push(IoRequest::Signal { child, to: kernel::Target::Child, signal });
     }
 
     /// Request an immediate operator stop once the child handle exists.
@@ -249,7 +249,7 @@ impl Process {
     pub fn kill_if_spawned(&self, below: &mut Queue<IoRequest>) -> bool {
         match self.child {
             Some(child) => {
-                below.push(IoRequest::Signal { child, signal: kernel::Signal::Kill });
+                below.push(IoRequest::Signal { child, to: kernel::Target::Child, signal: kernel::Signal::Kill });
                 true
             }
             None => false,

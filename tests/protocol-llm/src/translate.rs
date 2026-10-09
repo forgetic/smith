@@ -296,6 +296,9 @@ fn object(document: &[u8]) -> Option<()> {
             }
             Some(json::Event::Done) => return (!first).then_some(()),
             Some(json::Event::Failed(_)) => return None,
+            Some(json::Event::Long(_) | json::Event::Skipped(_)) => {
+                unreachable!("fixture decoder requests only Next tokens")
+            }
             Some(json::Event::Closed) => panic!("parser is not closed by this translator"),
             None => {}
         }

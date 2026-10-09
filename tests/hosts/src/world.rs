@@ -4,7 +4,8 @@
 //! parent observations and requests shutdown or scripted child faults.
 use skein_io::kernel;
 use skein_lib::{Duration, Queue, Time, Token, Wall};
-use skein_world::{Host, HostedProgram, Inherited, Memory, Outcome};
+use skein_shell::Host;
+use skein_world::{HostedProgram, Inherited, Memory, Outcome};
 use smith_agent_process_world as fixture;
 use smith_agent_shell::Agent;
 
@@ -15,7 +16,7 @@ enum Proc {
     /// The scripted parent sends Start and watches the child until Gone.
     Parent(Box<HostService>),
     /// The actual agent service receives inherited streams until its exit.
-    Agent { agent: Box<Agent>, errors: fixture::AgentErrors, paused: bool },
+    Agent { agent: Box<skein_world::PipeHost<Agent>>, errors: fixture::AgentErrors, paused: bool },
     /// The independent fake provider answers requests until shutdown.
     Peer(Box<skein_fake_peers::llm::Peer>),
     /// The failing startup writes stderr and waits to be killed.
@@ -43,6 +44,12 @@ impl Proc {
 }
 
 impl Host for Proc {
+    fn drain(&mut self) {
+        if !matches!(self, Self::Agent { paused: true, .. }) {
+            self.host_mut().drain();
+        }
+    }
+
     fn iterate(&mut self, now: Time, wall: Wall) {
         if !matches!(self, Self::Agent { paused: true, .. }) {
             self.host_mut().iterate(now, wall);
@@ -196,12 +203,10 @@ impl Host for ErrorTail {
 }
 
 fn make_agent(_spawn: &kernel::Spawn, inherited: &Inherited) -> Proc {
-    let errors = fixture::AgentErrors::default();
-    Proc::Agent {
-        agent: Box::new(fixture::configured(fixture::configuration(), 7, inherited, errors.clone())),
-        errors,
-        paused: false,
-    }
+    let fd = inherited.pipes.iter().find(|(child, _)| *child == 2).expect("stderr").1;
+    let (errors, capture) = fixture::AgentErrors::pipe(fd);
+    let agent = fixture::configured(fixture::configuration(), 7, inherited, errors.clone());
+    Proc::Agent { agent: Box::new(capture.host(agent)), errors, paused: false }
 }
 
 fn make_error(_spawn: &kernel::Spawn, inherited: &Inherited) -> Proc {
@@ -314,7 +319,11 @@ impl skein_world::Referee<Proc> for Referee {
         if parent.seen.gone.is_some() {
             for proc in procs {
                 if let Proc::Agent { errors, .. } = proc {
-                    referee::review_agent_errors(&errors.bytes(), parent.seen.answered.is_some());
+                    referee::review_agent_errors(
+                        &errors.bytes(),
+                        parent.seen.detail.as_deref().expect("Gone detail"),
+                        parent.seen.answered.is_some(),
+                    );
                 }
             }
         }
@@ -394,11 +403,16 @@ impl World {
                 program: b"smith".as_slice().into(),
                 make: if self.program == Program::Service { make_agent } else { make_error },
                 instances: 1,
-                operations: fixture::limits().routes.checked_add(1).expect("agent operations"),
+                operations: fixture::limits().routes.checked_add(2).expect("agent operations"),
             });
         }
         harness.spawn_root(skein_sim::Handle::new(root.raw()), |root| {
-            Proc::Parent(Box::new(HostService::new(root, Time::ZERO, config.wall)))
+            Proc::Parent(Box::new(HostService::new(
+                root,
+                Time::ZERO,
+                config.wall,
+                if self.program == Program::Service { 4096 } else { super::host_limits().detail_bytes },
+            )))
         });
         harness.spawn(|| Proc::Peer(Box::new(fixture::fake::peer())));
         self.outcome = Some(harness.run());

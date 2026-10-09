@@ -322,6 +322,7 @@ impl skein_world::Machine for Adapter {
             | Ask::Open { .. }
             | Ask::Read { .. }
             | Ask::Write { .. }
+            | Ask::Append { .. }
             | Ask::Sync { .. }
             | Ask::Stat { .. }
             | Ask::Rename { .. }
