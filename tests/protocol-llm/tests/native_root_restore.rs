@@ -44,7 +44,7 @@ fn fixtures() -> [Fixture; 2] {
             call_replay: Some(CALL_REPLAY),
             text_replay: Some(TEXT_REPLAY),
             seal: b"encrypted-root",
-            cache_write: false,
+            cache_write: true,
         },
         Fixture {
             opaque: ANTHROPIC_OPAQUE,
@@ -320,7 +320,7 @@ fn expected_usage(system_bytes: usize, expected: &[Message], output: u64, fixtur
     };
     let input = u64::try_from(fresh / 4).expect("bounded caller fixture");
     [
-        input,
+        if fixture.cache_write { 0 } else { input },
         output,
         u64::try_from(cached / 4).expect("bounded caller fixture"),
         if fixture.cache_write { input } else { 0 },

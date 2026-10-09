@@ -86,9 +86,10 @@ fn accounting(world: &World, prefixes: &[Vec<Message>], outputs: &[u64], prior: 
                 query.system.len() + earlier.iter().flat_map(|message| &message.parts).map(part_bytes).sum::<usize>(),
             )
         };
-        let input = u64::try_from(fresh / 4).expect("bounded fixture");
+        let fresh_tokens = u64::try_from(fresh / 4).expect("bounded fixture");
+        let input = if cache_write { 0 } else { fresh_tokens };
         let read = u64::try_from(cached / 4).expect("bounded fixture");
-        let write = if cache_write { input } else { 0 };
+        let write = if cache_write { Some(fresh_tokens) } else { None };
         assert_eq!(
             [
                 turn.usage.input_tokens,
@@ -96,14 +97,14 @@ fn accounting(world: &World, prefixes: &[Vec<Message>], outputs: &[u64], prior: 
                 turn.usage.cache_read_tokens,
                 turn.usage.cache_write_tokens
             ],
-            [Some(input), Some(outputs[index]), Some(read), Some(write)],
+            [Some(input), Some(outputs[index]), Some(read), write],
             "all four independently calculated SDK usage fields"
         );
         spent.turns += 1;
         spent.input += input;
         spent.output += outputs[index];
         spent.cache_read += read;
-        spent.cache_write += write;
+        spent.cache_write += write.unwrap_or(0);
         assert_eq!(world.turn_metadata()[index], (spent.turns, None, spent));
         assert_eq!(turn.sequence, prior + spent.turns);
         assert_eq!(turn.version, smith_domain::session::record::VERSION);
@@ -182,7 +183,7 @@ fn no_workspace_host_answer_wait_park_and_native_transcript_resume() {
             message(Role::Assistant, vec![tool(b"wait", b"{}")]),
             message(Role::User, vec![result(b"waiting")]),
         ]);
-        accounting(&first, &[first_prefix, second_prefix, third_prefix.clone()], &[17, 11, 3], 0, index == 1);
+        accounting(&first, &[first_prefix, second_prefix, third_prefix.clone()], &[17, 11, 3], 0, true);
         no_workspace(&first, &settings);
         assert_eq!(first.host_submissions().len(), 1);
         assert_eq!(first.host_submissions()[0].name, run::CallName { activation: 1, completion: 1, position: 0 });
@@ -217,7 +218,7 @@ fn no_workspace_host_answer_wait_park_and_native_transcript_resume() {
             message(Role::Assistant, vec![text(RESUMED), tool(b"wait", b"{}")]),
             message(Role::User, vec![result(b"waiting")]),
         ]);
-        accounting(&resumed, &[third_prefix, continued], &[7, 5], 3, index == 1);
+        accounting(&resumed, &[third_prefix, continued], &[7, 5], 3, true);
         no_workspace(&resumed, &settings);
         assert!(resumed.host_submissions().is_empty() && resumed.host_terminals().is_empty());
         assert_eq!(resumed.host_decisions(), 0, "restored history performs no second host effect");

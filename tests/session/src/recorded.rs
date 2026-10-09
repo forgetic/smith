@@ -201,6 +201,18 @@ impl World {
         self.domain.reclaim();
         session::step(&mut self.domain, &self.env, event, &mut self.out);
         assert!(self.out.len() <= session::max_out(&self.env.limits));
+        self.collect_outputs();
+    }
+
+    /// Resume one settled immediate tool batch before the next provider request.
+    pub fn resume(&mut self) {
+        self.domain.reclaim();
+        session::resume(&mut self.domain, &self.env, &mut self.out);
+        assert!(self.out.len() <= session::max_out(&self.env.limits));
+        self.collect_outputs();
+    }
+
+    fn collect_outputs(&mut self) {
         while let Some(request) = self.out.pop() {
             self.trace.push(format!("{request:?}"));
             self.observe(request);

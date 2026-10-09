@@ -89,7 +89,10 @@ pub fn configured_transport(
 pub fn queries(peer: &llm::Peer) -> impl Iterator<Item = &api::Query> {
     peer.observations().iter().filter_map(|observation| match observation {
         llm::Observation::Query { query, .. } => Some(query),
-        llm::Observation::Head { .. } | llm::Observation::Accepted { .. } | llm::Observation::Answered { .. } | llm::Observation::Closed { .. } => None,
+        llm::Observation::Head { .. }
+        | llm::Observation::Accepted { .. }
+        | llm::Observation::Answered { .. }
+        | llm::Observation::Closed { .. } => None,
     })
 }
 

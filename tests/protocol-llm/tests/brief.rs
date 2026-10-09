@@ -393,9 +393,10 @@ fn native_accounting(
                 system.len() + earlier.iter().flat_map(|message| &message.parts).map(part_bytes).sum::<usize>(),
             )
         };
-        let input = u64::try_from(fresh / 4).expect("bounded outside fixture");
+        let fresh_tokens = u64::try_from(fresh / 4).expect("bounded outside fixture");
+        let input = if cache_write { 0 } else { fresh_tokens };
         let read = u64::try_from(cached / 4).expect("bounded outside fixture");
-        let write = if cache_write { input } else { 0 };
+        let write = if cache_write { Some(fresh_tokens) } else { None };
         assert_eq!(
             [
                 turn.usage.input_tokens,
@@ -403,14 +404,14 @@ fn native_accounting(
                 turn.usage.cache_read_tokens,
                 turn.usage.cache_write_tokens
             ],
-            [Some(input), Some(outputs[index]), Some(read), Some(write)],
+            [Some(input), Some(outputs[index]), Some(read), write],
             "all four usage fields independently priced from literal system and native query"
         );
         spent.turns += 1;
         spent.input += input;
         spent.output += outputs[index];
         spent.cache_read += read;
-        spent.cache_write += write;
+        spent.cache_write += write.unwrap_or(0);
         assert_eq!(world.turn_metadata()[index], (spent.turns, None, spent));
         assert_eq!(turn.sequence, prior + spent.turns);
         assert_eq!(turn.version, smith_domain::session::record::VERSION);
@@ -539,7 +540,7 @@ fn structured_brief_native_wait_park_and_genuine_transcript_restore_in_both_wire
         let opening = vec![message(Role::User, vec![text(BEGIN)])];
         let mut waited = opening.clone();
         waited.extend([message(Role::Assistant, vec![wait_call()]), message(Role::User, vec![wait_result()])]);
-        native_accounting(&first, &first_system, &[opening, waited.clone()], &[17, 3], 0, index == 1);
+        native_accounting(&first, &first_system, &[opening, waited.clone()], &[17, 3], 0, true);
         native_settled(&first, &settings, &roots);
         recorded_wait(&first.turns()[0], false);
         assert!(matches!(first.turns()[1].messages[0].content.as_ref(), [llm::Block::Text { text, .. }]
@@ -572,7 +573,7 @@ fn structured_brief_native_wait_park_and_genuine_transcript_restore_in_both_wire
             message(Role::Assistant, vec![text(RESUMED), wait_call()]),
             message(Role::User, vec![wait_result()]),
         ]);
-        native_accounting(&restored, &restored_system, &[waited, continued], &[11, 5], 2, index == 1);
+        native_accounting(&restored, &restored_system, &[waited, continued], &[11, 5], 2, true);
         native_settled(&restored, &settings, &roots);
         recorded_wait(&restored.turns()[0], true);
         assert!(matches!(restored.turns()[1].messages[0].content.as_ref(), [llm::Block::Text { text, .. }]

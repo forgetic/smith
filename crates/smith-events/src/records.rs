@@ -339,6 +339,8 @@ pub enum Level {
 /// `NoticeKind` classification sent by a stream producer.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum NoticeKind {
+    /// The service reports one reasoning item omitted by the model's opt-in.
+    ReasoningDropped,
     /// The `credential_rejected` classification.
     CredentialRejected,
     /// The `account_exhausted` classification.
@@ -667,14 +669,16 @@ pub struct CheckCompleted {
     pub duration_ms: u64,
 }
 
-/// An operator notice the service records for a rejected or exhausted account.
+/// An operator notice the service records for an account or a dropped reasoning item.
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct Notice {
     pub level: Level,
     pub kind: NoticeKind,
     pub run: Option<u64>,
-    pub account: u64,
+    pub account: Option<u64>,
     pub wait_ms: Option<u64>,
+    /// Actual size of the reasoning item omitted from history, in bytes.
+    pub bytes: Option<u64>,
 }
 
 /// A content block supplied by a provider or a prompt owner.

@@ -914,12 +914,17 @@ mod tests {
     fn oversized_reasoning_defaults_to_fail_and_drop_requires_explicit_selection() {
         let mut document = shaped_document();
         let configured = parse_value(&document).expect("default policy");
-        assert_eq!(configured.declarations.endpoints[0].models[0].oversized_reasoning, service::profile::OversizedReasoning::Fail);
+        assert_eq!(
+            configured.declarations.endpoints[0].models[0].oversized_reasoning,
+            service::profile::OversizedReasoning::Fail
+        );
         document["endpoints"][0]["models"][0]["oversized_reasoning"] = "drop".into();
         let configured = parse_value(&document).expect("explicit drop");
-        assert_eq!(configured.declarations.endpoints[0].models[0].oversized_reasoning, service::profile::OversizedReasoning::Drop);
+        assert_eq!(
+            configured.declarations.endpoints[0].models[0].oversized_reasoning,
+            service::profile::OversizedReasoning::Drop
+        );
         document["endpoints"][0]["models"][0]["oversized_reasoning"] = "fallback".into();
         assert_eq!(parse_value(&document).err().as_deref(), Some("model oversized_reasoning must be fail or drop"));
     }
-
 }

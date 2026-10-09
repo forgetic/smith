@@ -2126,6 +2126,9 @@ fn add_usage(left: Usage, right: Usage) -> Usage {
                 .checked_add(right.cache_write_tokens.unwrap_or(0))
                 .expect("bounded scheduled cache writes"),
         ),
-        reasoning_tokens: None,
+        reasoning_tokens: match (left.reasoning_tokens, right.reasoning_tokens) {
+            (Some(left), Some(right)) => Some(left.checked_add(right).expect("bounded scheduled reasoning")),
+            (None, _) | (_, None) => None,
+        },
     }
 }

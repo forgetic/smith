@@ -561,7 +561,8 @@ fn value_notice(name: &str, spelling: &str) -> Notice {
         level: value_level(name, spelling),
         kind: value_notice_kind(name, spelling),
         run: Some(u64::MAX),
-        account: u64::MAX,
+        account: Some(u64::MAX),
+        bytes: None,
         wait_ms: Some(u64::MAX),
     }
 }
@@ -1469,7 +1470,9 @@ fn samples_14() -> Vec<(&'static str, Record, Capture)> {
 }
 
 pub fn samples() -> Vec<(&'static str, Record, Capture)> {
-    let mut samples = Vec::new();
+    let mut samples = vec![("notice_kind_reasoning_dropped", Record { t_ms: u64::MAX, event: Event::Notice(Notice {
+        level: Level::Warning, kind: NoticeKind::ReasoningDropped, run: Some(u64::MAX), account: None, wait_ms: None, bytes: Some(u64::MAX),
+    }) }, Capture::Everything)];
     samples.extend(samples_0());
     samples.extend(samples_1());
     samples.extend(samples_2());

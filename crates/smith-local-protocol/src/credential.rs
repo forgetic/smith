@@ -492,5 +492,4 @@ mod tests {
             assert!(credential.next_deadline().is_none());
         }
     }
-
 }

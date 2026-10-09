@@ -186,3 +186,13 @@ fn configured_boundaries_and_unknown_content_kinds_are_checked() {
     let future = String::from_utf8(line.into_vec()).expect("UTF8").replace("\"type\":\"text\"", "\"type\":\"future\"");
     assert!(read(future.as_bytes(), &self::limits()).expect("unknown block kind").is_some());
 }
+
+#[test]
+fn a_reasoning_drop_notice_keeps_its_size_under_every_capture() {
+    let frozen = include_bytes!("../../../crates/smith-events/golden/v1/notice_kind_reasoning_dropped.jsonl");
+    let record = read(frozen, &limits()).expect("drop notice").expect("known event");
+    for capture in [Capture::None, Capture::Calls, Capture::Everything] {
+        assert_eq!(write(&record, &capture, &limits()).expect("write").expect("notice").as_ref(), frozen);
+    }
+    assert_eq!(read(br#"{"v":1,"type":"notice","t_ms":0,"level":"warning","kind":"reasoning_dropped"}"#, &limits()), Err(Error::Shape));
+}

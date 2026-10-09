@@ -90,7 +90,10 @@ fn a_run_refreshes_its_grant_at_the_issuer() {
         )
         .expect("dedicated token store");
         let mut saved = store.load(0).expect("read dedicated grant").expect("sign in by hand first");
-        assert!(saved.refresh_token.as_ref().is_some_and(|token| !token.is_empty()), "dedicated test grant must support refresh");
+        assert!(
+            saved.refresh_token.as_ref().is_some_and(|token| !token.is_empty()),
+            "dedicated test grant must support refresh"
+        );
         let generation = saved.generation;
         saved.expires_at = skein_lib::Wall::EPOCH;
         store

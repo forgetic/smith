@@ -315,6 +315,7 @@ fn write_level(json: &mut Encoder, value: &Level, _capture: &Capture) {
 
 fn write_notice_kind(json: &mut Encoder, value: &NoticeKind, _capture: &Capture) {
     match value {
+        NoticeKind::ReasoningDropped => json.string(b"reasoning_dropped"),
         NoticeKind::CredentialRejected => json.string(b"credential_rejected"),
         NoticeKind::AccountExhausted => json.string(b"account_exhausted"),
         NoticeKind::Unknown(text) => json.string(text),
@@ -901,7 +902,7 @@ fn validate_level(value: &Level, limits: &Limits) -> Result<(), Error> {
 
 fn validate_notice_kind(value: &NoticeKind, limits: &Limits) -> Result<(), Error> {
     match value {
-        NoticeKind::CredentialRejected | NoticeKind::AccountExhausted => Ok(()),
+        NoticeKind::ReasoningDropped | NoticeKind::CredentialRejected | NoticeKind::AccountExhausted => Ok(()),
         NoticeKind::Unknown(text) => check_text(text, limits.string),
     }
 }
@@ -1118,8 +1119,11 @@ fn validate_tool_completed(value: &ToolCompleted, limits: &Limits) -> Result<(),
 fn validate_notice(value: &Notice, limits: &Limits) -> Result<(), Error> {
     validate_level(&value.level, limits)?;
     validate_notice_kind(&value.kind, limits)?;
-
-    Ok(())
+    match value.kind {
+        NoticeKind::ReasoningDropped if value.bytes.is_none() => Err(Error::Shape),
+        NoticeKind::CredentialRejected | NoticeKind::AccountExhausted if value.account.is_none() => Err(Error::Shape),
+        NoticeKind::ReasoningDropped | NoticeKind::CredentialRejected | NoticeKind::AccountExhausted | NoticeKind::Unknown(_) => Ok(()),
+    }
 }
 
 fn validate_block(value: &Block, limits: &Limits) -> Result<(), Error> {
@@ -1546,8 +1550,14 @@ fn encode_notice(json: &mut Encoder, value: &Notice, capture: &Capture) {
         json.key(b"run");
         json.unsigned(*item);
     }
-    json.key(b"account");
-    json.unsigned(value.account);
+    if let Some(account) = value.account {
+        json.key(b"account");
+        json.unsigned(account);
+    }
+    if let Some(bytes) = value.bytes {
+        json.key(b"bytes");
+        json.unsigned(bytes);
+    }
     if let Some(item) = &value.wait_ms {
         json.key(b"wait_ms");
         json.unsigned(*item);

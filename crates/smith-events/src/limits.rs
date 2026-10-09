@@ -788,6 +788,7 @@ fn size_notice(capture: &Capture, limits: &Limits) -> Option<u64> {
     length = length.checked_add(7)?.checked_add(20_u64)?;
     length = length.checked_add(11)?.checked_add(20_u64)?;
     length = length.checked_add(11)?.checked_add(20_u64)?;
+    length = length.checked_add(9)?.checked_add(20_u64)?;
     Some(length)
 }
 

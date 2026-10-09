@@ -87,7 +87,13 @@ fn run(dialect: Provider, calls: bool) {
         Provider::Anthropic => documents::Provider::Anthropic,
     };
     let mut service = provider::Service::new(
-        provider::Config { echo: skein_llm::openai::Echo::NONE, usage_fields: documents::UsageFields::ALL, provider: provider_kind, path: call.endpoint.target.clone(), headers: Box::new([]) },
+        provider::Config {
+            echo: skein_llm::openai::Echo::NONE,
+            usage_fields: documents::UsageFields::ALL,
+            provider: provider_kind,
+            path: call.endpoint.target.clone(),
+            headers: Box::new([]),
+        },
         &peer_limits,
     )
     .expect("fake service");

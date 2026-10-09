@@ -611,6 +611,7 @@ fn read_level(tokens: &[Token], limits: &Limits) -> Result<Level, Error> {
 fn read_notice_kind(tokens: &[Token], limits: &Limits) -> Result<NoticeKind, Error> {
     let value = text(tokens, limits.string.max(64))?;
     Ok(match value.as_ref() {
+        b"reasoning_dropped" => NoticeKind::ReasoningDropped,
         b"credential_rejected" => NoticeKind::CredentialRejected,
         b"account_exhausted" => NoticeKind::AccountExhausted,
         _ => {
@@ -1080,19 +1081,25 @@ fn read_check_completed(tokens: &[Token], limits: &Limits) -> Result<CheckComple
 
 fn read_notice(tokens: &[Token], limits: &Limits) -> Result<Notice, Error> {
     object(tokens)?;
-    Ok(Notice {
+    let notice = Notice {
         level: read_level(required(tokens, b"level")?, limits)?,
         kind: read_notice_kind(required(tokens, b"kind")?, limits)?,
         run: match field(tokens, b"run")? {
             Some(item) => Some(unsigned(item)?),
             None => None,
         },
-        account: unsigned(required(tokens, b"account")?)?,
+        account: match field(tokens, b"account")? { Some(item) => Some(unsigned(item)?), None => None },
+        bytes: match field(tokens, b"bytes")? { Some(item) => Some(unsigned(item)?), None => None },
         wait_ms: match field(tokens, b"wait_ms")? {
             Some(item) => Some(unsigned(item)?),
             None => None,
         },
-    })
+    };
+    match notice.kind {
+        NoticeKind::ReasoningDropped if notice.bytes.is_none() => Err(Error::Shape),
+        NoticeKind::CredentialRejected | NoticeKind::AccountExhausted if notice.account.is_none() => Err(Error::Shape),
+        NoticeKind::ReasoningDropped | NoticeKind::CredentialRejected | NoticeKind::AccountExhausted | NoticeKind::Unknown(_) => Ok(notice),
+    }
 }
 
 fn read_block(tokens: &[Token], limits: &Limits) -> Result<Block, Error> {

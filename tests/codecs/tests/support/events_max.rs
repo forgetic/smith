@@ -274,7 +274,8 @@ fn max_notice(limits: &smith_events::Limits) -> Notice {
         level: Level::Unknown(payload(limits.string)),
         kind: NoticeKind::Unknown(payload(limits.string)),
         run: Some(u64::MAX),
-        account: u64::MAX,
+        account: Some(u64::MAX),
+        bytes: Some(u64::MAX),
         wait_ms: Some(u64::MAX),
     }
 }
