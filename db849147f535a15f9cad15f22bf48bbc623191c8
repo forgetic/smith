@@ -1,0 +1,32 @@
+Smith09.1 final verification on db849147f535a15f9cad15f22bf48bbc623191c8,
+rebased on main 7652f8df112c9f93435df4671e3569e3189963ec.
+
+Heavy task 1069 passed cargo fmt --check, workspace/all-target Clippy with
+-D warnings, all 1625 focused tests in 4.592 seconds (one slow, zero skips),
+and all 24 fuzzy tests in 4.521 seconds (zero skips). Focused run ID:
+57899be6-23ff-4213-80d5-fdbf79f842c7. Fuzzy run ID:
+bf6bd82c-b194-4586-8566-3862f572cdf1. Both remain within 15/60 second gates.
+
+Idle serial affected-package measure: 107 focused tests in 1.561 seconds,
+run ID 675b26b1-d9d5-4533-a3bf-58267be6e5f4. The new tools and machine
+stories remain within their existing world shares. All heavy commands
+used the serialized heavy wrapper; no other running queue task was seen
+at this gate's start. Configuration assertions remain enabled.
+
+Global memory project home-free-src-rust-smith-rel-09 refreshed full at
+2026-10-09T15:53:22Z: 14862 nodes, 123062 edges, no partial/unusable/skipped
+source; 512 binary goldens excluded by design. Own source verification,
+helper snippets and both trace directions completed. All eight changed
+paths have metadata_match/no_recorded_issue best-effort coverage; this
+is not a completeness claim. Resolver collisions in outbound graph names
+were checked against source rather than taken as real dependencies.
+
+Design: domain/tools.md sections 2, 4, 6 and 7; protocol/agent.md section 2;
+finding T2. One path-only io_path follows the binding sketch. Immediate
+NotFile answers live at existing kit::admit rather than job::start, the
+merged owner of immediate admission refusal; directory file calls admit
+neither a job nor io. Read-only mounted roots are covered as well.
+
+Evidence pending: smoke-tools directory-listed check on parent and this
+increment, complete smoke-tools after 09.2, and runtime smoke. Benchmark
+runner/adapters are not ready; no credentialed probe or smoke was run.
