@@ -1,0 +1,22 @@
+Final exact-tip gates: heavy772, /tmp/smith-02-resumed-gate.log.
+Tip4cb0c56bdacac999ac1bef8929983c409a4ee340;
+parent/maincca5c09f0a10588d7771e7ddafa0e9f67777090c.
+fmt --check PASS; workspace/all-target clippy -D warnings PASS.
+Focused1569/1569, 0 skipped, 3.388s;
+ID8103edd2-8afe-408a-8a1f-11a14efd079c.
+Fuzzy21/21, 0 skipped, 3.882s;
+ID628a1a5d-d399-4b79-b2e0-4337840f60fa.
+Serial native regression1/1, 0.013s;
+IDf3bcb218-bdad-4501-b500-d9e925579c75.
+Parent regression fails at fresh-start assertion in
+/tmp/smith-02-resumed-parent.log; fix covers fresh, absent, selected and
+ignored concrete histories through actual root/run/session boundaries.
+Affected focused256/256 passed in0.909s (/tmp/smith-02-resumed-devb.log).
+Smoke-tools remains pending session00.8 runner/adapter integration; no live
+smoke/probe is claimed. Domain-run standalone fixtures mechanically supply
+the parent-authoritative flag; opaque StartContext lifetime is unchanged.
+Memory graph own worktree generation13:27:13Z, all production changed paths
+metadata_match; run-world source fallback after its mechanical new-field
+adaptation. Graph get() resolver ambiguity was verified against own source.
+No design/coordinator files changed. Local ff-only merge under common lock;
+primary bench checkout remains untouched; no push.
