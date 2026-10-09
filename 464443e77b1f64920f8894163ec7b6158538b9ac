@@ -1,0 +1,27 @@
+Final exact-tip gates: heavy813, /tmp/smith-02-gate3.log.
+Tip464443e77b1f64920f8894163ec7b6158538b9ac;
+parent/main254cf7c2c0e857950b28d4017d85efe6597fd854.
+fmt --check PASS; workspace/all-target clippy -D warnings PASS.
+Focused1576/1576, zero skipped, 3.064s;
+IDea477e2d-e5d8-47b7-ac12-d9b8c06f0cc3.
+Fuzzy22/22, zero skipped, 3.746s;
+ID4d154bde-0da3-4086-9b31-a5d9d42d7739.
+Serial new stories3/3, 0.085s;
+ID552fd1c4-fa54-4f19-be72-a79cd48104cb.
+Serial32-seed sweep1/1, 0.434s;
+IDe15bb9f1-54de-49db-8b19-ce9f03f7b613.
+Parent/fix controls heavy808 /tmp/smith-02-control3.log: actual parent four
+production files plus new test adapters; both native pressure and channel
+phase guards fail (old service emits zero terminal to trace; channel returns
+Error::Order). Parent controlIDd516e4db-3ef4-41dc-8917-97bbcbacf64d.
+Restored committed production files; both pass with fix. Native service
+observations only: no forged facts or observed engine decision state.
+Accepted/failed/parked/cancelled each retain one native Answered; entrance
+Refused is one actual channel answer, no Admitted/native run/session fact.
+Its stream-local run.completed is explicitly owned by02.5 and not claimed.
+04 owner accepted04.6 entrance host/offer sizing plus typed post-admission
+conversation-byte failure carrying the actual bound. Unmerged aa34278
+retains the late-refusal reproducer; no unmerged04.6 mechanism consumed.
+Plan02.3 requires no external probe; smoke-tools pending00.8 integration.
+No live smoke claimed. Git lock rechecks exact parent before own ff-only
+local merge; primary bench untouched; no push/design/coordinator edits.
