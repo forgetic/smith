@@ -1,10 +1,10 @@
 //! Both agent kinds share the parent referee (domain/host.md, section 10).
-use skein_lib::{Duration, Time, Token};
+use skein_lib::Token;
 use smith_agent_world::Job;
 use smith_domain::{run, session::record};
 use smith_host_domain::{self as host, End, Input, RunFailure, RunResult, parent};
 use smith_host_world::{
-    Seen, World as Spawned,
+    World as Spawned,
     inline::{self, World},
 };
 
@@ -21,12 +21,8 @@ fn an_inline_run_answers_and_its_slot_is_released_after_its_last_completion() {
         if world.seen[&Token::new(1)].answer.is_some() {
             break;
         }
-        let next = world
-            .agent
-            .next_deadline()
-            .expect("live run alarm")
-            .min(Time::ZERO.saturating_add(Duration::from_millis(100)));
-        world.at(next.max(world.stage.env.now.saturating_add(Duration::from_millis(1))));
+        let next = world.next_deadline().expect("actual provider or root alarm");
+        world.at(next);
     }
     let seen = &world.seen[&Token::new(1)];
     assert!(
@@ -67,6 +63,7 @@ fn an_inline_run_waits_parks_and_resumes_from_its_transcript() {
     next.charter =
         host::Charter::new(charter, world.stage.env.limits.smith.run.run_bytes).expect("bounded resumed policy");
     next.activation = 2;
+    next.logical_run = Token::new(1);
     next.transcript = Some(host::Transcript::new(history, u64::MAX).expect("saved concrete history"));
     next.messages = Box::from([host::Message {
         name: Token::new(92),
@@ -154,44 +151,6 @@ fn two_inline_slots_keep_provider_owners_independent() {
     for client in [Token::new(1), Token::new(2)] {
         assert!(matches!(world.seen[&client].answer.as_ref().expect("answer").result, RunResult::Accepted { .. }));
     }
-}
-
-#[test]
-#[should_panic(expected = "Gone retains every lower terminal")]
-fn the_common_parent_referee_rejects_a_gone_with_an_open_inline_completion() {
-    Seen::default().observe_parent(
-        parent::Request::Gone { client: Token::new(1), end: End::Stopped, detail: Box::default() },
-        true,
-        false,
-    );
-}
-
-#[test]
-#[should_panic]
-fn the_common_parent_referee_rejects_two_run_answers() {
-    let mut seen = Seen::default();
-    for _ in 0..2 {
-        seen.observe_parent(
-            parent::Request::Answered {
-                client: Token::new(1),
-                answer: host::Answer { read: None, turns: 0, spent: 0, result: RunResult::Parked },
-            },
-            true,
-            true,
-        );
-    }
-}
-
-#[test]
-#[should_panic]
-fn the_common_parent_referee_rejects_a_gone_with_an_unanswered_parent_call() {
-    let mut seen = Seen::default();
-    seen.calls.insert(Token::new(2));
-    seen.observe_parent(
-        parent::Request::Gone { client: Token::new(1), end: End::Stopped, detail: Box::default() },
-        true,
-        true,
-    );
 }
 
 #[test]

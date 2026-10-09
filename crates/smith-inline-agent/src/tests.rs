@@ -4,7 +4,7 @@ use skein_lib::{Duration, Env, Id, Queue, Time, Token, Wall};
 use smith_domain::{self as smith, run};
 use smith_host_domain::{self as host, parent};
 
-use crate::{Below, Domain, Input, Limits, Lower, Output, fire, reclaim, resume, step, translate};
+use crate::{Below, Domain, Input, Limits, Lower, Output, fire, resume, step, translate};
 
 fn bounds() -> Limits {
     let smith = smith_agent_world::LIMITS;
@@ -144,12 +144,28 @@ fn cancel_fire_resume_terminal_and_reclaim_settle_exactly_once() {
     env.now = Time::ZERO.saturating_add(Duration::from_secs(1));
     assert!(agent.is_due(env.now));
     fire(&mut agent, &env, &mut out);
+    agent.reclaim();
+    for _ in 0..8 {
+        if !agent.is_ready() {
+            break;
+        }
+        resume(&mut agent, &env, &mut out);
+        agent.reclaim();
+    }
     assert_eq!(out.pop(), Some(Output::Lower { agent: handle, request: Lower::Cancel { owner } }));
     assert!(out.is_empty());
     step(&mut agent, &env, Input::Parent(parent::Event::Stop { agent: handle }), &mut out);
     assert!(out.is_empty());
     assert_eq!(agent.hosted(), 1);
     step(&mut agent, &env, Input::Below { agent: handle, terminal: Below::Cancelled { owner } }, &mut out);
+    agent.reclaim();
+    for _ in 0..8 {
+        if !agent.is_ready() {
+            break;
+        }
+        resume(&mut agent, &env, &mut out);
+        agent.reclaim();
+    }
     let Some(Output::Parent(parent::Request::Answered { answer, .. })) = out.pop() else { panic!("cancel answer") };
     assert_eq!(answer.result, host::RunResult::Failed { failure: host::RunFailure::Cancelled });
     assert_eq!(
@@ -163,9 +179,11 @@ fn cancel_fire_resume_terminal_and_reclaim_settle_exactly_once() {
     step(&mut agent, &env, Input::Below { agent: handle, terminal: Below::Cancelled { owner } }, &mut out);
     assert!(out.is_empty());
     assert!(agent.pop_fact(Token::new(1)).is_some(), "native observations survive retirement");
+    agent.reclaim();
+    assert_eq!(agent.hosted(), 1, "an ended slot retains undrained native observations");
     while agent.pop_fact(Token::new(1)).is_some() {}
     while agent.pop_content(Token::new(1)).is_some() {}
-    reclaim(&mut agent);
+    agent.reclaim();
     assert_eq!(agent.hosted(), 0);
     step(&mut agent, &env, Input::Below { agent: handle, terminal: Below::Cancelled { owner } }, &mut out);
     assert!(out.is_empty());
@@ -180,4 +198,29 @@ fn checked_limits_require_one_concrete_turn_and_positive_wall_time() {
     limits = bounds();
     limits.wall_time = Duration::ZERO;
     assert_eq!(crate::worst_case(&limits), None);
+}
+
+#[test]
+fn an_occupied_or_duplicate_client_is_refused_without_touching_its_live_slot() {
+    let mut env = env();
+    env.limits.slots = 1;
+    let mut domain = Domain::new(&env.limits, configuration(), 4);
+    let mut out = Queue::with_capacity(crate::max_out(&env.limits));
+    step(&mut domain, &env, Input::Parent(parent::Event::Spawn { client: Token::new(1), start: start() }), &mut out);
+    while out.pop().is_some() {}
+    for client in [Token::new(1), Token::new(2)] {
+        step(&mut domain, &env, Input::Parent(parent::Event::Spawn { client, start: start() }), &mut out);
+        assert_eq!(
+            out.pop(),
+            Some(Output::Parent(parent::Request::Gone { client, end: host::End::Busy, detail: Box::default() }))
+        );
+        assert!(out.is_empty());
+        assert_eq!(domain.hosted(), 1);
+    }
+}
+
+#[test]
+fn a_full_parent_reply_is_a_typed_too_large_terminal() {
+    let reply = host::Reply::Host { error: false, body: vec![b'x'; run::HostAnswer::CAPACITY + 1].into() };
+    assert_eq!(translate::host_reply(reply), Some(run::HostReply::TooLarge));
 }

@@ -25,7 +25,7 @@ fn story(seed: u64) -> (Vec<String>, Vec<Option<smith_host_domain::RunResult>>) 
     }
     world.run();
     world.settled();
-    let outcomes = world.seen.values().map(|seen| seen.answer.as_ref().map(|answer| answer.result.clone())).collect();
+    let outcomes = world.seen.into_values().map(|seen| seen.answer.map(|answer| answer.result)).collect();
     (world.trace.lines().to_vec(), outcomes)
 }
 

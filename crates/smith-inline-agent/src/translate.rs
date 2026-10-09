@@ -376,13 +376,15 @@ pub(crate) fn route(agent: &mut Domain, env: &Env<Limits>, id: Id<Slot>, out: &m
                     },
                 });
             }
-            smith::Request::Cancel { owner } => {
-                match slot.completions.get_mut(&owner) {
-                    Some(cancelled) => *cancelled = true,
-                    None => unreachable!("cancel retains a live provider right"),
+            smith::Request::Cancel { owner } => match slot.completions.get_mut(&owner) {
+                Some(cancelled) => {
+                    if !*cancelled {
+                        *cancelled = true;
+                        out.push(Output::Lower { agent: id.token(), request: Lower::Cancel { owner } });
+                    }
                 }
-                out.push(Output::Lower { agent: id.token(), request: Lower::Cancel { owner } });
-            }
+                None => unreachable!("cancel retains a live provider right"),
+            },
             smith::Request::HostCall { host_run, relay, name, tool, effect, input, deadline } => {
                 assert_eq!(slot.logical_run, host_run, "root output preserves its scoped identity and single right");
                 assert!(

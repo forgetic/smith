@@ -403,3 +403,6 @@ fn maximum_carried_start_messages_are_owned_and_priced_during_spawn() {
     measured.domain.reclaim();
     assert_eq!(measured.domain.agents(), 0);
 }
+
+#[path = "memory/inline.rs"]
+mod inline;

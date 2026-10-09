@@ -63,7 +63,7 @@ pub fn start(seed: u64, job: smith_agent_world::Job) -> host::Start {
     charter.models = Box::default();
     host::Start {
         messages: Box::default(),
-        logical_run: Token::new(7),
+        logical_run: Token::new(seed),
         activation: 1,
         workspace: None,
         charter: host::Charter::new(charter, settings.limits.run.run_bytes).expect("bounded script charter"),
@@ -179,6 +179,17 @@ impl World {
             self.pass();
         }
         self.pass();
+    }
+
+    /// Earliest actual provider, slot or scheduled parent alarm.
+    #[must_use]
+    pub fn next_deadline(&self) -> Option<Time> {
+        self.provider
+            .next_deadline()
+            .into_iter()
+            .chain(self.agent.next_deadline())
+            .chain(self.schedule.next_time())
+            .min()
     }
 
     /// Drive real alarms until every requested slot has its containment terminal.
@@ -318,24 +329,26 @@ impl World {
             for event in pending {
                 self.event(event);
             }
+            for client in self.seen.keys() {
+                while let Some(fact) = self.agent.pop_fact(*client) {
+                    self.facts.push((*client, fact));
+                }
+                while let Some(content) = self.agent.pop_content(*client) {
+                    self.content.push((*client, content));
+                }
+            }
+            while let Some(fact) = self.agent.pop_slot_fact() {
+                self.observations.push(fact);
+            }
+            self.agent.reclaim();
             if !self.agent.is_ready() {
-                break;
+                return;
             }
             assert!(self.stage.has_room());
+            assert!(self.agent.facts_room() >= inline::max_facts());
             inline::resume(&mut self.agent, &self.stage.env, &mut self.stage.out);
         }
-        for client in self.seen.keys() {
-            while let Some(fact) = self.agent.pop_fact(*client) {
-                self.facts.push((*client, fact));
-            }
-            while let Some(content) = self.agent.pop_content(*client) {
-                self.content.push((*client, content));
-            }
-        }
-        while let Some(fact) = self.agent.pop_slot_fact() {
-            self.observations.push(fact);
-        }
-        inline::reclaim(&mut self.agent);
+        panic!("bounded ready work did not settle");
     }
 }
 

@@ -61,7 +61,12 @@ impl Domain {
         }
     }
 
-    /// Occupied slots, including retired slots until iteration-end reclaim.
+    /// Reclaim ended slots after their outputs, facts and content were handed on.
+    pub fn reclaim(&mut self) {
+        reclaim(self);
+    }
+
+    /// Occupied slots, including ended slots until their native drains are empty.
     #[must_use]
     pub const fn hosted(&self) -> u32 {
         self.slots.len()
@@ -331,7 +336,7 @@ fn terminal(agent: &mut Domain, env: &Env<Limits>, handle: Token, completion: Be
         return;
     }
     match slot.state {
-        Stage::Live | Stage::Cancelling => {
+        Stage::Live | Stage::Cancelling | Stage::Settling => {
             let event = match completion {
                 Below::Completed { owner, completion } => smith::Event::Completed { owner, completion },
                 Below::Failed { owner, failure, evidence, detail } => {
@@ -341,7 +346,7 @@ fn terminal(agent: &mut Domain, env: &Env<Limits>, handle: Token, completion: Be
             };
             root_step(agent, env, id, event, out);
         }
-        Stage::Settling | Stage::Gone => {}
+        Stage::Gone => {}
     }
     stop::settle(agent, env.now, id, out);
 }
@@ -372,13 +377,15 @@ pub fn fire(agent: &mut Domain, env: &Env<Limits>, out: &mut Queue<Output>) {
         None => return,
     };
     let slot = agent.slots.get_mut(id).expect("due slot");
-    if slot.state == Stage::Live && slot.wall <= env.now {
-        stop::cancel(agent, env, id, out);
-    } else {
-        slot.facts_drained = false;
-        slot.content_drained = false;
-        smith::fire(&mut slot.root, &child_env(env), &mut agent.lower);
-        translate::route(agent, env, id, out);
+    match slot.state {
+        Stage::Live if slot.wall <= env.now => stop::cancel(agent, env, id, out),
+        Stage::Live | Stage::Cancelling => {
+            slot.facts_drained = false;
+            slot.content_drained = false;
+            smith::fire(&mut slot.root, &child_env(env), &mut agent.lower);
+            translate::route(agent, env, id, out);
+        }
+        Stage::Settling | Stage::Gone => unreachable!("settling slots have no alarms"),
     }
 }
 
@@ -407,7 +414,7 @@ pub fn resume(agent: &mut Domain, env: &Env<Limits>, out: &mut Queue<Output>) {
 }
 
 /// Reclaim after outputs and native observations have been drained for this pass.
-pub fn reclaim(agent: &mut Domain) {
+fn reclaim(agent: &mut Domain) {
     let mut gone = List::with_capacity(agent.clients.capacity());
     for (client, id) in &agent.clients {
         let slot = agent.slots.get_mut(*id).expect("retained slot");
@@ -428,8 +435,9 @@ pub fn reclaim(agent: &mut Domain) {
     agent.slots.reclaim();
 }
 
-/// Consume one parent command or terminal below a retained run.
+/// Consume one parent command or terminal below a retained run with reserved facts.
 pub fn step(agent: &mut Domain, env: &Env<Limits>, input: crate::Input, out: &mut Queue<Output>) {
+    assert!(agent.facts_room() >= crate::max_facts(), "the owner reserves lifecycle facts before stepping");
     match input {
         crate::Input::Parent(event) => command(agent, env, event, out),
         crate::Input::Below { agent: handle, terminal: below } => terminal(agent, env, handle, below, out),

@@ -35,6 +35,6 @@ mod translate;
 mod tests;
 
 pub use boundary::{Below, Input, Lower, Output};
-pub use domain::{Domain, fire, reclaim, resume, step};
+pub use domain::{Domain, fire, resume, step};
 pub use facts::{Fact, FactKind};
 pub use limits::{Limits, max_facts, max_out, worst_case};
