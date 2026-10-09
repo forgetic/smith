@@ -153,12 +153,6 @@ impl Domain {
     pub fn facts_room(&self) -> u32 {
         self.facts.room()
     }
-
-    /// Lost inline observations; never an admission or settlement input.
-    #[must_use]
-    pub const fn facts_lost(&self) -> u64 {
-        0
-    }
 }
 
 fn earlier(current: Option<Time>, candidate: Time) -> Time {
@@ -279,7 +273,7 @@ fn command(agent: &mut Domain, env: &Env<Limits>, event: parent::Event, out: &mu
                 Some(reply) => reply,
                 None => return,
             };
-            slot.relays.remove(&call);
+            slot.relays.remove(&call).expect("the retained relay receives one answer");
             match slot.state {
                 Stage::Live | Stage::Cancelling => {
                     root_step(agent, env, id, smith::Event::HostReturned { relay, reply }, out);

@@ -22,7 +22,7 @@ fn the_common_parent_referee_rejects_a_gone_with_an_open_inline_completion() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "one actual run answer")]
 fn the_common_parent_referee_rejects_two_run_answers() {
     let mut seen = Seen::default();
     for _ in 0..2 {
@@ -38,7 +38,7 @@ fn the_common_parent_referee_rejects_two_run_answers() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "Gone retains every parent call")]
 fn the_common_parent_referee_rejects_a_gone_with_an_unanswered_parent_call() {
     let mut seen = Seen::default();
     seen.calls.insert(Token::new(2));

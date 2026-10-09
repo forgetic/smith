@@ -515,7 +515,7 @@ impl Seen {
             }
             parent::Request::Answered { answer, .. } => {
                 assert!(self.fault.is_none());
-                assert!(self.answer.replace(answer).is_none());
+                assert!(self.answer.replace(answer).is_none(), "one actual run answer");
             }
             parent::Request::Faulted { fault, .. } => {
                 assert!(self.answer.is_none());
@@ -525,8 +525,8 @@ impl Seen {
                 if end == End::Stopped {
                     assert!(contained, "Gone needs the kind's actual containment proof");
                     assert!(lower_settled, "Gone retains every lower terminal");
-                    assert!(self.calls.is_empty());
-                    assert!(self.turns.is_empty());
+                    assert!(self.calls.is_empty(), "Gone retains every parent call");
+                    assert!(self.turns.is_empty(), "Gone retains every told turn");
                 }
                 assert!(self.gone.replace(end).is_none());
                 assert!(self.gone_detail.replace(detail).is_none());

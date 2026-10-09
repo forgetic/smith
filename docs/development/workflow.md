@@ -720,3 +720,14 @@ parent values, including full ownership-cap turns, decoded delivery fields,
 charter/history round trips and malformed bodies refused before domain
 ingress. The store's durable turn format and goldens are unchanged. Workspace
 focused and fuzzy budgets remain unchanged.
+
+Reliability inline increment 3.3 was measured through the serial heavy queue
+on 2026-10-09 with `measure -j 1`: the host world and inline agent passed
+67 focused tests in 0.754 seconds, with no skips. The new inline host-world
+stories, referee negatives and two-slot memory driver contribute 0.163
+seconds of individual test durations; its seeded message/cancel replay
+sweep passed serially in 0.192 seconds. Both slots use real root domains
+and Skein's native fake provider, and share the spawned kind's parent
+referee. Full start-message and grant inventories, exact turn ACK rights,
+park/resume, cancellation and native-drain ownership are covered. Workspace
+focused and fuzzy budgets remain unchanged.

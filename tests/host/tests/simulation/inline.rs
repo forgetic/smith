@@ -137,7 +137,6 @@ fn an_inline_runs_facts_are_drained_every_pass() {
             .iter()
             .any(|fact| matches!(fact.kind, smith_inline_agent::FactKind::Gone { client: _, end: End::Stopped }))
     );
-    assert_eq!(world.agent.facts_lost(), 0);
 }
 
 #[test]

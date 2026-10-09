@@ -3,7 +3,7 @@
 //! provider and parent operation rights, exact turn acknowledgement metadata,
 //! and the root domains' facts and content until the owner drains them.
 //! It knows no codec, process handle, address, credential value or host policy.
-//! `step`, `terminal`, `fire` and `resume` produce ordered parent notices and
+//! `step`, `fire` and `resume` produce ordered parent notices and
 //! lower requests. The owner routes every lower terminal, drains observations
 //! each pass, and calls `reclaim` only after handing the outputs onward.
 //! Workspace starts are refused until the workspace routing increment.
@@ -17,7 +17,7 @@
 //! | Live | Stop or wall expiry | Cancelling | Root cancellation |
 //! | Live/Cancelling | Root answer | Settling | Answered; cleanup |
 //! | Settling | Last terminal and ACK | Gone | Gone |
-//! | Gone | Reclaim | Empty | Nothing |
+//! | Gone | Drains empty, Reclaim | Empty | Nothing |
 
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]

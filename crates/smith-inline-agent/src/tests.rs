@@ -145,7 +145,7 @@ fn cancel_fire_resume_terminal_and_reclaim_settle_exactly_once() {
     assert!(agent.is_due(env.now));
     fire(&mut agent, &env, &mut out);
     agent.reclaim();
-    for _ in 0..8 {
+    for _ in 0_u32..8 {
         if !agent.is_ready() {
             break;
         }
@@ -159,7 +159,7 @@ fn cancel_fire_resume_terminal_and_reclaim_settle_exactly_once() {
     assert_eq!(agent.hosted(), 1);
     step(&mut agent, &env, Input::Below { agent: handle, terminal: Below::Cancelled { owner } }, &mut out);
     agent.reclaim();
-    for _ in 0..8 {
+    for _ in 0_u32..8 {
         if !agent.is_ready() {
             break;
         }
@@ -221,6 +221,6 @@ fn an_occupied_or_duplicate_client_is_refused_without_touching_its_live_slot() {
 
 #[test]
 fn a_full_parent_reply_is_a_typed_too_large_terminal() {
-    let reply = host::Reply::Host { error: false, body: vec![b'x'; run::HostAnswer::CAPACITY + 1].into() };
+    let reply = host::Reply::Host { error: false, body: Box::new([b'x'; run::HostAnswer::CAPACITY + 1]) };
     assert_eq!(translate::host_reply(reply), Some(run::HostReply::TooLarge));
 }
