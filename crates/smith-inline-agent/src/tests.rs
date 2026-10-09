@@ -1,6 +1,6 @@
 //! Entry-point and boundary ownership cases; clocks and values are supplied.
 use alloc::boxed::Box;
-use skein_lib::{Duration, Env, Id, Queue, Time, Token, Wall};
+use skein_lib::{Duration, Env, Id, List, Queue, Time, Token, Wall};
 use smith_domain::{self as smith, run};
 use smith_host_domain::{self as host, parent};
 
@@ -221,6 +221,11 @@ fn an_occupied_or_duplicate_client_is_refused_without_touching_its_live_slot() {
 
 #[test]
 fn a_full_parent_reply_is_a_typed_too_large_terminal() {
-    let reply = host::Reply::Host { error: false, body: Box::new([b'x'; run::HostAnswer::CAPACITY + 1]) };
+    let capacity = u32::try_from(run::HostAnswer::CAPACITY + 1).expect("small vocabulary cap");
+    let mut body = List::with_capacity(capacity);
+    for _ in 0..capacity {
+        body.push(b'x').expect("fixed checked capacity");
+    }
+    let reply = host::Reply::Host { error: false, body: body.into_boxed() };
     assert_eq!(translate::host_reply(reply), Some(run::HostReply::TooLarge));
 }
