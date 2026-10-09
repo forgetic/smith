@@ -675,6 +675,7 @@ fn host_memory_take(
             Request::Read { owner, .. } => token = Some(owner),
             Request::Open { conversation, opening } => {
                 assert_eq!(opening.host_tools.len(), 1);
+                assert_eq!(opening.prompt.len(), usize::try_from(env.limits.message_bytes).expect("cap fits"));
                 token = Some(conversation);
             }
             Request::Turn { .. }
@@ -743,6 +744,14 @@ fn complete_declaration_and_maximum_opaque_input_answer_retries_reach_the_measur
         &mut out,
         &meter,
         Some(Event::Read { owner: run, read: smith_domain_run::Read::Missing }),
+    );
+    assert!(conversation.is_none(), "an empty-brief wait-enabled run retains its complete declaration until a task");
+    let (conversation, _) = host_memory_take(
+        &mut domain,
+        &env,
+        &mut out,
+        &meter,
+        Some(Event::Message { run, name: Token::new(100), text: bytes(u64::from(limits.message_bytes)) }),
     );
     let conversation = conversation.expect("main opens with complete declaration");
     host_memory_take(&mut domain, &env, &mut out, &meter, Some(Event::Started { conversation, peer: Token::new(99) }));
