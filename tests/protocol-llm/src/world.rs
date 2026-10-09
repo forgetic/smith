@@ -1496,10 +1496,11 @@ impl World {
                         .accepted_usage
                         .expect("actual SDK completed usage"),
                     Backend::Typed { .. } => skein_llm::Usage {
-                        input_tokens: completion.usage.input_tokens.expect("scripted peer supplies count"),
-                        output_tokens: completion.usage.output_tokens.expect("scripted peer supplies count"),
-                        cache_read_tokens: completion.usage.cache_read_tokens.expect("scripted peer supplies count"),
-                        cache_write_tokens: completion.usage.cache_write_tokens.expect("scripted peer supplies count"),
+                        input: completion.usage.input_tokens,
+                        output: completion.usage.output_tokens,
+                        cache_read: completion.usage.cache_read_tokens,
+                        cache_write: completion.usage.cache_write_tokens,
+                        reasoning: completion.usage.reasoning_tokens,
                     },
                 };
                 CompletionTerminal::Completed(usage)

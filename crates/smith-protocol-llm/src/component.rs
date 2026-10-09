@@ -108,6 +108,7 @@ pub fn component_worst_case(limits: &ComponentLimits, endpoints: &Endpoints) -> 
     let base = connection::worst_case(&limits.connection, endpoints.destinations())?
         .checked_add(Grants::worst_case(limits.accounts, limits.grant_value_bytes)?)?
         .checked_add(Map::<u32, EndpointOptions>::worst_case(limits.connection.endpoints)?)?
+        .checked_add(endpoints.option_bytes()?)?
         .checked_add(Map::<Token, Active>::worst_case(limits.connection.connections)?)?
         .checked_add(Set::<Token>::worst_case(limits.connection.connections)?)?
         .checked_add(Queue::<connection::Event>::worst_case(MAX_OUT.above)?)?;
@@ -249,6 +250,7 @@ impl Component {
                 return;
             }
         };
+        let drop_reasoning = options.drop_reasoning(&prompt.model);
         let credential = match self.grants.read(grant, env.now) {
             Ok(credential) => credential,
             Err(GrantError::Missing | GrantError::Lapsed) => {
@@ -308,7 +310,14 @@ impl Component {
         let child_env = self.child_env(env);
         self.connection.down(
             &child_env,
-            connection::Request::Start { call: owner, endpoint: index, prompt: translated, credential, deadlines },
+            connection::Request::Start {
+                call: owner,
+                endpoint: index,
+                prompt: translated,
+                credential,
+                deadlines,
+                drop_reasoning,
+            },
             &mut self.events,
             io,
         );

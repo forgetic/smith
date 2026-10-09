@@ -1877,6 +1877,7 @@ fn a_provider_charge_above_its_reserved_maximum_fails_without_recording_it() {
     };
     let (_, main, _) = harness.admit(1, selected);
     let completion = Completion {
+        reasoning_dropped: Box::new([]),
         content: Box::new([Said::Text { text: bytes(b"overbound"), replay: None }]),
         stop: Stop::EndTurn,
         usage: Usage { output_tokens: Some(100_000), ..Usage::ZERO },
@@ -2086,6 +2087,7 @@ fn missing_provider_usage_settles_the_root_reservation_and_keeps_the_raw_fact() 
                 .step(Event::Completed {
                     owner: main,
                     completion: Completion {
+                        reasoning_dropped: Box::default(),
                         content: Box::new([served(b"finish", verdict(b"approve"))]),
                         stop: Stop::ToolUse,
                         usage: raw,

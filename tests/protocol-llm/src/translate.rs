@@ -100,11 +100,11 @@ pub(crate) fn completion(
         provider::Finish::ContentFilter => agent::Stop::Refusal,
     };
     let usage = agent::Usage {
-        input_tokens: Some(answer.usage.prompt_tokens),
-        output_tokens: Some(answer.usage.completion_tokens),
-        cache_read_tokens: Some(answer.usage.cached_tokens),
-        cache_write_tokens: Some(answer.usage.cache_creation_tokens),
-        reasoning_tokens: None,
+        input_tokens: answer.usage.input,
+        output_tokens: answer.usage.output,
+        cache_read_tokens: answer.usage.cache_read,
+        cache_write_tokens: answer.usage.cache_write,
+        reasoning_tokens: answer.usage.reasoning,
     };
     let content = answer
         .parts

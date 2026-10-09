@@ -470,6 +470,7 @@ fn validate_fact(domain: &str, fact: &Value) -> Result<(), ParseError> {
         ("Session", "Opened" | "CompletionCancelled" | "DelegateCancelled") => &["opener"],
         ("Session", "CompletionStarted") => &["opener", "attempt", "messages", "max_tokens"],
         ("Session", "CompletionAnswered") => &["opener", "stop", "blocks", "calls", "invalid"],
+        ("Session", "ReasoningDropped") => &["opener", "bytes"],
         ("Session", "CompletionFailed") => &["opener", "failure", "evidence"],
         ("Session", "CompletionRetried") => &["opener", "attempt", "delay"],
         ("Session", "Tools") => &["opener", "fact"],

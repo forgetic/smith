@@ -4,6 +4,7 @@
 //! Contract: protocol/agent.md, section 4; protocol/llm.md, sections 2 and 6.
 
 use alloc::boxed::Box;
+use core::mem::size_of;
 
 use skein_lib::{List, Map};
 use skein_llm::{Prompt, Provider};
@@ -17,6 +18,22 @@ pub enum IdentityProfile {
     Plain,
     /// Opt in to skein's archived Claude Code identity blocks.
     ClaudeCode,
+}
+
+/// A model's policy for a reasoning item past its bound (protocol/limits.md, section 2.1).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum OversizedReasoning {
+    /// Refuse the completion with the reasoning item's typed limit; the default.
+    Fail,
+    /// Keep the completion without the item and emit its drop as a fact.
+    Drop,
+}
+
+/// One declared model's per-call policy, supplied by startup and retained by its endpoint.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct ConfiguredModel {
+    pub name: Box<[u8]>,
+    pub oversized_reasoning: OversizedReasoning,
 }
 
 /// One startup-resolved endpoint, named as the domain names it.
@@ -35,6 +52,8 @@ pub struct ConfiguredEndpoint {
     pub cache_key: Option<Box<[u8]>>,
     /// Optional provider system identity selected at startup.
     pub identity: IdentityProfile,
+    /// The models whose per-call reasoning policy this endpoint serves.
+    pub models: Box<[ConfiguredModel]>,
 }
 
 /// Per-name options kept after the connection component takes destinations.
@@ -52,6 +71,24 @@ pub struct EndpointOptions {
     pub cache_key: Option<Box<[u8]>>,
     /// Optional provider system identity selected at startup.
     pub identity: IdentityProfile,
+    /// The models whose per-call reasoning policy this endpoint serves.
+    pub models: Box<[ConfiguredModel]>,
+}
+
+impl EndpointOptions {
+    /// Select the declared model's per-call policy; an undeclared name keeps the default failure.
+    #[must_use]
+    pub fn drop_reasoning(&self, requested_model: &[u8]) -> bool {
+        for model in &self.models {
+            if model.name.as_ref() == requested_model {
+                return match model.oversized_reasoning {
+                    OversizedReasoning::Fail => false,
+                    OversizedReasoning::Drop => true,
+                };
+            }
+        }
+        false
+    }
 }
 
 /// Why startup endpoint registration cannot be admitted.
@@ -108,6 +145,7 @@ impl Endpoints {
                 reasoning_effort: configured.reasoning_effort,
                 cache_key: configured.cache_key,
                 identity: configured.identity,
+                models: configured.models,
             };
             options.insert(configured.name.0, option).or(Err(EndpointError::TooMany))?;
         }
@@ -140,6 +178,25 @@ impl Endpoints {
     #[must_use]
     pub fn destinations(&self) -> &List<connection::Endpoint> {
         &self.destinations
+    }
+
+    /// Bytes owned by startup options beyond the map's inline cells.
+    #[must_use]
+    pub fn option_bytes(&self) -> Option<u64> {
+        let mut held = 0_u64;
+        for (_, option) in &self.options {
+            for model in &option.models {
+                held = held.checked_add(u64::try_from(size_of::<ConfiguredModel>()).ok()?)?;
+                held = held.checked_add(u64::try_from(model.name.len()).ok()?)?;
+            }
+            if let Some(value) = &option.reasoning_effort {
+                held = held.checked_add(u64::try_from(value.len()).ok()?)?;
+            }
+            if let Some(value) = &option.cache_key {
+                held = held.checked_add(u64::try_from(value.len()).ok()?)?;
+            }
+        }
+        Some(held)
     }
 
     /// Split names from resolved destinations for the owning component.

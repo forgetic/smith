@@ -136,13 +136,13 @@ fn completion(
         provider::Finish::Length => agent::Stop::MaxTokens,
         provider::Finish::ContentFilter => agent::Stop::Refusal,
     };
-    let provider::Usage { prompt_tokens, cached_tokens, cache_creation_tokens, completion_tokens } = answer.usage;
+    let provider::Usage { input, cache_read, cache_write, output, reasoning } = answer.usage;
     let usage = agent::Usage {
-        input_tokens: Some(prompt_tokens),
-        output_tokens: Some(completion_tokens),
-        cache_read_tokens: Some(cached_tokens),
-        cache_write_tokens: Some(cache_creation_tokens),
-        reasoning_tokens: None,
+        input_tokens: input,
+        output_tokens: output,
+        cache_read_tokens: cache_read,
+        cache_write_tokens: cache_write,
+        reasoning_tokens: reasoning,
     };
     let content = answer.parts.into_iter().map(|part| block(part, tickets, opener, served)).collect();
     agent::Completion { reasoning_dropped: Box::default(), content, stop, usage }

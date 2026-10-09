@@ -28,6 +28,8 @@ pub struct Model {
     pub window: u32,
     pub output: u32,
     pub reasoning_item: u32,
+    #[serde(default)]
+    pub oversized_reasoning: Option<String>,
     /// Progress durations in milliseconds.
     pub head: u64,
     pub idle: u64,
@@ -323,6 +325,7 @@ pub fn read(global: &Path, workspace: Option<&Path>) -> Result<Settings, String>
                 || model.window == 0
                 || model.output == 0
                 || model.reasoning_item == 0
+                || !matches!(model.oversized_reasoning.as_deref(), None | Some("fail" | "drop"))
                 || model.head == 0
                 || model.idle == 0
         })
@@ -354,7 +357,7 @@ pub fn agent_document(settings: &Settings) -> Result<Vec<u8>, String> {
                     return Err("duplicate local model declaration".into());
                 }
                 models.push(serde_json::json!({"name":model.name,"window":model.window,"output":model.output,
-                    "reasoning_item":model.reasoning_item,"head":model.head,"idle":model.idle}));
+                    "reasoning_item":model.reasoning_item,"oversized_reasoning":model.oversized_reasoning,"head":model.head,"idle":model.idle}));
             }
         }
         if models.is_empty() {
@@ -451,6 +454,7 @@ mod tests {
                 window: 8192,
                 output: 32,
                 reasoning_item: 2048,
+                oversized_reasoning: None,
                 head: 60_000,
                 idle: 30_000,
                 input_price: 1,
@@ -495,6 +499,7 @@ mod tests {
                                 window: model.window,
                                 output: model.output,
                                 reasoning_item: model.reasoning_item,
+                                oversized_reasoning: smith_agent_service::profile::OversizedReasoning::Fail,
                                 head: Duration::from_millis(model.head),
                                 idle: Duration::from_millis(model.idle),
                             })

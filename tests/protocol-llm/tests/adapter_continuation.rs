@@ -199,13 +199,12 @@ fn envelope(bytes: &[u8], header: [u8; 7], payload: &[u8]) -> bool {
     bytes.get(..7) == Some(header.as_slice()) && bytes.get(7..) == Some(payload)
 }
 
-fn usage(actual: llm::Usage, expected: [u64; 4]) {
-    let expected = expected.map(Some);
+fn usage(actual: llm::Usage, expected: [Option<u64>; 4]) {
     let observed = [actual.input_tokens, actual.output_tokens, actual.cache_read_tokens, actual.cache_write_tokens];
     assert_eq!(observed, expected, "all four actual translated usage fields");
     for index in 0..4 {
         let mut changed = observed;
-        changed[index] = Some(changed[index].expect("provider reports every fixture count") + 1);
+        changed[index] = Some(changed[index].unwrap_or(0) + 1);
         assert_ne!(changed, expected, "usage field {index} participates in the outside oracle");
     }
 }
@@ -286,7 +285,7 @@ fn codex_reasoning_refusal_and_message_identity_continue_exactly() {
     let (context, mut peer) = adopt(&configuration, Token::new(0), Box::new([user(b"Start.")]), source);
     let mut completion = completed(context, &mut peer, Token::new(0));
     assert!(codex_evidence(&completion), "actual translated ordered replay/refusal: {completion:?}");
-    usage(completion.usage, [8, 3, 4, 0]);
+    usage(completion.usage, [Some(8), Some(3), Some(4), None]);
     completion.content.swap(0, 1);
     assert!(!codex_evidence(&completion));
     completion.content.swap(0, 1);
@@ -315,7 +314,7 @@ fn anthropic_all_usage_signed_and_redacted_replay_continue_exactly() {
     let (context, mut peer) = adopt(&configuration, Token::new(99), Box::new([user(b"Start.")]), source.clone());
     let mut completion = completed(context, &mut peer, Token::new(99));
     assert!(anthropic_evidence(&completion), "actual translated ordered thinking: {completion:?}");
-    usage(completion.usage, [7, 9, 11, 13]);
+    usage(completion.usage, [Some(7), Some(9), Some(11), Some(13)]);
     completion.content.swap(0, 1);
     assert!(!anthropic_evidence(&completion));
     completion.content.swap(0, 1);
@@ -329,7 +328,7 @@ fn anthropic_all_usage_signed_and_redacted_replay_continue_exactly() {
     let (context, mut next) = adopt(&configuration, Token::new(7), history(completion), source);
     let continued = completed(context, &mut next, Token::new(7));
     assert!(anthropic_evidence(&continued));
-    usage(continued.usage, [7, 9, 11, 13]);
+    usage(continued.usage, [Some(7), Some(9), Some(11), Some(13)]);
     native_corruptions(
         &next,
         ANTHROPIC_HISTORY,
@@ -629,4 +628,150 @@ fn response_unknown_and_unsent_failures_preserve_full_evidence() {
         llm::Evidence::Unsent,
         b"stream closed before completion",
     );
+}
+
+fn block_peer(configuration: &Configuration, bounds: &Limits, source: Vec<u8>) -> (Context, RawWorld) {
+    let mut requested = prompt(Box::new([user(b"Start.")]));
+    requested.served = Box::new([llm::Served::Host(run::HostTool {
+        name: Box::from(b"host_action".as_slice()),
+        description: Box::from(b"A bounded host action".as_slice()),
+        schema: Box::from(br#"{"type":"object"}"#.as_slice()),
+        effect: run::HostEffect::Read,
+        timeout: Duration::from_secs(2),
+    })]);
+    let adapter::Prepared { client, context } = adapter::prepare(
+        Input {
+            owner: Token::new(71),
+            prompt: requested,
+            endpoint_name: llm::Endpoint(1),
+            endpoint: configuration.endpoint.clone(),
+            credential: shared::Credential {
+                access_token: configuration.credential.access_token.clone(),
+                account_id: configuration.credential.account_id.clone(),
+            },
+            application: Box::new([]),
+            receiving: receiving(bounds),
+        },
+        bounds,
+    )
+    .expect("block peer prepares");
+    let mut peer = RawWorld::prepared(client, bounds.client, source, 71);
+    peer.fragmentation(1, 1);
+    (context, peer)
+}
+
+const BLOCK_RESPONSE: &[&str] = &[
+    r#"{"type":"response.output_item.added","output_index":0,"item":{"id":"large","call_id":"large-call","type":"function_call","name":"host_action","arguments":""}}"#,
+    r#"{"type":"response.output_item.done","output_index":0,"item":{"id":"large","call_id":"large-call","type":"function_call","name":"host_action","arguments":"{\"payload\":\"abcdefghij\"}"}}"#,
+    r#"{"type":"response.output_item.added","output_index":1,"item":{"id":"ordinary","call_id":"ordinary-call","type":"function_call","name":"host_action","arguments":""}}"#,
+    r#"{"type":"response.output_item.done","output_index":1,"item":{"id":"ordinary","call_id":"ordinary-call","type":"function_call","name":"host_action","arguments":"{}"}}"#,
+    r#"{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":2,"output_tokens":3}}}"#,
+];
+
+#[test]
+fn an_oversized_call_beside_an_ordinary_one_completes_with_a_fixable_error() {
+    let configuration = wire::configurations().into_iter().next().expect("Codex fixture");
+    let mut bounds = limits();
+    bounds.client.dialect.input_bytes = 16;
+    let source = response(200, "Content-Type: text/event-stream\r\n", &events(BLOCK_RESPONSE), true);
+    let (context, mut peer) = block_peer(&configuration, &bounds, source);
+    let actual = completed(context, &mut peer, Token::new(71));
+    let [
+        llm::Said::ToolCall { id, input, call: llm::Decoded::Invalid { problem }, replay: None, .. },
+        llm::Said::ToolCall { call: llm::Decoded::Served { ask: run::Ask::Host { .. } }, .. },
+    ] = actual.content.as_ref()
+    else {
+        panic!("one invalid and one ordinary call: {:?}", actual.content);
+    };
+    assert_eq!(id.as_ref(), b"large-call");
+    assert_eq!(input.as_ref(), b"{}");
+    assert_eq!(problem, &llm::Problem::Oversize { bytes: 24, bound: 16 });
+    assert_eq!(actual.usage.cache_read_tokens, None);
+    close(&mut peer);
+}
+
+#[test]
+fn a_cut_call_is_replaced_and_the_next_request_replays() {
+    let configuration = wire::configurations().into_iter().next().expect("Codex fixture");
+    let messages = [
+        r#"{"type":"response.output_item.added","output_index":0,"item":{"id":"cut","call_id":"cut-call","type":"function_call","name":"host_action","arguments":""}}"#,
+        r#"{"type":"response.output_item.done","output_index":0,"item":{"id":"cut","call_id":"cut-call","type":"function_call","name":"host_action","status":"incomplete","arguments":"{broken"}}"#,
+        r#"{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":2,"output_tokens":3}}}"#,
+    ];
+    let bounds = limits();
+    let source = response(200, "Content-Type: text/event-stream\r\n", &events(&messages), true);
+    let (context, mut peer) = block_peer(&configuration, &bounds, source);
+    let actual = completed(context, &mut peer, Token::new(71));
+    let [llm::Said::ToolCall { id, name, input, call: llm::Decoded::Invalid { problem }, replay: None }] =
+        actual.content.as_ref()
+    else {
+        panic!("cut becomes one replayable call: {:?}", actual.content);
+    };
+    assert_eq!(input.as_ref(), b"{}");
+    assert_eq!(problem, &llm::Problem::CutOff { bytes: 7 });
+    let history = Box::new([
+        llm::Message {
+            role: llm::Role::Assistant,
+            content: Box::new([llm::Block::ToolCall {
+                id: id.clone(),
+                name: name.clone(),
+                input: input.clone(),
+                replay: None,
+            }]),
+        },
+        llm::Message {
+            role: llm::Role::User,
+            content: Box::new([llm::Block::ToolResult {
+                id: id.clone(),
+                result: llm::Returned::Invalid { problem: problem.clone() },
+            }]),
+        },
+    ]);
+    close(&mut peer);
+    let source = response(200, "Content-Type: text/event-stream\r\n", &events(CODEX_RESPONSE), true);
+    let (context, mut next) = adopt(&configuration, Token::new(72), history, source);
+    drop(completed(context, &mut next, Token::new(72)));
+    let body = native_body(&next);
+    assert!(body.windows(b"\"arguments\":\"{}\"".len()).any(|part| part == b"\"arguments\":\"{}\""));
+    assert!(body.windows(b"input cut off after 7 bytes".len()).any(|part| part == b"input cut off after 7 bytes"));
+    assert!(!body.windows(b"{broken".len()).any(|part| part == b"{broken"));
+    close(&mut next);
+}
+
+#[test]
+fn a_reasoning_item_past_its_bound_fails_unless_the_model_drops_it() {
+    let configuration = wire::configurations().into_iter().next().expect("Codex fixture");
+    for enabled in [false, true] {
+        let mut bounds = limits();
+        bounds.client.dialect.opaque_bytes = u32::try_from(CODEX_REASONING.len() - 1).expect("fixture size");
+        bounds.client.drop_reasoning = enabled;
+        let source = response(200, "Content-Type: text/event-stream\r\n", &events(CODEX_RESPONSE), true);
+        let (context, mut peer) = block_peer(&configuration, &bounds, source);
+        peer.request(client::Request::Start);
+        peer.run();
+        let terminal = take_terminal(&mut peer);
+        if enabled {
+            let client::Event::Completed { owner, completion } = terminal else {
+                panic!("drop keeps completion");
+            };
+            let Event::Completed { completion, .. } =
+                adapter::completion(context, owner, completion, Box::new([])).expect("drop translates")
+            else {
+                panic!("completed");
+            };
+            assert_eq!(
+                completion.reasoning_dropped.as_ref(),
+                &[u64::try_from(CODEX_REASONING.len()).expect("fixture size")]
+            );
+            assert_eq!(completion.content.len(), 2);
+            assert!(completion.content.iter().all(|block| !matches!(block, llm::Said::Opaque { .. })));
+            close(&mut peer);
+        } else {
+            assert!(matches!(
+                terminal,
+                client::Event::Failed { failure: shared::Failure::Limit { which: shared::Cap::Opaque, .. }, .. }
+            ));
+            peer.settle();
+        }
+    }
 }

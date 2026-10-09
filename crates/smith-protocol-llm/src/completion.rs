@@ -83,13 +83,13 @@ pub fn completion(
         shared::Stop::MaxTokens => llm::Stop::MaxTokens,
         shared::Stop::Refusal => llm::Stop::Refusal,
     };
-    let shared::Usage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens } = usage;
+    let shared::Usage { input, output, cache_read, cache_write, reasoning } = usage;
     let usage = llm::Usage {
-        input_tokens: Some(input_tokens),
-        output_tokens: Some(output_tokens),
-        cache_read_tokens: Some(cache_read_tokens),
-        cache_write_tokens: Some(cache_write_tokens),
-        reasoning_tokens: None,
+        input_tokens: input,
+        output_tokens: output,
+        cache_read_tokens: cache_read,
+        cache_write_tokens: cache_write,
+        reasoning_tokens: reasoning,
     };
     Ok(Event::Completed {
         owner: context.owner,

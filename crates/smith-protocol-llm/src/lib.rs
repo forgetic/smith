@@ -37,7 +37,9 @@ pub use completion::completion;
 pub use component::{Component, ComponentError, ComponentLimits, MAX_OUT, MaxOut, component_worst_case};
 pub use contract::{decode_deliver, decode_finish, deliver_schema, finish_schema};
 pub use decode::decode;
-pub use endpoints::{ConfiguredEndpoint, EndpointError, EndpointOptions, Endpoints, IdentityProfile};
+pub use endpoints::{
+    ConfiguredEndpoint, ConfiguredModel, EndpointError, EndpointOptions, Endpoints, IdentityProfile, OversizedReasoning,
+};
 pub use failure::{cancelled, failed, refusal};
 pub use grants::{GrantError, Grants};
 pub use limits::{Limits, Receiving, completion_worst_case, render_worst_case, worst_case};

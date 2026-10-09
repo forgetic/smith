@@ -112,6 +112,8 @@ struct ModelDocument {
     window: u32,
     output: u32,
     reasoning_item: u32,
+    #[serde(default)]
+    oversized_reasoning: Option<String>,
     head: u64,
     idle: u64,
 }
@@ -374,6 +376,17 @@ fn build_endpoints(endpoints: Vec<Endpoint>, limits: &llm::ComponentLimits) -> R
             reasoning_effort: endpoint.reasoning_effort.map(|value| value.into_bytes().into()),
             cache_key: endpoint.cache_key.map(|value| value.into_bytes().into()),
             identity,
+            models: endpoint
+                .models
+                .iter()
+                .map(|model| {
+                    Ok(llm::ConfiguredModel {
+                        name: model.name.as_bytes().into(),
+                        oversized_reasoning: reasoning_policy(model.oversized_reasoning.as_deref())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?
+                .into_boxed_slice(),
         });
     }
     Ok(PreparedEndpoints {
@@ -610,6 +623,14 @@ fn duration(millis: u64, name: &str) -> Result<Duration, String> {
     Ok(Duration::from_nanos(nanos))
 }
 
+fn reasoning_policy(value: Option<&str>) -> Result<llm::OversizedReasoning, String> {
+    match value {
+        None | Some("fail") => Ok(llm::OversizedReasoning::Fail),
+        Some("drop") => Ok(llm::OversizedReasoning::Drop),
+        Some(_) => Err("model oversized_reasoning must be fail or drop".into()),
+    }
+}
+
 fn build_models(
     number: u32,
     connect: u64,
@@ -641,6 +662,7 @@ fn build_models(
             window: model.window,
             output: model.output,
             reasoning_item: model.reasoning_item,
+            oversized_reasoning: reasoning_policy(model.oversized_reasoning.as_deref())?,
             head: duration(model.head, "model.head")?,
             idle: duration(model.idle, "model.idle")?,
         });
@@ -743,6 +765,7 @@ mod tests {
                 window: 8192,
                 output: 4096,
                 reasoning_item: 2048,
+                oversized_reasoning: None,
                 head: 60_000,
                 idle: 30_000,
             }],
@@ -887,4 +910,16 @@ mod tests {
             assert!(parse_value(&document).is_err(), "zero deployment quantity {field}");
         }
     }
+    #[test]
+    fn oversized_reasoning_defaults_to_fail_and_drop_requires_explicit_selection() {
+        let mut document = shaped_document();
+        let configured = parse_value(&document).expect("default policy");
+        assert_eq!(configured.declarations.endpoints[0].models[0].oversized_reasoning, service::profile::OversizedReasoning::Fail);
+        document["endpoints"][0]["models"][0]["oversized_reasoning"] = "drop".into();
+        let configured = parse_value(&document).expect("explicit drop");
+        assert_eq!(configured.declarations.endpoints[0].models[0].oversized_reasoning, service::profile::OversizedReasoning::Drop);
+        document["endpoints"][0]["models"][0]["oversized_reasoning"] = "fallback".into();
+        assert_eq!(parse_value(&document).err().as_deref(), Some("model oversized_reasoning must be fail or drop"));
+    }
+
 }

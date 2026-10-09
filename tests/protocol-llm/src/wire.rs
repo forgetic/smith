@@ -459,7 +459,10 @@ fn resolutions(context: &Context, completion: &shared::Completion) -> Box<[Resol
             shared::Block::Text { .. }
             | shared::Block::Refusal { .. }
             | shared::Block::Reasoning { .. }
-            | shared::Block::ToolResult { .. } => None,
+            | shared::Block::ToolResult { .. }
+            | shared::Block::Oversize { .. }
+            | shared::Block::Cut { .. }
+            | shared::Block::Dropped { .. } => None,
         })
         .collect()
 }

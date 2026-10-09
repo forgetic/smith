@@ -71,6 +71,8 @@ pub fn configured_transport(
         transport,
         limits(),
         provider::Config {
+            echo: skein_llm::openai::Echo::NONE,
+            usage_fields: documents::UsageFields::ALL,
             provider: documents::Provider::OpenAi,
             path: skein_llm_world::call(1).endpoint.target,
             headers: Box::new([]),
@@ -87,7 +89,7 @@ pub fn configured_transport(
 pub fn queries(peer: &llm::Peer) -> impl Iterator<Item = &api::Query> {
     peer.observations().iter().filter_map(|observation| match observation {
         llm::Observation::Query { query, .. } => Some(query),
-        llm::Observation::Accepted { .. } | llm::Observation::Answered { .. } | llm::Observation::Closed { .. } => None,
+        llm::Observation::Head { .. } | llm::Observation::Accepted { .. } | llm::Observation::Answered { .. } | llm::Observation::Closed { .. } => None,
     })
 }
 

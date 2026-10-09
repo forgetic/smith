@@ -27,7 +27,7 @@ fn a_first_run_signs_in_and_keeps_its_token() {
     .expect("private token store");
     let saved = tokens.load(0).expect("token load").expect("saved grant");
     assert_eq!(saved.access_token.as_ref(), b"access-new");
-    assert_eq!(saved.refresh_token.as_ref(), b"refresh-new");
+    assert_eq!(saved.refresh_token.as_deref(), Some(b"refresh-new".as_slice()));
     assert_eq!(seen.exit, Some(kernel::Exit::Code(0)));
 }
 

@@ -114,6 +114,7 @@ pub struct Model {
     pub output: u32,
     /// Largest opaque reasoning item, in bytes.
     pub reasoning_item: u32,
+    pub oversized_reasoning: smith_protocol_llm::OversizedReasoning,
     pub head: Duration,
     pub idle: Duration,
 }

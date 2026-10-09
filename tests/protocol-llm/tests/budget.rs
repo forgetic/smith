@@ -55,9 +55,10 @@ const RESUMED_RATES: [Rate; 2] =
 fn charge(usage: skein_llm::Usage, rate: Rate) -> u64 {
     // One combined numerator is rounded once. This oracle uses no domain
     // price method, accumulated spend, child bill or saved Turn value.
-    let numerator = (u128::from(usage.input_tokens) + u128::from(usage.cache_write_tokens)) * u128::from(rate.input)
-        + u128::from(usage.cache_read_tokens) * u128::from(rate.cached)
-        + u128::from(usage.output_tokens) * u128::from(rate.output);
+    let numerator = (u128::from(usage.input.unwrap_or(0)) + u128::from(usage.cache_write.unwrap_or(0)))
+        * u128::from(rate.input)
+        + u128::from(usage.cache_read.unwrap_or(0)) * u128::from(rate.cached)
+        + u128::from(usage.output.unwrap_or(0)) * u128::from(rate.output);
     let denominator = u128::from(rate.unit);
     u64::try_from(numerator.div_ceil(denominator)).expect("finite story prices fit u64")
 }
@@ -77,10 +78,10 @@ fn total(observations: &[CompletionObservation], rates: &[Rate]) -> run::Spend {
         let actual = usage(observation);
         let rate = rates.iter().find(|rate| rate.model == observation.model.as_ref()).expect("outside model table");
         expected.turns += 1;
-        expected.input += actual.input_tokens;
-        expected.output += actual.output_tokens;
-        expected.cache_read += actual.cache_read_tokens;
-        expected.cache_write += actual.cache_write_tokens;
+        expected.input += actual.input.unwrap_or(0);
+        expected.output += actual.output.unwrap_or(0);
+        expected.cache_read += actual.cache_read.unwrap_or(0);
+        expected.cache_write += actual.cache_write.unwrap_or(0);
         expected.units += charge(actual, *rate);
     }
     expected
@@ -304,11 +305,11 @@ fn own_units(calls: &[&CompletionObservation], rate: Rate) -> u64 {
 
 fn turn_usage(actual: skein_llm::Usage) -> llm::Usage {
     llm::Usage {
-        input_tokens: Some(actual.input_tokens),
-        output_tokens: Some(actual.output_tokens),
-        cache_read_tokens: Some(actual.cache_read_tokens),
-        cache_write_tokens: Some(actual.cache_write_tokens),
-        reasoning_tokens: None,
+        input_tokens: actual.input,
+        output_tokens: actual.output,
+        cache_read_tokens: actual.cache_read,
+        cache_write_tokens: actual.cache_write,
+        reasoning_tokens: actual.reasoning,
     }
 }
 

@@ -18,6 +18,8 @@ use crate as service;
 
 mod quantities;
 
+pub use smith_protocol_llm::OversizedReasoning;
+
 pub use quantities::{Configuration, Declared, Endpoint, Fraction, Model, Name, Policy, Profile, standard};
 
 /// The number of configured destinations the standard profile admits.

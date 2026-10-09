@@ -69,6 +69,6 @@ fn a_lent_grant_refreshes_while_the_model_is_running_before_it_lapses() {
     .expect("record")
     .expect("saved rotation");
     assert_eq!(token.generation, 2);
-    assert_eq!(token.refresh_token.as_ref(), b"refresh-new");
+    assert_eq!(token.refresh_token.as_deref(), Some(b"refresh-new".as_slice()));
     review(&world.seen(), &world, Ending::Report(b"First answer".to_vec())).assert_passed(23);
 }

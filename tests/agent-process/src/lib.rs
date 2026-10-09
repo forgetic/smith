@@ -166,6 +166,7 @@ pub fn configuration() -> agent::Config {
             reasoning_effort: None,
             cache_key: None,
             identity: llm::IdentityProfile::Plain,
+            models: Box::new([]),
         }]),
         1,
         1,

@@ -314,7 +314,7 @@ mod tests {
                 client_id: bytes(b"client"),
                 client_secret: None,
                 redirect_uri: bytes(b"http://127.0.0.1:2345/callback"),
-                refresh_token: Some(bytes(b"refresh-old")),
+                refresh_token: bytes(b"refresh-old"),
             },
             fake::Limits {
                 document: limits().oauth.document,
@@ -452,7 +452,7 @@ mod tests {
         };
         let stored = oauth::decode_record(&token, &limits().oauth.document).expect("saved token");
         assert_eq!(stored.generation, 2);
-        assert_eq!(stored.refresh_token.as_ref(), b"refresh-new");
+        assert_eq!(stored.refresh_token.as_deref(), Some(b"refresh-new".as_slice()));
         let CredentialRequest::Ready { event: local::Event::Credential { grant }, value } =
             step(&mut credential, CredentialEvent::Stored { wall: wall() })
         else {
@@ -461,4 +461,36 @@ mod tests {
         assert_eq!(grant.name.generation, 2);
         assert_eq!(value.as_ref(), b"access-new");
     }
+    #[test]
+    fn an_access_only_token_is_lent_until_expiry_then_fails_without_sign_in() {
+        for fresh in [true, false] {
+            let mut credential = Credential::new(7, limits()).expect("component");
+            let mut saved = oauth::SavedToken {
+                key: 7,
+                generation: 3,
+                access_token: bytes(b"access-only"),
+                refresh_token: None,
+                metadata: None,
+                expires_at: wall(),
+            };
+            if fresh {
+                saved.expires_at = Wall::from_nanos(wall().as_nanos() + Duration::from_secs(3600).as_nanos());
+            }
+            let mut out = Queue::with_capacity(1);
+            credential.begin(begin(Some(saved)), &mut out);
+            match out.pop().expect("one terminal") {
+                CredentialRequest::Ready { event: local::Event::Credential { grant }, value } if fresh => {
+                    assert_eq!(grant.name.generation, 3);
+                    assert_eq!(value.as_ref(), b"access-only");
+                }
+                CredentialRequest::Failed { event: local::Event::NoCredential { reason, .. } } if !fresh => {
+                    assert_eq!(reason, CredentialFailure::Refresh);
+                }
+                _ => panic!("access-only token produces a terminal without sign-in or HTTP"),
+            }
+            assert!(out.is_empty());
+            assert!(credential.next_deadline().is_none());
+        }
+    }
+
 }
