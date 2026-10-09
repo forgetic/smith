@@ -128,6 +128,7 @@ pub fn run(settings_path: &Path, state_root: &Path, workspace_settings: Option<&
         local_service.iterate(now, wall);
         while let Some(diagnostic) = local_service.pop_diagnostic() {
             match diagnostic {
+                service::Diagnostic::RunFailed { failure } => eprintln!("smith: agent run failed: {failure:?}"),
                 service::Diagnostic::Faulted { fault } => eprintln!("smith: agent failure: {fault:?}"),
                 service::Diagnostic::Gone { end, detail } => {
                     if !detail.is_empty() {

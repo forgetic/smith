@@ -110,7 +110,7 @@ what its host's protocol layer would do:
 - **The run's words are shown** as its turns arrive: the LLM's text, each
   tool it calls by name, and how each ended.
 - **Hosted-agent failures** are reported separately on the operator's error
-  output: the typed process/channel failure, followed by the bounded standard-error
+  output: the typed run or process/channel failure, followed by the bounded standard-error
   tail when the tree settles. These observations never enter person messages,
   saved turns or LLM prompts. The shell drains the bounded diagnostic queue
   between service passes; a full queue pauses host routing without dropping detail.

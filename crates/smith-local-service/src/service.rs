@@ -87,6 +87,8 @@ pub fn in_process_worst_case(limits: &Limits, effects: &agent_service::Limits) -
 /// One bounded host failure observation for the operator, never the agent or its transcript.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Diagnostic {
+    /// The agent reports a typed run failure in its final answer.
+    RunFailed { failure: host::channel::RunFailure },
     /// The host reports a typed process or channel failure before its answer.
     Faulted { fault: host::Fault },
     /// The host reports process settlement and its bounded standard-error tail.
@@ -696,13 +698,26 @@ impl Service {
                     }
                 }
             }
-            host::Request::Answered { answer, .. } => match protocol::answer_to_local(answer) {
-                Ok(answer) => self.local_events.push(local::Event::External(local::ExternalEvent::Answer { answer })),
-                Err(_) => {
-                    self.failed = true;
-                    self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
+            host::Request::Answered { answer, .. } => {
+                match &answer.result {
+                    host::channel::RunResult::Failed { failure } => {
+                        self.diagnostics.push(Diagnostic::RunFailed { failure: *failure });
+                        self.diagnostic_failure = true;
+                    }
+                    host::channel::RunResult::Accepted { .. }
+                    | host::channel::RunResult::Parked
+                    | host::channel::RunResult::Refused { .. } => {}
                 }
-            },
+                match protocol::answer_to_local(answer) {
+                    Ok(answer) => {
+                        self.local_events.push(local::Event::External(local::ExternalEvent::Answer { answer }));
+                    }
+                    Err(_) => {
+                        self.failed = true;
+                        self.local_events.push(local::Event::External(local::ExternalEvent::Failed));
+                    }
+                }
+            }
             host::Request::Called { call, name, deadline, ask, .. } => self.called(call, name, deadline, ask),
             host::Request::Waiting { .. } => {
                 self.local_events.push(local::Event::External(local::ExternalEvent::Waiting));
@@ -961,6 +976,18 @@ fn to_agent_io(event: agent::Event) -> local::AgentIo {
 #[cfg(test)]
 mod diagnostic_tests {
     use super::*;
+
+    #[test]
+    fn a_typed_agent_run_failure_is_preserved_before_process_settlement() {
+        let mut service = Service::new(crate::tests::config(), 7).expect("bounded service");
+        let failure = host::channel::RunFailure::Model(host::channel::ModelFault::ContextFull);
+        service.route_host(host::Request::Answered {
+            client: Token::new(1),
+            answer: host::channel::Answer { turns: 0, spent: 0, result: host::channel::RunResult::Failed { failure } },
+        });
+        assert_eq!(service.pop_diagnostic(), Some(Diagnostic::RunFailed { failure }));
+        assert!(service.diagnostic_failure);
+    }
 
     #[test]
     fn successful_process_tail_is_not_reported_as_a_failure() {
