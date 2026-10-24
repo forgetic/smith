@@ -95,6 +95,7 @@ impl Accounts {
                 Some(oauth::Event::Keep { .. }) => {
                     unreachable!("private keepers own their durable records")
                 }
+                Some(oauth::Event::Taken { .. }) => unreachable!("smith hands in no redirected"),
                 None => break,
             }
         }
